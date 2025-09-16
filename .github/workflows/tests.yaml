@@ -7,7 +7,7 @@ on:
 jobs:
   test:
     name: Run Tests
-    runs-on: [self-hosted, x64, edge]
+    runs-on: [self-hosted-linux-amd64-noble-edge]
 
     steps:
       - uses: actions/checkout@v2
