@@ -2,6 +2,7 @@ package queue
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,11 +19,13 @@ type MockAmqpChannel struct {
 	closed            bool
 	confirmMode       bool
 	errorChan         chan *amqp.Error
+	mutex             sync.Mutex
 }
 
 type MockAmqConnection struct {
 	channel *MockAmqpChannel
 	closed  bool
+	mutex   sync.Mutex
 }
 
 func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
@@ -39,11 +42,15 @@ func (ch *MockAmqpChannel) QueueDeclare(name string, _, _, _, _ bool, _ amqp.Tab
 }
 
 func (ch *MockAmqpChannel) Close() error {
+	ch.mutex.Lock()
+	defer ch.mutex.Unlock()
 	ch.closed = true
 	return nil
 }
 
 func (ch *MockAmqpChannel) NotifyClose(c chan *amqp.Error) chan *amqp.Error {
+	ch.mutex.Lock()
+	defer ch.mutex.Unlock()
 	ch.errorChan = c
 	return c
 }
@@ -61,6 +68,8 @@ func (c *MockAmqConnection) Channel() (AmqpChannel, error) {
 }
 
 func (c *MockAmqConnection) Close() error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.closed = true
 	return nil
 }
@@ -217,19 +226,26 @@ func TestProducerChannelShutDownTriesReconnect(t *testing.T) {
 		channel: &fakeAmqpChan,
 		closed:  false,
 	}
+	mutex := sync.Mutex{}
 	connectCalls := 0
 	connectFunc := func(uri string) (AmqpConnection, error) {
+		mutex.Lock()
+		defer mutex.Unlock()
 		connectCalls++
 		return &fakeAmqpConn, nil
 	}
 
 	go Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 	assert.Eventually(t, func() bool {
+		fakeAmqpChan.mutex.Lock()
+		defer fakeAmqpChan.mutex.Unlock()
 		return fakeAmqpChan.errorChan != nil
 	}, time.Second, 1, "error channel should be set")
 	fakeAmqpChan.errorChan <- amqp.ErrClosed
 
 	assert.Eventually(t, func() bool {
+		mutex.Lock()
+		defer mutex.Unlock()
 		return connectCalls >= 2
 	}, time.Second, 1, "connect should be called multiple times")
 	shutdownChan <- true
@@ -291,11 +307,15 @@ func TestProducerClosesResources(t *testing.T) {
 
 	assert.Eventually(t,
 		func() bool {
+			fakeAmqpConn.mutex.Lock()
+			defer fakeAmqpConn.mutex.Unlock()
 			return fakeAmqpConn.closed
 		}, time.Second, 1, "connection should be closed")
 
 	assert.Eventually(t,
 		func() bool {
+			fakeAmqpChan.mutex.Lock()
+			defer fakeAmqpChan.mutex.Unlock()
 			return fakeAmqpChan.closed
 		}, time.Second, 1, "channel should should be closed")
 
