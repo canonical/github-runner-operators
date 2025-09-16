@@ -73,7 +73,7 @@ func (q *AmqpQueue) StartProducer() {
 func connect(uri string) (AmqpConnection, error) {
 	conn, err := amqp.Dial(uri)
 	if err != nil {
-		return nil, errors.New("Failed to connect to RabbitMQ")
+		return nil, errors.New("Failed to connect to RabbitMQ." + err.Error())
 	}
 
 	return &AmpqConnectionWrapper{conn: conn}, nil
@@ -117,7 +117,10 @@ func Producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool
 	}
 
 	defer func() {
-		amqpConnection.Close()
+		err := amqpConnection.Close()
+		if err != nil {
+			log.Println("Failed to close AMQP connection:", err)
+		}
 	}()
 
 	amqpChannel, connErrorChan, err := setupChannel(amqpConnection, q.Name)
@@ -126,7 +129,10 @@ func Producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool
 	}
 
 	defer func() {
-		amqpChannel.Close()
+		err := amqpChannel.Close()
+		if err != nil {
+			log.Println("Failed to close AMQP channel:", err)
+		}
 	}()
 
 	for {
@@ -152,7 +158,7 @@ func Producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool
 			}
 		}
 
-		deferred_confirm, err := amqpChannel.PublishWithDeferredConfirm(
+		deferredConfirm, err := amqpChannel.PublishWithDeferredConfirm(
 			"",     // exchange
 			q.Name, // routing key
 			false,  // mandatory
@@ -168,16 +174,16 @@ func Producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool
 			log.Println("Failed to publish message:", err)
 			continue // skip to next message
 		}
-		log.Println("Waiting for confirmation...", deferred_confirm)
+		log.Println("Waiting for confirmation...", deferredConfirm)
 
-		go confirmHandlerFunc(produceMsg.confirmationChan, deferred_confirm)
+		go confirmHandlerFunc(produceMsg.confirmationChan, deferredConfirm)
 	}
 
-	return nil
 }
 
 func confirmHandler(confirmationChan chan bool, deferredConfirmation *amqp.DeferredConfirmation) {
-	timeout, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	timeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	log.Println("Waiting for confirmation...", deferredConfirmation)
 	confirmation, _ := deferredConfirmation.WaitContext(timeout)
 	log.Println("Confirmation received:", confirmation)
@@ -186,12 +192,12 @@ func confirmHandler(confirmationChan chan bool, deferredConfirmation *amqp.Defer
 
 func (q *AmqpQueue) Push(msg []byte) error {
 	confirmationChan := make(chan bool)
-	channel_msg := ProduceMsg{
+	channelMsg := ProduceMsg{
 		msg:              msg,
 		confirmationChan: confirmationChan,
 	}
 
-	q.ProducerChan <- channel_msg
+	q.ProducerChan <- channelMsg
 
 	confirmation := <-confirmationChan
 
@@ -199,10 +205,4 @@ func (q *AmqpQueue) Push(msg []byte) error {
 		return errors.New("message not confirmed")
 	}
 	return nil
-}
-
-func failOnError(err error, msg string) {
-	if err != nil {
-		log.Panicf("%s: %s", msg, err)
-	}
 }
