@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  pull_request:
+  workflow_call:
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.24
+
+      - name: Ensure No Formatting Changes
+        run: |
+          go fmt ./...
+          git diff --exit-code
+
+      - name: Build and Test
+        run: |
+          go test -race ./...
