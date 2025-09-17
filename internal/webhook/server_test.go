@@ -42,12 +42,15 @@ func TestWebhookForwarded(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 200, message was forwarded to queue
 	*/
-	InitWebhookSecret(secret)
-	req := setupRequest()
-	fakeQueue := setupFakeQueue()
 
+	req := setupRequest()
+	fakeQueue := &FakeQueue{}
+	handler := Handler{
+		WebhookSecret: secret,
+		MsgQueue:      fakeQueue,
+	}
 	w := httptest.NewRecorder()
-	WebhookHandler(w, req)
+	handler.Webhook(w, req)
 	res := w.Result()
 	defer res.Body.Close()
 
@@ -66,24 +69,21 @@ func setupRequest() *http.Request {
 	return req
 }
 
-func setupFakeQueue() *FakeQueue {
-	fakeQueue := FakeQueue{}
-	InitQueue(&fakeQueue)
-	return &fakeQueue
-}
-
 func TestWebhookQueueError(t *testing.T) {
 	/*
 		arrange: create request with valid signature header and a queue that returns an error
 		act: call WebhookHandler
 		assert: status 500
 	*/
-	InitWebhookSecret(secret)
 	req := setupRequest()
 	w := httptest.NewRecorder()
-	InitQueue(&ErrorQueue{})
+	errQueue := &ErrorQueue{}
 
-	WebhookHandler(w, req)
+	handler := Handler{
+		WebhookSecret: secret,
+		MsgQueue:      errQueue,
+	}
+	handler.Webhook(w, req)
 	res := w.Result()
 	defer res.Body.Close()
 
@@ -96,12 +96,15 @@ func TestWebhookMissingSignatureHeader(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 403
 	*/
-	InitWebhookSecret(secret)
 	req := setupRequest()
 	req.Header.Del(WebhookSignatureHeader)
 	w := httptest.NewRecorder()
 
-	WebhookHandler(w, req)
+	handler := Handler{
+		WebhookSecret: secret,
+		MsgQueue:      &FakeQueue{},
+	}
+	handler.Webhook(w, req)
 	res := w.Result()
 	defer res.Body.Close()
 
@@ -114,13 +117,16 @@ func TestWebhookInvalidSignature(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 403
 	*/
-	InitWebhookSecret(secret)
 	req := setupRequest()
 	invalidSignatureHeader := "0aca2d7154cinvalid56f246cad61f1485df34b8056e10c4e4799494376fb3412"
 	req.Header.Set(WebhookSignatureHeader, invalidSignatureHeader)
 	w := httptest.NewRecorder()
 
-	WebhookHandler(w, req)
+	handler := Handler{
+		WebhookSecret: secret,
+		MsgQueue:      &FakeQueue{},
+	}
+	handler.Webhook(w, req)
 	res := w.Result()
 	defer res.Body.Close()
 

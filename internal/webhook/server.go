@@ -17,18 +17,12 @@ import (
 
 const WebhookSignatureHeader = "X-Hub-Signature-256"
 
-var msgQueue queue.Queue
-var webhookSecret string
-
-func InitQueue(queueToSet queue.Queue) {
-	msgQueue = queueToSet
+type Handler struct {
+	WebhookSecret string
+	MsgQueue      queue.Queue
 }
 
-func InitWebhookSecret(secret string) {
-	webhookSecret = secret
-}
-
-func WebhookHandler(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 	defer r.Body.Close()
 
@@ -44,12 +38,12 @@ func WebhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if hmac_sha256(body, webhookSecret) != signature {
+	if hmac_sha256(body, h.WebhookSecret) != signature {
 		http.Error(w, "Invalid signature", http.StatusForbidden)
 		return
 	}
 
-	err = msgQueue.Push(body)
+	err = h.MsgQueue.Push(body)
 	if err != nil {
 		http.Error(w, "Unable to push to queue", http.StatusInternalServerError)
 		return

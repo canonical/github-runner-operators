@@ -35,9 +35,11 @@ func main() {
 	q := queue.NewAmqpQueue(uri, queueName)
 	q.StartProducer()
 
-	webhook.InitQueue(q)
-	webhook.InitWebhookSecret(webhookSecret)
+	handler := &webhook.Handler{
+		WebhookSecret: webhookSecret,
+		MsgQueue:      q,
+	}
 
-	http.HandleFunc(webhookPath, webhook.WebhookHandler)
+	http.HandleFunc(webhookPath, handler.Webhook)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
