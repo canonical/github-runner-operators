@@ -1,0 +1,30 @@
+name: Webhook Gateway Integration Tests
+on:
+    pull_request:
+        paths:
+          - 'gateway/webhook/**'
+          - 'internal/**'
+    workflow_call:
+
+jobs:
+  integration-test:
+    runs-on: [self-hosted-linux-amd64-noble-edge]
+    name: Run Integration Tests
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.24
+      - name: Setup rabbitmq in an OCI container
+        run: |
+          docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+          sleep 10 # wait for rabbitmq to start
+      - name: Run integration test
+        env:
+            RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+            APP_PORT: 8080
+            WEBHOOK_SECRET: fake-secret
+        run: |
+            go test -v  ./webhook-gateway -integration
