@@ -8,6 +8,9 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"net/http"
 	"os"
@@ -21,21 +24,45 @@ import (
 
 var integration = flag.Bool("integration", false, "Run integration tests")
 
-func TestHTTPRequestisForwarded(t *testing.T) {
+func TestHTTPRequestIsForwarded(t *testing.T) {
 	if !*integration {
 		t.Skip("skipping integration test")
 	}
-	os.Setenv("APP_PORT", "8080")
-	os.Setenv("RABBITMQ_CONNECT_STRING", "amqp://guest:guest@localhost:5672/")
-	os.Setenv("WEBHOOK_SECRET", "fake-secret")
-	// start the server
+	const payload = `{"message":"Hello, Bob!"}`
+
 	go main()
-	body := `{"message":"Hello, Alice!"}`
+
+	secret := getSecretFromEnv(t)
+	doPostRequest(t, payload, secret)
+
+	amqpUri := getAmqpUriFromEnv(t)
+	msg := consumeMessage(t, amqpUri)
+
+	assert.Equal(t, payload, msg, "expected message body to match")
+}
+
+func getSecretFromEnv(t *testing.T) string {
+	secret := os.Getenv("WEBHOOK_SECRET")
+	if secret == "" {
+		t.Fatal("WEBHOOK_SECRET environment variable not set")
+	}
+	return secret
+}
+
+func getAmqpUriFromEnv(t *testing.T) string {
+	uri := os.Getenv("RABBITMQ_CONNECT_STRING")
+	if uri == "" {
+		t.Fatal("RABBITMQ_CONNECT_STRING environment variable not set")
+	}
+	return uri
+}
+
+func doPostRequest(t *testing.T, payload string, secret string) {
 	headers := map[string]string{
-		"X-Hub-Signature-256": "0aca2d7154cddad4f56f246cad61f1485df34b8056e10c4e4799494376fb3413",
+		"X-Hub-Signature-256": createSignature(payload, secret),
 		"Content-Type":        "application/json",
 	}
-	req, err := http.NewRequest("POST", "http://localhost:8080/webhook", strings.NewReader(body))
+	req, err := http.NewRequest("POST", "http://localhost:8080/webhook", strings.NewReader(payload))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -43,10 +70,8 @@ func TestHTTPRequestisForwarded(t *testing.T) {
 		req.Header.Set(k, v)
 	}
 
-	// Create an HTTP client
 	client := &http.Client{}
 
-	// add a retry loop to wait for the server to start
 	var resp *http.Response
 	for i := 0; i < 5; i++ {
 		resp, err = client.Do(req)
@@ -54,20 +79,22 @@ func TestHTTPRequestisForwarded(t *testing.T) {
 			break
 		}
 		t.Logf("Retrying... (%d/5)", i+1)
-		// wait 2**i seconds before retrying
 		time.Sleep(time.Duration((1 << i) * time.Second))
 	}
 	if err != nil {
 		t.Fatalf("Failed to send request: %v. Server did probably not start up.", err)
 	}
 	defer resp.Body.Close()
+}
 
-	// check that message is in the queue
-	uri, found := os.LookupEnv("RABBITMQ_CONNECT_STRING")
-	if !found {
-		t.Fatalf("RABBITMQ_CONNECT_STRING environment variable not set")
-	}
-	conn, err := amqp.Dial(uri)
+func createSignature(message string, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(message))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func consumeMessage(t *testing.T, amqpUri string) string {
+	conn, err := amqp.Dial(amqpUri)
 	if err != nil {
 		t.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
@@ -99,5 +126,5 @@ func TestHTTPRequestisForwarded(t *testing.T) {
 
 	msg := <-deliveryChan
 
-	assert.Equal(t, body, string(msg.Body), "expected message body to match")
+	return string(msg.Body)
 }

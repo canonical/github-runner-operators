@@ -23,8 +23,8 @@ jobs:
           sleep 10 # wait for rabbitmq to start
       - name: Run integration test
         env:
-            RABBITMQ_URL: amqp://guest:guest@localhost:5672/
-            APP_PORT: 8080
-            WEBHOOK_SECRET: fake-secret
+          RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
+          APP_PORT: 8080
+          WEBHOOK_SECRET: fake-secret
         run: |
             go test -v  ./webhook-gateway -integration
