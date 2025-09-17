@@ -9,11 +9,11 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
@@ -46,13 +46,21 @@ func TestHTTPRequestisForwarded(t *testing.T) {
 	// Create an HTTP client
 	client := &http.Client{}
 
-	// Perform the request
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Failed to perform request: %v\n", err)
-		return
+	// add a retry loop to wait for the server to start
+	var resp *http.Response
+	for i := 0; i < 5; i++ {
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		t.Logf("Retrying... (%d/5)", i+1)
+		// wait 2**i seconds before retrying
+		time.Sleep(time.Duration((1 << i) * time.Second))
 	}
-	defer resp.Body.Close() // Always close the response body
+	if err != nil {
+		t.Fatalf("Failed to send request: %v. Server did probably not start up.", err)
+	}
+	defer resp.Body.Close()
 
 	// check that message is in the queue
 	uri, found := os.LookupEnv("RABBITMQ_CONNECT_STRING")
