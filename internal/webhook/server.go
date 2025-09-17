@@ -34,7 +34,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Unable to read request body", http.StatusBadRequest)
+		http.Error(w, "Unable to read request body", http.StatusInternalServerError)
 		return
 	}
 
