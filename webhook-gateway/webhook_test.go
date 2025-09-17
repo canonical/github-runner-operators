@@ -33,7 +33,7 @@ func TestHTTPRequestIsForwarded(t *testing.T) {
 	go main()
 
 	secret := getSecretFromEnv(t)
-	doPostRequest(t, payload, secret)
+	sendPayloadToHTTPServer(t, payload, secret)
 
 	amqpUri := getAmqpUriFromEnv(t)
 	msg := consumeMessage(t, amqpUri)
@@ -57,22 +57,16 @@ func getAmqpUriFromEnv(t *testing.T) string {
 	return uri
 }
 
-func doPostRequest(t *testing.T, payload string, secret string) {
-	headers := map[string]string{
-		"X-Hub-Signature-256": createSignature(payload, secret),
-		"Content-Type":        "application/json",
-	}
-	req, err := http.NewRequest("POST", "http://localhost:8080/webhook", strings.NewReader(payload))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
+func sendPayloadToHTTPServer(t *testing.T, payload string, secret string) {
+	req := createRequest(t, payload, secret)
+	postRequestUsingRetryBecauseServerMightNotYetBeUp(t, req)
+}
 
+func postRequestUsingRetryBecauseServerMightNotYetBeUp(t *testing.T, req *http.Request) {
 	client := &http.Client{}
 
 	var resp *http.Response
+	var err error
 	for i := 0; i < 5; i++ {
 		resp, err = client.Do(req)
 		if err == nil {
@@ -85,6 +79,21 @@ func doPostRequest(t *testing.T, payload string, secret string) {
 		t.Fatalf("Failed to send request: %v. Server did probably not start up.", err)
 	}
 	defer resp.Body.Close()
+}
+
+func createRequest(t *testing.T, payload string, secret string) *http.Request {
+	headers := map[string]string{
+		"X-Hub-Signature-256": createSignature(payload, secret),
+		"Content-Type":        "application/json",
+	}
+	req, err := http.NewRequest("POST", "http://localhost:8080/webhook", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return req
 }
 
 func createSignature(message string, secret string) string {
