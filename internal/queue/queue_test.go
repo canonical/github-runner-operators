@@ -150,7 +150,7 @@ func TestProducerSetupsChannelAndQueue(t *testing.T) {
 	_, fakeAmqpChan, connectFunc := createConnectFunc()
 	shutdownChan <- true
 
-	err := Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
+	err := producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 
 	assert.NoError(t, err)
 	assert.True(t, fakeAmqpChan.confirmMode, "channel should be in confirm mode")
@@ -182,7 +182,7 @@ func TestProducerPublishesMessage(t *testing.T) {
 	_, fakeAmqpChan, connectFunc := createConnectFunc()
 	confirmationChan := make(chan bool, 1)
 
-	go Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
+	go producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 	produceMsg := ProduceMsg{
 		msg:              []byte(TestMessage),
 		confirmationChan: confirmationChan,
@@ -211,7 +211,7 @@ func TestProducerCouldNotPublishMessage(t *testing.T) {
 	}
 	producerChan <- produceMsg
 
-	go Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerFailure)
+	go producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerFailure)
 
 	assert.False(t, <-confirmationChan, "message should not be confirmed")
 	shutdownChan <- true
@@ -240,7 +240,7 @@ func TestProducerChannelShutDownTriesReconnect(t *testing.T) {
 		return &fakeAmqpConn, nil
 	}
 
-	go Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
+	go producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 	assert.Eventually(t, func() bool {
 		fakeAmqpChan.mutex.Lock()
 		defer fakeAmqpChan.mutex.Unlock()
@@ -269,7 +269,7 @@ func TestProducerConnectError(t *testing.T) {
 		return nil, errors.New("error")
 	}
 
-	err := Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
+	err := producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "Failed to connect to RabbitMQ")
@@ -290,7 +290,7 @@ func TestProducerQueueDeclareError(t *testing.T) {
 	}
 	_, _, connectFunc := createConnectFunc()
 
-	err := Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
+	err := producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "Failed to declare a queue")
@@ -306,7 +306,7 @@ func TestProducerClosesResources(t *testing.T) {
 	shutdownChan := make(chan bool, 1)
 	fakeQueue := createQueue(producerChan)
 	fakeAmqpConn, fakeAmqpChan, connectFunc := createConnectFunc()
-	go Producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
+	go producer(&fakeQueue, producerChan, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 
 	shutdownChan <- true
 

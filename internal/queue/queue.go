@@ -14,7 +14,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-type Queue interface {
+type Producer interface {
 	Push([]byte) error
 }
 
@@ -57,22 +57,37 @@ func (q *AmpqConnectionWrapper) Close() error {
 	return q.conn.Close()
 }
 
-func NewAmqpQueue(uri, name string) *AmqpQueue {
-	return &AmqpQueue{
+func NewProducer(uri, name string) *AmqpQueue {
+	q := &AmqpQueue{
 		URI:          uri,
 		Name:         name,
 		ProducerChan: make(chan ProduceMsg),
 	}
-}
-
-func (q *AmqpQueue) StartProducer() {
 	go func() {
 
-		err := Producer(q, q.ProducerChan, make(chan bool), connect, confirmHandler)
+		err := producer(q, q.ProducerChan, make(chan bool), connect, confirmHandler)
 		if err != nil {
 			log.Panicf("Producer error: %s", err)
 		}
 	}()
+	return q
+}
+
+func (q *AmqpQueue) Push(msg []byte) error {
+	confirmationChan := make(chan bool)
+	channelMsg := ProduceMsg{
+		msg:              msg,
+		confirmationChan: confirmationChan,
+	}
+
+	q.ProducerChan <- channelMsg
+
+	confirmation := <-confirmationChan
+
+	if confirmation != true {
+		return errors.New("message not confirmed")
+	}
+	return nil
 }
 
 func connect(uri string) (AmqpConnection, error) {
@@ -113,7 +128,7 @@ func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel,
 	return amqpChannel, errChan, nil
 }
 
-func Producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool, connectFunc ConnectFunc, confirmHandlerFunc ConfirmHandler) error {
+func producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool, connectFunc ConnectFunc, confirmHandlerFunc ConfirmHandler) error {
 
 	amqpConnection, err := connectFunc(q.URI)
 
@@ -193,21 +208,4 @@ func confirmHandler(confirmationChan chan bool, deferredConfirmation *amqp.Defer
 	confirmation, _ := deferredConfirmation.WaitContext(timeout)
 	log.Println("Confirmation received:", confirmation)
 	confirmationChan <- confirmation
-}
-
-func (q *AmqpQueue) Push(msg []byte) error {
-	confirmationChan := make(chan bool)
-	channelMsg := ProduceMsg{
-		msg:              msg,
-		confirmationChan: confirmationChan,
-	}
-
-	q.ProducerChan <- channelMsg
-
-	confirmation := <-confirmationChan
-
-	if confirmation != true {
-		return errors.New("message not confirmed")
-	}
-	return nil
 }

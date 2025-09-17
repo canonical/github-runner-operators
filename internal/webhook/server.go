@@ -19,7 +19,7 @@ const WebhookSignatureHeader = "X-Hub-Signature-256"
 
 type Handler struct {
 	WebhookSecret string
-	MsgQueue      queue.Queue
+	Producer      queue.Producer
 }
 
 func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +43,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.MsgQueue.Push(body)
+	err = h.Producer.Push(body)
 	if err != nil {
 		http.Error(w, "Unable to push to queue", http.StatusInternalServerError)
 		return

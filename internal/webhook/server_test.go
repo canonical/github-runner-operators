@@ -47,7 +47,7 @@ func TestWebhookForwarded(t *testing.T) {
 	fakeQueue := &FakeQueue{}
 	handler := Handler{
 		WebhookSecret: secret,
-		MsgQueue:      fakeQueue,
+		Producer:      fakeQueue,
 	}
 	w := httptest.NewRecorder()
 	handler.Webhook(w, req)
@@ -81,7 +81,7 @@ func TestWebhookQueueError(t *testing.T) {
 
 	handler := Handler{
 		WebhookSecret: secret,
-		MsgQueue:      errQueue,
+		Producer:      errQueue,
 	}
 	handler.Webhook(w, req)
 	res := w.Result()
@@ -135,7 +135,7 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			fakeQueue := &FakeQueue{}
 			handler := Handler{
 				WebhookSecret: secret,
-				MsgQueue:      &FakeQueue{},
+				Producer:      &FakeQueue{},
 			}
 			handler.Webhook(w, req)
 			res := w.Result()
