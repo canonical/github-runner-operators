@@ -6,6 +6,7 @@
 package webhook
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,18 +22,18 @@ const payload = `{"message":"Hello, Alice!"}`
 const secret = "fake-secret"
 const valid_signature_header = "0aca2d7154cddad4f56f246cad61f1485df34b8056e10c4e4799494376fb3413" // HMAC SHA256 of body with secret "fake-secret"
 
-type FakeQueue struct {
+type FakeProducer struct {
 	Messages [][]byte
 }
 
-func (q *FakeQueue) Push(msg []byte) error {
+func (q *FakeProducer) Push(_ context.Context, msg []byte) error {
 	q.Messages = append(q.Messages, msg)
 	return nil
 }
 
-type ErrorQueue struct{}
+type ErrorProducer struct{}
 
-func (q *ErrorQueue) Push(msg []byte) error {
+func (q *ErrorProducer) Push(_ context.Context, _ []byte) error {
 	return fmt.Errorf("queue error")
 }
 
@@ -44,10 +45,10 @@ func TestWebhookForwarded(t *testing.T) {
 	*/
 
 	req := setupRequest()
-	fakeQueue := &FakeQueue{}
+	fakeProducer := &FakeProducer{}
 	handler := Handler{
 		WebhookSecret: secret,
-		Producer:      fakeQueue,
+		Producer:      fakeProducer,
 	}
 	w := httptest.NewRecorder()
 	handler.Webhook(w, req)
@@ -55,9 +56,9 @@ func TestWebhookForwarded(t *testing.T) {
 	defer res.Body.Close()
 
 	assert.Equal(t, http.StatusOK, res.StatusCode, "expected status 200 got %v", res.Status)
-	assert.NotNil(t, fakeQueue.Messages, "expected messages in queue")
-	assert.Equal(t, 1, len(fakeQueue.Messages), "expected 1 message in queue")
-	assert.Equal(t, payload, string(fakeQueue.Messages[0]), "expected message body to match")
+	assert.NotNil(t, fakeProducer.Messages, "expected messages in queue")
+	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
+	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
 
 }
 
@@ -77,11 +78,11 @@ func TestWebhookQueueError(t *testing.T) {
 	*/
 	req := setupRequest()
 	w := httptest.NewRecorder()
-	errQueue := &ErrorQueue{}
+	errProducer := &ErrorProducer{}
 
 	handler := Handler{
 		WebhookSecret: secret,
-		Producer:      errQueue,
+		Producer:      errProducer,
 	}
 	handler.Webhook(w, req)
 	res := w.Result()
@@ -132,10 +133,10 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 
-			fakeQueue := &FakeQueue{}
+			fakeProducer := &FakeProducer{}
 			handler := Handler{
 				WebhookSecret: secret,
-				Producer:      &FakeQueue{},
+				Producer:      &FakeProducer{},
 			}
 			handler.Webhook(w, req)
 			res := w.Result()
@@ -145,7 +146,7 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			assert.NotNil(t, res.Body, "expected response body")
 			respBody, _ := io.ReadAll(res.Body)
 			assert.Contains(t, string(respBody), tt.expectedResponseMessage)
-			assert.Equal(t, 0, len(fakeQueue.Messages), "expected 0 message in queue")
+			assert.Equal(t, 0, len(fakeProducer.Messages), "expected 0 message in queue")
 		})
 	}
 }

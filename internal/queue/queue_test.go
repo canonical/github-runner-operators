@@ -6,6 +6,7 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -95,7 +96,7 @@ func mockConfirmHandlerFailure(confirmationChan chan bool, _ *amqp.DeferredConfi
 
 func TestPushWithSuccess(t *testing.T) {
 	/*
-		arrange: create a fake AmqpQueue with a producer that always confirms
+		arrange: create a producer that always confirms
 		act: push a message to the queue
 		assert: no error is returned
 	*/
@@ -106,7 +107,7 @@ func TestPushWithSuccess(t *testing.T) {
 		produceMsg.confirmationChan <- true
 	}()
 
-	err := fakeProducer.Push([]byte(TestMessage))
+	err := fakeProducer.Push(context.Background(), []byte(TestMessage))
 
 	assert.NoError(t, err)
 }
@@ -123,7 +124,7 @@ func createProducer(producerChan chan ProduceMsg) AmqpProducer {
 
 func TestPushWithFailure(t *testing.T) {
 	/*
-		arrange: create a fake AmqpQueue with a producer that always fails to confirm
+		arrange: create a producer that always fails to confirm
 		act: push a message to the queue
 		assert: an error is returned
 	*/
@@ -134,10 +135,29 @@ func TestPushWithFailure(t *testing.T) {
 		produceMsg.confirmationChan <- false
 	}()
 
-	err := fakeProducer.Push([]byte("TestMessage"))
+	err := fakeProducer.Push(context.Background(), []byte("TestMessage"))
 
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "message not confirmed")
+}
+
+func TestPushContextCancelled(t *testing.T) {
+	/*
+		arrange: create a producer that never confirms and a context that will be cancelled
+		act: push a message to the queue
+		assert: an error is returned after timeout
+	*/
+	producerChan := make(chan ProduceMsg, 1)
+	fakeProducer := createProducer(producerChan)
+	go func() {
+		<-producerChan
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := fakeProducer.Push(ctx, []byte("TestMessage"))
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "context canceled")
 }
 
 func TestProducerSetupsChannelAndQueue(t *testing.T) {

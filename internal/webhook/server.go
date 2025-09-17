@@ -43,7 +43,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.Producer.Push(body)
+	err = h.Producer.Push(r.Context(), body)
 	if err != nil {
 		http.Error(w, "Unable to push to queue", http.StatusInternalServerError)
 		return

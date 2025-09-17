@@ -15,7 +15,7 @@ import (
 )
 
 type Producer interface {
-	Push([]byte) error
+	Push(context.Context, []byte) error
 }
 
 type AmqpChannel interface {
@@ -80,7 +80,7 @@ func NewProducer(uri, name string) *AmqpProducer {
 	return p
 }
 
-func (p *AmqpProducer) Push(msg []byte) error {
+func (p *AmqpProducer) Push(ctx context.Context, msg []byte) error {
 	confirmationChan := make(chan bool)
 	channelMsg := ProduceMsg{
 		msg:              msg,
@@ -89,10 +89,14 @@ func (p *AmqpProducer) Push(msg []byte) error {
 
 	p.producerChan <- channelMsg
 
-	confirmation := <-confirmationChan
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
 
-	if confirmation != true {
-		return errors.New("message not confirmed")
+	case confirmation := <-confirmationChan:
+		if confirmation != true {
+			return errors.New("message not confirmed")
+		}
 	}
 	return nil
 }
