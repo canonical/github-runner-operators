@@ -38,7 +38,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if hmac_sha256(body, h.WebhookSecret) != signature {
+	if !validateSignature(body, h.WebhookSecret, signature) {
 		http.Error(w, "Invalid signature", http.StatusForbidden)
 		return
 	}
@@ -50,8 +50,12 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func hmac_sha256(message []byte, secret string) string {
+func validateSignature(message []byte, secret string, signature string) bool {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(message)
-	return hex.EncodeToString(h.Sum(nil))
+	sig, err := hex.DecodeString(signature)
+	if err != nil {
+		return false
+	}
+	return hmac.Equal(h.Sum(nil), sig)
 }

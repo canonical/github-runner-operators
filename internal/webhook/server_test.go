@@ -90,48 +90,62 @@ func TestWebhookQueueError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, res.StatusCode, "expected status 500 got %v", res.Status)
 }
 
-func TestWebhookMissingSignatureHeader(t *testing.T) {
-	/*
-		arrange: create request without signature header
-		act: call WebhookHandler
-		assert: status 403
-	*/
-	req := setupRequest()
-	req.Header.Del(WebhookSignatureHeader)
-	w := httptest.NewRecorder()
-
-	handler := Handler{
-		WebhookSecret: secret,
-		MsgQueue:      &FakeQueue{},
-	}
-	handler.Webhook(w, req)
-	res := w.Result()
-	defer res.Body.Close()
-
-	assert.Equal(t, http.StatusForbidden, res.StatusCode, "expected status 403 got %v", res.Status)
-}
-
 func TestWebhookInvalidSignature(t *testing.T) {
 	/*
-		arrange: create request with invalid signature header
-		act: call WebhookHandler
-		assert: status 403
+		arrange: create invalid signature test cases
+		act: call webhook handler
+		assert: A 403 response is returned
 	*/
-	req := setupRequest()
-	invalidSignatureHeader := "0aca2d7154cinvalid56f246cad61f1485df34b8056e10c4e4799494376fb3412"
-	req.Header.Set(WebhookSignatureHeader, invalidSignatureHeader)
-	w := httptest.NewRecorder()
-
-	handler := Handler{
-		WebhookSecret: secret,
-		MsgQueue:      &FakeQueue{},
+	tests := []struct {
+		name                    string
+		signature               string
+		expectedResponseMessage string
+	}{
+		{
+			name:                    "Invalid Signature",
+			signature:               "0aca2d7154cinvalid56f246cad61f1485df34b8056e10c4e4799494376fb3412",
+			expectedResponseMessage: "Invalid signature",
+		},
+		{
+			name:                    "Non ASCII Signature",
+			signature:               "非ASCII签名",
+			expectedResponseMessage: "Invalid signature",
+		},
+		{
+			name:                    "Empty Signature",
+			signature:               "",
+			expectedResponseMessage: "Missing signature header",
+		},
+		{
+			name:                    "Missing Signature Header",
+			signature:               "",
+			expectedResponseMessage: "Missing signature header",
+		},
 	}
-	handler.Webhook(w, req)
-	res := w.Result()
-	defer res.Body.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := setupRequest()
+			if tt.name == "Missing Signature Header" {
+				req.Header.Del(WebhookSignatureHeader)
+			} else {
+				req.Header.Set(WebhookSignatureHeader, tt.signature)
+			}
+			w := httptest.NewRecorder()
 
-	assert.Equal(t, http.StatusForbidden, res.StatusCode, "expected status 403 got %v", res.Status)
-	assert.NotNil(t, res.Body, "expected response body")
-	respBody, _ := io.ReadAll(res.Body)
-	assert.Contains(t, string(respBody), "Invalid signature")
+			fakeQueue := &FakeQueue{}
+			handler := Handler{
+				WebhookSecret: secret,
+				MsgQueue:      &FakeQueue{},
+			}
+			handler.Webhook(w, req)
+			res := w.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, http.StatusForbidden, res.StatusCode, "expected status %v got %v", http.StatusForbidden, res.Status)
+			assert.NotNil(t, res.Body, "expected response body")
+			respBody, _ := io.ReadAll(res.Body)
+			assert.Contains(t, string(respBody), tt.expectedResponseMessage)
+			assert.Equal(t, 0, len(fakeQueue.Messages), "expected 0 message in queue")
+		})
+	}
 }
