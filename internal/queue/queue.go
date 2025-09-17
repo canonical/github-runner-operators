@@ -7,7 +7,7 @@ package queue
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -95,7 +95,7 @@ func (p *AmqpProducer) Push(ctx context.Context, msg []byte) error {
 
 	case confirmation := <-confirmationChan:
 		if confirmation != true {
-			return errors.New("message not confirmed")
+			return fmt.Errorf("message not confirmed")
 		}
 	}
 	return nil
@@ -104,7 +104,7 @@ func (p *AmqpProducer) Push(ctx context.Context, msg []byte) error {
 func connect(uri string) (AmqpConnection, error) {
 	conn, err := amqp.Dial(uri)
 	if err != nil {
-		return nil, errors.New("Failed to connect to RabbitMQ." + err.Error())
+		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
 
 	return &AmpqConnectionWrapper{conn: conn}, nil
@@ -113,7 +113,7 @@ func connect(uri string) (AmqpConnection, error) {
 func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel, chan *amqp.Error, error) {
 	amqpChannel, err := amqpConnection.Channel()
 	if err != nil {
-		return nil, nil, errors.New("Failed to open a channel: " + err.Error())
+		return nil, nil, fmt.Errorf("failed to open a channel: %w", err)
 	}
 
 	errChan := make(chan *amqp.Error, 1)
@@ -121,7 +121,7 @@ func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel,
 
 	err = amqpChannel.Confirm(false)
 	if err != nil {
-		return nil, nil, errors.New("Failed to put channel into confirm mode: " + err.Error())
+		return nil, nil, fmt.Errorf("failed to put channel into confirm mode: %w", err)
 	}
 
 	_, err = amqpChannel.QueueDeclare(
@@ -133,7 +133,7 @@ func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel,
 		nil,       // arguments
 	)
 	if err != nil {
-		return nil, nil, errors.New("Failed to declare a queue: " + err.Error())
+		return nil, nil, fmt.Errorf("failed to declare a queue: %w", err)
 	}
 
 	return amqpChannel, errChan, nil
@@ -144,25 +144,25 @@ func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, 
 	amqpConnection, err := connectFunc(p.queue.URI)
 
 	if err != nil {
-		return errors.New("Failed to connect to RabbitMQ: " + err.Error())
+		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
 
 	defer func() {
 		err := amqpConnection.Close()
 		if err != nil {
-			log.Println("Failed to close AMQP connection:", err)
+			log.Println("failed to close AMQP connection", err)
 		}
 	}()
 
 	amqpChannel, connErrorChan, err := setupChannel(amqpConnection, p.queue.Name)
 	if err != nil {
-		return errors.New("Failed to setup channel: " + err.Error())
+		return fmt.Errorf("failed to setup channel: %w", err)
 	}
 
 	defer func() {
 		err := amqpChannel.Close()
 		if err != nil {
-			log.Println("Failed to close AMQP channel:", err)
+			log.Println("failed to close AMQP channel", err)
 		}
 	}()
 
@@ -180,12 +180,12 @@ func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, 
 			amqpConnection, connectErr = connectFunc(p.queue.URI)
 
 			if connectErr != nil {
-				return errors.New("Failed to reconnect to RabbitMQ: " + connectErr.Error())
+				return fmt.Errorf("failed to reconnect to RabbitMQ: %w", connectErr)
 			}
 			var channelSetupErr error
 			amqpChannel, connErrorChan, channelSetupErr = setupChannel(amqpConnection, p.queue.Name)
 			if channelSetupErr != nil {
-				return errors.New("Failed to setup channel: " + channelSetupErr.Error())
+				return fmt.Errorf("failed to setup channel: %w", channelSetupErr)
 			}
 		}
 
@@ -202,7 +202,7 @@ func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, 
 		if err != nil {
 			// if publish fails, we should notify the caller that the message was not confirmed
 			produceMsg.confirmationChan <- false
-			log.Println("Failed to publish message:", err)
+			log.Println("failed to publish message:", err)
 			continue // skip to next message
 		}
 		log.Println("Waiting for confirmation...", deferredConfirm)

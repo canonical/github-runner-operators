@@ -294,7 +294,7 @@ func TestProducerConnectError(t *testing.T) {
 	err := producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 
 	assert.Error(t, err)
-	assert.ErrorContains(t, err, "Failed to connect to RabbitMQ")
+	assert.ErrorContains(t, err, "failed to connect to RabbitMQ")
 }
 
 func TestProducerQueueDeclareError(t *testing.T) {
@@ -316,7 +316,7 @@ func TestProducerQueueDeclareError(t *testing.T) {
 	err := producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
 
 	assert.Error(t, err)
-	assert.ErrorContains(t, err, "Failed to declare a queue")
+	assert.ErrorContains(t, err, "failed to declare a queue")
 }
 
 func TestProducerClosesResources(t *testing.T) {
