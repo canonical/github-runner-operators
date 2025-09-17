@@ -40,9 +40,13 @@ type ProduceMsg struct {
 }
 type AmqpQueue struct {
 	// Add fields for AMQP connection, channel, etc.
-	URI          string
-	Name         string
-	ProducerChan chan ProduceMsg
+	URI  string
+	Name string
+}
+
+type AmqpProducer struct {
+	queue        *AmqpQueue
+	producerChan chan ProduceMsg
 }
 
 type AmpqConnectionWrapper struct {
@@ -57,30 +61,33 @@ func (q *AmpqConnectionWrapper) Close() error {
 	return q.conn.Close()
 }
 
-func NewProducer(uri, name string) *AmqpQueue {
+func NewProducer(uri, name string) *AmqpProducer {
 	q := &AmqpQueue{
-		URI:          uri,
-		Name:         name,
-		ProducerChan: make(chan ProduceMsg),
+		URI:  uri,
+		Name: name,
+	}
+	p := &AmqpProducer{
+		queue:        q,
+		producerChan: make(chan ProduceMsg),
 	}
 	go func() {
 
-		err := producer(q, q.ProducerChan, make(chan bool), connect, confirmHandler)
+		err := producer(p, make(chan bool), connect, confirmHandler)
 		if err != nil {
 			log.Panicf("Producer error: %s", err)
 		}
 	}()
-	return q
+	return p
 }
 
-func (q *AmqpQueue) Push(msg []byte) error {
+func (p *AmqpProducer) Push(msg []byte) error {
 	confirmationChan := make(chan bool)
 	channelMsg := ProduceMsg{
 		msg:              msg,
 		confirmationChan: confirmationChan,
 	}
 
-	q.ProducerChan <- channelMsg
+	p.producerChan <- channelMsg
 
 	confirmation := <-confirmationChan
 
@@ -128,9 +135,9 @@ func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel,
 	return amqpChannel, errChan, nil
 }
 
-func producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool, connectFunc ConnectFunc, confirmHandlerFunc ConfirmHandler) error {
+func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, confirmHandlerFunc ConfirmHandler) error {
 
-	amqpConnection, err := connectFunc(q.URI)
+	amqpConnection, err := connectFunc(p.queue.URI)
 
 	if err != nil {
 		return errors.New("Failed to connect to RabbitMQ: " + err.Error())
@@ -143,7 +150,7 @@ func producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool
 		}
 	}()
 
-	amqpChannel, connErrorChan, err := setupChannel(amqpConnection, q.Name)
+	amqpChannel, connErrorChan, err := setupChannel(amqpConnection, p.queue.Name)
 	if err != nil {
 		return errors.New("Failed to setup channel: " + err.Error())
 	}
@@ -160,29 +167,29 @@ func producer(q *AmqpQueue, producerChan chan ProduceMsg, shutdownChan chan bool
 		var produceMsg ProduceMsg
 		select {
 
-		case produceMsg = <-producerChan:
+		case produceMsg = <-p.producerChan:
 		case _ = <-shutdownChan:
 			return nil
 		case err := <-connErrorChan:
 			log.Println("Connection error:", err)
 			var connectErr error
-			amqpConnection, connectErr = connectFunc(q.URI)
+			amqpConnection, connectErr = connectFunc(p.queue.URI)
 
 			if connectErr != nil {
 				return errors.New("Failed to reconnect to RabbitMQ: " + connectErr.Error())
 			}
 			var channelSetupErr error
-			amqpChannel, connErrorChan, channelSetupErr = setupChannel(amqpConnection, q.Name)
+			amqpChannel, connErrorChan, channelSetupErr = setupChannel(amqpConnection, p.queue.Name)
 			if channelSetupErr != nil {
 				return errors.New("Failed to setup channel: " + channelSetupErr.Error())
 			}
 		}
 
 		deferredConfirm, err := amqpChannel.PublishWithDeferredConfirm(
-			"",     // exchange
-			q.Name, // routing key
-			false,  // mandatory
-			false,  // immediate
+			"",           // exchange
+			p.queue.Name, // routing key
+			false,        // mandatory
+			false,        // immediate
 			amqp.Publishing{
 				ContentType: "application/json",
 				Body:        produceMsg.msg,
