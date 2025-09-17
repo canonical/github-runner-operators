@@ -124,7 +124,12 @@ func consumeMessage(t *testing.T, amqpUri string) string {
 		t.Fatalf("Failed to register a consumer: %v", err)
 	}
 
-	msg := <-deliveryChan
+	var msg amqp.Delivery
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for message")
+	case msg = <-deliveryChan:
+	}
 
 	return string(msg.Body)
 }
