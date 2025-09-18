@@ -102,12 +102,19 @@ func (p *AmqpProducer) Push(ctx context.Context, msg []byte) error {
 }
 
 func connect(uri string) (AmqpConnection, error) {
-	conn, err := amqp.Dial(uri)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+	retry := 5
+	var err error
+	for i := 0; i < retry; i++ {
+		var conn *amqp.Connection
+		conn, err = amqp.Dial(uri)
+		if err == nil {
+			return &AmpqConnectionWrapper{conn: conn}, nil
+		}
+		log.Printf("failed to connect to RabbitMQ (attempt %d/%d): %v", i+1, retry, err)
+		time.Sleep((1 << i) * time.Second)
 	}
 
-	return &AmpqConnectionWrapper{conn: conn}, nil
+	return nil, fmt.Errorf("failed to connect to RabbitMQ after %d attempts: %w", retry, err)
 }
 
 func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel, chan *amqp.Error, error) {
