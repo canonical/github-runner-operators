@@ -6,6 +6,11 @@ on:
           - 'internal/**'
     workflow_call:
 
+concurrency:
+  group:  ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+
 jobs:
   integration-test:
     runs-on: [self-hosted-linux-amd64-noble-edge]
