@@ -101,20 +101,79 @@ func (p *AmqpProducer) Push(ctx context.Context, msg []byte) error {
 	return nil
 }
 
-func connect(uri string) (AmqpConnection, error) {
-	retry := 5
-	var err error
-	for i := 0; i < retry; i++ {
-		var conn *amqp.Connection
-		conn, err = amqp.Dial(uri)
-		if err == nil {
-			return &AmpqConnectionWrapper{conn: conn}, nil
-		}
-		log.Printf("failed to connect to RabbitMQ (attempt %d/%d): %v", i+1, retry, err)
-		time.Sleep((1 << i) * time.Second)
+func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, confirmHandlerFunc ConfirmHandler) error {
+
+	amqpConnectionClose, amqpChannel, connErrorChan, err := setupConnection(p, connectFunc)
+	if err != nil {
+		return fmt.Errorf("failed to setup connection: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed to connect to RabbitMQ after %d attempts: %w", retry, err)
+	defer func() {
+		err := amqpConnectionClose()
+		if err != nil {
+			log.Println("failed to close AMQP connection", err)
+		}
+	}()
+	defer amqpConnectionClose()
+	defer func() {
+		err := amqpChannel.Close()
+		if err != nil {
+			log.Println("failed to close AMQP channel", err)
+		}
+	}()
+
+	for {
+
+		var produceMsg ProduceMsg
+		select {
+
+		case produceMsg = <-p.producerChan:
+		case _ = <-shutdownChan:
+			return nil
+		case err := <-connErrorChan:
+			log.Println("Connection error:", err)
+			var connectErr error
+			amqpConnectionClose, amqpChannel, connErrorChan, connectErr = setupConnection(p, connectFunc)
+			if err != nil {
+				return fmt.Errorf("failed to resetup connection: %w", connectErr)
+			}
+		}
+
+		deferredConfirm, err := amqpChannel.PublishWithDeferredConfirm(
+			"",           // exchange
+			p.queue.Name, // routing key
+			false,        // mandatory
+			false,        // immediate
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        produceMsg.msg,
+			},
+		)
+		if err != nil {
+			// if publish fails, we should notify the caller that the message was not confirmed
+			produceMsg.confirmationChan <- false
+			log.Println("failed to publish message:", err)
+			continue // skip to next message
+		}
+		log.Println("Waiting for confirmation...", deferredConfirm)
+
+		go confirmHandlerFunc(produceMsg.confirmationChan, deferredConfirm)
+	}
+
+}
+
+func setupConnection(p *AmqpProducer, connectFunc ConnectFunc) (func() error, AmqpChannel, chan *amqp.Error, error) {
+	amqpConnection, err := connectFunc(p.queue.URI)
+
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+	}
+
+	amqpChannel, connErrorChan, err := setupChannel(amqpConnection, p.queue.Name)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to setup channel: %w", err)
+	}
+	return amqpConnection.Close, amqpChannel, connErrorChan, nil
 }
 
 func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel, chan *amqp.Error, error) {
@@ -146,77 +205,20 @@ func setupChannel(amqpConnection AmqpConnection, queueName string) (AmqpChannel,
 	return amqpChannel, errChan, nil
 }
 
-func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, confirmHandlerFunc ConfirmHandler) error {
-
-	amqpConnection, err := connectFunc(p.queue.URI)
-
-	if err != nil {
-		return fmt.Errorf("failed to connect to RabbitMQ: %w", err)
+func connect(uri string) (AmqpConnection, error) {
+	retry := 5
+	var err error
+	for i := 0; i < retry; i++ {
+		var conn *amqp.Connection
+		conn, err = amqp.Dial(uri)
+		if err == nil {
+			return &AmpqConnectionWrapper{conn: conn}, nil
+		}
+		log.Printf("failed to connect to RabbitMQ (attempt %d/%d): %v", i+1, retry, err)
+		time.Sleep((1 << i) * time.Second)
 	}
 
-	defer func() {
-		err := amqpConnection.Close()
-		if err != nil {
-			log.Println("failed to close AMQP connection", err)
-		}
-	}()
-
-	amqpChannel, connErrorChan, err := setupChannel(amqpConnection, p.queue.Name)
-	if err != nil {
-		return fmt.Errorf("failed to setup channel: %w", err)
-	}
-
-	defer func() {
-		err := amqpChannel.Close()
-		if err != nil {
-			log.Println("failed to close AMQP channel", err)
-		}
-	}()
-
-	for {
-
-		var produceMsg ProduceMsg
-		select {
-
-		case produceMsg = <-p.producerChan:
-		case _ = <-shutdownChan:
-			return nil
-		case err := <-connErrorChan:
-			log.Println("Connection error:", err)
-			var connectErr error
-			amqpConnection, connectErr = connectFunc(p.queue.URI)
-
-			if connectErr != nil {
-				return fmt.Errorf("failed to reconnect to RabbitMQ: %w", connectErr)
-			}
-			var channelSetupErr error
-			amqpChannel, connErrorChan, channelSetupErr = setupChannel(amqpConnection, p.queue.Name)
-			if channelSetupErr != nil {
-				return fmt.Errorf("failed to setup channel: %w", channelSetupErr)
-			}
-		}
-
-		deferredConfirm, err := amqpChannel.PublishWithDeferredConfirm(
-			"",           // exchange
-			p.queue.Name, // routing key
-			false,        // mandatory
-			false,        // immediate
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        produceMsg.msg,
-			},
-		)
-		if err != nil {
-			// if publish fails, we should notify the caller that the message was not confirmed
-			produceMsg.confirmationChan <- false
-			log.Println("failed to publish message:", err)
-			continue // skip to next message
-		}
-		log.Println("Waiting for confirmation...", deferredConfirm)
-
-		go confirmHandlerFunc(produceMsg.confirmationChan, deferredConfirm)
-	}
-
+	return nil, fmt.Errorf("failed to connect to RabbitMQ after %d attempts: %w", retry, err)
 }
 
 func confirmHandler(confirmationChan chan bool, deferredConfirmation *amqp.DeferredConfirmation) {
