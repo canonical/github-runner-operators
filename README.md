@@ -1,4 +1,4 @@
-# github-runner-operators
+# GitHub runner operators
 
 
 ![WIP](https://img.shields.io/badge/status-WIP-yellow)

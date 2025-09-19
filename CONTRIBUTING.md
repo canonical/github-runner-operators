@@ -10,7 +10,7 @@ This document explains the processes and practices recommended for contributing 
     * code quality
     * test coverage
 
-## Developing
+## Develop
 
 For any problems with this charm, please [report bugs here](https://github.com/canonical/github-runner-operator/issues).
 
@@ -26,7 +26,7 @@ The code structure is as follows
 - `webhook-gateway`: The webhook gateway application code
 
 
-### Testing
+### Test
 
 This project uses standard Go testing tools for unit tests and integration tests.
 You can have a look at the GitHub actions workflows in `.github/workflows/` to see how the tests are run in CI.
