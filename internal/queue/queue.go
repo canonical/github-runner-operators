@@ -49,15 +49,15 @@ type AmqpProducer struct {
 	producerChan chan ProduceMsg
 }
 
-type AmpqConnectionWrapper struct {
+type AmqpConnectionWrapper struct {
 	conn *amqp.Connection
 }
 
-func (q *AmpqConnectionWrapper) Channel() (AmqpChannel, error) {
+func (q *AmqpConnectionWrapper) Channel() (AmqpChannel, error) {
 	return q.conn.Channel()
 }
 
-func (q *AmpqConnectionWrapper) Close() error {
+func (q *AmqpConnectionWrapper) Close() error {
 	return q.conn.Close()
 }
 
