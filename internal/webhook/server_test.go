@@ -136,7 +136,7 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			fakeProducer := &FakeProducer{}
 			handler := Handler{
 				WebhookSecret: secret,
-				Producer:      &FakeProducer{},
+				Producer:      fakeProducer,
 			}
 			handler.Webhook(w, req)
 			res := w.Result()

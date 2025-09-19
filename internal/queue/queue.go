@@ -114,7 +114,6 @@ func producer(p *AmqpProducer, shutdownChan chan bool, connectFunc ConnectFunc, 
 			log.Println("failed to close AMQP connection", err)
 		}
 	}()
-	defer amqpConnectionClose()
 	defer func() {
 		err := amqpChannel.Close()
 		if err != nil {
@@ -212,7 +211,7 @@ func connect(uri string) (AmqpConnection, error) {
 		var conn *amqp.Connection
 		conn, err = amqp.Dial(uri)
 		if err == nil {
-			return &AmpqConnectionWrapper{conn: conn}, nil
+			return &AmqpConnectionWrapper{conn: conn}, nil
 		}
 		log.Printf("failed to connect to RabbitMQ (attempt %d/%d): %v", i+1, retry, err)
 		time.Sleep((1 << i) * time.Second)
