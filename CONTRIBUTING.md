@@ -10,6 +10,62 @@ This document explains the processes and practices recommended for contributing 
     * code quality
     * test coverage
 
+## Code of conduct
+
+When contributing, you must abide by the
+[Ubuntu Code of Conduct](https://ubuntu.com/community/ethos/code-of-conduct).
+
+## Submissions
+
+If you want to address an issue or a bug in this project,
+notify in advance the people involved to avoid confusion;
+also, reference the issue or bug number when you submit the changes.
+
+- [Fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/about-forks)
+  our [GitHub repository](https://github.com/canonical/github-runner-operators)
+  and add the changes to your fork, properly structuring your commits,
+  providing detailed commit messages and signing your commits.
+- Make sure the updated project builds and runs without warnings or errors;
+  this includes linting, documentation, code and tests.
+- Submit the changes as a
+  [pull request (PR)](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork).
+
+Your changes will be reviewed in due time; if approved, they will be eventually merged.
+
+### Describing pull requests
+
+To be properly considered, reviewed and merged,
+your pull request must provide the following details:
+
+- **Title**: Summarize the change in a short, descriptive title.
+
+- **Overview**: Describe the problem that your pull request solves.
+  Mention any new features, bug fixes or refactoring.
+
+- **Rationale**: Explain why the change is needed.
+
+
+- **Checklist**: Complete the following items:
+
+    - The PR is tagged with appropriate label (`urgent`, `trivial`, `senior-review-required`, `documentation`).
+
+### Signing commits
+
+To improve contribution tracking,
+we use the [Canonical contributor license agreement](https://assets.ubuntu.com/v1/ff2478d1-Canonical-HA-CLA-ANY-I_v1.2.pdf)
+(CLA) as a legal sign-off, and we require all commits to have verified signatures.
+
+### Canonical contributor agreement
+
+Canonical welcomes contributions to this repository. Please check out our [contributor agreement](https://ubuntu.com/legal/contributors) if you’re interested in contributing to the solution.
+
+#### Verified signatures on commits
+
+All commits in a pull request must have cryptographic (verified) signatures.
+To add signatures on your commits, follow the
+[GitHub documentation](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
+
+
 ## Develop
 
 For any problems with this charm, please [report bugs here](https://github.com/canonical/github-runner-operator/issues).
@@ -50,6 +106,3 @@ You can use `docker` to run a RabbitMQ server locally:
 docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
 ```
 
-## Canonical contributor agreement
-
-Canonical welcomes contributions to this repository. Please check out our [contributor agreement](https://ubuntu.com/legal/contributors) if you’re interested in contributing to the solution.
