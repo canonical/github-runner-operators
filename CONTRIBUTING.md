@@ -96,7 +96,7 @@ go test -race -v ./...
 Run `webhook-gateway` integration tests using:
 
 ```shell
-APP_PORT=8080 WEBHOOK_SECRET=fake RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -cover -v  ./webhook-gateway -integratio
+APP_PORT=8080 WEBHOOK_SECRET=fake RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -cover -v  ./webhook-gateway -integration
 ```
 
 It assumes you have access to a RabbitMQ server running reachable at $RABBITMQ_CONNECT_STRING.

@@ -2,7 +2,7 @@ name: Webhook Gateway Integration Tests
 on:
     pull_request:
         paths:
-          - 'gateway/webhook/**'
+          - 'webhook-gateway/**'
           - 'internal/**'
     workflow_call:
 
