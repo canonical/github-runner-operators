@@ -26,14 +26,14 @@ type FakeProducer struct {
 	Messages [][]byte
 }
 
-func (q *FakeProducer) Push(_ context.Context, msg []byte) error {
+func (q *FakeProducer) Push(_ context.Context, _ map[string]interface{}, msg []byte) error {
 	q.Messages = append(q.Messages, msg)
 	return nil
 }
 
 type ErrorProducer struct{}
 
-func (q *ErrorProducer) Push(_ context.Context, _ []byte) error {
+func (q *ErrorProducer) Push(_ context.Context, _ map[string]interface{}, _ []byte) error {
 	return fmt.Errorf("queue error")
 }
 

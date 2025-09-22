@@ -106,10 +106,11 @@ func TestPush(t *testing.T) {
 		amqpConnection: &MockAmqpConnection{
 			amqpChannel: mockAmqpChannel,
 		},
+		queueName: queueName,
 	}
 
 	headers := map[string]interface{}{"header1": "value1"}
-	amqpProducer.Push(nil, headers, []byte("TestMessage"))
+	amqpProducer.Push(context.Background(), headers, []byte("TestMessage"))
 
 	assert.Contains(t, mockAmqpChannel.headers, headers)
 	assert.Contains(t, mockAmqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
@@ -140,7 +141,7 @@ func TestPushFailure(t *testing.T) {
 				cancel()
 				return ctx
 			}(),
-			queueName: queueName,
+			queueName: queueWithPublishHangs,
 			errMsg:    "context canceled",
 		},
 		{
@@ -199,7 +200,7 @@ func TestPushNoChannel(t *testing.T) {
 				amqpConnection: mockAmqpConnection,
 			}
 
-			amqpProducer.Push(nil, nil, []byte("TestMessage"))
+			amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 			assert.Equal(t, 1, mockAmqpConnection.channelCalls, "expected connection to be re-established")
 			assert.Contains(t, mockAmqpConnection.amqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
 		})
@@ -240,7 +241,7 @@ func TestPushNoConnection(t *testing.T) {
 				},
 			}
 
-			amqpProducer.Push(nil, nil, []byte("TestMessage"))
+			amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 			assert.Equal(t, 1, amqpConnection.channelCalls, "expected connection to be re-established")
 			assert.Contains(t, amqpConnection.amqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
 		})
@@ -261,7 +262,7 @@ func TestPushQueueDeclare(t *testing.T) {
 		queueName:      queueName,
 	}
 
-	amqpProducer.Push(nil, nil, []byte("TestMessage"))
+	amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 
 	assert.Equal(t, mockAmqpConnection.amqpChannel.confirmMode, true, "expected channel to be in confirm mode")
 	assert.Equal(t, mockAmqpConnection.amqpChannel.queueName, queueName, "expected queue name to be "+queueName)
