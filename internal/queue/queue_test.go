@@ -8,57 +8,50 @@ package queue
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
-	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
 
-const QueueWithDeclareError = "queue-with-declare-error"
-const TestMessage = "TestMessage"
+const queueName = "test-queue"
+const queueWithPublishNoAck = "queue-with-publish-no-ack"
+const queueWithPublishError = "queue-with-publish-error"
+const queueWithPublishHangs = "queue-with-publish-hangs"
 
 type MockAmqpChannel struct {
-	queueName         string
-	publishedMessages [][]byte
-	closed            bool
-	confirmMode       bool
-	errorChan         chan *amqp.Error
-	mutex             sync.Mutex
+	msgs         [][]byte
+	headers      []map[string]interface{}
+	isclosed     bool
+	confirmMode  bool
+	queueName    string
+	queueDurable bool
 }
 
-type MockAmqConnection struct {
-	channel *MockAmqpChannel
-	closed  bool
-	mutex   sync.Mutex
-}
+func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _ bool, msg amqp.Publishing) (Confirmation, error) {
 
-func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
-	ch.publishedMessages = append(ch.publishedMessages, msg.Body)
-	return nil, nil
-}
-
-func (ch *MockAmqpChannel) QueueDeclare(name string, _, _, _, _ bool, _ amqp.Table) (amqp.Queue, error) {
-	if name == QueueWithDeclareError {
-		return amqp.Queue{}, errors.New("failed to declare queue")
+	if key == queueWithPublishError {
+		return nil, errors.New("publish error")
 	}
-	ch.queueName = name
-	return amqp.Queue{}, nil
+	ch.msgs = append(ch.msgs, msg.Body)
+	ch.headers = append(ch.headers, msg.Headers)
+
+	done_ch := make(chan struct{}, 1)
+
+	if key != queueWithPublishHangs {
+		done_ch <- struct{}{}
+	}
+
+	ack := key != queueWithPublishNoAck
+	confirmation := &MockConfirmation{
+		done: done_ch,
+		ack:  ack,
+	}
+	return confirmation, nil
 }
 
-func (ch *MockAmqpChannel) Close() error {
-	ch.mutex.Lock()
-	defer ch.mutex.Unlock()
-	ch.closed = true
-	return nil
-}
-
-func (ch *MockAmqpChannel) NotifyClose(c chan *amqp.Error) chan *amqp.Error {
-	ch.mutex.Lock()
-	defer ch.mutex.Unlock()
-	ch.errorChan = c
-	return c
+func (ch *MockAmqpChannel) IsClosed() bool {
+	return ch.isclosed
 }
 
 func (ch *MockAmqpChannel) Confirm(_ bool) error {
@@ -66,285 +59,211 @@ func (ch *MockAmqpChannel) Confirm(_ bool) error {
 	return nil
 }
 
-func (c *MockAmqConnection) Channel() (AmqpChannel, error) {
-	if c.channel == nil {
-		c.channel = &MockAmqpChannel{}
-	}
-	return c.channel, nil
+func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ amqp.Table) (amqp.Queue, error) {
+	ch.queueName = name
+	ch.queueDurable = durable
+	return amqp.Queue{}, nil
 }
 
-func (c *MockAmqConnection) Close() error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.closed = true
-	return nil
+type MockConfirmation struct {
+	done <-chan struct{}
+	ack  bool
 }
 
-func mockConfirmHandlerSuccess(confirmationChan chan bool, _ *amqp.DeferredConfirmation) {
-	go func() {
-		// Simulate a successful confirmation
-		confirmationChan <- true
-	}()
+func (c *MockConfirmation) Done() <-chan struct{} {
+	return c.done
 }
 
-func mockConfirmHandlerFailure(confirmationChan chan bool, _ *amqp.DeferredConfirmation) {
-	go func() {
-		// Simulate a failed confirmation
-		confirmationChan <- false
-	}()
+func (c *MockConfirmation) Acked() bool {
+	return c.ack
 }
 
-func TestPushWithSuccess(t *testing.T) {
+type MockAmqpConnection struct {
+	channelCalls int
+	amqpChannel  *MockAmqpChannel
+	isclosed     bool
+}
+
+func (m *MockAmqpConnection) Channel() (AmqpChannel, error) {
+	m.channelCalls++
+	m.amqpChannel = &MockAmqpChannel{}
+	return m.amqpChannel, nil
+}
+
+func (m *MockAmqpConnection) IsClosed() bool {
+	return m.isclosed
+}
+
+func TestPush(t *testing.T) {
 	/*
-		arrange: create a producer that always confirms
+		arrange: create a queue with a fake amqp connection
 		act: push a message to the queue
-		assert: no error is returned
+		assert: message was published to the amqp channel
 	*/
-	producerChan := make(chan ProduceMsg, 1)
-	fakeProducer := createProducer(producerChan)
-	go func() {
-		produceMsg := <-producerChan
-		produceMsg.confirmationChan <- true
-	}()
-
-	err := fakeProducer.Push(context.Background(), []byte(TestMessage))
-
-	assert.NoError(t, err)
-}
-
-func createProducer(producerChan chan ProduceMsg) AmqpProducer {
-	return AmqpProducer{
-		queue: &AmqpQueue{
-			URI:  "amqp://guest:guest@localhost:5672/",
-			Name: "test-queue",
+	mockAmqpChannel := &MockAmqpChannel{}
+	amqpProducer := &AmqpProducer{
+		amqpChannel: mockAmqpChannel,
+		amqpConnection: &MockAmqpConnection{
+			amqpChannel: mockAmqpChannel,
 		},
-		producerChan: producerChan,
+	}
+
+	headers := map[string]interface{}{"header1": "value1"}
+	amqpProducer.Push(nil, headers, []byte("TestMessage"))
+
+	assert.Contains(t, mockAmqpChannel.headers, headers)
+	assert.Contains(t, mockAmqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
+}
+
+func TestPushFailure(t *testing.T) {
+	/*
+		arrange: create a queue with a fake confirm handler that always fails
+		act: push a message to the queue that will fail to publish
+		assert: the push return an error
+	*/
+	tests := []struct {
+		name      string
+		queueName string
+		context   context.Context
+		errMsg    string
+	}{
+		{
+			name:      "message is not acked",
+			queueName: queueWithPublishNoAck,
+			errMsg:    "confirmation not acknowledged",
+			context:   context.Background(),
+		},
+		{
+			name: "context is done",
+			context: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			}(),
+			queueName: queueName,
+			errMsg:    "context canceled",
+		},
+		{
+			name:      "publish returns error",
+			queueName: queueWithPublishError,
+			errMsg:    "publish error",
+			context:   context.Background(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAmqpChannel := &MockAmqpChannel{}
+			amqpProducer := &AmqpProducer{
+				amqpChannel: mockAmqpChannel,
+				amqpConnection: &MockAmqpConnection{
+					amqpChannel: mockAmqpChannel,
+				},
+				queueName: tt.queueName,
+			}
+
+			err := amqpProducer.Push(tt.context, nil, []byte("TestMessage"))
+
+			assert.Error(t, err, "expected error when message fails to publish")
+			assert.ErrorContains(t, err, tt.errMsg)
+		})
 	}
 }
 
-func TestPushWithFailure(t *testing.T) {
+func TestPushNoChannel(t *testing.T) {
 	/*
-		arrange: create a producer that always fails to confirm
+		arrange: create a queue with no amqp channel
 		act: push a message to the queue
-		assert: an error is returned
+		assert: connection got re-established and message was published to the amqp channel
 	*/
-	producerChan := make(chan ProduceMsg, 1)
-	fakeProducer := createProducer(producerChan)
-	go func() {
-		produceMsg := <-producerChan
-		produceMsg.confirmationChan <- false
-	}()
+	tests := []struct {
+		name    string
+		channel AmqpChannel
+	}{
+		{
+			name:    "channel is nil",
+			channel: nil,
+		},
+		{
+			name: "channel is closed",
+			channel: &MockAmqpChannel{
+				isclosed: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAmqpConnection := &MockAmqpConnection{}
+			amqpProducer := &AmqpProducer{
+				amqpChannel:    tt.channel,
+				amqpConnection: mockAmqpConnection,
+			}
 
-	err := fakeProducer.Push(context.Background(), []byte("TestMessage"))
-
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "message not confirmed")
+			amqpProducer.Push(nil, nil, []byte("TestMessage"))
+			assert.Equal(t, 1, mockAmqpConnection.channelCalls, "expected connection to be re-established")
+			assert.Contains(t, mockAmqpConnection.amqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
+		})
+	}
 }
 
-func TestPushContextCancelled(t *testing.T) {
+func TestPushNoConnection(t *testing.T) {
 	/*
-		arrange: create a producer that never confirms and a context that will be cancelled
+		arrange: create a queue with no amqp connection
 		act: push a message to the queue
-		assert: an error is returned after timeout
+		assert: connection got established and message was published to the amqp channel
 	*/
-	producerChan := make(chan ProduceMsg, 1)
-	fakeProducer := createProducer(producerChan)
-	go func() {
-		<-producerChan
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	tests := []struct {
+		name       string
+		connection AmqpConnection
+	}{
+		{
+			name:       "connection is nil",
+			connection: nil,
+		},
+		{
+			name: "connection is closed",
+			connection: &MockAmqpConnection{
+				isclosed: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			amqpConnection := &MockAmqpConnection{
+				amqpChannel: &MockAmqpChannel{},
+			}
+			amqpProducer := &AmqpProducer{
+				amqpConnection: tt.connection,
+				uri:            "amqp://guest:guest@localhost:5672/",
+				connectFunc: func(uri string) (AmqpConnection, error) {
+					return amqpConnection, nil
+				},
+			}
 
-	err := fakeProducer.Push(ctx, []byte("TestMessage"))
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "context canceled")
+			amqpProducer.Push(nil, nil, []byte("TestMessage"))
+			assert.Equal(t, 1, amqpConnection.channelCalls, "expected connection to be re-established")
+			assert.Contains(t, amqpConnection.amqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
+		})
+	}
 }
 
-func TestProducerSetupsChannelAndQueue(t *testing.T) {
+func TestPushQueueDeclare(t *testing.T) {
 	/*
-		arrange: create a fake AmqpQueue and a mock connection function
-		act: start the producer
-		assert: the channel is in confirm mode and the queue name matches
+		arrange: create a queue with no amqp channel
+		act: push a message to the queue
+		assert: channel with confirm mode is established and queue is declared
 	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := createProducer(producerChan)
-	_, fakeAmqpChan, connectFunc := createConnectFunc()
-	shutdownChan <- true
-
-	err := producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
-
-	assert.NoError(t, err)
-	assert.True(t, fakeAmqpChan.confirmMode, "channel should be in confirm mode")
-	assert.Equal(t, "test-queue", fakeAmqpChan.queueName, "queue name should match")
-
-}
-
-func createConnectFunc() (*MockAmqConnection, *MockAmqpChannel, func(uri string) (AmqpConnection, error)) {
-	fakeAmqpChan := MockAmqpChannel{}
-	fakeAmqpConn := MockAmqConnection{
-		channel: &fakeAmqpChan,
-		closed:  false,
-	}
-	connectFunc := func(uri string) (AmqpConnection, error) {
-		return &fakeAmqpConn, nil
-	}
-	return &fakeAmqpConn, &fakeAmqpChan, connectFunc
-}
-
-func TestProducerPublishesMessage(t *testing.T) {
-	/*
-		arrange: mock the confirm handler to always confirm
-		act: start the producer and send a message to the producer channel
-		assert: the message is published and confirmed
-	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := createProducer(producerChan)
-	_, fakeAmqpChan, connectFunc := createConnectFunc()
-	confirmationChan := make(chan bool, 1)
-
-	go producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
-	produceMsg := ProduceMsg{
-		msg:              []byte(TestMessage),
-		confirmationChan: confirmationChan,
-	}
-	producerChan <- produceMsg
-
-	assert.True(t, <-confirmationChan, "message should be confirmed")
-	assert.Contains(t, fakeAmqpChan.publishedMessages, []byte(TestMessage), "published messages should contain the test message")
-	shutdownChan <- true
-}
-
-func TestProducerCouldNotPublishMessage(t *testing.T) {
-	/*
-		arrange: mock the confirm handler to always fail
-		act: start the producer and send a message to the producer channel
-		assert: the message is not confirmed
-	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := createProducer(producerChan)
-	_, _, connectFunc := createConnectFunc()
-	confirmationChan := make(chan bool, 1)
-	produceMsg := ProduceMsg{
-		msg:              []byte(TestMessage),
-		confirmationChan: confirmationChan,
-	}
-	producerChan <- produceMsg
-
-	go producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerFailure)
-
-	assert.False(t, <-confirmationChan, "message should not be confirmed")
-	shutdownChan <- true
-}
-
-func TestProducerChannelShutDownTriesReconnect(t *testing.T) {
-	/*
-		arrange: create a mock connection function that counts calls
-		act: start the producer and simulate a channel error
-		assert: the connect function is called multiple times
-	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := createProducer(producerChan)
-	fakeAmqpChan := MockAmqpChannel{}
-	fakeAmqpConn := MockAmqConnection{
-		channel: &fakeAmqpChan,
-		closed:  false,
-	}
-	mutex := sync.Mutex{}
-	connectCalls := 0
-	connectFunc := func(uri string) (AmqpConnection, error) {
-		mutex.Lock()
-		defer mutex.Unlock()
-		connectCalls++
-		return &fakeAmqpConn, nil
+	mockAmqpConnection := &MockAmqpConnection{}
+	queueName := "fakeQueue"
+	amqpProducer := &AmqpProducer{
+		amqpChannel:    nil,
+		amqpConnection: mockAmqpConnection,
+		queueName:      queueName,
 	}
 
-	go producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
-	assert.Eventually(t, func() bool {
-		fakeAmqpChan.mutex.Lock()
-		defer fakeAmqpChan.mutex.Unlock()
-		return fakeAmqpChan.errorChan != nil
-	}, time.Second, 1, "error channel should be set")
-	fakeAmqpChan.errorChan <- amqp.ErrClosed
+	amqpProducer.Push(nil, nil, []byte("TestMessage"))
 
-	assert.Eventually(t, func() bool {
-		mutex.Lock()
-		defer mutex.Unlock()
-		return connectCalls >= 2
-	}, time.Second, 1, "connect should be called multiple times")
-	shutdownChan <- true
-}
-
-func TestProducerConnectError(t *testing.T) {
-	/*
-		arrange: create a mock connection function that always fails
-		act: start the producer
-		assert: an error is returned
-	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := createProducer(producerChan)
-	connectFunc := func(uri string) (AmqpConnection, error) {
-		return nil, errors.New("error")
-	}
-
-	err := producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
-
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "failed to connect to RabbitMQ")
-}
-
-func TestProducerQueueDeclareError(t *testing.T) {
-	/*
-		arrange: create a fake AmqpQueue that will fail to declare the queue
-		act: start the producer
-		assert: an error is returned
-	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := AmqpProducer{queue: &AmqpQueue{
-		URI:  "amqp://guest:guest@localhost:5672/",
-		Name: QueueWithDeclareError,
-	},
-		producerChan: producerChan,
-	}
-	_, _, connectFunc := createConnectFunc()
-
-	err := producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
-
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "failed to declare a queue")
-}
-
-func TestProducerClosesResources(t *testing.T) {
-	/*
-		arrange: start the producer
-		act: send a shutdown signal
-		assert: the connection and channel are closed
-	*/
-	producerChan := make(chan ProduceMsg, 1)
-	shutdownChan := make(chan bool, 1)
-	fakeProducer := createProducer(producerChan)
-	fakeAmqpConn, fakeAmqpChan, connectFunc := createConnectFunc()
-	go producer(&fakeProducer, shutdownChan, connectFunc, mockConfirmHandlerSuccess)
-
-	shutdownChan <- true
-
-	assert.Eventually(t,
-		func() bool {
-			fakeAmqpConn.mutex.Lock()
-			defer fakeAmqpConn.mutex.Unlock()
-			return fakeAmqpConn.closed
-		}, time.Second, 1, "connection should be closed")
-
-	assert.Eventually(t,
-		func() bool {
-			fakeAmqpChan.mutex.Lock()
-			defer fakeAmqpChan.mutex.Unlock()
-			return fakeAmqpChan.closed
-		}, time.Second, 1, "channel should should be closed")
-
+	assert.Equal(t, mockAmqpConnection.amqpChannel.confirmMode, true, "expected channel to be in confirm mode")
+	assert.Equal(t, mockAmqpConnection.amqpChannel.queueName, queueName, "expected queue name to be "+queueName)
+	assert.Equal(t, mockAmqpConnection.amqpChannel.queueDurable, true, "expected queue to be durable")
 }

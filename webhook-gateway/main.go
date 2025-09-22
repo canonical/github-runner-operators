@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/canonical/mayfly/internal/queue_alt"
+	"github.com/canonical/mayfly/internal/queue"
 	"github.com/canonical/mayfly/internal/webhook"
 )
 
@@ -34,7 +34,7 @@ func main() {
 
 	//p := queue.NewProducer(uri, queueName)
 
-	p := queue_alt.NewAmqpProducer(uri, queueName)
+	p := queue.NewAmqpProducer(uri, queueName)
 	handler := &webhook.Handler{
 		WebhookSecret: webhookSecret,
 		Producer:      p,
