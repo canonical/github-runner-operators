@@ -21,7 +21,7 @@ type MockAmqpChannel struct {
 	queueDurable bool
 }
 
-func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (*interface{}, error) {
+func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
 
 	ch.msgs = append(ch.msgs, msg.Body)
 	ch.headers = append(ch.headers, msg.Headers)
@@ -168,7 +168,7 @@ func TestPushQueueDeclare(t *testing.T) {
 	amqpProducer := &AmqpProducer{
 		amqpChannel:    nil,
 		amqpConnection: mockAmqpConnection,
-		name:           queueName,
+		queueName:      queueName,
 	}
 
 	amqpProducer.Push(nil, nil, []byte("TestMessage"))

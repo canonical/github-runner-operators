@@ -12,14 +12,14 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/canonical/mayfly/internal/queue"
+	"github.com/canonical/mayfly/internal/queue_alt"
 )
 
 const WebhookSignatureHeader = "X-Hub-Signature-256"
 
 type Handler struct {
 	WebhookSecret string
-	Producer      queue.Producer
+	Producer      queue_alt.Producer
 }
 
 func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +43,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.Producer.Push(r.Context(), body)
+	err = h.Producer.Push(r.Context(), nil, body)
 	if err != nil {
 		http.Error(w, "Unable to push to queue", http.StatusInternalServerError)
 		return

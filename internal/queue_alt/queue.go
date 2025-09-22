@@ -10,7 +10,7 @@ import (
 )
 
 type AmqpChannel interface {
-	PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (*interface{}, error)
+	PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error)
 	IsClosed() bool
 	Confirm(noWait bool) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
@@ -26,7 +26,23 @@ type AmqpProducer struct {
 	amqpConnection AmqpConnection
 	connectFunc    func(uri string) (AmqpConnection, error)
 	uri            string
-	name           string
+	queueName      string
+}
+
+type AmqpConnectionWrapper struct {
+	conn *amqp.Connection
+}
+
+func (q *AmqpConnectionWrapper) Channel() (AmqpChannel, error) {
+	return q.conn.Channel()
+}
+
+func (q *AmqpConnectionWrapper) Close() error {
+	return q.conn.Close()
+}
+
+func (q *AmqpConnectionWrapper) IsClosed() bool {
+	return q.conn.IsClosed()
 }
 
 type Producer interface {
@@ -68,12 +84,25 @@ func (p *AmqpProducer) resetChannel() error {
 	c.Confirm(false)
 
 	c.QueueDeclare(
-		p.name, // name
-		true,   // durable
-		false,  // delete when unused
-		false,  // exclusive
-		false,  // no-wait
-		nil,    // arguments
+		p.queueName, // queueName
+		true,        // durable
+		false,       // delete when unused
+		false,       // exclusive
+		false,       // no-wait
+		nil,         // arguments
 	)
 	return nil
+}
+
+func NewAmqpProducer(uri string, queueName string) *AmqpProducer {
+	return &AmqpProducer{
+		uri:         uri,
+		queueName:   queueName,
+		connectFunc: amqpConnect,
+	}
+}
+
+func amqpConnect(uri string) (AmqpConnection, error) {
+	amqpConnection, err := amqp.Dial(uri)
+	return &AmqpConnectionWrapper{conn: amqpConnection}, err
 }

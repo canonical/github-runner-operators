@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/canonical/mayfly/internal/queue"
+	"github.com/canonical/mayfly/internal/queue_alt"
 	"github.com/canonical/mayfly/internal/webhook"
 )
 
@@ -32,8 +32,9 @@ func main() {
 		log.Panicf("WEBHOOK_SECRET environment variable not set")
 	}
 
-	p := queue.NewProducer(uri, queueName)
+	//p := queue.NewProducer(uri, queueName)
 
+	p := queue_alt.NewAmqpProducer(uri, queueName)
 	handler := &webhook.Handler{
 		WebhookSecret: webhookSecret,
 		Producer:      p,
