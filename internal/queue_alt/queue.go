@@ -10,7 +10,7 @@ import (
 )
 
 type AmqpChannel interface {
-	PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error)
+	PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (Confirmation, error)
 	IsClosed() bool
 	Confirm(noWait bool) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
@@ -19,6 +19,11 @@ type AmqpChannel interface {
 type AmqpConnection interface {
 	Channel() (AmqpChannel, error)
 	IsClosed() bool
+}
+
+type Confirmation interface {
+	Done() <-chan struct{}
+	Acked() bool
 }
 
 type AmqpProducer struct {
@@ -34,7 +39,8 @@ type AmqpConnectionWrapper struct {
 }
 
 func (q *AmqpConnectionWrapper) Channel() (AmqpChannel, error) {
-	return q.conn.Channel()
+	ch, err := q.conn.Channel()
+	return &AmqpChannelWrapper{ch: ch}, err
 }
 
 func (q *AmqpConnectionWrapper) Close() error {
@@ -43,6 +49,39 @@ func (q *AmqpConnectionWrapper) Close() error {
 
 func (q *AmqpConnectionWrapper) IsClosed() bool {
 	return q.conn.IsClosed()
+}
+
+type AmqpDeferredConfirmationWrapper struct {
+	deferredConfirmation *amqp.DeferredConfirmation
+}
+
+func (c *AmqpDeferredConfirmationWrapper) Done() <-chan struct{} {
+	return c.deferredConfirmation.Done()
+}
+
+func (c *AmqpDeferredConfirmationWrapper) Acked() bool {
+	return c.deferredConfirmation.Acked()
+}
+
+type AmqpChannelWrapper struct {
+	ch *amqp.Channel
+}
+
+func (ch *AmqpChannelWrapper) PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (Confirmation, error) {
+	deferredConfirmation, err := ch.ch.PublishWithDeferredConfirm(exchange, key, mandatory, immediate, msg)
+	return &AmqpDeferredConfirmationWrapper{deferredConfirmation: deferredConfirmation}, err
+}
+
+func (ch *AmqpChannelWrapper) IsClosed() bool {
+	return ch.ch.IsClosed()
+}
+
+func (ch *AmqpChannelWrapper) Confirm(noWait bool) error {
+	return ch.ch.Confirm(noWait)
+}
+
+func (ch *AmqpChannelWrapper) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
+	return ch.ch.QueueDeclare(name, durable, autoDelete, exclusive, noWait, args)
 }
 
 type Producer interface {
@@ -57,17 +96,22 @@ func (p *AmqpProducer) Push(ctx interface{}, headers map[string]interface{}, msg
 	if p.amqpChannel == nil || p.amqpChannel.IsClosed() {
 		p.resetChannel()
 	}
-	p.amqpChannel.PublishWithDeferredConfirm(
-		"",    // exchange
-		"",    // routing key
-		false, // mandatory
-		false, // immediate
+
+	confirmation, _ := p.amqpChannel.PublishWithDeferredConfirm(
+		"",          // exchange
+		p.queueName, // routing key
+		false,       // mandatory
+		false,       // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        msg,
 			Headers:     headers,
 		},
 	)
+
+	select {
+	case <-confirmation.Done():
+	}
 	return nil
 }
 

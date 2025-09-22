@@ -21,11 +21,18 @@ type MockAmqpChannel struct {
 	queueDurable bool
 }
 
-func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
+func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (Confirmation, error) {
 
 	ch.msgs = append(ch.msgs, msg.Body)
 	ch.headers = append(ch.headers, msg.Headers)
-	return nil, nil
+
+	done_ch := make(chan struct{}, 1)
+	confirmation := &MockConfirmation{
+		done: done_ch,
+		ack:  true,
+	}
+	done_ch <- struct{}{}
+	return confirmation, nil
 }
 
 func (ch *MockAmqpChannel) IsClosed() bool {
@@ -41,6 +48,19 @@ func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ am
 	ch.queueName = name
 	ch.queueDurable = durable
 	return amqp.Queue{}, nil
+}
+
+type MockConfirmation struct {
+	done <-chan struct{}
+	ack  bool
+}
+
+func (c *MockConfirmation) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *MockConfirmation) Acked() bool {
+	return c.ack
 }
 
 type MockAmqpConnection struct {
