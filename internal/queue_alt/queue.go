@@ -6,6 +6,9 @@
 package queue_alt
 
 import (
+	"context"
+	"fmt"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -85,10 +88,10 @@ func (ch *AmqpChannelWrapper) QueueDeclare(name string, durable, autoDelete, exc
 }
 
 type Producer interface {
-	Push(ctx interface{}, headers map[string]interface{}, msg []byte) error
+	Push(ctx context.Context, headers map[string]interface{}, msg []byte) error
 }
 
-func (p *AmqpProducer) Push(ctx interface{}, headers map[string]interface{}, msg []byte) error {
+func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{}, msg []byte) error {
 	if p.amqpConnection == nil || p.amqpConnection.IsClosed() {
 		p.resetConnection()
 	}
@@ -97,7 +100,7 @@ func (p *AmqpProducer) Push(ctx interface{}, headers map[string]interface{}, msg
 		p.resetChannel()
 	}
 
-	confirmation, _ := p.amqpChannel.PublishWithDeferredConfirm(
+	confirmation, err := p.amqpChannel.PublishWithDeferredConfirm(
 		"",          // exchange
 		p.queueName, // routing key
 		false,       // mandatory
@@ -109,8 +112,18 @@ func (p *AmqpProducer) Push(ctx interface{}, headers map[string]interface{}, msg
 		},
 	)
 
+	if err != nil {
+		return fmt.Errorf("failed to publish message: %w", err)
+	}
+
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
+
 	case <-confirmation.Done():
+		if !confirmation.Acked() {
+			return fmt.Errorf("confirmation not acknowledged")
+		}
 	}
 	return nil
 }

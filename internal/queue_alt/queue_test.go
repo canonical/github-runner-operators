@@ -6,11 +6,18 @@
 package queue_alt
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
+
+const queueName = "test-queue"
+const queueWithPublishNoAck = "queue-with-publish-no-ack"
+const queueWithPublishError = "queue-with-publish-error"
+const queueWithPublishHangs = "queue-with-publish-hangs"
 
 type MockAmqpChannel struct {
 	msgs         [][]byte
@@ -21,17 +28,25 @@ type MockAmqpChannel struct {
 	queueDurable bool
 }
 
-func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, _ string, _, _ bool, msg amqp.Publishing) (Confirmation, error) {
+func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _ bool, msg amqp.Publishing) (Confirmation, error) {
 
+	if key == queueWithPublishError {
+		return nil, errors.New("publish error")
+	}
 	ch.msgs = append(ch.msgs, msg.Body)
 	ch.headers = append(ch.headers, msg.Headers)
 
 	done_ch := make(chan struct{}, 1)
+
+	if key != queueWithPublishHangs {
+		done_ch <- struct{}{}
+	}
+
+	ack := key != queueWithPublishNoAck
 	confirmation := &MockConfirmation{
 		done: done_ch,
-		ack:  true,
+		ack:  ack,
 	}
-	done_ch <- struct{}{}
 	return confirmation, nil
 }
 
@@ -98,6 +113,61 @@ func TestPush(t *testing.T) {
 
 	assert.Contains(t, mockAmqpChannel.headers, headers)
 	assert.Contains(t, mockAmqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
+}
+
+func TestPushFailure(t *testing.T) {
+	/*
+		arrange: create a queue with a fake confirm handler that always fails
+		act: push a message to the queue that will fail to publish
+		assert: the push return an error
+	*/
+	tests := []struct {
+		name      string
+		queueName string
+		context   context.Context
+		errMsg    string
+	}{
+		{
+			name:      "message is not acked",
+			queueName: queueWithPublishNoAck,
+			errMsg:    "confirmation not acknowledged",
+			context:   context.Background(),
+		},
+		{
+			name: "context is done",
+			context: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			}(),
+			queueName: queueName,
+			errMsg:    "context canceled",
+		},
+		{
+			name:      "publish returns error",
+			queueName: queueWithPublishError,
+			errMsg:    "publish error",
+			context:   context.Background(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAmqpChannel := &MockAmqpChannel{}
+			amqpProducer := &AmqpProducer{
+				amqpChannel: mockAmqpChannel,
+				amqpConnection: &MockAmqpConnection{
+					amqpChannel: mockAmqpChannel,
+				},
+				queueName: tt.queueName,
+			}
+
+			err := amqpProducer.Push(tt.context, nil, []byte("TestMessage"))
+
+			assert.Error(t, err, "expected error when message fails to publish")
+			assert.ErrorContains(t, err, tt.errMsg)
+		})
+	}
 }
 
 func TestPushNoChannel(t *testing.T) {
