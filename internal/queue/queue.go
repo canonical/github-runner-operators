@@ -92,6 +92,22 @@ type Producer interface {
 }
 
 func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{}, msg []byte) error {
+	err := p.resetConnectionOrChannelIfNecessary()
+	if err != nil {
+		return err
+	}
+
+	confirmation, err := p.publishMsg(msg, headers)
+	if err != nil {
+		return err
+	}
+
+	err = waitForMsgConfirmation(ctx, confirmation)
+
+	return err
+}
+
+func (p *AmqpProducer) resetConnectionOrChannelIfNecessary() error {
 	if p.amqpConnection == nil || p.amqpConnection.IsClosed() {
 		err := p.resetConnection()
 		if err != nil {
@@ -105,7 +121,23 @@ func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{},
 			return err
 		}
 	}
+	return nil
+}
 
+func waitForMsgConfirmation(ctx context.Context, confirmation Confirmation) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+
+	case <-confirmation.Done():
+		if !confirmation.Acked() {
+			return fmt.Errorf("confirmation not acknowledged")
+		}
+	}
+	return nil
+}
+
+func (p *AmqpProducer) publishMsg(msg []byte, headers map[string]interface{}) (Confirmation, error) {
 	confirmation, err := p.amqpChannel.PublishWithDeferredConfirm(
 		"",          // exchange
 		p.queueName, // routing key
@@ -119,19 +151,9 @@ func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{},
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to publish message: %w", err)
+		return nil, fmt.Errorf("failed to publish message: %w", err)
 	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-
-	case <-confirmation.Done():
-		if !confirmation.Acked() {
-			return fmt.Errorf("confirmation not acknowledged")
-		}
-	}
-	return nil
+	return confirmation, nil
 }
 
 func (p *AmqpProducer) resetConnection() error {
