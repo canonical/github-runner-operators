@@ -16,11 +16,13 @@ func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{},
 	p.mu.Lock()
 	err := p.resetConnectionOrChannelIfNecessary()
 	if err != nil {
+		p.mu.Unlock()
 		return err
 	}
 
 	confirmation, err := p.publishMsg(msg, headers)
 	if err != nil {
+		p.mu.Unlock()
 		return err
 	}
 	p.mu.Unlock()

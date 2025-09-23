@@ -32,8 +32,6 @@ func main() {
 		log.Panicf("WEBHOOK_SECRET environment variable not set")
 	}
 
-	//p := queue.NewProducer(uri, queueName)
-
 	p := queue.NewAmqpProducer(uri, queueName)
 	handler := &webhook.Handler{
 		WebhookSecret: webhookSecret,

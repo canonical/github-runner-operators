@@ -42,7 +42,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !validateSignature(body, h.WebhookSecret, signature) {
-		slog.Debug("invalid signature", "signature", signature, "body", string(body))
+		slog.Debug("invalid signature", "signature", signature)
 		http.Error(w, "Invalid signature", http.StatusForbidden)
 		return
 	}
