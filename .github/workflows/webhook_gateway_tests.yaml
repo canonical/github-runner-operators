@@ -25,7 +25,9 @@ jobs:
       - name: Setup rabbitmq in an OCI container
         run: |
           docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
-          sleep 10 # wait for rabbitmq to start
+          until docker exec rabbitmq rabbitmqctl status
+            do echo "waiting for rabbit mq"
+          done
       - name: Run integration test
         env:
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
