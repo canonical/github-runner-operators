@@ -93,11 +93,17 @@ type Producer interface {
 
 func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{}, msg []byte) error {
 	if p.amqpConnection == nil || p.amqpConnection.IsClosed() {
-		p.resetConnection()
+		err := p.resetConnection()
+		if err != nil {
+			return err
+		}
 	}
 
 	if p.amqpChannel == nil || p.amqpChannel.IsClosed() {
-		p.resetChannel()
+		err := p.resetChannel()
+		if err != nil {
+			return err
+		}
 	}
 
 	confirmation, err := p.amqpChannel.PublishWithDeferredConfirm(
@@ -129,18 +135,29 @@ func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{},
 }
 
 func (p *AmqpProducer) resetConnection() error {
-	conn, _ := p.connectFunc(p.uri)
+	conn, err := p.connectFunc(p.uri)
+
+	if err != nil {
+		return fmt.Errorf("failed to connect to AMQP server: %w", err)
+	}
 	p.amqpConnection = conn
 	return nil
 }
 
 func (p *AmqpProducer) resetChannel() error {
-	c, _ := p.amqpConnection.Channel()
+	c, err := p.amqpConnection.Channel()
+
+	if err != nil {
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
 	p.amqpChannel = c
 
-	c.Confirm(false)
+	err = c.Confirm(false)
+	if err != nil {
+		return fmt.Errorf("failed to put channel in confirm mode: %w", err)
+	}
 
-	c.QueueDeclare(
+	_, err = c.QueueDeclare(
 		p.queueName, // queueName
 		true,        // durable
 		false,       // delete when unused
@@ -148,6 +165,9 @@ func (p *AmqpProducer) resetChannel() error {
 		false,       // no-wait
 		nil,         // arguments
 	)
+	if err != nil {
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
 	return nil
 }
 
