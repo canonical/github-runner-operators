@@ -13,6 +13,7 @@ import (
 )
 
 func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{}, msg []byte) error {
+	p.mu.Lock()
 	err := p.resetConnectionOrChannelIfNecessary()
 	if err != nil {
 		return err
@@ -22,7 +23,7 @@ func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{},
 	if err != nil {
 		return err
 	}
-
+	p.mu.Unlock()
 	err = waitForMsgConfirmation(ctx, confirmation)
 
 	return err

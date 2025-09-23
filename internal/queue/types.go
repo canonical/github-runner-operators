@@ -7,6 +7,7 @@ package queue
 
 import (
 	"context"
+	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -34,6 +35,7 @@ type AmqpProducer struct {
 	connectFunc    func(uri string) (AmqpConnection, error)
 	uri            string
 	queueName      string
+	mu             sync.Mutex
 }
 
 type Producer interface {
