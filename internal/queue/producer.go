@@ -48,7 +48,7 @@ func (p *AmqpProducer) resetConnectionOrChannelIfNecessary() error {
 	return nil
 }
 
-func waitForMsgConfirmation(ctx context.Context, confirmation Confirmation) error {
+func waitForMsgConfirmation(ctx context.Context, confirmation confirmation) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -61,7 +61,7 @@ func waitForMsgConfirmation(ctx context.Context, confirmation Confirmation) erro
 	return nil
 }
 
-func (p *AmqpProducer) publishMsg(msg []byte, headers map[string]interface{}) (Confirmation, error) {
+func (p *AmqpProducer) publishMsg(msg []byte, headers map[string]interface{}) (confirmation, error) {
 	confirmation, err := p.amqpChannel.PublishWithDeferredConfirm(
 		"",          // exchange
 		p.queueName, // routing key
@@ -125,7 +125,7 @@ func NewAmqpProducer(uri string, queueName string) *AmqpProducer {
 	}
 }
 
-func amqpConnect(uri string) (AmqpConnection, error) {
+func amqpConnect(uri string) (amqpConnection, error) {
 	amqpConnection, err := amqp.Dial(uri)
-	return &AmqpConnectionWrapper{Connection: amqpConnection}, err
+	return &amqpConnectionWrapper{Connection: amqpConnection}, err
 }

@@ -30,7 +30,7 @@ type MockAmqpChannel struct {
 	confirmModeError bool
 }
 
-func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _ bool, msg amqp.Publishing) (Confirmation, error) {
+func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _ bool, msg amqp.Publishing) (confirmation, error) {
 
 	if key == queueWithPublishError {
 		return nil, errors.New("publish error")
@@ -94,7 +94,7 @@ type MockAmqpConnection struct {
 	confirmModeError bool
 }
 
-func (m *MockAmqpConnection) Channel() (AmqpChannel, error) {
+func (m *MockAmqpConnection) Channel() (amqpChannel, error) {
 	if m.errMode {
 		return nil, errors.New("failed to open channel")
 	}
@@ -194,7 +194,7 @@ func TestPushNoChannel(t *testing.T) {
 	*/
 	tests := []struct {
 		name    string
-		channel AmqpChannel
+		channel amqpChannel
 	}{
 		{
 			name:    "channel is nil",
@@ -249,7 +249,7 @@ func TestPushNoConnection(t *testing.T) {
 	*/
 	tests := []struct {
 		name       string
-		connection AmqpConnection
+		connection amqpConnection
 	}{
 		{
 			name:       "connection is nil",
@@ -264,20 +264,20 @@ func TestPushNoConnection(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			amqpConnection := &MockAmqpConnection{
+			mockAmqpConnection := &MockAmqpConnection{
 				amqpChannel: &MockAmqpChannel{},
 			}
 			amqpProducer := &AmqpProducer{
 				amqpConnection: tt.connection,
 				uri:            "amqp://guest:guest@localhost:5672/",
-				connectFunc: func(uri string) (AmqpConnection, error) {
-					return amqpConnection, nil
+				connectFunc: func(uri string) (amqpConnection, error) {
+					return mockAmqpConnection, nil
 				},
 			}
 
 			amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
-			assert.Equal(t, 1, amqpConnection.channelCalls, "expected connection to be re-established")
-			assert.Contains(t, amqpConnection.amqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
+			assert.Equal(t, 1, mockAmqpConnection.channelCalls, "expected connection to be re-established")
+			assert.Contains(t, mockAmqpConnection.amqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
 		})
 	}
 }
@@ -291,7 +291,7 @@ func TestPushNoConnectionFailure(t *testing.T) {
 	amqpProducer := &AmqpProducer{
 		amqpConnection: nil,
 		uri:            "amqp://guest:guest@localhost:5672/",
-		connectFunc: func(uri string) (AmqpConnection, error) {
+		connectFunc: func(uri string) (amqpConnection, error) {
 			return nil, errors.New("connection error")
 		},
 	}
