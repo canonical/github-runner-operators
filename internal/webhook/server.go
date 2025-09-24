@@ -27,9 +27,10 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 	defer r.Body.Close()
 
+	ctx := r.Context()
 	signature := r.Header.Get(WebhookSignatureHeader)
 	if signature == "" {
-		slog.DebugContext(ctx,"missing signature header", "header", r.Header)
+		slog.DebugContext(ctx, "missing signature header", "header", r.Header)
 		http.Error(w, "Missing signature header", http.StatusForbidden)
 		return
 	}
