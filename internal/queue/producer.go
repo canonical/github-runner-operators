@@ -13,20 +13,20 @@ import (
 )
 
 func (p *AmqpProducer) Push(ctx context.Context, headers map[string]interface{}, msg []byte) error {
-	p.mu.Lock()
+	p.mu.Lock() // Lock to prevent concurrent access to connection/channel object
 	err := p.resetConnectionOrChannelIfNecessary()
 	if err != nil {
 		p.mu.Unlock()
 		return err
 	}
 
-	confirmation, err := p.publishMsg(msg, headers)
+	msgConfirmation, err := p.publishMsg(msg, headers)
 	if err != nil {
 		p.mu.Unlock()
 		return err
 	}
-	p.mu.Unlock()
-	err = waitForMsgConfirmation(ctx, confirmation)
+	p.mu.Unlock() // Unlock to not unblock other Push calls while waiting for confirmation
+	err = waitForMsgConfirmation(ctx, msgConfirmation)
 
 	return err
 }
