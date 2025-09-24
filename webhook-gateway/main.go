@@ -21,7 +21,7 @@ func main() {
 
 	port, found := os.LookupEnv("APP_PORT")
 	if !found {
-		log.Panicf("APP_PORT environment variable not set")
+		log.Fatalln("APP_PORT environment variable not set")
 	}
 	uri, found := os.LookupEnv("RABBITMQ_CONNECT_STRING")
 	if !found {
@@ -38,6 +38,8 @@ func main() {
 		Producer:      p,
 	}
 
-	http.HandleFunc(webhookPath, handler.Webhook)
+	mux := http.NewServeMux()
+	mux.HandleFunc(webhookPath, handler.Webhook)
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }

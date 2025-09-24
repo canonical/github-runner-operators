@@ -29,7 +29,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	signature := r.Header.Get(WebhookSignatureHeader)
 	if signature == "" {
-		slog.Debug("missing signature header", "header", r.Header)
+		slog.DebugContext(ctx,"missing signature header", "header", r.Header)
 		http.Error(w, "Missing signature header", http.StatusForbidden)
 		return
 	}
