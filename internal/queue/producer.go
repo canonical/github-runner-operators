@@ -127,5 +127,5 @@ func NewAmqpProducer(uri string, queueName string) *AmqpProducer {
 
 func amqpConnect(uri string) (AmqpConnection, error) {
 	amqpConnection, err := amqp.Dial(uri)
-	return &AmqpConnectionWrapper{conn: amqpConnection}, err
+	return &AmqpConnectionWrapper{Connection: amqpConnection}, err
 }
