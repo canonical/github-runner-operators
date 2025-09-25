@@ -16,20 +16,23 @@ import (
 
 const queueName = "webhook-queue"
 const webhookPath = "/webhook"
+const portEnvVar = "APP_PORT"
+const rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
+const webhookSecretEnvVar = "APP_WEBHOOK_SECRET_VALUE"
 
 func main() {
 
-	port, found := os.LookupEnv("APP_PORT")
+	port, found := os.LookupEnv(portEnvVar)
 	if !found {
-		log.Fatalln("APP_PORT environment variable not set")
+		log.Fatalln(portEnvVar + " environment variable not set")
 	}
-	uri, found := os.LookupEnv("RABBITMQ_CONNECT_STRING")
+	uri, found := os.LookupEnv(rabbitMQUriEnvVar)
 	if !found {
-		log.Panicf("RABBITMQ_CONNECT_STRING environment variable not set")
+		log.Fatalln(rabbitMQUriEnvVar + " environment variable not set")
 	}
-	webhookSecret, found := os.LookupEnv("WEBHOOK_SECRET")
+	webhookSecret, found := os.LookupEnv(webhookSecretEnvVar)
 	if !found {
-		log.Panicf("WEBHOOK_SECRET environment variable not set")
+		log.Panicf(webhookSecretEnvVar + " environment variable not set")
 	}
 
 	p := queue.NewAmqpProducer(uri, queueName)

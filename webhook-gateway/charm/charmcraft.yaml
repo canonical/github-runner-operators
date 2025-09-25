@@ -29,7 +29,7 @@ extensions:
 config:
   options:
     webhook-secret:
-      type: string
+      type: secret
       description: "The secret used to validate the webhook"
 
 # Uncomment the integrations used by your application

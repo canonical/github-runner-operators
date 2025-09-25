@@ -42,9 +42,9 @@ func TestHTTPRequestIsForwarded(t *testing.T) {
 }
 
 func getSecretFromEnv(t *testing.T) string {
-	secret := os.Getenv("WEBHOOK_SECRET")
+	secret := os.Getenv("APP_WEBHOOK_SECRET")
 	if secret == "" {
-		t.Fatal("WEBHOOK_SECRET environment variable not set")
+		t.Fatal("APP_WEBHOOK_SECRET environment variable not set")
 	}
 	return secret
 }
