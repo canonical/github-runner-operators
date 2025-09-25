@@ -33,7 +33,7 @@ jobs:
         env:
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
           APP_PORT: 8080
-          APP_WEBHOOK_SECRET: fake-secret
+          APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
             go test -cover -v  . -integration
 
