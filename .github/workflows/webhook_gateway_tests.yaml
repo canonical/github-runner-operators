@@ -35,7 +35,7 @@ jobs:
           APP_PORT: 8080
           WEBHOOK_SECRET: fake-secret
         run: |
-            go test -cover -v  ./webhook-gateway -integration
+            go test -cover -v  . -integration
 
   unit-test:
     name: Run Unit and Lint Tests
