@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/canonical/mayfly/internal/queue"
-	"github.com/canonical/mayfly/internal/webhook"
+	"github.com/canonical/webhook-gateway/internal/queue"
+	"github.com/canonical/webhook-gateway/internal/webhook"
 )
 
 const queueName = "webhook-queue"

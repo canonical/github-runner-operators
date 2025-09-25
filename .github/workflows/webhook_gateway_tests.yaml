@@ -3,7 +3,6 @@ on:
     pull_request:
         paths:
           - 'webhook-gateway/**'
-          - 'internal/**'
     workflow_call:
 
 concurrency:
@@ -30,9 +29,34 @@ jobs:
             sleep 2
           done
       - name: Run integration test
+        working-directory: ./webhook-gateway
         env:
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
           APP_PORT: 8080
           WEBHOOK_SECRET: fake-secret
         run: |
             go test -cover -v  ./webhook-gateway -integration
+
+  unit-test:
+    name: Run Unit and Lint Tests
+    runs-on: [self-hosted-linux-amd64-noble-edge]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.24
+
+      - name: Ensure No Formatting Changes
+        working-directory: ./webhook-gateway
+
+        run: |
+          go fmt ./...
+          git diff --exit-code
+
+      - name: Build and Test
+        working-directory: ./webhook-gateway
+
+        run: |
+          go test -v -cover -race ./...
