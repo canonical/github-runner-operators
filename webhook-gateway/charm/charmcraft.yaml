@@ -30,6 +30,7 @@ config:
   options:
     webhook-secret:
       type: secret
+      optional: false
       description: "The secret used to validate the webhook"
 
 # Uncomment the integrations used by your application
