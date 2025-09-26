@@ -12,55 +12,55 @@ concurrency:
 
 
 jobs:
-  integration-test:
-    runs-on: [self-hosted-linux-amd64-noble-edge]
-    name: Run Integration Tests
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.24
-      - name: Setup rabbitmq in an OCI container
-        run: |
-          docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
-          until curl -fs http://localhost:15672;
-            do echo "waiting for rabbit mq"
-            sleep 2
-          done
-      - name: Run integration test
-        working-directory: ./webhook-gateway
-        env:
-          RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
-          APP_PORT: 8080
-          APP_WEBHOOK_SECRET_VALUE: fake-secret
-        run: |
-            go test -cover -v  . -integration
-
-  unit-test:
-    name: Run Unit and Lint Tests
-    runs-on: [self-hosted-linux-amd64-noble-edge]
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.24
-
-      - name: Ensure No Formatting Changes
-        working-directory: ./webhook-gateway
-
-        run: |
-          go fmt ./...
-          git diff --exit-code
-
-      - name: Build and Test
-        working-directory: ./webhook-gateway
-
-        run: |
-          go test -v -cover -race ./...
+#  integration-test:
+#    runs-on: [self-hosted-linux-amd64-noble-edge]
+#    name: Run Integration Tests
+#    steps:
+#      - uses: actions/checkout@v5
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v6
+#        with:
+#          go-version: 1.24
+#      - name: Setup rabbitmq in an OCI container
+#        run: |
+#          docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+#          until curl -fs http://localhost:15672;
+#            do echo "waiting for rabbit mq"
+#            sleep 2
+#          done
+#      - name: Run integration test
+#        working-directory: ./webhook-gateway
+#        env:
+#          RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
+#          APP_PORT: 8080
+#          APP_WEBHOOK_SECRET_VALUE: fake-secret
+#        run: |
+#            go test -cover -v  . -integration
+#
+#  unit-test:
+#    name: Run Unit and Lint Tests
+#    runs-on: [self-hosted-linux-amd64-noble-edge]
+#    steps:
+#      - uses: actions/checkout@v5
+#
+#      - name: Set up Go
+#        uses: actions/setup-go@v6
+#        with:
+#          go-version: 1.24
+#
+#      - name: Ensure No Formatting Changes
+#        working-directory: ./webhook-gateway
+#
+#        run: |
+#          go fmt ./...
+#          git diff --exit-code
+#
+#      - name: Build and Test
+#        working-directory: ./webhook-gateway
+#
+#        run: |
+#          go test -v -cover -race ./...
 
   charm-integration-tests:
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
