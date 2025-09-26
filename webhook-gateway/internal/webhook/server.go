@@ -13,7 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/canonical/mayfly/internal/queue"
+	"github.com/canonical/webhook-gateway/internal/queue"
 )
 
 const WebhookSignatureHeader = "X-Hub-Signature-256"
