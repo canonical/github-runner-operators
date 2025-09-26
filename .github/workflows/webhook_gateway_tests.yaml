@@ -3,6 +3,7 @@ on:
     pull_request:
         paths:
           - 'webhook-gateway/**'
+          - '.github/workflows/webhook_gateway_tests.yaml'
     workflow_call:
 
 concurrency:
@@ -60,3 +61,16 @@ jobs:
 
         run: |
           go test -v -cover -race ./...
+
+  charm-integration-tests:
+    uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
+    secrets: inherit
+    with:
+      self-hosted-runner: true
+      self-hosted-runner-label: "edge"
+      juju-channel: 3.6/stable
+      provider: microk8s
+      channel: 1.34-strict
+      working-directory: ./webhook-gateway
+      rockcraft-channel: latest/edge
+      charmcraft-channel: latest/edge
