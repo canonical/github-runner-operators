@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type TestDatabase struct {
+type testDatabase struct {
 	uri string
 
 	conn *pgxpool.Pool
 	mu   sync.Mutex
 }
 
-func (d *TestDatabase) reset(ctx context.Context, conn *pgxpool.Pool) error {
+func (d *testDatabase) reset(ctx context.Context, conn *pgxpool.Pool) error {
 	_, err := conn.Exec(ctx, `
 		BEGIN;
 		  DROP SCHEMA IF EXISTS public CASCADE;
@@ -36,7 +36,7 @@ func (d *TestDatabase) reset(ctx context.Context, conn *pgxpool.Pool) error {
 	return nil
 }
 
-func (d *TestDatabase) Acquire(ctx context.Context) (*pgxpool.Pool, error) {
+func (d *testDatabase) Acquire(ctx context.Context) (*pgxpool.Pool, error) {
 	d.mu.Lock()
 	conn, err := pgxpool.New(ctx, d.uri)
 	if err != nil {
@@ -59,22 +59,22 @@ func (d *TestDatabase) Acquire(ctx context.Context) (*pgxpool.Pool, error) {
 	return conn, nil
 }
 
-func (d *TestDatabase) Release(ctx context.Context) error {
+func (d *testDatabase) Release(ctx context.Context) error {
 	defer d.mu.Unlock()
 	d.conn = nil
 	return nil
 }
 
-var testDatabase *TestDatabase
+var globalTestDatabase *testDatabase
 
 func setupDatabase(t *testing.T) *Database {
-	if testDatabase == nil {
+	if globalTestDatabase == nil {
 		uri, ok := os.LookupEnv("POSTGRESQL_CONNECT_STRING")
 		if !ok {
 			t.Skip("test database not configured")
 		}
 
-		testDatabase = &TestDatabase{
+		globalTestDatabase = &testDatabase{
 			uri:  uri,
 			conn: nil,
 			mu:   sync.Mutex{},
@@ -82,15 +82,15 @@ func setupDatabase(t *testing.T) *Database {
 	}
 
 	ctx := t.Context()
-	conn, err := testDatabase.Acquire(ctx)
+	conn, err := globalTestDatabase.Acquire(ctx)
 	assert.NoError(t, err)
 
 	return &Database{conn: conn}
 }
 
 func teardownDatabase(t *testing.T) {
-	if testDatabase != nil {
-		assert.NoError(t, testDatabase.Release(t.Context()))
+	if globalTestDatabase != nil {
+		assert.NoError(t, globalTestDatabase.Release(t.Context()))
 	}
 }
 
@@ -619,4 +619,22 @@ func TestDatabase_GetPressures(t *testing.T) {
 		"github-arm64-large-ps7":  3,
 		"github-s390x-large-ps7":  0,
 	}, pressures)
+}
+
+func TestDatabase_GetPressures_MinimumPressure(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform:        "github",
+		Name:            "github-amd64-medium-ps6",
+		Labels:          []string{"self-hosted", "amd64", "medium"},
+		Priority:        300,
+		MinimumPressure: 10,
+	}))
+
+	pressures, err := db.GetPressures(ctx, "github", "github-amd64-medium-ps6")
+	assert.NoError(t, err)
+	assert.Equal(t, 10, pressures["github-amd64-medium-ps6"])
 }
