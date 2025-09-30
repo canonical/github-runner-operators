@@ -1,0 +1,14 @@
+name: Publish Webhook Gateway to edge
+
+on:
+  push:
+    branches:
+      - main
+      - track/*
+
+jobs:
+  publish-to-edge:
+    uses: canonical/operator-workflows/.github/workflows/publish_charm.yaml@main
+    secrets: inherit
+    integration-test-workflow-file: webhook_gateway_tests.yaml
+    identifier: webhook-gateway-integration-tests
