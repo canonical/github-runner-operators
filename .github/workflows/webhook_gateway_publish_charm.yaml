@@ -12,5 +12,5 @@ jobs:
     secrets: inherit
     with:
       integration-test-workflow-file: webhook_gateway_tests.yaml
-      resource-mapping: {"webhook-gateway": "app-image"}
+      resource-mapping: '{"webhook-gateway": "app-image"}'
       working-directory: ./webhook-gateway
