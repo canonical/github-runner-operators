@@ -1,4 +1,4 @@
-module github.com/canonical/webhook-gateway
+module github.com/canonical/mayfly
 
 go 1.24.6
 
