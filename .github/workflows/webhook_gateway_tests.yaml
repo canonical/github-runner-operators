@@ -21,7 +21,7 @@ jobs:
 #      - name: Set up Go
 #        uses: actions/setup-go@v6
 #        with:
-#          go-version: 1.24
+#          go-version: 1.25
 #      - name: Setup rabbitmq in an OCI container
 #        run: |
 #          docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
