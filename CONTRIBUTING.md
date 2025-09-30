@@ -125,7 +125,7 @@ controller is active in your juju client before running the tests. An
 example run command in the `webhook-gateway/charm` directory is as follows:
 
 ```shell
-tox -e integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
+tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
 ```
 
 To add the rock to the microk8s registry, use the following command:

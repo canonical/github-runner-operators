@@ -50,5 +50,6 @@ jobs:
       channel: 1.34-strict
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
+      test-tox-env: webhook-gateway-integration
       pre-build-script: |
         -c "ln -s ./webhook-gateway-rockcraft.yaml ./rockcraft.yaml"
