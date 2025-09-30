@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group:  ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run Unit and Lint Tests
+    runs-on: [self-hosted-linux-amd64-noble-edge]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.24
+
+      - name: Ensure No Formatting Changes
+        run: |
+          go fmt ./...
+          git diff --exit-code
+
+      - name: Build and Test
+        run: |
+          go test -v -cover -race ./...

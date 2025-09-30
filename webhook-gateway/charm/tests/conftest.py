@@ -6,7 +6,7 @@
 from pytest import Parser
 
 CHARM_FILE_PARAM = "--charm-file"
-APP_IMAGE_PARAM = "--github-runner-webhook-gateway-image"
+APP_IMAGE_PARAM = "--webhook-gateway-image"
 USE_EXISTING_APP_PARAM = "--use-existing-app"
 
 

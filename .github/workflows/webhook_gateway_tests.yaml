@@ -30,37 +30,13 @@ jobs:
             sleep 2
           done
       - name: Run integration test
-        working-directory: ./webhook-gateway
         env:
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
           APP_PORT: 8080
           APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
-            go test -cover -v  . -integration
+          go test -cover -v  ./webhook-gateway -integration
 
-  unit-test:
-    name: Run Unit and Lint Tests
-    runs-on: [self-hosted-linux-amd64-noble-edge]
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.25
-
-      - name: Ensure No Formatting Changes
-        working-directory: ./webhook-gateway
-
-        run: |
-          go fmt ./...
-          git diff --exit-code
-
-      - name: Build and Test
-        working-directory: ./webhook-gateway
-
-        run: |
-          go test -v -cover -race ./...
 
   charm-integration-tests:
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
@@ -71,6 +47,7 @@ jobs:
       juju-channel: 3.6/stable
       provider: microk8s
       channel: 1.34-strict
-      working-directory: ./webhook-gateway
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
+      pre-build-script: |
+        -c "ln -s ./webhook-gateway/main.go ./main.go"
