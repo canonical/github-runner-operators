@@ -136,7 +136,7 @@ func TestDatabase_VerifyAuthToken(t *testing.T) {
 
 	token[0] = token[0] + 1
 	_, err = db.VerifyAuthToken(ctx, token)
-	assert.ErrorIs(t, err, ErrNotAuthorized)
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestDatabase_DeleteAuthToken(t *testing.T) {
@@ -149,7 +149,7 @@ func TestDatabase_DeleteAuthToken(t *testing.T) {
 	assert.NoError(t, db.DeleteAuthToken(ctx, "foo"))
 
 	_, err = db.VerifyAuthToken(ctx, token)
-	assert.ErrorIs(t, err, ErrNotAuthorized)
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestDatabase_AddJob(t *testing.T) {
