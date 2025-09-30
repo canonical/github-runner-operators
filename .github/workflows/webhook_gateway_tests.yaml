@@ -3,6 +3,7 @@ on:
     pull_request:
         paths:
           - 'webhook-gateway/**'
+          - 'internal/**'
           - '.github/workflows/webhook_gateway_tests.yaml'
     workflow_call:
 
