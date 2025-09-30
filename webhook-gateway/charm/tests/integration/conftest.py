@@ -2,19 +2,15 @@
 # See LICENSE file for licensing details.
 import contextlib
 import logging
-from typing import Generator, cast, Iterator
+import secrets
+from typing import Iterator
 
-import pytest
 import jubilant
+import pytest
 
-from tests.conftest import CHARM_FILE_PARAM, APP_IMAGE_PARAM
+from tests.conftest import APP_IMAGE_PARAM, CHARM_FILE_PARAM
 
 logger = logging.getLogger(__name__)
-
-@pytest.fixture(name="use_existing_app", scope="module")
-def use_existing_app_fixture(pytestconfig: pytest.Config) -> bool:
-    """Return whether to use an existing app instead of deploying a new one."""
-    return pytestconfig.getoption("--use-existing-app")
 
 
 @pytest.fixture(name="charm_file", scope="module")
@@ -26,20 +22,31 @@ def charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
 
 @pytest.fixture(name="app_image", scope="module")
 def app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the flask app image"""
+    """Return the path to the app image."""
     app_image = pytestconfig.getoption(APP_IMAGE_PARAM)
     return app_image
 
 
-@pytest.fixture(scope='module')
-def juju():
-    with jubilant.temp_model(keep=True) as juju:
+@pytest.fixture(name="keep_models", scope="module")
+def keep_models_fixture(pytestconfig: pytest.Config) -> bool:
+    """Return whether to keep models after deploying."""
+    return pytestconfig.getoption("--keep-models")
+
+
+@pytest.fixture(name="model_name", scope="module")
+def model_name_fixture(pytestconfig: pytest.Config) -> str:
+    return "jubilant-" + secrets.token_hex(4)
+
+
+@pytest.fixture(scope="module")
+def juju(keep_models: bool, model_name: str) -> Iterator[jubilant.Juju]:
+    with jubilant_temp_model(keep=keep_models, model=model_name) as juju:
         yield juju
+
 
 @pytest.fixture(scope="module", name="app")
 def deploy_app_fixture(juju: jubilant.Juju, charm_file: str, app_image: str) -> str:
-    app_name = "webhook-gateway-k8s"
-
+    app_name = "github-runner-webhook-gateway"
 
     resources = {
         "app-image": app_image,
@@ -55,9 +62,10 @@ def deploy_app_fixture(juju: jubilant.Juju, charm_file: str, app_image: str) -> 
     juju.config(app_name, values={"webhook-secret": secret_uri})
     return app_name
 
+
 @pytest.fixture(scope="module", name="lxd_controller_name")
 def lxd_controller_name_fixture() -> str:
-    "Return the controller name for lxd."
+    """Return the controller name for lxd."""
     return "localhost"
 
 
@@ -76,43 +84,36 @@ def lxd_controller(
         if "already exists" not in ex.stderr:
             raise
     finally:
-        # Always get back to the original controller and model
         juju.cli(
             "switch", f"{original_controller_name}:{original_model_name}", include_model=False
         )
-    yield lxd_controller_name
-
-
-@pytest.fixture(scope="module", name="lxd_model_name")
-def lxd_model_name_fixture(juju: jubilant.Juju) -> str:
-    "Return the model name for lxd."
-    status = juju.status() #TODO fix this , too implicit
-    return status.model.name
+    return lxd_controller_name
 
 
 @pytest.fixture(scope="module", name="lxd_model")
 def lxd_model_fixture(
-    request: pytest.FixtureRequest, juju: jubilant.Juju, lxd_controller, lxd_model_name
+    request: pytest.FixtureRequest, juju: jubilant.Juju, lxd_controller: str, keep_models: bool
 ) -> Iterator[str]:
-    "Create the lxd_model and return its name."
-    with jubilant_temp_controller(juju, lxd_controller):
+    """Create the lxd_model and return its name."""
+    current_model_name = juju.model
+    with jubilant_switch_controller(juju, lxd_controller):
         try:
-            juju.add_model(lxd_model_name)
+            juju.add_model(current_model_name)
         except jubilant.CLIError as ex:
             if "already exists" not in ex.stderr:
                 raise
-    yield lxd_model_name
-    keep_models = cast(bool, request.config.getoption("--keep-models"))
+    yield current_model_name
     if not keep_models:
-        with jubilant_temp_controller(juju, lxd_controller):
-            juju.destroy_model(lxd_model_name, destroy_storage=True, force=True)
+        with jubilant_switch_controller(juju, lxd_controller):
+            juju.destroy_model(current_model_name, destroy_storage=True, force=True)
+
 
 @pytest.fixture(scope="module", name="rabbitmq_server_app")
 def deploy_rabbitmq_server_fixture(juju: jubilant.Juju, lxd_controller, lxd_model) -> str:
     """Deploy rabbitmq server machine charm."""
     rabbitmq_server_name = "rabbitmq-server"
 
-    with jubilant_temp_controller(juju, lxd_controller, lxd_model):
+    with jubilant_switch_controller(juju, lxd_controller, lxd_model):
         if juju.status().apps.get(rabbitmq_server_name):
             logger.info("rabbitmq server already deployed")
             return rabbitmq_server_name
@@ -131,15 +132,14 @@ def deploy_rabbitmq_server_fixture(juju: jubilant.Juju, lxd_controller, lxd_mode
     # Add the offer in the original model
     offer_name = f"{lxd_controller}:admin/{lxd_model}.{rabbitmq_server_name}"
     juju.cli("consume", offer_name, include_model=False)
-    # The return is a string with the name of the applications, but will not
-    # contain the controller or model. Other apps can integrate to rabbitmq using this
-    # name as there is a local offer with this name.
     return rabbitmq_server_name
 
+
 @contextlib.contextmanager
-def jubilant_temp_controller(
+def jubilant_switch_controller(
     juju: jubilant.Juju, controller: str, model: str = ""
-) -> Generator[jubilant.Juju, None, None]:
+) -> Iterator[jubilant.Juju]:
+    original_controller_name = original_model_name = None
     try:
         status = juju.status()
         original_controller_name = status.model.controller
@@ -147,6 +147,18 @@ def jubilant_temp_controller(
         juju.cli("switch", f"{controller}:{model}", include_model=False)
         yield juju
     finally:
-        juju.cli(
-            "switch", f"{original_controller_name}:{original_model_name}", include_model=False
-        )
+        if original_controller_name and original_model_name:
+            juju.cli(
+                "switch", f"{original_controller_name}:{original_model_name}", include_model=False
+            )
+
+
+@contextlib.contextmanager
+def jubilant_temp_model(model: str, keep: bool = False) -> Iterator[jubilant.Juju]:
+    juju = jubilant.Juju()
+    juju.add_model(model)
+    try:
+        yield juju
+    finally:
+        if not keep:
+            juju.destroy_model(model, destroy_storage=True, force=True)

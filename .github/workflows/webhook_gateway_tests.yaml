@@ -51,4 +51,4 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       pre-build-script: |
-        -c "ln -s ./webhook-gateway/webhook-gateway-rockcraft.yaml ./rockcraft.yaml"
+        -c "ln -s ./webhook-gateway-rockcraft.yaml ./rockcraft.yaml"
