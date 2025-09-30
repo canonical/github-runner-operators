@@ -52,4 +52,4 @@ jobs:
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
       pre-build-script: |
-        -c "ln -s ./webhook-gateway-rockcraft.yaml ./rockcraft.yaml"
+        -c "rm ./rockcraft.yaml && ln -s ./webhook-gateway-rockcraft.yaml ./rockcraft.yaml"
