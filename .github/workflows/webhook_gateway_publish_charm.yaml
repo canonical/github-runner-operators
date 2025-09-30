@@ -10,6 +10,7 @@ jobs:
   publish-to-edge:
     uses: canonical/operator-workflows/.github/workflows/publish_charm.yaml@main
     secrets: inherit
-    integration-test-workflow-file: webhook_gateway_tests.yaml
-    resource-mapping: {"webhook-gateway": "app-image"}
-    working-directory: ./webhook-gateway
+    with:
+      integration-test-workflow-file: webhook_gateway_tests.yaml
+      resource-mapping: {"webhook-gateway": "app-image"}
+      working-directory: ./webhook-gateway
