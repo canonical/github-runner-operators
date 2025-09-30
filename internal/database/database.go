@@ -2,6 +2,9 @@ package database
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,24 +48,36 @@ type ListJobOptions struct {
 	Limit            int
 }
 
-func (d *Database) CreateAuthToken(ctx context.Context, name, token string) error {
-	_, err := d.conn.Exec(ctx, "INSERT INTO auth (name, token) VALUES ($1, $2)", name, token)
+func (d *Database) CreateAuthToken(ctx context.Context, name string) ([32]byte, error) {
+	token := [32]byte{}
+	_, err := rand.Read(token[:])
 	if err != nil {
-		return fmt.Errorf("failed to insert auth token: %w", err)
+		return token, fmt.Errorf("failed to generate token: %w", err)
 	}
-	return nil
+	sha := sha256.New()
+	sha.Write(token[:])
+	hash := hex.EncodeToString(sha.Sum(nil))
+	_, err = d.conn.Exec(ctx, "INSERT INTO auth (name, token) VALUES ($1, $2)", name, hash)
+	if err != nil {
+		return token, fmt.Errorf("failed to insert auth token: %w", err)
+	}
+	return token, nil
 }
 
-func (d *Database) GetAuthToken(ctx context.Context, name string) (string, error) {
-	row := d.conn.QueryRow(ctx, "SELECT token FROM auth WHERE name = $1", name)
-	var token string
-	if err := row.Scan(&token); err != nil {
+func (d *Database) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
+	sha := sha256.New()
+	sha.Write(token[:])
+	hash := hex.EncodeToString(sha.Sum(nil))
+
+	var name string
+	row := d.conn.QueryRow(ctx, "SELECT name FROM auth WHERE token = $1", hash)
+	if err := row.Scan(&name); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
-		return "", fmt.Errorf("failed to get auth token: %w", err)
+		return "", fmt.Errorf("failed to get auth name: %w", err)
 	}
-	return token, nil
+	return name, nil
 }
 
 func (d *Database) DeleteAuthToken(ctx context.Context, name string) error {

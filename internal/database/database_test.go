@@ -99,7 +99,12 @@ func TestDatabase_CreateAuthToken(t *testing.T) {
 	defer teardownDatabase(t)
 	ctx := t.Context()
 
-	assert.NoError(t, db.CreateAuthToken(ctx, "test", "test"))
+	token1, err := db.CreateAuthToken(ctx, "test")
+	assert.NoError(t, err)
+	token2, err := db.CreateAuthToken(ctx, "foo")
+	assert.NoError(t, err)
+
+	assert.NotEqual(t, token1, token2)
 }
 
 func TestDatabase_CreateAuthToken_Duplicate(t *testing.T) {
@@ -107,28 +112,31 @@ func TestDatabase_CreateAuthToken_Duplicate(t *testing.T) {
 	defer teardownDatabase(t)
 	ctx := t.Context()
 
-	assert.NoError(t, db.CreateAuthToken(ctx, "test", "test"))
+	_, err := db.CreateAuthToken(ctx, "test")
+	assert.NoError(t, err)
 
-	assert.Error(t, db.CreateAuthToken(ctx, "test", "bar"))
-	assert.Error(t, db.CreateAuthToken(ctx, "foo", "test"))
+	_, err = db.CreateAuthToken(ctx, "test")
+	assert.Error(t, err)
 
-	assert.NoError(t, db.CreateAuthToken(ctx, "foo", "bar"))
-
-	assert.Error(t, db.CreateAuthToken(ctx, "foo", "bar"))
-	assert.NoError(t, db.DeleteAuthToken(ctx, "foo"))
-	assert.NoError(t, db.CreateAuthToken(ctx, "foo", "bar"))
+	_, err = db.CreateAuthToken(ctx, "foo")
+	assert.NoError(t, err)
 }
 
-func TestDatabase_GetAuthToken(t *testing.T) {
+func TestDatabase_VerifyAuthToken(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
 
-	assert.NoError(t, db.CreateAuthToken(ctx, "foo", "bar"))
-
-	token, err := db.GetAuthToken(ctx, "foo")
+	token, err := db.CreateAuthToken(ctx, "foo")
 	assert.NoError(t, err)
-	assert.Equal(t, "bar", token)
+
+	name, err := db.VerifyAuthToken(ctx, token)
+	assert.NoError(t, err)
+	assert.Equal(t, "foo", name)
+
+	token[0] = token[0] + 1
+	_, err = db.VerifyAuthToken(ctx, token)
+	assert.ErrorIs(t, err, ErrNotAuthorized)
 }
 
 func TestDatabase_DeleteAuthToken(t *testing.T) {
@@ -136,11 +144,12 @@ func TestDatabase_DeleteAuthToken(t *testing.T) {
 	defer teardownDatabase(t)
 	ctx := t.Context()
 
-	assert.NoError(t, db.CreateAuthToken(ctx, "foo", "bar"))
+	token, err := db.CreateAuthToken(ctx, "foo")
+	assert.NoError(t, err)
 	assert.NoError(t, db.DeleteAuthToken(ctx, "foo"))
 
-	_, err := db.GetAuthToken(ctx, "foo")
-	assert.ErrorIs(t, err, ErrNotFound)
+	_, err = db.VerifyAuthToken(ctx, token)
+	assert.ErrorIs(t, err, ErrNotAuthorized)
 }
 
 func TestDatabase_AddJob(t *testing.T) {
