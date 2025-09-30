@@ -7,7 +7,7 @@
 
 export ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS=true
 
-ln -s ./webhook-gateway/main.go ./main.go
+ln -s ./webhook-gateway-rockcraft.yaml ./rockcraft.yaml
 rockcraft clean
 rockcraft pack
-rm ./main.go
+rm ./rockcraft.yaml
