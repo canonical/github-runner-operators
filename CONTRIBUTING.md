@@ -122,7 +122,7 @@ for a step-by-step guide to develop a Kubernetes charm using Go.
 To run the charm integration test, the charm file and rock has to be provided as input.
 You would need an lxd and microk8s cloud to run the tests. Ensure the `microk8s`
 controller is active in your juju client before running the tests. An 
-example run command in the `webhook-gateway/charm` directory is as follows:
+example run command in the root directory is as follows:
 
 ```shell
 tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
