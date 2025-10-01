@@ -22,9 +22,9 @@ def test_rabbitmq_server_integration(
         timeout=(10 * 60),
         delay=30,
     )
+
     status = juju.status()
     unit_ip = status.apps[app].units[app + "/0"].address
-
     response = requests.post(
         f"http://{unit_ip}:{APP_PORT}/webhook",
         data='{"message":"Hello, Alice!"}',
@@ -34,4 +34,5 @@ def test_rabbitmq_server_integration(
             "34b8056e10c4e4799494376fb3413",
         },
     )
+
     assert response.status_code == requests.status_codes.codes.OK
