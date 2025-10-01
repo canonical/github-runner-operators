@@ -52,5 +52,4 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
-      pre-run-script: './ci-webhook-gateway-pre-run.sh'
       tmate-debug: true
