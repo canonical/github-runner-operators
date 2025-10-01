@@ -133,6 +133,6 @@ To add the rock to the MicroK8s registry, use the following command:
 ```shell
 rockcraft.skopeo copy \
   --insecure-policy --dest-tls-verify=false \
-  oci-archive:webhook-gateway_0.1_$(dpkg --print-architecture).rock \
+  oci-archive:webhook-gateway_0.1_amd64.rock \
   docker://localhost:32000/webhook-gateway:0.1
 ```
