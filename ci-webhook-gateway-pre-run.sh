@@ -1,4 +1,4 @@
-!/usr/bin/env bash
+#!/usr/bin/env bash
 #
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
@@ -17,6 +17,6 @@ image="localhost:32000/${IMAGE_NAME}:latest"
 rockfile=`ls ./webhook-gateway_*.rock | head -n 1`
 sudo  /snap/rockcraft/current/bin/skopeo --insecure-policy copy \
                 --dest-tls-verify=false \
-                "oci-archive:${rockfile} \
+                "oci-archive:${rockfile}" \
                 "docker://${image}"
 echo "PYTESTADDOPTS=--webhook-gateway-image ${image}" >> $GITHUB_ENV
