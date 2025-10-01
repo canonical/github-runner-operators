@@ -32,7 +32,7 @@ func main() {
 	}
 	webhookSecret, found := os.LookupEnv(webhookSecretEnvVar)
 	if !found {
-		log.Panicf(webhookSecretEnvVar + " environment variable not set")
+		log.Fatalln(webhookSecretEnvVar + " environment variable not set")
 	}
 
 	p := queue.NewAmqpProducer(uri, queueName)
