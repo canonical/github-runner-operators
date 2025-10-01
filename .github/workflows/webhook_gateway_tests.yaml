@@ -43,8 +43,6 @@ jobs:
   charm-integration-tests:
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     with:
       self-hosted-runner: true
