@@ -1,1 +1,0 @@
-name: mayfly # placeholder for ci, operator workflows require a rockcraft.yaml to detect building rocks https://github.com/canonical/operator-workflows/blob/main/src/plan.ts#L87
