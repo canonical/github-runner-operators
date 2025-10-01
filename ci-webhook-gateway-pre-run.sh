@@ -19,4 +19,4 @@ sudo  /snap/rockcraft/current/bin/skopeo --insecure-policy copy \
                 --dest-tls-verify=false \
                 "oci-archive:${rockfile}" \
                 "docker://${image}"
-echo "PYTEST_ADDOPTS=--webhook-gateway-image ${image}" >> $GITHUB_ENV
+echo "PYTEST_ADDOPTS=--webhook-gateway-image=${image}" >> $GITHUB_ENV
