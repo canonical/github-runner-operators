@@ -1,5 +1,6 @@
 name: Webhook Gateway Integration Tests
 on:
+    push:
     pull_request:
         paths:
           - 'webhook-gateway/**'
@@ -42,6 +43,7 @@ jobs:
   charm-integration-tests:
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
+
     with:
       self-hosted-runner: true
       self-hosted-runner-label: "edge"
@@ -51,5 +53,5 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
-      pre-build-script: |
-        -c "rm ./rockcraft.yaml && ln -s ./webhook-gateway-rockcraft.yaml ./rockcraft.yaml"
+      pre-run-script: './ci-webhook-gateway-pre-run.sh'
+      tmate-debug: true
