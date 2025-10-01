@@ -1,6 +1,5 @@
 name: Webhook Gateway Integration Tests
 on:
-    push:
     pull_request:
         paths:
           - 'webhook-gateway/**'

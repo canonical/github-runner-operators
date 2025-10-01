@@ -44,5 +44,4 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc(webhookPath, handler.Webhook)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
-	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
