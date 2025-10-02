@@ -9,9 +9,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/canonical/mayfly/internal/queue"
 )
@@ -31,29 +33,31 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	signature := r.Header.Get(WebhookSignatureHeader)
 	if signature == "" {
 		slog.DebugContext(ctx, "missing signature header", "header", r.Header)
-		http.Error(w, "Missing signature header", http.StatusForbidden)
+		respondWithError(w, r, http.StatusForbidden, "Missing signature header")
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		slog.Error("unable to read request body", "error", err)
-		http.Error(w, "Unable to read request body", http.StatusInternalServerError)
+		respondWithError(w, r, http.StatusInternalServerError, "unable to read request body")
 		return
 	}
 
 	if !validateSignature(body, h.WebhookSecret, signature) {
 		slog.Debug("invalid signature", "signature", signature)
-		http.Error(w, "Invalid signature", http.StatusForbidden)
+		respondWithError(w, r, http.StatusForbidden, "Invalid signature")
 		return
 	}
 
 	err = h.Producer.Push(r.Context(), nil, body)
 	if err != nil {
 		slog.Error("unable to push message to queue", "error", err)
-		http.Error(w, "Unable to push to queue", http.StatusInternalServerError)
+		respondWithError(w, r, http.StatusInternalServerError, "Unable to push to queue")
 		return
 	}
+
+	logRequest(r, http.StatusOK, 0)
 }
 
 func validateSignature(message []byte, secret string, signature string) bool {
@@ -64,4 +68,22 @@ func validateSignature(message []byte, secret string, signature string) bool {
 		return false
 	}
 	return hmac.Equal(h.Sum(nil), sig)
+}
+
+func respondWithError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	http.Error(w, msg, status)
+	logRequest(r, status, len(msg))
+}
+
+func logRequest(r *http.Request, status int, size int) {
+	slog.Info(fmt.Sprintf(
+		"%s - - [%s] \"%s %s %s\" %d %d \"%s\"",
+		r.RemoteAddr,
+		time.Now().Format("02/Jan/2006:15:04:05 -0700"),
+		r.Method,
+		r.URL.Path,
+		r.Proto,
+		status,
+		size,
+		r.UserAgent()))
 }
