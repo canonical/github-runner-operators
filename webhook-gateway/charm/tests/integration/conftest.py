@@ -64,6 +64,7 @@ def deploy_rabbitmq_server_fixture(juju: jubilant.Juju, app: str) -> str:
     juju.deploy(
         rabbitmq_app,
         channel="3.12/edge",
+        trust=True
     )
 
     juju.integrate(app, rabbitmq_app)
