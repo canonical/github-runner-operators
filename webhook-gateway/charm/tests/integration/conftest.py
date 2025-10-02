@@ -32,7 +32,7 @@ def keep_models_fixture(pytestconfig: pytest.Config) -> bool:
 
 
 @pytest.fixture(scope="module")
-def juju(keep_models: bool, model_name: str) -> Iterator[jubilant.Juju]:
+def juju(keep_models: bool) -> Iterator[jubilant.Juju]:
     with jubilant.temp_model(keep=keep_models) as juju:
         yield juju
 
@@ -56,13 +56,20 @@ def deploy_app_fixture(juju: jubilant.Juju, charm_file: str, app_image: str) -> 
     return app_name
 
 
-@pytest.fixture(scope="module", name="rabbitmq_server_app")
-def deploy_rabbitmq_server_fixture(juju: jubilant.Juju) -> str:
-    """Deploy rabbitmq server machine charm."""
-    rabbitmq_server_name = "rabbitmq-k8s"
+@pytest.fixture(scope="module", name="rabbitmq")
+def deploy_rabbitmq_server_fixture(juju: jubilant.Juju, app: str) -> str:
+    """Deploy rabbitmq charm and integrate it with the app."""
+    rabbitmq_app = "rabbitmq-k8s"
 
     juju.deploy(
-        rabbitmq_server_name,
+        rabbitmq_app,
         channel="3.12/edge",
     )
-    return rabbitmq_server_name
+
+    juju.integrate(app, rabbitmq_app)
+    juju.wait(
+        lambda status: jubilant.all_active(status, app),
+        timeout=(10 * 60),
+        delay=30,
+    )
+    return rabbitmq_app
