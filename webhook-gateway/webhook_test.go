@@ -11,7 +11,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"flag"
 	"net/http"
 	"os"
 	"strings"
@@ -22,12 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var integration = flag.Bool("integration", false, "Run integration tests")
-
 func TestHTTPRequestIsForwarded(t *testing.T) {
-	if !*integration {
-		t.Skip("skipping integration test")
-	}
 	const payload = `{"message":"Hello, Bob!"}`
 
 	go main()
@@ -44,7 +38,7 @@ func TestHTTPRequestIsForwarded(t *testing.T) {
 func getSecretFromEnv(t *testing.T) string {
 	secret := os.Getenv("WEBHOOK_SECRET")
 	if secret == "" {
-		t.Fatal("WEBHOOK_SECRET environment variable not set")
+		t.Skip("WEBHOOK_SECRET environment variable not set, skip tests")
 	}
 	return secret
 }
@@ -52,7 +46,7 @@ func getSecretFromEnv(t *testing.T) string {
 func getAmqpUriFromEnv(t *testing.T) string {
 	uri := os.Getenv("RABBITMQ_CONNECT_STRING")
 	if uri == "" {
-		t.Fatal("RABBITMQ_CONNECT_STRING environment variable not set")
+		t.Skip("RABBITMQ_CONNECT_STRING environment variable not set, skip tests")
 	}
 	return uri
 }
