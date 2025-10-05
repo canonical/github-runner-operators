@@ -32,3 +32,18 @@ CREATE TABLE job
     UNIQUE (platform, id),
     CHECK (platform <> '' AND id <> '')
 );
+
+CREATE EXTENSION IF NOT EXISTS btree_gin;
+
+CREATE INDEX auth_token_idx ON auth (token);
+CREATE INDEX auth_name_idx ON auth (name);
+
+CREATE INDEX flavor_platform_name_idx ON flavor (platform, name);
+CREATE INDEX flavor_platform_labels_gin ON flavor USING gin(platform, labels);
+CREATE INDEX flavor_platform_priority_pidx ON flavor (platform, priority DESC) WHERE NOT is_disabled;
+
+CREATE INDEX job_platform_id_idx ON job (platform, id);
+CREATE INDEX job_platform_created_at_idx ON job (platform, created_at);
+CREATE INDEX job_in_progress_platform_created_pidx ON job (platform, created_at) WHERE completed_at IS NULL;
+CREATE INDEX job_platform_assigned_flavor_idx ON job (platform, assigned_flavor);
+CREATE INDEX job_in_progress_by_platform_flavor_pidx ON job (platform, assigned_flavor) WHERE completed_at IS NULL;

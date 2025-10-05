@@ -25,13 +25,13 @@ const (
 							 AND f.labels @> j.labels
 						   ORDER BY f.priority DESC, random()
 						   LIMIT 1)
-	WHERE j.assigned_flavor IS NULL
+	WHERE j.assigned_flavor IS NULL AND j.completed_at IS NULL
 	  AND EXISTS (SELECT 1
 				  FROM flavor AS f
 				  WHERE f.is_disabled = FALSE
 					AND f.platform = j.platform
 					AND f.labels @> j.labels
-					AND j.completed_at IS NULL);
+				  );
 `
 )
 
