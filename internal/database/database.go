@@ -36,7 +36,7 @@ const (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
+	ErrNotExist = errors.New("does not exist")
 	ErrExist    = errors.New("already exists")
 )
 
@@ -79,7 +79,7 @@ func (d *Database) VerifyAuthToken(ctx context.Context, token [32]byte) (string,
 	row := d.conn.QueryRow(ctx, "SELECT name FROM auth WHERE token = $1", hash)
 	if err := row.Scan(&name); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrNotFound
+			return "", ErrNotExist
 		}
 		return "", fmt.Errorf("failed to get auth name: %w", err)
 	}
@@ -214,7 +214,7 @@ func (d *Database) UpdateJobStarted(ctx context.Context, platform, id string, st
 		return fmt.Errorf("failed to update job started_at time: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return ErrNotExist
 	}
 	return nil
 }
@@ -238,7 +238,7 @@ func (d *Database) UpdateJobCompleted(ctx context.Context, platform, id string, 
 		return fmt.Errorf("failed to update job completed_at time: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return ErrNotExist
 	}
 	return nil
 }
@@ -321,7 +321,7 @@ func (d *Database) setFlavorIsDisabled(ctx context.Context, platform, name strin
 		}
 	}
 	if notFound {
-		return ErrNotFound
+		return ErrNotExist
 	}
 	return nil
 }

@@ -136,7 +136,7 @@ func TestDatabase_VerifyAuthToken(t *testing.T) {
 
 	token[0] = token[0] + 1
 	_, err = db.VerifyAuthToken(ctx, token)
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, ErrNotExist)
 }
 
 func TestDatabase_DeleteAuthToken(t *testing.T) {
@@ -149,7 +149,7 @@ func TestDatabase_DeleteAuthToken(t *testing.T) {
 	assert.NoError(t, db.DeleteAuthToken(ctx, "foo"))
 
 	_, err = db.VerifyAuthToken(ctx, token)
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, ErrNotExist)
 }
 
 func TestDatabase_AddJob(t *testing.T) {
@@ -373,7 +373,7 @@ func TestDatabase_UpdateJobStarted_NotExists(t *testing.T) {
 	ctx := t.Context()
 
 	err := db.UpdateJobStarted(ctx, "github", "1", time.Date(2025, time.January, 1, 1, 0, 0, 0, time.Local), nil)
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, ErrNotExist)
 }
 
 func TestDatabase_UpdateJobCompleted(t *testing.T) {
@@ -412,7 +412,7 @@ func TestDatabase_UpdateJobCompleted_NotExists(t *testing.T) {
 	ctx := t.Context()
 
 	err := db.UpdateJobCompleted(ctx, "github", "1", time.Date(2025, time.January, 1, 1, 0, 0, 0, time.Local), nil)
-	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, err, ErrNotExist)
 }
 
 func TestDatabase_AddFlavor(t *testing.T) {
@@ -506,7 +506,7 @@ func TestDatabase_DisableFlavor_NotExists(t *testing.T) {
 	defer teardownDatabase(t)
 	ctx := t.Context()
 
-	assert.ErrorIs(t, db.DisableFlavor(ctx, "github", "test"), ErrNotFound)
+	assert.ErrorIs(t, db.DisableFlavor(ctx, "github", "test"), ErrNotExist)
 }
 
 func TestDatabase_DeleteFlavor(t *testing.T) {
