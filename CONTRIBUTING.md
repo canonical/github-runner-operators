@@ -79,7 +79,7 @@ git clone https://github.com/canonical/github-runner-operators.git
 The code structure is as follows
 
 - `internal/`: Internal libraries for the applications
-- `webhook-gateway`: The webhook gateway application code
+- `webhook-gateway`: The webhook gateway application and charm code
 
 
 ### Test
@@ -106,3 +106,33 @@ You can use `docker` to run a RabbitMQ server locally:
 docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
 ```
 
+### Charm development
+
+The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/). 
+In order to build the webhook-gateway rock, use the
+`build-webhook-gateway-rock.sh` script.
+
+The `github-runner-webhook-gateway` charm code is in the `webhook-gateway/charm` directory.
+
+Integration tests for the charm are in the `webhook-gateway/charm/tests/integration` directory.
+
+Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)
+for a step-by-step guide to develop a Kubernetes charm using Go.
+
+To run the charm integration test, the charm file and rock has to be provided as input.
+You would need an LXD and MicroK8s cloud to run the tests. Ensure the `microk8s`
+controller is active in your Juju client before running the tests. An 
+example run command in the root directory is as follows:
+
+```shell
+tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
+```
+
+To add the rock to the MicroK8s registry, use the following command:
+
+```shell
+rockcraft.skopeo copy \
+  --insecure-policy --dest-tls-verify=false \
+  oci-archive:webhook-gateway_0.1_amd64.rock \
+  docker://localhost:32000/webhook-gateway:0.1
+```

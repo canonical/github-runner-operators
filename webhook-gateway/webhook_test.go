@@ -36,17 +36,17 @@ func TestHTTPRequestIsForwarded(t *testing.T) {
 }
 
 func getSecretFromEnv(t *testing.T) string {
-	secret := os.Getenv("WEBHOOK_SECRET")
+	secret := os.Getenv(webhookSecretEnvVar)
 	if secret == "" {
-		t.Skip("WEBHOOK_SECRET environment variable not set, skip tests")
+		t.Skip(webhookSecretEnvVar + " environment variable not set, skip tests")
 	}
 	return secret
 }
 
 func getAmqpUriFromEnv(t *testing.T) string {
-	uri := os.Getenv("RABBITMQ_CONNECT_STRING")
+	uri := os.Getenv(rabbitMQUriEnvVar)
 	if uri == "" {
-		t.Skip("RABBITMQ_CONNECT_STRING environment variable not set, skip tests")
+		t.Skip(rabbitMQUriEnvVar + " environment variable not set, skip tests")
 	}
 	return uri
 }
