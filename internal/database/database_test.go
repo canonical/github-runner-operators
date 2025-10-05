@@ -116,7 +116,7 @@ func TestDatabase_CreateAuthToken_Duplicate(t *testing.T) {
 	assert.NoError(t, err)
 
 	_, err = db.CreateAuthToken(ctx, "test")
-	assert.Error(t, err)
+	assert.ErrorIs(t, ErrExist, err)
 
 	_, err = db.CreateAuthToken(ctx, "foo")
 	assert.NoError(t, err)
@@ -171,6 +171,22 @@ func TestDatabase_AddJob(t *testing.T) {
 
 	assert.Len(t, jobs, 1)
 	assert.Equal(t, job, jobs[0])
+}
+
+func TestDatabase_AddJob_Exists(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	job := Job{
+		Platform:  "github",
+		ID:        "1",
+		Labels:    []string{"self-hosted", "amd64", "large"},
+		CreatedAt: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local),
+		Raw:       map[string]interface{}{"queued": "queued"},
+	}
+	assert.NoError(t, db.AddJob(ctx, &job))
+	assert.ErrorIs(t, ErrExist, db.AddJob(ctx, &job))
 }
 
 func TestDatabase_AddJob_FlavorSelection(t *testing.T) {
@@ -429,6 +445,24 @@ func TestDatabase_AddFlavor(t *testing.T) {
 
 	assert.Len(t, jobs, 1)
 	assert.Equal(t, flavor.Name, *jobs[0].AssignedFlavor)
+}
+
+func TestDatabase_AddFlavor_Exists(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	flavor := Flavor{
+		Platform:        "github",
+		Name:            "amd64-large",
+		Labels:          []string{"self-hosted", "amd64", "large"},
+		Priority:        0,
+		IsDisabled:      false,
+		MinimumPressure: 0,
+	}
+
+	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+	assert.ErrorIs(t, ErrExist, db.AddFlavor(ctx, &flavor))
 }
 
 func TestDatabase_DisableFlavor(t *testing.T) {

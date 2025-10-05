@@ -35,7 +35,10 @@ const (
 `
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrExist    = errors.New("already exists")
+)
 
 type Database struct {
 	conn *pgxpool.Pool
@@ -57,9 +60,12 @@ func (d *Database) CreateAuthToken(ctx context.Context, name string) ([32]byte, 
 	sha := sha256.New()
 	sha.Write(token[:])
 	hash := hex.EncodeToString(sha.Sum(nil))
-	_, err = d.conn.Exec(ctx, "INSERT INTO auth (name, token) VALUES ($1, $2)", name, hash)
+	tag, err := d.conn.Exec(ctx, "INSERT INTO auth (name, token) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING;\n", name, hash)
 	if err != nil {
 		return token, fmt.Errorf("failed to insert auth token: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return token, ErrExist
 	}
 	return token, nil
 }
@@ -106,7 +112,8 @@ func (d *Database) AddJob(ctx context.Context, job *Job) error {
 		  LIMIT 1
 		)
 		ELSE NULL
-	  END;
+	  END
+	ON CONFLICT (platform, id) DO NOTHING;
 	`
 
 	raw := job.Raw
@@ -114,7 +121,7 @@ func (d *Database) AddJob(ctx context.Context, job *Job) error {
 		raw = map[string]interface{}{}
 	}
 
-	_, err := d.conn.Exec(ctx, sql, pgx.NamedArgs{
+	tag, err := d.conn.Exec(ctx, sql, pgx.NamedArgs{
 		"platform":     job.Platform,
 		"id":           job.ID,
 		"labels":       job.Labels,
@@ -125,6 +132,9 @@ func (d *Database) AddJob(ctx context.Context, job *Job) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to insert job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrExist
 	}
 	return nil
 }
@@ -239,6 +249,7 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 		INSERT INTO flavor (
 			platform, name, labels, priority, is_disabled, minimum_pressure
 		) VALUES (@platform, @name, @labels, @priority, @is_disabled, @minimum_pressure)
+		ON CONFLICT (name) DO NOTHING;
 	`, pgx.NamedArgs{
 		"platform":         flavor.Platform,
 		"name":             flavor.Name,
@@ -257,10 +268,13 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 		}
 	}()
 
-	for range batch.Len() {
-		_, err := result.Exec()
+	for i := range batch.Len() {
+		tag, err := result.Exec()
 		if err != nil {
 			return fmt.Errorf("failed to insert flavor: %w", err)
+		}
+		if i == 0 && tag.RowsAffected() == 0 {
+			return ErrExist
 		}
 	}
 
