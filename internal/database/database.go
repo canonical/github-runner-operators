@@ -1,3 +1,15 @@
+// Package database provides persistent storage for auth tokens, jobs, and flavors,
+// and computes "pressure" for each flavor.
+//
+// Pressure is a numeric measure of demand for runner machines (flavors). It is
+// defined as the number of incomplete jobs (completed_at IS NULL) assigned to a
+// given flavor.
+//
+// When a job is inserted, it is assigned a flavor using the following algorithm:
+//  1. The flavor's platform must match the job's platform.
+//  2. The flavor's labels must be a superset of (or equal to) the job's labels.
+//  3. If multiple flavors match, choose the one with the highest priority.
+//  4. If there is still a tie, pick one at random.
 package database
 
 import (
@@ -51,6 +63,10 @@ type ListJobOptions struct {
 	Limit            int
 }
 
+// CreateAuthToken creates an authentication token for the given name.
+// If a token with the same name already exists, it returns ErrExist.
+// The returned token is a 256-bit random byte slice and can be verified
+// with VerifyAuthToken.
 func (d *Database) CreateAuthToken(ctx context.Context, name string) ([32]byte, error) {
 	token := [32]byte{}
 	_, err := rand.Read(token[:])
@@ -70,6 +86,9 @@ func (d *Database) CreateAuthToken(ctx context.Context, name string) ([32]byte, 
 	return token, nil
 }
 
+// VerifyAuthToken verifies an authentication token.
+// It returns the associated token name if the token is valid.
+// If the token is invalid or not found, it returns ErrNotExist.
 func (d *Database) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
 	sha := sha256.New()
 	sha.Write(token[:])
@@ -86,6 +105,8 @@ func (d *Database) VerifyAuthToken(ctx context.Context, token [32]byte) (string,
 	return name, nil
 }
 
+// DeleteAuthToken deletes an authentication token.
+// If the token doesn't exist, DeleteAuthToken does nothing.
 func (d *Database) DeleteAuthToken(ctx context.Context, name string) error {
 	_, err := d.conn.Exec(ctx, "DELETE FROM auth WHERE name = $1", name)
 	if err != nil {
@@ -94,6 +115,10 @@ func (d *Database) DeleteAuthToken(ctx context.Context, name string) error {
 	return nil
 }
 
+// AddJob inserts a job into the database.
+// All fields from job are persisted except AssignedFlavor, which is computed
+// by the flavor-assignment (pressure) algorithm.
+// If a job with the same (platform, id) already exists, it returns ErrExist.
 func (d *Database) AddJob(ctx context.Context, job *Job) error {
 	const sql = `
 	INSERT INTO job (
@@ -178,6 +203,9 @@ func (d *Database) createListJobsSqlArgs(platform string, options ListJobOptions
 	return sql, args
 }
 
+// ListJobs returns stored jobs.
+// Use ListJobOptions to filter results. If ListJobOptions.Limit is 0,
+// DefaultLimit is applied.
 func (d *Database) ListJobs(ctx context.Context, platform string, option ...ListJobOptions) ([]Job, error) {
 	opt := ListJobOptions{}
 	if len(option) > 0 {
@@ -195,6 +223,9 @@ func (d *Database) ListJobs(ctx context.Context, platform string, option ...List
 	return jobs, nil
 }
 
+// UpdateJobStarted updates a job's started_at field.
+// If raw is provided, it is merged into the existing raw payload in the database.
+// If the job doesn't exist, it will return ErrNotExist.
 func (d *Database) UpdateJobStarted(ctx context.Context, platform, id string, startedAt time.Time, raw map[string]interface{}) error {
 	const sql = `
 		UPDATE job
@@ -219,6 +250,9 @@ func (d *Database) UpdateJobStarted(ctx context.Context, platform, id string, st
 	return nil
 }
 
+// UpdateJobCompleted updates a job's started_at field.
+// If raw is provided, it is merged into the existing raw payload in the database.
+// If the job doesn't exist, it will return ErrNotExist.
 func (d *Database) UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]interface{}) error {
 	const stmt = `
 		UPDATE job
@@ -243,6 +277,10 @@ func (d *Database) UpdateJobCompleted(ctx context.Context, platform, id string, 
 	return nil
 }
 
+// AddFlavor inserts a new flavor into the database.
+// Returns ErrExist if a flavor with the same name already exists.
+// After insertion, the flavor-assignment (pressure) algorithm runs for all
+// jobs that do not yet have an assigned flavor.
 func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 	batch := &pgx.Batch{}
 	batch.Queue(`
@@ -326,14 +364,24 @@ func (d *Database) setFlavorIsDisabled(ctx context.Context, platform, name strin
 	return nil
 }
 
+// DisableFlavor disables a flavor, excluding it from the flavor-assignment
+// pressure algorithm. Jobs currently assigned to this flavor are reset and
+// re-assigned to a new flavor using the same algorithm.
+// If the flavor doesn't exist, it will return ErrNotExist.
 func (d *Database) DisableFlavor(ctx context.Context, platform, name string) error {
 	return d.setFlavorIsDisabled(ctx, platform, name, true)
 }
 
+// EnableFlavor enables a flavor, and reverses the DisableFlavor.
+// If the flavor doesn't exist, it will return ErrNotExist.
 func (d *Database) EnableFlavor(ctx context.Context, platform, name string) error {
 	return d.setFlavorIsDisabled(ctx, platform, name, false)
 }
 
+// DeleteFlavor deletes a flavor.
+// Jobs currently assigned to this flavor are reset and re-assigned to a new
+// flavor using the same algorithm.
+// If the flavor doesn't exist, it will do nothing.
 func (d *Database) DeleteFlavor(ctx context.Context, platform, name string) error {
 	batch := &pgx.Batch{}
 	batch.Queue(`
@@ -369,6 +417,7 @@ func (d *Database) DeleteFlavor(ctx context.Context, platform, name string) erro
 	return nil
 }
 
+// ListFlavors lists existing flavors.
 func (d *Database) ListFlavors(ctx context.Context, platform string) ([]Flavor, error) {
 	sql := `
 	SELECT 
@@ -386,6 +435,9 @@ func (d *Database) ListFlavors(ctx context.Context, platform string) ([]Flavor, 
 	return flavors, nil
 }
 
+// GetPressures returns the pressure for the specified flavors.
+// For details on how pressure is computed, see the package documentation
+// on the pressure algorithm.
 func (d *Database) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
 	sql := `
 	SELECT f.name                                    AS flavor,
@@ -423,6 +475,7 @@ func (d *Database) GetPressures(ctx context.Context, platform string, flavors ..
 	return pressures, nil
 }
 
+// New creates a new Database instance
 func New(ctx context.Context, uri string) (*Database, error) {
 	conn, err := pgxpool.New(ctx, uri)
 	if err != nil {
