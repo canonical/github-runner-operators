@@ -1,3 +1,8 @@
+/*
+ * Copyright 2025 Canonical Ltd.
+ * See LICENSE file for licensing details.
+ */
+
 package database
 
 import (
@@ -37,7 +42,7 @@ func Migrate(ctx context.Context, dbUri string) error {
 		return err
 	}
 	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
-		return fmt.Errorf("database migration close failed: %w, %w", sourceErr, err)
+		return fmt.Errorf("database migration close failed: %w, %w", sourceErr, dbErr)
 	}
 	return nil
 }

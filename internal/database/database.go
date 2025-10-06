@@ -1,3 +1,8 @@
+/*
+ * Copyright 2025 Canonical Ltd.
+ * See LICENSE file for licensing details.
+ */
+
 // Package database provides persistent storage for auth tokens, jobs, and flavors,
 // and computes "pressure" for each flavor.
 //
@@ -250,7 +255,7 @@ func (d *Database) UpdateJobStarted(ctx context.Context, platform, id string, st
 	return nil
 }
 
-// UpdateJobCompleted updates a job's started_at field.
+// UpdateJobCompleted updates a job's completed_at field.
 // If raw is provided, it is merged into the existing raw payload in the database.
 // If the job doesn't exist, it will return ErrNotExist.
 func (d *Database) UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]interface{}) error {
@@ -349,12 +354,17 @@ func (d *Database) setFlavorIsDisabled(ctx context.Context, platform, name strin
 
 	notFound := false
 
+	flavorUpdateIdx := 0
+	if isDisabled {
+		flavorUpdateIdx = 1
+	}
+
 	for i := range batch.Len() {
 		tag, err := result.Exec()
 		if err != nil {
 			return fmt.Errorf("failed to disable flavor: %w", err)
 		}
-		if i == 0 && tag.RowsAffected() == 0 {
+		if i == flavorUpdateIdx && tag.RowsAffected() == 0 {
 			notFound = true
 		}
 	}
