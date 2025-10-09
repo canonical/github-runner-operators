@@ -1,3 +1,5 @@
+//go:build integration
+
 /*
  * Copyright 2025 Canonical Ltd.
  * See LICENSE file for licensing details.
@@ -38,7 +40,7 @@ func TestHTTPRequestIsForwarded(t *testing.T) {
 func getSecretFromEnv(t *testing.T) string {
 	secret := os.Getenv(webhookSecretEnvVar)
 	if secret == "" {
-		t.Skip(webhookSecretEnvVar + " environment variable not set, skip tests")
+		t.Fatal(webhookSecretEnvVar + " environment variable not set")
 	}
 	return secret
 }
@@ -46,7 +48,7 @@ func getSecretFromEnv(t *testing.T) string {
 func getAmqpUriFromEnv(t *testing.T) string {
 	uri := os.Getenv(rabbitMQUriEnvVar)
 	if uri == "" {
-		t.Skip(rabbitMQUriEnvVar + " environment variable not set, skip tests")
+		t.Fatal(webhookSecretEnvVar + " environment variable not set")
 	}
 	return uri
 }

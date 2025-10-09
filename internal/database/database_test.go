@@ -1,3 +1,5 @@
+//go:build integration
+
 /*
  * Copyright 2025 Canonical Ltd.
  * See LICENSE file for licensing details.
@@ -76,7 +78,7 @@ func setupDatabase(t *testing.T) *Database {
 	if globalTestDatabase == nil {
 		uri, ok := os.LookupEnv("POSTGRESQL_CONNECT_STRING")
 		if !ok {
-			t.Skip("test database not configured")
+			t.Fatal("test database not configured, missing POSTGRESQL_CONNECT_STRING environment variable")
 		}
 
 		globalTestDatabase = &testDatabase{

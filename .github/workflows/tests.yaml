@@ -5,13 +5,13 @@ on:
   workflow_call:
 
 concurrency:
-  group:  ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  unit-test:
     name: Run Unit and Lint Tests
-    runs-on: [self-hosted-linux-amd64-noble-edge]
+    runs-on: [ self-hosted-linux-amd64-noble-edge ]
 
     steps:
       - uses: actions/checkout@v5
@@ -42,6 +42,34 @@ jobs:
         run: |
           go test -v -cover -race ./...
 
+  integration-test:
+    name: Run Integration Tests
+    runs-on: [ self-hosted-linux-amd64-noble-edge ]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25
+
+      - name: Wait for rabbitmq
+        run: |
+          until curl -fs http://localhost:15672;
+            do echo "waiting for rabbit mq"
+            sleep 2
+          done
+
+      - name: Build and Test
+        env:
+          POSTGRESQL_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
+          RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
+          APP_PORT: 8080
+          APP_WEBHOOK_SECRET_VALUE: fake-secret
+        run: |
+          go test -v -cover -tags=integration -race ./...
+
     services:
       postgres:
         image: postgres:latest
@@ -54,3 +82,4 @@ jobs:
         ports:
           - 5672:5672
           - 15672:15672
+
