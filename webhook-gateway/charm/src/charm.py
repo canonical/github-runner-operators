@@ -28,7 +28,7 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         """Adding OpenTelemetry environment variables."""
         env = super()._gen_environment()
         env["OTEL_METRICS_EXPORTER"] = "prometheus"
-        env["OTEL_EXPORTER_PROMETHEUS_HOST"] = "localhost"
+        env["OTEL_EXPORTER_PROMETHEUS_HOST"] = "0.0.0.0"
         env["OTEL_EXPORTER_PROMETHEUS_PORT"] = str(self.config.get("metrics-port"))
         env["OTEL_LOGS_EXPORTER"] = "console"
         if env["OTEL_EXPORTER_OTLP_ENDPOINT"]:
