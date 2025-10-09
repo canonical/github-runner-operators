@@ -270,13 +270,13 @@ func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.Meter
 
 func newResource(ctx context.Context, service, version string) (*resource.Resource, error) {
 	r, err := resource.New(ctx,
-		resource.WithFromEnv(),
-		resource.WithOS(),
-		resource.WithHost(),
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(service),
 			semconv.ServiceVersionKey.String(version),
 		),
+		resource.WithFromEnv(),
+		resource.WithOS(),
+		resource.WithHost(),
 	)
 	if err != nil {
 		return nil, err
