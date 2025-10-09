@@ -6,9 +6,11 @@
 package webhook
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +18,8 @@ import (
 	"time"
 
 	"github.com/canonical/mayfly/internal/queue"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 const WebhookSignatureHeader = "X-Hub-Signature-256"
@@ -31,34 +35,59 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	ctx := r.Context()
+	ctx, span := trace.Start(ctx, "serve webhook")
 	signature := r.Header.Get(WebhookSignatureHeader)
 	if signature == "" {
 		slog.DebugContext(ctx, "missing signature header", "header", r.Header)
-		respondWithError(w, r, requestReceiveTime, http.StatusForbidden, "Missing signature header")
+		respondWithError(ctx, w, r, requestReceiveTime, http.StatusForbidden, "Missing signature header")
+		inboundWebhookErrors.Add(ctx, 1)
+		span.RecordError(errors.New("missing signature header"))
+		span.End()
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		slog.Error("unable to read request body", "error", err)
-		respondWithError(w, r, requestReceiveTime, http.StatusInternalServerError, "unable to read request body")
+		slog.ErrorContext(ctx, "unable to read request body", "error", err)
+		respondWithError(ctx, w, r, requestReceiveTime, http.StatusInternalServerError, "unable to read request body")
+		inboundWebhookErrors.Add(ctx, 1)
+		span.RecordError(err)
+		span.End()
 		return
 	}
 
 	if !validateSignature(body, h.WebhookSecret, signature) {
-		slog.Debug("invalid signature", "signature", signature)
-		respondWithError(w, r, requestReceiveTime, http.StatusForbidden, "Invalid signature")
+		slog.DebugContext(ctx, "invalid signature", "signature", signature)
+		respondWithError(ctx, w, r, requestReceiveTime, http.StatusForbidden, "Invalid signature")
+		inboundWebhookErrors.Add(ctx, 1)
+		span.RecordError(errors.New("invalid signature"))
+		span.End()
 		return
 	}
 
-	err = h.Producer.Push(r.Context(), nil, body)
+	inboundWebhook.Add(ctx, 1)
+	span.End()
+
+	ctx, span = trace.Start(ctx, "send webhook")
+	traceHeader := make(map[string]string)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.MapCarrier(traceHeader))
+	rabbitHeaders := make(map[string]interface{})
+	for k, v := range traceHeader {
+		rabbitHeaders[k] = v
+	}
+	err = h.Producer.Push(r.Context(), rabbitHeaders, body)
 	if err != nil {
-		slog.Error("unable to push message to queue", "error", err)
-		respondWithError(w, r, requestReceiveTime, http.StatusInternalServerError, "Unable to push to queue")
+		slog.ErrorContext(ctx, "unable to push message to queue", "error", err)
+		respondWithError(ctx, w, r, requestReceiveTime, http.StatusInternalServerError, "Unable to push to queue")
+		outboundWebhookErrors.Add(ctx, 1)
+		span.RecordError(err)
+		span.End()
 		return
 	}
+	span.End()
 
-	logRequest(r, requestReceiveTime, http.StatusOK, 0)
+	outboundWebhook.Add(ctx, 1)
+	logRequest(ctx, r, requestReceiveTime, http.StatusOK, 0)
 }
 
 func validateSignature(message []byte, secret string, signature string) bool {
@@ -71,13 +100,13 @@ func validateSignature(message []byte, secret string, signature string) bool {
 	return hmac.Equal(h.Sum(nil), sig)
 }
 
-func respondWithError(w http.ResponseWriter, r *http.Request, receiveTime time.Time, status int, msg string) {
+func respondWithError(ctx context.Context, w http.ResponseWriter, r *http.Request, receiveTime time.Time, status int, msg string) {
 	http.Error(w, msg, status)
-	logRequest(r, receiveTime, status, len(msg))
+	logRequest(ctx, r, receiveTime, status, len(msg))
 }
 
-func logRequest(r *http.Request, receiveTime time.Time, status int, size int) {
-	slog.Info(fmt.Sprintf(
+func logRequest(ctx context.Context, r *http.Request, receiveTime time.Time, status int, size int) {
+	slog.InfoContext(ctx, fmt.Sprintf(
 		"%s - - [%s] \"%s %s %s\" %d %d \"%s\"",
 		r.RemoteAddr,
 		receiveTime.Format("02/Jan/2006:15:04:05 -0700"),
