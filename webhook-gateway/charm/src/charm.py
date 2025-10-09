@@ -31,7 +31,7 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         env["OTEL_EXPORTER_PROMETHEUS_HOST"] = "0.0.0.0"
         env["OTEL_EXPORTER_PROMETHEUS_PORT"] = str(self.config.get("metrics-port"))
         env["OTEL_LOGS_EXPORTER"] = "console"
-        if env["OTEL_EXPORTER_OTLP_ENDPOINT"]:
+        if env.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
             env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = env["OTEL_EXPORTER_OTLP_ENDPOINT"]
             del env["OTEL_EXPORTER_OTLP_ENDPOINT"]
             env["OTEL_TRACES_EXPORTER"] = "otlp"
