@@ -18,7 +18,7 @@ func TestInMemoryMetrics(t *testing.T) {
 
 	defer assert.NoError(t, Shutdown(ctx))
 	assert.NoError(t, os.Setenv("OTEL_METRICS_EXPORTER", "memory"))
-	assert.NoError(t, Start(ctx), "failed to start telemetry")
+	assert.NoError(t, Start(ctx, "test", "0.0.0"), "failed to start telemetry")
 	assert.NotNil(t, ManualReader, "in-memory metrics provider should be initialized")
 
 	testMetric.Record(ctx, 1)
