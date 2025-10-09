@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/canonical/mayfly/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,7 +44,7 @@ func TestWebhookForwarded(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 200, message was forwarded to queue
 	*/
-
+	mr := telemetry.InitTestMetricReader(t)
 	req := setupRequest()
 	fakeProducer := &FakeProducer{}
 	handler := Handler{
@@ -59,7 +60,11 @@ func TestWebhookForwarded(t *testing.T) {
 	assert.NotNil(t, fakeProducer.Messages, "expected messages in queue")
 	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
 	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
-
+	m := mr.Collect(t)
+	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.inbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.inbound.errors"))
+	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.outbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound.errors"))
 }
 
 func setupRequest() *http.Request {
@@ -76,6 +81,7 @@ func TestWebhookQueueError(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 500
 	*/
+	mr := telemetry.InitTestMetricReader(t)
 	req := setupRequest()
 	w := httptest.NewRecorder()
 	errProducer := &ErrorProducer{}
@@ -88,7 +94,12 @@ func TestWebhookQueueError(t *testing.T) {
 	res := w.Result()
 	defer res.Body.Close()
 
+	m := mr.Collect(t)
 	assert.Equal(t, http.StatusInternalServerError, res.StatusCode, "expected status 500 got %v", res.Status)
+	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.inbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.inbound.errors"))
+	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound"))
+	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.outbound.errors"))
 }
 
 func TestWebhookInvalidSignature(t *testing.T) {
@@ -125,6 +136,7 @@ func TestWebhookInvalidSignature(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mr := telemetry.InitTestMetricReader(t)
 			req := setupRequest()
 			if tt.name == "Missing Signature Header" {
 				req.Header.Del(WebhookSignatureHeader)
@@ -147,6 +159,12 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			respBody, _ := io.ReadAll(res.Body)
 			assert.Contains(t, string(respBody), tt.expectedResponseMessage)
 			assert.Equal(t, 0, len(fakeProducer.Messages), "expected 0 message in queue")
+
+			m := mr.Collect(t)
+			assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.inbound"))
+			assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.inbound.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound"))
+			assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound.errors"))
 		})
 	}
 }

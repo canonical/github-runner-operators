@@ -55,10 +55,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -74,6 +76,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -394,4 +397,92 @@ func Shutdown(ctx context.Context) error {
 		shutdown = nil
 	}
 	return err
+}
+
+type TestMetricReader struct {
+	*sdkmetric.ManualReader
+}
+
+type TestMetrics struct {
+	*metricdata.ResourceMetrics
+}
+
+var tr *TestMetricReader
+
+func InitTestMetricReader(t *testing.T) *TestMetricReader {
+	t.Helper()
+	if tr != nil {
+		return tr
+	}
+
+	r := sdkmetric.NewManualReader(
+		sdkmetric.WithTemporalitySelector(func(kind sdkmetric.InstrumentKind) metricdata.Temporality {
+			return metricdata.DeltaTemporality
+		}))
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(r))
+	otel.SetMeterProvider(mp)
+
+	tr = &TestMetricReader{ManualReader: r}
+	tr.Collect(t)
+
+	return tr
+}
+
+func (m *TestMetricReader) Collect(t *testing.T) TestMetrics {
+	t.Helper()
+
+	var rm metricdata.ResourceMetrics
+	err := m.ManualReader.Collect(t.Context(), &rm)
+	if err != nil {
+		t.Fatalf("failed to collect metrics: %v", err)
+	}
+	return TestMetrics{ResourceMetrics: &rm}
+}
+
+func (tm *TestMetrics) Counter(t *testing.T, name string, attrs ...attribute.KeyValue) float64 {
+	t.Helper()
+
+	var total float64
+	for _, sm := range tm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			switch data := m.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, dp := range data.DataPoints {
+					if hasAttrs(dp.Attributes, attrs) {
+						total += float64(dp.Value)
+					}
+				}
+			case metricdata.Sum[float64]:
+				for _, dp := range data.DataPoints {
+					if hasAttrs(dp.Attributes, attrs) {
+						total += dp.Value
+					}
+				}
+			}
+		}
+	}
+	return total
+}
+
+func hasAttrs(set attribute.Set, want []attribute.KeyValue) bool {
+	if len(want) == 0 {
+		return true
+	}
+	got := set.ToSlice()
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g.Key == w.Key && g.Value == w.Value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
