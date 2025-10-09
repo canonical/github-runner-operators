@@ -55,7 +55,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
@@ -82,7 +81,6 @@ import (
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
-var useOtelSlog = atomic.Bool{}
 var mu sync.Mutex
 var started = false
 var shutdown func(context.Context) error
@@ -115,6 +113,22 @@ func pickProtocol(signal string) string {
 	return v
 }
 
+func useOtelSlog() bool {
+	kind := strings.ToLower(strings.TrimSpace(envOrDefault("OTEL_LOGS_EXPORTER", "none")))
+	protocol := pickProtocol("LOGS")
+	if kind == "none" || kind == "" {
+		return false
+	} else if kind == "console" {
+		return true
+	} else if kind == "otlp" && protocol == "grpc" {
+		return true
+	} else if kind == "otlp" && strings.HasPrefix(protocol, "http") {
+		return true
+	} else {
+		return false
+	}
+}
+
 func newLoggerProvider(ctx context.Context, res *resource.Resource) (log.LoggerProvider, func(ctx context.Context) error, error) {
 	kind := strings.ToLower(strings.TrimSpace(envOrDefault("OTEL_LOGS_EXPORTER", "none")))
 	protocol := pickProtocol("LOGS")
@@ -125,13 +139,10 @@ func newLoggerProvider(ctx context.Context, res *resource.Resource) (log.LoggerP
 	if kind == "none" || kind == "" {
 		return noop.NewLoggerProvider(), func(context.Context) error { return nil }, nil
 	} else if kind == "console" {
-		useOtelSlog.Store(true)
 		exp, err = stdoutlog.New()
 	} else if kind == "otlp" && protocol == "grpc" {
-		useOtelSlog.Store(true)
 		exp, err = otlploggrpc.New(ctx)
 	} else if kind == "otlp" && strings.HasPrefix(protocol, "http") {
-		useOtelSlog.Store(true)
 		exp, err = otlploghttp.New(ctx)
 	} else {
 		err = fmt.Errorf("unsupported logger exporter type or protocol: %s, %s", kind, protocol)
@@ -362,7 +373,7 @@ func Start(ctx context.Context, service, version string) error {
 // NewLogger creates a new slog.Logger. If OpenTelemetry logging is
 // enabled, the logger is connected to the OpenTelemetry logging bridge.
 func NewLogger(name string) *slog.Logger {
-	if useOtelSlog.Load() {
+	if useOtelSlog() {
 		return otelslog.NewLogger(name)
 	}
 	return slog.Default()

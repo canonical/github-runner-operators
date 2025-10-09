@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"github.com/canonical/mayfly/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -16,6 +17,7 @@ var (
 	pkg            = "github.com/canonical/mayfly/internal/webhook"
 	meter          = otel.Meter(pkg)
 	trace          = otel.Tracer(pkg)
+	logger         = telemetry.NewLogger("github.com/canonical/mayfly/internal/webhook")
 	inboundWebhook = must(
 		meter.Int64Counter(
 			"mayfly.webhook.gateway.inbound",
