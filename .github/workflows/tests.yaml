@@ -26,13 +26,6 @@ jobs:
           go fmt ./...
           git diff --exit-code
 
-      - name: Wait for rabbitmq
-        run: |
-          until curl -fs http://localhost:15672;
-            do echo "waiting for rabbit mq"
-            sleep 2
-          done
-
       - name: Build and Test
         env:
           POSTGRESQL_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
