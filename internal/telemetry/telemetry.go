@@ -403,16 +403,13 @@ type TestMetricReader struct {
 	*sdkmetric.ManualReader
 }
 
-type TestMetrics struct {
-	*metricdata.ResourceMetrics
-}
+var testMetricReader *TestMetricReader
 
-var tr *TestMetricReader
-
+// InitTestMetricReader initializes an in-memory metric reader for inspecting metric changes during tests.
 func InitTestMetricReader(t *testing.T) *TestMetricReader {
 	t.Helper()
-	if tr != nil {
-		return tr
+	if testMetricReader != nil {
+		return testMetricReader
 	}
 
 	r := sdkmetric.NewManualReader(
@@ -422,12 +419,13 @@ func InitTestMetricReader(t *testing.T) *TestMetricReader {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(r))
 	otel.SetMeterProvider(mp)
 
-	tr = &TestMetricReader{ManualReader: r}
-	tr.Collect(t)
+	testMetricReader = &TestMetricReader{ManualReader: r}
+	testMetricReader.Collect(t)
 
-	return tr
+	return testMetricReader
 }
 
+// Collect returns the accumulated metric changes and resets all metrics to zero.
 func (m *TestMetricReader) Collect(t *testing.T) TestMetrics {
 	t.Helper()
 
@@ -439,6 +437,11 @@ func (m *TestMetricReader) Collect(t *testing.T) TestMetrics {
 	return TestMetrics{ResourceMetrics: &rm}
 }
 
+type TestMetrics struct {
+	*metricdata.ResourceMetrics
+}
+
+// Counter returns the counter metric value that matches the provided name and attributes.
 func (tm *TestMetrics) Counter(t *testing.T, name string, attrs ...attribute.KeyValue) float64 {
 	t.Helper()
 
