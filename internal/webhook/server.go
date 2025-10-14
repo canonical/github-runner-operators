@@ -32,7 +32,7 @@ type httpError struct {
 	err     error
 }
 
-func (e httpError) Error() string {
+func (e *httpError) Error() string {
 	if e.err != nil {
 		return e.message
 	} else {
@@ -40,7 +40,7 @@ func (e httpError) Error() string {
 	}
 }
 
-func (e httpError) Unwrap() error {
+func (e *httpError) Unwrap() error {
 	return e.err
 }
 
@@ -54,20 +54,20 @@ func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, 
 	signature := r.Header.Get(WebhookSignatureHeader)
 	if signature == "" {
 		logger.DebugContext(ctx, "missing signature header", "header", r.Header)
-		return nil, httpError{code: http.StatusForbidden, message: "missing signature header"}
+		return nil, &httpError{code: http.StatusForbidden, message: "missing signature header"}
 	}
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		logger.ErrorContext(ctx, "unable to read request body", "error", err)
-		return nil, httpError{code: http.StatusInternalServerError, message: "unable to read request body: %w", err: err}
+		return nil, &httpError{code: http.StatusInternalServerError, message: "unable to read request body: %w", err: err}
 	}
 	if len(body) > bodyLimit {
 		logger.ErrorContext(ctx, "body exceeds limit")
-		return nil, httpError{code: http.StatusBadRequest, message: "body length exceeds limit"}
+		return nil, &httpError{code: http.StatusBadRequest, message: "body length exceeds limit"}
 	}
 	if !validateSignature(body, h.WebhookSecret, signature) {
 		logger.DebugContext(ctx, "invalid signature", "signature", signature)
-		return nil, httpError{code: http.StatusForbidden, message: "webhook contains invalid signature"}
+		return nil, &httpError{code: http.StatusForbidden, message: "webhook contains invalid signature"}
 	}
 	return body, nil
 }
@@ -87,7 +87,11 @@ func (h *Handler) sendWebhook(ctx context.Context, body []byte) error {
 }
 
 func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			logger.ErrorContext(ctx, "failed to close request body", "error", err)
+		}
+	}()
 	ctx, span := trace.Start(ctx, "serve webhook")
 	webhook, err := h.receiveWebhook(ctx, r)
 	if err != nil {
@@ -122,7 +126,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	message := ""
 	if err != nil {
-		var he httpError
+		var he *httpError
 		if errors.As(err, &he) {
 			status = he.code
 			message = he.message
