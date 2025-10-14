@@ -118,22 +118,22 @@ func TestWebhookInvalidSignature(t *testing.T) {
 		{
 			name:                    "Invalid Signature",
 			signature:               "0aca2d7154cinvalid56f246cad61f1485df34b8056e10c4e4799494376fb3412",
-			expectedResponseMessage: "Invalid signature",
+			expectedResponseMessage: "invalid signature",
 		},
 		{
 			name:                    "Non ASCII Signature",
 			signature:               "非ASCII签名",
-			expectedResponseMessage: "Invalid signature",
+			expectedResponseMessage: "invalid signature",
 		},
 		{
 			name:                    "Empty Signature",
 			signature:               "",
-			expectedResponseMessage: "Missing signature header",
+			expectedResponseMessage: "missing signature header",
 		},
 		{
 			name:                    "Missing Signature Header",
 			signature:               "",
-			expectedResponseMessage: "Missing signature header",
+			expectedResponseMessage: "missing signature header",
 		},
 	}
 	for _, tt := range tests {
