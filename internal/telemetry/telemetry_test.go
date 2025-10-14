@@ -11,6 +11,9 @@ import (
 )
 
 func TestInMemoryMetrics(t *testing.T) {
+	// arrange: initialize the in-memory metric provider
+	// act: update a metric value
+	// assert: the updated metric can be collected from the in-memory metric provider
 	ctx := context.Background()
 	meter := otel.Meter("github.com/canonical/mayfly/internal/telemetry")
 	testMetric, err := meter.Int64Gauge("test.metric")
