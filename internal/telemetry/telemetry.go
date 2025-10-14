@@ -262,9 +262,10 @@ func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.Meter
 	if shutdown == nil {
 		shutdown = mp.Shutdown
 	} else {
+		prevShutdown := shutdown
 		shutdown = func(ctx context.Context) error {
 			var firstErr error
-			if err := shutdown(ctx); err != nil {
+			if err := prevShutdown(ctx); err != nil {
 				logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
 				if firstErr == nil {
 					firstErr = err
@@ -404,10 +405,13 @@ type TestMetricReader struct {
 }
 
 var testMetricReader *TestMetricReader
+var testMetricReaderMutex sync.Mutex
 
-// InitTestMetricReader initializes an in-memory metric reader for inspecting metric changes during tests.
-func InitTestMetricReader(t *testing.T) *TestMetricReader {
+// AcquireTestMetricReader initializes an in-memory metric reader for inspecting metric changes during tests.
+// ReleaseTestMetricReader must be called after AcquireTestMetricReader.
+func AcquireTestMetricReader(t *testing.T) *TestMetricReader {
 	t.Helper()
+	testMetricReaderMutex.Lock()
 	if testMetricReader != nil {
 		return testMetricReader
 	}
@@ -423,6 +427,12 @@ func InitTestMetricReader(t *testing.T) *TestMetricReader {
 	testMetricReader.Collect(t)
 
 	return testMetricReader
+}
+
+// ReleaseTestMetricReader releases the test metric reader lock.
+func ReleaseTestMetricReader(t *testing.T) {
+	t.Helper()
+	testMetricReaderMutex.Unlock()
 }
 
 // Collect returns the accumulated metric changes and resets all metrics to zero.

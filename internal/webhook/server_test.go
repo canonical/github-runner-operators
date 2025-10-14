@@ -44,7 +44,8 @@ func TestWebhookForwarded(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 200, message was forwarded to queue
 	*/
-	mr := telemetry.InitTestMetricReader(t)
+	mr := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
 	req := setupRequest()
 	fakeProducer := &FakeProducer{}
 	handler := Handler{
@@ -81,7 +82,8 @@ func TestWebhookQueueError(t *testing.T) {
 		act: call WebhookHandler
 		assert: status 500
 	*/
-	mr := telemetry.InitTestMetricReader(t)
+	mr := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
 	req := setupRequest()
 	w := httptest.NewRecorder()
 	errProducer := &ErrorProducer{}
@@ -136,7 +138,8 @@ func TestWebhookInvalidSignature(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mr := telemetry.InitTestMetricReader(t)
+			mr := telemetry.AcquireTestMetricReader(t)
+			defer telemetry.ReleaseTestMetricReader(t)
 			req := setupRequest()
 			if tt.name == "Missing Signature Header" {
 				req.Header.Del(WebhookSignatureHeader)
