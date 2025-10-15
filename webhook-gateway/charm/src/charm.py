@@ -25,7 +25,7 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         super().__init__(*args)
 
     def _create_app(self):
-        """Patch _create_app to adding OpenTelemetry environment variables."""
+        """Patch _create_app to add OpenTelemetry environment variables."""
         original_app = super()._create_app()
         charm = self
         def gen_environment() -> dict[str, str]:

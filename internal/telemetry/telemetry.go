@@ -89,7 +89,7 @@ var started = false
 var shutdown func(context.Context) error
 var logger = slog.Default()
 
-// ManualReader is initialized only when the in-memory metric provider is use.
+// ManualReader is initialized only when the in-memory metric provider is used.
 // It will be nil otherwise. ManualReader is primarily intended for use in tests.
 var ManualReader *sdkmetric.ManualReader
 
