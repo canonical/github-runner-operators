@@ -27,7 +27,7 @@ const webhookSecretEnvVar = "APP_WEBHOOK_SECRET_VALUE"
 
 func main() {
 	ctx := context.Background()
-	err := telemetry.Start(ctx, "mayfly-webhook-gateway", version.String())
+	err := telemetry.Start(ctx, "github-runner-webhook-gateway", version.String())
 	if err != nil {
 		log.Fatalf("failed to start telemetry: %v", err)
 	}
