@@ -42,7 +42,7 @@ func TestWebhookForwarded(t *testing.T) {
 	/*
 		arrange: create request with valid signature header
 		act: call WebhookHandler
-		assert: status 200, message was forwarded to queue
+		assert: status 200, message was forwarded to queue, and inbound and outbound webhook metrics increase
 	*/
 	mr := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
@@ -80,7 +80,7 @@ func TestWebhookQueueError(t *testing.T) {
 	/*
 		arrange: create request with valid signature header and a queue that returns an error
 		act: call WebhookHandler
-		assert: status 500
+		assert: status 500 and outbound error metric increases
 	*/
 	mr := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
@@ -108,7 +108,7 @@ func TestWebhookInvalidSignature(t *testing.T) {
 	/*
 		arrange: create invalid signature test cases
 		act: call webhook handler
-		assert: A 403 response is returned
+		assert: A 403 response is returned and inbound error metric increases
 	*/
 	tests := []struct {
 		name                    string

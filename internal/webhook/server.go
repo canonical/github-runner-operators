@@ -59,7 +59,7 @@ func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, 
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		logger.ErrorContext(ctx, "unable to read request body", "error", err)
-		return nil, &httpError{code: http.StatusInternalServerError, message: "unable to read request body: %w", err: err}
+		return nil, &httpError{code: http.StatusInternalServerError, message: "unable to read request body", err: err}
 	}
 	if len(body) > bodyLimit {
 		logger.ErrorContext(ctx, "body exceeds limit")

@@ -28,7 +28,7 @@ var (
 	inboundWebhookErrors = must(
 		meter.Int64Counter(
 			"mayfly.webhook.gateway.inbound.errors",
-			metric.WithDescription("webhooks receiving failed in the webhook gateway"),
+			metric.WithDescription("webhooks receiving failures in the webhook gateway"),
 			metric.WithUnit("{error}"),
 		),
 	)
@@ -42,7 +42,7 @@ var (
 	outboundWebhookErrors = must(
 		meter.Int64Counter(
 			"mayfly.webhook.gateway.outbound.errors",
-			metric.WithDescription("webhooks transmitting failed in the webhook gateway"),
+			metric.WithDescription("webhooks transmitting failures in the webhook gateway"),
 			metric.WithUnit("{error}"),
 		),
 	)
