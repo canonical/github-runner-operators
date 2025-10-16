@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -41,9 +42,10 @@ func TestWebhookForwarded(t *testing.T) {
 	/*
 		arrange: create request with valid signature header
 		act: call WebhookHandler
-		assert: status 200, message was forwarded to queue
+		assert: status 200, message was forwarded to queue, and inbound and outbound webhook metrics increase
 	*/
-
+	mr := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
 	req := setupRequest()
 	fakeProducer := &FakeProducer{}
 	handler := Handler{
@@ -59,7 +61,11 @@ func TestWebhookForwarded(t *testing.T) {
 	assert.NotNil(t, fakeProducer.Messages, "expected messages in queue")
 	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
 	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
-
+	m := mr.Collect(t)
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound.errors"))
 }
 
 func setupRequest() *http.Request {
@@ -74,8 +80,10 @@ func TestWebhookQueueError(t *testing.T) {
 	/*
 		arrange: create request with valid signature header and a queue that returns an error
 		act: call WebhookHandler
-		assert: status 500
+		assert: status 500 and outbound error metric increases
 	*/
+	mr := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
 	req := setupRequest()
 	w := httptest.NewRecorder()
 	errProducer := &ErrorProducer{}
@@ -88,14 +96,19 @@ func TestWebhookQueueError(t *testing.T) {
 	res := w.Result()
 	defer res.Body.Close()
 
+	m := mr.Collect(t)
 	assert.Equal(t, http.StatusInternalServerError, res.StatusCode, "expected status 500 got %v", res.Status)
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.outbound.errors"))
 }
 
 func TestWebhookInvalidSignature(t *testing.T) {
 	/*
 		arrange: create invalid signature test cases
 		act: call webhook handler
-		assert: A 403 response is returned
+		assert: A 403 response is returned and inbound error metric increases
 	*/
 	tests := []struct {
 		name                    string
@@ -105,26 +118,28 @@ func TestWebhookInvalidSignature(t *testing.T) {
 		{
 			name:                    "Invalid Signature",
 			signature:               "0aca2d7154cinvalid56f246cad61f1485df34b8056e10c4e4799494376fb3412",
-			expectedResponseMessage: "Invalid signature",
+			expectedResponseMessage: "invalid signature",
 		},
 		{
 			name:                    "Non ASCII Signature",
 			signature:               "非ASCII签名",
-			expectedResponseMessage: "Invalid signature",
+			expectedResponseMessage: "invalid signature",
 		},
 		{
 			name:                    "Empty Signature",
 			signature:               "",
-			expectedResponseMessage: "Missing signature header",
+			expectedResponseMessage: "missing signature header",
 		},
 		{
 			name:                    "Missing Signature Header",
 			signature:               "",
-			expectedResponseMessage: "Missing signature header",
+			expectedResponseMessage: "missing signature header",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mr := telemetry.AcquireTestMetricReader(t)
+			defer telemetry.ReleaseTestMetricReader(t)
 			req := setupRequest()
 			if tt.name == "Missing Signature Header" {
 				req.Header.Del(WebhookSignatureHeader)
@@ -147,6 +162,12 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			respBody, _ := io.ReadAll(res.Body)
 			assert.Contains(t, string(respBody), tt.expectedResponseMessage)
 			assert.Equal(t, 0, len(fakeProducer.Messages), "expected 0 message in queue")
+
+			m := mr.Collect(t)
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound.errors"))
 		})
 	}
 }

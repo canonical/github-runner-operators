@@ -6,12 +6,17 @@
 package main
 
 import (
+	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
-	"github.com/canonical/mayfly/internal/queue"
-	"github.com/canonical/mayfly/internal/webhook"
+	"github.com/canonical/github-runner-operators/internal/queue"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
+	"github.com/canonical/github-runner-operators/internal/version"
+	"github.com/canonical/github-runner-operators/internal/webhook"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const queueName = "webhook-queue"
@@ -21,6 +26,17 @@ const rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 const webhookSecretEnvVar = "APP_WEBHOOK_SECRET_VALUE"
 
 func main() {
+	ctx := context.Background()
+	err := telemetry.Start(ctx, "github-runner-webhook-gateway", version.String())
+	if err != nil {
+		log.Fatalf("failed to start telemetry: %v", err)
+	}
+	defer func() {
+		err := telemetry.Shutdown(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to shutdown telemetry", "error", err)
+		}
+	}()
 
 	port, found := os.LookupEnv(portEnvVar)
 	if !found {
@@ -43,5 +59,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(webhookPath, handler.Webhook)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+
+	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(mux, "", otelhttp.WithServerName(""))))
 }
