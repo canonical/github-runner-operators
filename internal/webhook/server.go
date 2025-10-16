@@ -34,10 +34,10 @@ type httpError struct {
 
 func (e *httpError) Error() string {
 	if e.err != nil {
-		return e.message
-	} else {
-		return fmt.Sprintf("%s: %s", e.message, e.err.Error())
+		return fmt.Sprintf("%s: %v", e.message, e.err)
 	}
+	return e.message
+}
 }
 
 func (e *httpError) Unwrap() error {
