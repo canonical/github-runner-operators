@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/canonical/mayfly/internal/queue"
+	"github.com/canonical/github-runner-operators/internal/queue"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -37,7 +37,6 @@ func (e *httpError) Error() string {
 		return fmt.Sprintf("%s: %v", e.message, e.err)
 	}
 	return e.message
-}
 }
 
 func (e *httpError) Unwrap() error {

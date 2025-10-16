@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/canonical/mayfly/internal/telemetry"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -62,10 +62,10 @@ func TestWebhookForwarded(t *testing.T) {
 	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
 	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
 	m := mr.Collect(t)
-	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.inbound"))
-	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.inbound.errors"))
-	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.outbound"))
-	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound.errors"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound.errors"))
 }
 
 func setupRequest() *http.Request {
@@ -98,10 +98,10 @@ func TestWebhookQueueError(t *testing.T) {
 
 	m := mr.Collect(t)
 	assert.Equal(t, http.StatusInternalServerError, res.StatusCode, "expected status 500 got %v", res.Status)
-	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.inbound"))
-	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.inbound.errors"))
-	assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound"))
-	assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.outbound.errors"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.outbound.errors"))
 }
 
 func TestWebhookInvalidSignature(t *testing.T) {
@@ -164,10 +164,10 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			assert.Equal(t, 0, len(fakeProducer.Messages), "expected 0 message in queue")
 
 			m := mr.Collect(t)
-			assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.inbound"))
-			assert.Equal(t, 1.0, m.Counter(t, "mayfly.webhook.gateway.inbound.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound"))
-			assert.Equal(t, 0.0, m.Counter(t, "mayfly.webhook.gateway.outbound.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.outbound.errors"))
 		})
 	}
 }

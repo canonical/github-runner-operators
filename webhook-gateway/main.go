@@ -12,10 +12,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/canonical/mayfly/internal/queue"
-	"github.com/canonical/mayfly/internal/telemetry"
-	"github.com/canonical/mayfly/internal/version"
-	"github.com/canonical/mayfly/internal/webhook"
+	"github.com/canonical/github-runner-operators/internal/queue"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
+	"github.com/canonical/github-runner-operators/internal/version"
+	"github.com/canonical/github-runner-operators/internal/webhook"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
