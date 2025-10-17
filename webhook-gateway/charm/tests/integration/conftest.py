@@ -52,7 +52,7 @@ def deploy_app_fixture(juju: jubilant.Juju, charm_file: str, app_image: str) -> 
     )
     secret_uri = juju.add_secret(name="webhook", content={"value": "fake-secret"})
     juju.grant_secret(secret_uri, app_name)
-    juju.config(app_name, values={"webhook-secret": secret_uri})
+    juju.config(app_name, values={"webhook-secret": secret_uri, "metrics-port": 9464})
     return app_name
 
 
