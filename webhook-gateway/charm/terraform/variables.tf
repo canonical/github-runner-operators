@@ -16,11 +16,11 @@ variable "base" {
 variable "channel" {
   description = "The channel to use when deploying a charm."
   type        = string
-  default     = "latest/stable"
+  default     = "latest/edge"
 }
 
 variable "config" {
-  description = "Application config. Details about available options can be found at https://charmhub.io/<charm-name>/configurations."
+  description = "Application config. Details about available options can be found at https://charmhub.io/github-runner-webhook-gateway/configurations."
   type        = map(string)
   default     = {}
 }

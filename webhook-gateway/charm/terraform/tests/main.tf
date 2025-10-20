@@ -22,6 +22,15 @@ terraform {
   }
 }
 
+resource "juju_secret" "webhook-gateway-secret" {
+  model = "prod-github_runner_webhook_gateway-example"
+  name  = "webhook-gateway"
+  value = {
+    value = data.vault_generic_secret.webhook-gateway.data["webhook_secret"]
+  }
+  info = "The webhook gateway secret used for validating the webhooks"
+}
+
 provider "juju" {}
 
 module "github_runner_webhook_gateway" {
@@ -30,7 +39,9 @@ module "github_runner_webhook_gateway" {
   channel  = var.channel
   model    = "prod-github_runner_webhook_gateway-example"
   revision = var.revision
-  config   = { webhook-secret = "" }
+  config = {
+    webhook-secret = juju_secret.webhook-gateway-secret.secret_uri
+  }
 }
 
 output "app_name" {
