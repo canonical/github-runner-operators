@@ -6,7 +6,7 @@ resource "juju_application" "github_runner_webhook_gateway" {
   model = var.model
 
   charm {
-    name     = "github_runner_webhook_gateway"
+    name     = "github-runner-webhook-gateway"
     channel  = var.channel
     revision = var.revision
     base     = var.base
@@ -23,28 +23,13 @@ resource "juju_application" "rabbitmq" {
   model = var.model
 
   charm {
-    name     = "rabbitmq_server"
+    name     = "rabbitmq-k8s"
     channel  = "3.12/stable"
-    revision = 247
+    revision = var.revision
   }
 
+  trust       = true
   config      = var.config
-  constraints = "arch=amd64 cores=4 mem=4096M root-disk=51200M" # according to https://www.rabbitmq.com/docs/production-checklist#minimum-hardware 4 cpu 4 GiB of Ram are recommended
+  constraints = var.constraints
   units       = var.units
-
-  expose {}
-}
-
-
-resource "juju_offer" "rabbitmq_amqp" {
-  model            = var.model
-  application_name = juju_application.rabbitmq.name
-  endpoints        = ["amqp"]
-  name             = "rabbitmq"
-}
-
-resource "juju_access_offer" "this" {
-  offer_url = juju_offer.rabbitmq_amqp.url
-  consume   = ["k8s-prod-github-runner-github-runner"]
-  admin     = [var.model]
 }
