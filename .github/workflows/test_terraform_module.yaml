@@ -1,7 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-name: Terraform files test
+name: Terraform files test (webhook-gateway)
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ jobs:
     name: Validate terraform configuration files
     runs-on: ubuntu-latest
     env:
-      WORKING_DIR: "terraform"
+      WORKING_DIR: "webhook-gateway/charm/terraform"
     steps:
       - name: Check out code
         uses: actions/checkout@v5.0.0

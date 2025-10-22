@@ -1,6 +1,11 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+locals {
+  webhook_gateway_app_name = "github-runner-webhook-gateway"
+  juju_model_name          = "test-deploy-webhook-gateway"
+}
+
 variable "channel" {
   description = "The channel to use when deploying a charm."
   type        = string
@@ -22,13 +27,9 @@ terraform {
   }
 }
 
-resource "juju_model" "webhook" {
-  name = "test-deploy-webhook"
-}
-
 resource "juju_application" "rabbitmq" {
   name  = "rabbitmq"
-  model = juju_model.webhook.name
+  model = local.juju_model_name
 
   charm {
     name     = "rabbitmq-k8s"
@@ -43,25 +44,35 @@ resource "juju_application" "rabbitmq" {
 }
 
 resource "juju_secret" "webhook_gateway_secret" {
-  model = juju_model.webhook.name
+  model = local.juju_model_name
   name  = "webhook-gateway"
   value = { value = data.vault_generic_secret.webhook_gateway.data["webhook_secret"] }
   info  = "The webhook gateway secret used for validating the webhooks"
 }
 
 resource "juju_access_secret" "webhook_gateway_access" {
-  applications = ["github-runner-webhook-gateway"]
-  model        = juju_model.webhook.name
+  applications = [local.webhook_gateway_app_name]
+  model        = local.juju_model_name
   secret_id    = juju_secret.webhook_gateway_secret.secret_id
+}
+
+resource "juju_integration" "webhook_rabbitmq" {
+  model = local.juju_model_name
+  application {
+    name = local.webhook_gateway_app_name
+  }
+  application {
+    name = juju_application.rabbitmq.name
+  }
 }
 
 provider "juju" {}
 
 module "github_runner_webhook_gateway" {
   source   = "./.."
-  app_name = "github_runner_webhook_gateway"
+  app_name = local.webhook_gateway_app_name
   channel  = var.channel
-  model    = juju_model.webhook.name
+  model    = local.juju_model_name
   revision = var.revision
   config = {
     webhook-secret = juju_secret.webhook_gateway_secret.secret_uri,

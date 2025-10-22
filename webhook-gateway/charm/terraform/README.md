@@ -36,15 +36,14 @@ module "github_runner_webhook_gateway" {
 Create integrations, for instance:
 
 ```text
-resource "juju_integration" "github_runner_webhook_gateway-loki" {
+resource "juju_integration" "webhook_rabbitmq" {
   model = juju_model.my_model.name
   application {
     name     = module.github_runner_webhook_gateway.app_name
     endpoint = module.github_runner_webhook_gateway.endpoints.logging
   }
   application {
-    name     = "loki-k8s"
-    endpoint = "logging"
+    name = "rabbitmq"
   }
 }
 ```

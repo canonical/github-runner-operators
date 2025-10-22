@@ -1,7 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-name: Terraform module tests
+name: Terraform module tests (webhook-gateway)
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ jobs:
     name: Test Terraform with Juju
     runs-on: ubuntu-latest
     env:
-      WORKING_DIR: "terraform/tests"
+      WORKING_DIR: "webhook-gateway/charm/terraform/tests"
     steps:
       - uses: actions/checkout@v5.0.0
       - uses: charmed-kubernetes/actions-operator@main
