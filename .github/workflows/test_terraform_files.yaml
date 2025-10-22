@@ -6,7 +6,7 @@ name: Terraform module tests
 on:
   pull_request:
     paths:
-      - "*/terraform/**"
+      - "**/terraform/**"
 
 permissions:
   contents: read
