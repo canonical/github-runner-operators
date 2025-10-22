@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v5.0.0
       - uses: charmed-kubernetes/actions-operator@main
         with:
-          provider: "k8s"
+          provider: "microk8s"
           channel: 1.33-classic/stable
           juju-channel: 3.6/stable
 
