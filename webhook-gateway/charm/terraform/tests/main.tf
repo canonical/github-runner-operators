@@ -23,7 +23,23 @@ terraform {
 }
 
 resource "juju_model" "webhook" {
-  name = "stg-ps6-github-runner-k8s-shared"
+  name = "test-deploy-webhook"
+}
+
+resource "juju_application" "rabbitmq" {
+  name  = "rabbitmq"
+  model = juju_model.webhook.name
+
+  charm {
+    name     = "rabbitmq-k8s"
+    channel  = "3.12/stable"
+    revision = var.revision
+  }
+
+  trust       = true
+  config      = {}
+  constraints = ""
+  units       = 1
 }
 
 resource "juju_secret" "webhook_gateway_secret" {
@@ -31,6 +47,12 @@ resource "juju_secret" "webhook_gateway_secret" {
   name  = "webhook-gateway"
   value = { value = data.vault_generic_secret.webhook_gateway.data["webhook_secret"] }
   info  = "The webhook gateway secret used for validating the webhooks"
+}
+
+resource "juju_access_secret" "webhook_gateway_access" {
+  applications = ["github-runner-webhook-gateway"]
+  model        = juju_model.webhook.name
+  secret_id    = juju_secret.webhook_gateway_secret.secret_id
 }
 
 provider "juju" {}
@@ -42,7 +64,8 @@ module "github_runner_webhook_gateway" {
   model    = juju_model.webhook.name
   revision = var.revision
   config = {
-    webhook-secret = juju_secret.webhook_gateway_secret.secret_uri
+    webhook-secret = juju_secret.webhook_gateway_secret.secret_uri,
+    metrics-port   = 9464
   }
 }
 
