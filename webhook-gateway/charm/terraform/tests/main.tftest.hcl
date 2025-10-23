@@ -9,7 +9,7 @@ variables {
 
 run "basic_deploy" {
   assert {
-    condition     = module.github_runner_webhook_gateway.app_name == "github_runner_webhook_gateway"
-    error_message = "github_runner_webhook_gateway app_name did not match expected"
+    condition     = module.github_runner_webhook_gateway.app_name == "github-runner-webhook-gateway"
+    error_message = "github-runner-webhook-gateway app_name did not match expected"
   }
 }
