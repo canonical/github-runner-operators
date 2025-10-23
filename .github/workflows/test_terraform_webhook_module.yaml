@@ -27,6 +27,7 @@ jobs:
 
       - name: Prepare juju tf provider environment
         run: |
+          set -e
           CONTROLLER=$(juju whoami | yq .Controller)
           JUJU_CONTROLLER_ADDRESSES="$(juju show-controller | yq '.[$CONTROLLER]'.details.\"api-endpoints\" | tr -d "[]' "|tr -d '"'|tr -d '\n')"
           JUJU_USERNAME="$(cat ~/.local/share/juju/accounts.yaml | yq .controllers.$CONTROLLER.user|tr -d '"')"
@@ -43,12 +44,31 @@ jobs:
       - uses: hashicorp/setup-terraform@v3.1.2
       - run: terraform init
         working-directory: ${{env.WORKING_DIR}}
+      - run: terraform validate
+        working-directory: ${{env.WORKING_DIR}}
       - run: terraform plan -out=tfplan
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform show tfplan
         working-directory: ${{env.WORKING_DIR}}
       - run: |
-          juju add-model prod-chat-example
+          juju add-model test-deploy-webhook-gateway
           set -e  # Exit on error
           terraform test || { echo "Terraform test failed"; exit 1; }
         working-directory: ${{env.WORKING_DIR}}
+      - name: Apply Terraform
+        run: terraform apply -auto-approve
+        working-directory: ${{ env.WORKING_DIR }}
+      - name: Wait for github-runner-webhook-gateway to be deployed
+        run: |
+          echo "Waiting for github-runner-webhook-gateway to be deployed..."
+          juju wait-for application github-runner-webhook-gateway --query='status=="maintenance" || status=="blocked"' --timeout=10m
+
+      - name: Verify github-runner-webhook-gateway application is deployed
+        run: |
+          STATUS=$(juju status github-runner-webhook-gateway --model test-deploy-webhook-gateway --format=json | jq -r '.applications.github-runner-webhook-gateway["application-status"].current')
+          echo "github-runner-webhook-gateway status: $STATUS"
+          if [ "$STATUS" == "error" ] || [ "$STATUS" == "unknown" ]; then
+            echo "github-runner-webhook-gateway failed to deploy or is unknown"
+            juju status --model test-deploy-webhook-gateway
+            exit 1
+          fi
