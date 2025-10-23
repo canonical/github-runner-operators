@@ -5,11 +5,11 @@ on:
   workflow_call:
 
 concurrency:
-  group:  ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  unit-test:
     name: Run Unit and Lint Tests
     runs-on: [self-hosted-linux-amd64-noble-edge]
 

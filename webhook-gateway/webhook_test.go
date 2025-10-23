@@ -1,3 +1,5 @@
+//go:build integration
+
 /*
  * Copyright 2025 Canonical Ltd.
  * See LICENSE file for licensing details.
@@ -11,7 +13,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"flag"
 	"net/http"
 	"os"
 	"strings"
@@ -22,12 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var integration = flag.Bool("integration", false, "Run integration tests")
-
 func TestHTTPRequestIsForwarded(t *testing.T) {
-	if !*integration {
-		t.Skip("skipping integration test")
-	}
 	const payload = `{"message":"Hello, Bob!"}`
 
 	go main()
@@ -52,7 +48,7 @@ func getSecretFromEnv(t *testing.T) string {
 func getAmqpUriFromEnv(t *testing.T) string {
 	uri := os.Getenv(rabbitMQUriEnvVar)
 	if uri == "" {
-		t.Fatal(rabbitMQUriEnvVar + " environment variable not set")
+		t.Fatal(webhookSecretEnvVar + " environment variable not set")
 	}
 	return uri
 }

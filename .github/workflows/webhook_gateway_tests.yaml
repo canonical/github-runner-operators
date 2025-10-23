@@ -23,20 +23,35 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: 1.25
-      - name: Setup rabbitmq in an OCI container
+
+      - name: Wait for rabbitmq
         run: |
-          docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
           until curl -fs http://localhost:15672;
             do echo "waiting for rabbit mq"
             sleep 2
           done
-      - name: Run integration test
+
+      - name: Build and Test
         env:
+          POSTGRESQL_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
           APP_PORT: 8080
           APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
-          go test -cover -v  ./webhook-gateway -integration
+          go test -v -cover -tags=integration -race ./...
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+          - 5672:5672
+          - 15672:15672
 
 
   charm-integration-tests:
