@@ -46,8 +46,6 @@ jobs:
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform validate
         working-directory: ${{env.WORKING_DIR}}
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
       - run: terraform plan -out=tfplan
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform show tfplan
