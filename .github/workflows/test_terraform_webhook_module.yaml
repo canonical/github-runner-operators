@@ -12,13 +12,6 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: [self-hosted, linux, X64, jammy, large]
-    steps:
-      - name: Setup tmate session
-        uses: canonical/action-tmate@main
-        with:
-          detached: true
   test-terraform:
     name: Test Terraform with Juju
     runs-on: ubuntu-latest
@@ -53,6 +46,8 @@ jobs:
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform validate
         working-directory: ${{env.WORKING_DIR}}
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
       - run: terraform plan -out=tfplan
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform show tfplan
