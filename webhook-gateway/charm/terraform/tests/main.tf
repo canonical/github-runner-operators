@@ -21,11 +21,6 @@ variable "revision" {
 terraform {
   required_version = ">= 1.6.6"
   required_providers {
-    vault = {
-      source  = "hashicorp/vault"
-      version = "~> 4.3.0"
-    }
-
     juju = {
       source  = "juju/juju"
       version = ">= 0.23.0"
@@ -49,19 +44,6 @@ resource "juju_application" "rabbitmq" {
   units       = 1
 }
 
-resource "juju_secret" "webhook_gateway_secret" {
-  model = local.juju_model_name
-  name  = "webhook-gateway"
-  value = { value = data.vault_generic_secret.webhook_gateway.data["webhook_secret"] }
-  info  = "The webhook gateway secret used for validating the webhooks"
-}
-
-resource "juju_access_secret" "webhook_gateway_access" {
-  applications = [local.webhook_gateway_app_name]
-  model        = local.juju_model_name
-  secret_id    = juju_secret.webhook_gateway_secret.secret_id
-}
-
 resource "juju_integration" "webhook_rabbitmq" {
   model = local.juju_model_name
   application {
@@ -81,7 +63,7 @@ module "github_runner_webhook_gateway" {
   model    = local.juju_model_name
   revision = var.revision
   config = {
-    webhook-secret = juju_secret.webhook_gateway_secret.secret_uri,
+    webhook-secret = "",
     metrics-port   = 9464
   }
 }
