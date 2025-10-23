@@ -33,8 +33,8 @@ resource "juju_application" "rabbitmq" {
   model = local.juju_model_name
 
   charm {
-    name     = "rabbitmq-k8s"
-    channel  = "3.12/stable"
+    name    = "rabbitmq-k8s"
+    channel = "3.12/stable"
   }
 
   trust       = true
