@@ -62,8 +62,7 @@ module "github_runner_webhook_gateway" {
   model    = local.juju_model_name
   revision = var.revision
   config = {
-    webhook-secret = "",
-    metrics-port   = 9464
+    metrics-port = 9464
   }
 }
 
