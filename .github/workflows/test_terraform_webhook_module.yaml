@@ -50,12 +50,10 @@ jobs:
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform show tfplan
         working-directory: ${{env.WORKING_DIR}}
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
       - run: |
           juju add-model test-deploy-webhook-gateway
           set -e  # Exit on error
           terraform test || { echo "Terraform test failed"; exit 1; }
         working-directory: ${{env.WORKING_DIR}}
-      - name: Cleanup Juju model
-        if: always()
-        run: |
-          juju destroy-model test-deploy-webhook-gateway --force --no-wait || true
