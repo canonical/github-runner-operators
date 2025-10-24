@@ -50,8 +50,6 @@ jobs:
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform show tfplan
         working-directory: ${{env.WORKING_DIR}}
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
       - run: |
           juju add-model test-deploy-webhook-gateway
           set -e  # Exit on error
