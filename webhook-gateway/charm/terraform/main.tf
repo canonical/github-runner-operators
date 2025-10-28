@@ -1,13 +1,9 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-resource "juju_model" "webhook" {
-  name = var.model
-}
-
 resource "juju_application" "github_runner_webhook_gateway" {
   name       = var.app_name
-  model_uuid = juju_model.webhook.uuid
+  model_uuid = var.model_uuid
 
   charm {
     name     = "github-runner-webhook-gateway"

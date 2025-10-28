@@ -22,8 +22,7 @@ like shown below:
 
 ```text
 data "juju_model" "my_model" {
-  name  = var.model
-  owner = "admin"
+  name = var.model
 }
 
 module "github_runner_webhook_gateway" {
@@ -38,7 +37,7 @@ Create integrations, for instance:
 
 ```text
 resource "juju_integration" "webhook_rabbitmq" {
-  model_uuid = data.juju_model.my_model.uuid
+  model = juju_model.my_model.name
   application {
     name     = module.github_runner_webhook_gateway.app_name
   }
