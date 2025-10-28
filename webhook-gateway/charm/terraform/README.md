@@ -22,13 +22,14 @@ like shown below:
 
 ```text
 data "juju_model" "my_model" {
-  name = var.model
+  name = "test-deploy-webhook-gateway"
+  owner = "admin"
 }
 
 module "github_runner_webhook_gateway" {
   source = "git::https://github.com/canonical/github-runner-operators/tree/main/webhook-gateway/charm/terraform"
 
-  model = juju_model.my_model.name
+  model_uuid = data.juju_model.my_model.uuid
   # (Customize configuration variables here if needed)
 }
 ```
@@ -37,7 +38,7 @@ Create integrations, for instance:
 
 ```text
 resource "juju_integration" "webhook_rabbitmq" {
-  model = juju_model.my_model.name
+  model_uuid = data.juju_model.my_model.uuid
   application {
     name     = module.github_runner_webhook_gateway.app_name
   }
