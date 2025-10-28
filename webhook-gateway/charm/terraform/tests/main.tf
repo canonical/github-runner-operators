@@ -3,7 +3,7 @@
 
 locals {
   webhook_gateway_app_name = "github-runner-webhook-gateway"
-  juju_model_name          = "test-deploy-webhook-gateway"
+  juju_model_name          = "stg-deploy-webhook-gateway"
 }
 
 variable "channel" {
@@ -28,9 +28,14 @@ terraform {
   }
 }
 
+data "juju_model" "webhook" {
+  name  = local.juju_model_name
+  owner = "admin"
+}
+
 resource "juju_application" "rabbitmq" {
-  name  = "rabbitmq"
-  model = local.juju_model_name
+  name       = "rabbitmq"
+  model_uuid = data.juju_model.webhook.id
 
   charm {
     name    = "rabbitmq-k8s"
@@ -44,7 +49,7 @@ resource "juju_application" "rabbitmq" {
 }
 
 resource "juju_integration" "webhook_rabbitmq" {
-  model = local.juju_model_name
+  model_uuid = data.juju_model.webhook.id
   application {
     name = local.webhook_gateway_app_name
   }
@@ -56,11 +61,11 @@ resource "juju_integration" "webhook_rabbitmq" {
 provider "juju" {}
 
 module "github_runner_webhook_gateway" {
-  source   = "./.."
-  app_name = local.webhook_gateway_app_name
-  channel  = var.channel
-  model    = local.juju_model_name
-  revision = var.revision
+  source     = "./.."
+  app_name   = local.webhook_gateway_app_name
+  channel    = var.channel
+  model_uuid = data.juju_model.webhook.id
+  revision   = var.revision
   config = {
     metrics-port = 9464
   }
