@@ -1,6 +1,6 @@
-# github_runner_webhook_gateway Terraform module
+# GitHub runner webhook gateway terraform module
 
-This folder contains a base [Terraform][Terraform] module for the github_runner_webhook_gateway charm.
+This folder contains a base [Terraform][Terraform] module for the GitHub runner webhook gateway charm.
 
 The module uses the [Terraform Juju provider][Terraform Juju provider] to model the charm
 deployment onto any Kubernetes environment managed by [Juju][Juju].
@@ -40,7 +40,6 @@ resource "juju_integration" "webhook_rabbitmq" {
   model = juju_model.my_model.name
   application {
     name     = module.github_runner_webhook_gateway.app_name
-    endpoint = module.github_runner_webhook_gateway.endpoints.logging
   }
   application {
     name = "rabbitmq"

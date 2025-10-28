@@ -23,7 +23,7 @@ terraform {
   required_providers {
     juju = {
       source  = "juju/juju"
-      version = ">= 0.23.0"
+      version = ">= 1.0.0"
     }
   }
 }
@@ -35,7 +35,7 @@ data "juju_model" "webhook" {
 
 resource "juju_application" "rabbitmq" {
   name       = "rabbitmq"
-  model_uuid = data.juju_model.webhook.id
+  model_uuid = data.juju_model.webhook.uuid
 
   charm {
     name    = "rabbitmq-k8s"
@@ -49,7 +49,7 @@ resource "juju_application" "rabbitmq" {
 }
 
 resource "juju_integration" "webhook_rabbitmq" {
-  model_uuid = data.juju_model.webhook.id
+  model_uuid = data.juju_model.webhook.uuid
   application {
     name = local.webhook_gateway_app_name
   }
@@ -64,7 +64,7 @@ module "github_runner_webhook_gateway" {
   source     = "./.."
   app_name   = local.webhook_gateway_app_name
   channel    = var.channel
-  model_uuid = data.juju_model.webhook.id
+  model_uuid = data.juju_model.webhook.uuid
   revision   = var.revision
   config = {
     metrics-port = 9464
