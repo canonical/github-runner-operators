@@ -30,6 +30,7 @@ terraform {
 
 data "juju_model" "webhook" {
   name  = local.juju_model_name
+  owner = "admin"
 }
 
 resource "juju_application" "rabbitmq" {

@@ -41,6 +41,7 @@ jobs:
             juju show-controller $(echo $CONTROLLER|tr -d '"') | yq '.[$CONTROLLER]'.details.\"ca-cert\"|tr -d '"'
             echo EOF
           } >> "$GITHUB_ENV"
+      - run: juju add-model stg-deploy-webhook-gateway
       - uses: hashicorp/setup-terraform@v3.1.2
       - run: terraform init
         working-directory: ${{env.WORKING_DIR}}
@@ -51,7 +52,5 @@ jobs:
       - run: terraform show tfplan
         working-directory: ${{env.WORKING_DIR}}
       - run: |
-          juju add-model stg-deploy-webhook-gateway
-          set -e  # Exit on error
           terraform test || { echo "Terraform test failed"; exit 1; }
         working-directory: ${{env.WORKING_DIR}}
