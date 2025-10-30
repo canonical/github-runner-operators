@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/canonical/github-runner-operators/internal/auth"
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/planner"
 	"github.com/prometheus/client_golang/prometheus"
@@ -24,13 +23,10 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const dbURI = "PLANNER_DATABASE_URI"
-const adminToken = "PLANNER_ADMIN_TOKEN"
-const portEnvVar = "PLANNER_PORT"
-const flavorPressureMetricName = "mayfly_planner_flavor_pressure"
+const dbURI = "POSTGRESQL_DB_CONNECT_STRING"
+const portEnvVar = "POSTGRESQL_DB_PORT"
 const metricsPath = "/metrics"
 const metricsPort = "9388"
-const flavorPlatform = "github" // Currently only github is supported
 
 func main() {
 	ctx := context.Background()
@@ -39,11 +35,6 @@ func main() {
 	uri, found := os.LookupEnv(dbURI)
 	if !found {
 		log.Fatalln(dbURI, "environment variable not set.")
-	}
-
-	token, found := os.LookupEnv(adminToken)
-	if !found {
-		log.Fatalln(adminToken, "environment variable not set.")
 	}
 
 	port, found := os.LookupEnv(portEnvVar)
@@ -57,89 +48,22 @@ func main() {
 		log.Fatalln("Failed to connect to db:", err)
 	}
 
-	server := planner.NewServer(db)
-	go initializeObservability(ctx, db, server)
-
-	// Start API server with auth middleware
-	handler := auth.AuthMiddleware(server, token)
-	mux := http.NewServeMux()
-	mux.Handle("/", handler)
-
-	log.Println("Starting planner API server on port", port)
-	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(mux, "planner-api", otelhttp.WithServerName("planner"))))
-}
-
-// initializeObservability sets up Prometheus metrics for flavor pressure
-// and starts an HTTP server to expose the metrics.
-func initializeObservability(ctx context.Context, db *database.Database, server *planner.Server) {
-	flavorPressure := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: flavorPressureMetricName,
-			Help: "The current pressure value for each flavor",
-		},
-		[]string{"platform", "flavor"},
-	)
-	prometheus.MustRegister(flavorPressure)
-
-	if err := populateExistingFlavors(ctx, db, flavorPressure); err != nil {
+	// Create a non-global Prometheus registry
+	reg := prometheus.NewRegistry()
+	metrics := planner.NewMetrics(reg)
+	if err := metrics.PopulateExistingFlavors(ctx, db); err != nil {
 		log.Println("Failed to populate existing flavors metrics:", err)
 	}
 
-	server.OnFlavorCreated = func(ctx context.Context, flavor *database.Flavor) {
-		pressure, err := db.GetPressures(ctx, flavor.Platform, flavor.Name)
-		if err != nil {
-			log.Printf("Failed to fetch pressure for flavor %s: %v", flavor.Name, err)
-			return
-		}
-		pressureValue, ok := pressure[flavor.Name]
-		if !ok {
-			pressureValue = 0
-		}
-		flavorPressure.WithLabelValues(flavor.Platform, flavor.Name).Set(float64(pressureValue))
-	}
+	server := planner.NewServer(db, metrics)
 
-	muxMetrics := http.NewServeMux()
-	muxMetrics.Handle(metricsPath, promhttp.Handler())
-	log.Println("Starting metrics server on port", metricsPort)
+	go func() {
+		muxMetrics := http.NewServeMux()
+		muxMetrics.Handle(metricsPath, promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
+		log.Println("Starting metrics server on port", metricsPort)
+		log.Fatal(http.ListenAndServe(":"+metricsPort, muxMetrics))
+	}()
 
-	if err := http.ListenAndServe(":"+metricsPort, muxMetrics); err != nil {
-		log.Fatalln("Failed to start metrics server:", err)
-	}
-}
-
-// populateExistingFlavors initializes the flavor pressure gauge with existing flavors from the database.
-func populateExistingFlavors(ctx context.Context, db *database.Database, gauge *prometheus.GaugeVec) error {
-	platforms := []string{flavorPlatform}
-	for _, platform := range platforms {
-		// Get all flavors for the platform
-		flavors, err := db.ListFlavors(ctx, platform)
-		if err != nil {
-			return err
-		}
-		if len(flavors) == 0 {
-			continue
-		}
-
-		// Extract flavor names
-		flavorNames := make([]string, 0, len(flavors))
-		for _, flavor := range flavors {
-			flavorNames = append(flavorNames, flavor.Name)
-		}
-
-		// Get pressures for the flavors
-		pressures, err := db.GetPressures(ctx, platform, flavorNames...)
-		if err != nil {
-			return err
-		}
-
-		// Set gauge labels in the format (platform, flavor) with pressure value
-		for _, flavor := range flavors {
-			pressureValue, ok := pressures[flavor.Name]
-			if !ok {
-				pressureValue = 0
-			}
-			gauge.WithLabelValues(platform, flavor.Name).Set(float64(pressureValue))
-		}
-	}
-	return nil
+	log.Println("Starting planner API server on port", port)
+	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(server, "planner-api", otelhttp.WithServerName("planner"))))
 }
