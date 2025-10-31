@@ -13,10 +13,11 @@ variable "base" {
   default     = "ubuntu@24.04"
 }
 
+# Change to latest/stable when available
 variable "channel" {
   description = "The channel to use when deploying a charm."
   type        = string
-  default     = "latest/edge" # change to latest/stable when available
+  default     = "latest/edge"
 }
 
 variable "config" {
