@@ -131,6 +131,11 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			expectedResponseMessage: "missing signature header",
 		},
 		{
+			name:                    "Short Signature",
+			signature:               "sha25",
+			expectedResponseMessage: "invalid signature",
+		},
+		{
 			name:                    "Missing Signature Header",
 			signature:               "",
 			expectedResponseMessage: "missing signature header",
