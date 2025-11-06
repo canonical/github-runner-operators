@@ -152,6 +152,9 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateSignature(message []byte, secret string, signature string) bool {
+	if len(signature) < len(WebhookSignaturePrefix) {
+		return false
+	}
 	signature_without_prefix := signature[len(WebhookSignaturePrefix):]
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(message)
