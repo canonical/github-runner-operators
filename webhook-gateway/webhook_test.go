@@ -12,6 +12,7 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"strings"
