@@ -155,10 +155,13 @@ func validateSignature(message []byte, secret string, signature string) bool {
 	if len(signature) < len(WebhookSignaturePrefix) {
 		return false
 	}
-	signature_without_prefix := signature[len(WebhookSignaturePrefix):]
+	if signature[:len(WebhookSignaturePrefix)] != WebhookSignaturePrefix {
+		return false
+	}
+	signatureWithoutPrefix := signature[len(WebhookSignaturePrefix):]
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(message)
-	sig, err := hex.DecodeString(signature_without_prefix)
+	sig, err := hex.DecodeString(signatureWithoutPrefix)
 	if err != nil {
 		return false
 	}

@@ -121,6 +121,11 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			expectedResponseMessage: "invalid signature",
 		},
 		{
+			name:                    "Wrong Prefix",
+			signature:               "mac256=" + valid_signature_header[len(WebhookSignaturePrefix):],
+			expectedResponseMessage: "invalid signature",
+		},
+		{
 			name:                    "Non ASCII Signature",
 			signature:               "非ASCII签名",
 			expectedResponseMessage: "invalid signature",
