@@ -12,7 +12,6 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"os"
 	"strings"
@@ -95,7 +94,7 @@ func createRequest(t *testing.T, payload string, secret string) *http.Request {
 func createSignature(message string, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write([]byte(message))
-	return hex.EncodeToString(h.Sum(nil))
+	return "sha256=" + hex.EncodeToString(h.Sum(nil))
 }
 
 func consumeMessage(t *testing.T, amqpUri string) string {
