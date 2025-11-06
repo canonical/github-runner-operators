@@ -21,7 +21,7 @@ import (
 const webhookPath = "/webhook"
 const payload = `{"message":"Hello, Alice!"}`
 const secret = "fake-secret"
-const valid_signature_header = "0aca2d7154cddad4f56f246cad61f1485df34b8056e10c4e4799494376fb3413" // HMAC SHA256 of body with secret "fake-secret"
+const valid_signature_header = "sha256=0aca2d7154cddad4f56f246cad61f1485df34b8056e10c4e4799494376fb3413" // HMAC SHA256 of body with secret "fake-secret"
 
 type FakeProducer struct {
 	Messages [][]byte

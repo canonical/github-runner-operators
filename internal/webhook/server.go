@@ -24,6 +24,7 @@ import (
 const (
 	WebhookSignatureHeader = "X-Hub-Signature-256"
 	bodyLimit              = 1048576
+	WebhookSignaturePrefix = "sha256="
 )
 
 type httpError struct {
@@ -151,9 +152,10 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateSignature(message []byte, secret string, signature string) bool {
+	signature_without_prefix := signature[len(WebhookSignaturePrefix):]
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(message)
-	sig, err := hex.DecodeString(signature)
+	sig, err := hex.DecodeString(signature_without_prefix)
 	if err != nil {
 		return false
 	}
