@@ -2,8 +2,9 @@
 # See LICENSE file for licensing details.
 
 locals {
-  webhook_gateway_app_name = "github-runner-webhook-gateway"
-  juju_model_name          = "stg-deploy-webhook-gateway"
+  webhook_gateway_app_name     = "github-runner-webhook-gateway"
+  webhook_gateway_metrics_port = 9464
+  juju_model_name              = "stg-deploy-webhook-gateway"
 }
 
 variable "channel" {
@@ -67,7 +68,7 @@ module "github_runner_webhook_gateway" {
   model_uuid = data.juju_model.webhook.uuid
   revision   = var.revision
   config = {
-    metrics-port = 9464
+    metrics-port = local.webhook_gateway_metrics_port
   }
 }
 
