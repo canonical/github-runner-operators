@@ -25,7 +25,7 @@ def test_rabbitmq_server_integration(
         data='{"message":"Hello, Alice!"}',
         headers={
             "Content-Type": "application/json",
-            "X-Hub-Signature-256": "0aca2d7154cddad4f56f246cad61f1485df"
+            "X-Hub-Signature-256": "sha256=0aca2d7154cddad4f56f246cad61f1485df"
             "34b8056e10c4e4799494376fb3413",
         },
     )
