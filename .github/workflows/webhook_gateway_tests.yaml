@@ -67,4 +67,3 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
-      tmate-debug: true

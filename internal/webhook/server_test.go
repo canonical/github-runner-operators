@@ -21,7 +21,7 @@ import (
 const webhookPath = "/webhook"
 const payload = `{"message":"Hello, Alice!"}`
 const secret = "fake-secret"
-const valid_signature_header = "0aca2d7154cddad4f56f246cad61f1485df34b8056e10c4e4799494376fb3413" // HMAC SHA256 of body with secret "fake-secret"
+const valid_signature_header = "sha256=0aca2d7154cddad4f56f246cad61f1485df34b8056e10c4e4799494376fb3413" // HMAC SHA256 of body with secret "fake-secret"
 
 type FakeProducer struct {
 	Messages [][]byte
@@ -121,6 +121,11 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			expectedResponseMessage: "invalid signature",
 		},
 		{
+			name:                    "Wrong Prefix",
+			signature:               "mac256=" + valid_signature_header[len(WebhookSignaturePrefix):],
+			expectedResponseMessage: "invalid signature",
+		},
+		{
 			name:                    "Non ASCII Signature",
 			signature:               "非ASCII签名",
 			expectedResponseMessage: "invalid signature",
@@ -129,6 +134,11 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			name:                    "Empty Signature",
 			signature:               "",
 			expectedResponseMessage: "missing signature header",
+		},
+		{
+			name:                    "Short Signature",
+			signature:               "sha25",
+			expectedResponseMessage: "invalid signature",
 		},
 		{
 			name:                    "Missing Signature Header",
