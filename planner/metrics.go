@@ -37,7 +37,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return m
 }
 
-// setFlavorPressure updates the gauge value for a given platform and flavor.
+// SetFlavorPressure updates the gauge value for a given platform and flavor.
 func (m *Metrics) SetFlavorPressure(platform, flavor string, value float64) {
 	m.flavorPressure.With(prometheus.Labels{
 		"platform": platform,
