@@ -13,23 +13,37 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
 	"github.com/canonical/github-runner-operators/internal/database"
-	"github.com/canonical/github-runner-operators/planner"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/canonical/github-runner-operators/internal/planner"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
+	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const dbURI = "POSTGRESQL_DB_CONNECT_STRING"
-const portEnvVar = "POSTGRESQL_DB_PORT"
-const metricsPath = "/metrics"
-const metricsPort = "9388"
+const (
+	dbURI       = "POSTGRESQL_DB_CONNECT_STRING"
+	portEnvVar  = "POSTGRESQL_DB_PORT"
+	serviceName = "github-runner-planner"
+)
 
 func main() {
 	ctx := context.Background()
+
+	// Initialize telemetry
+	err := telemetry.Start(ctx, serviceName, version.String())
+	if err != nil {
+		log.Fatalf("failed to start telemetry: %v", err)
+	}
+	defer func() {
+		err := telemetry.Shutdown(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to shutdown telemetry", "error", err)
+		}
+	}()
 
 	// Load environment variables
 	uri, found := os.LookupEnv(dbURI)
@@ -48,21 +62,12 @@ func main() {
 		log.Fatalln("Failed to connect to db:", err)
 	}
 
-	// Create a non-global Prometheus registry
-	reg := prometheus.NewRegistry()
-	metrics := planner.NewMetrics(reg)
+	metrics := planner.NewMetrics()
 	if err := metrics.PopulateExistingFlavors(ctx, db); err != nil {
 		log.Println("Failed to populate existing flavors metrics:", err)
 	}
 
 	server := planner.NewServer(db, metrics)
-
-	go func() {
-		muxMetrics := http.NewServeMux()
-		muxMetrics.Handle(metricsPath, promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
-		log.Println("Starting metrics server on port", metricsPort)
-		log.Fatal(http.ListenAndServe(":"+metricsPort, muxMetrics))
-	}()
 
 	log.Println("Starting planner API server on port", port)
 	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(server, "planner-api", otelhttp.WithServerName("planner"))))

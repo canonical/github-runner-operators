@@ -11,18 +11,20 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type contextKey string
 
 const tokenNameKey contextKey = "tokenName"
-const createFlavorPattern = "POST /api/v1/flavors/{name}"
+const createFlavorPattern = "/api/v1/flavors/{name}"
 
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
 type FlavorStore interface {
@@ -44,7 +46,7 @@ func NewServer(store FlavorStore, metrics *Metrics) *Server {
 	s := &Server{store: store, mux: http.NewServeMux(), metrics: metrics}
 
 	// Register routes
-	s.mux.Handle(createFlavorPattern, s.AuthMiddleware(http.HandlerFunc(s.createFlavor)))
+	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, s.AuthMiddleware(http.HandlerFunc(s.createFlavor))))
 
 	return s
 }
@@ -72,9 +74,11 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		name, err := s.store.VerifyAuthToken(r.Context(), [32]byte(tokenBytes))
+		var tokenArr [32]byte
+		copy(tokenArr[:], tokenBytes)
+		name, err := s.store.VerifyAuthToken(r.Context(), tokenArr)
 		if err != nil {
-			if err == database.ErrNotExist {
+			if errors.Is(err, database.ErrNotExist) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -119,15 +123,12 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.store.AddFlavor(r.Context(), flavor)
-	if err == nil {
+	if err == nil || errors.Is(err, database.ErrExist) {
 		s.updateMetrics(r.Context(), flavor)
 		w.WriteHeader(http.StatusCreated)
 		return
 	}
-	if err == database.ErrExist {
-		http.Error(w, "flavor already exists", http.StatusConflict)
-		return
-	}
+
 	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
 }
 
@@ -141,5 +142,5 @@ func (s *Server) updateMetrics(ctx context.Context, flavor *database.Flavor) {
 	if !ok {
 		pressureValue = 0
 	}
-	s.metrics.SetFlavorPressure(flavor.Platform, flavor.Name, float64(pressureValue))
+	s.metrics.ObserveFlavorPressure(flavor.Platform, flavor.Name, int64(pressureValue))
 }
