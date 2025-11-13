@@ -1,19 +1,35 @@
 name: Webhook Gateway Integration Tests
 on:
     pull_request:
-        paths:
-          - 'webhook-gateway/**'
-          - 'internal/**'
-          - '.github/workflows/webhook_gateway_tests.yaml'
     workflow_call:
 
 concurrency:
   group:  ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      webhook-gateway: ${{ steps.filter.outputs.webhook-gateway }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            webhook-gateway:
+              - 'webhook-gateway/**'
+              - 'internal/**'
+              - '.github/workflows/webhook_gateway_tests.yaml'
+
   integration-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.webhook-gateway == 'true'
     runs-on: [self-hosted-linux-amd64-noble-edge]
     name: Run Integration Tests
     steps:
@@ -55,6 +71,8 @@ jobs:
 
 
   charm-integration-tests:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.webhook-gateway == 'true'
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
 
@@ -63,7 +81,39 @@ jobs:
       self-hosted-runner-label: "edge"
       juju-channel: 3.6/stable
       provider: microk8s
+      microk8s-addons: "dns ingress rbac storage registry"
       channel: 1.34-strict
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
+      upload-image: ${{ startsWith(github.head_ref,  'copilot/') && 'artifact' || '' }}
+
+
+  integration-status-check:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, integration-test, charm-integration-tests]
+    if: always()
+    steps:
+      - name: Check integration test results
+        run: |
+          # If tests were skipped because no changes, that's success
+          if [ "${{ needs.detect-changes.outputs.webhook-gateway }}" != "true" ]; then
+            echo "No webhook-gateway changes detected, skipping tests is expected"
+            exit 0
+          fi
+
+          # If tests ran, check their results
+          integration_result="${{ needs.integration-test.result }}"
+          charm_result="${{ needs.charm-integration-tests.result }}"
+
+          echo "Integration test result: $integration_result"
+          echo "Charm integration test result: $charm_result"
+
+          # Fail if any test that ran actually failed (not skipped)
+          if [ "$integration_result" = "failure" ] || [ "$charm_result" = "failure" ]; then
+            echo "One or more integration tests failed"
+            exit 1
+          fi
+
+          echo "All integration tests passed or were skipped appropriately"
+          exit 0
