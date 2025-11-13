@@ -85,7 +85,7 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
-      upload-image: ${{ startsWith(github.ref,  'refs/heads/copilot/') && 'artifact' || '' }}
+      upload-image: ${{ startsWith(github.head_ref,  'copilot/') && 'artifact' || '' }}
 
 
   integration-status-check:
