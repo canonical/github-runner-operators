@@ -38,32 +38,54 @@ var (
 
 // Metrics encapsulates all OpenTelemetry metrics for the planner service.
 type Metrics struct {
-	mu        sync.RWMutex
-	pressures map[[2]string]int64 // key is [platform, flavor]
+	mu    sync.RWMutex
+	store FlavorStore
 }
 
 // NewMetrics initializes the planner metrics and registers the observable gauge.
-func NewMetrics() *Metrics {
+func NewMetrics(store FlavorStore) *Metrics {
 	m := &Metrics{
-		pressures: make(map[[2]string]int64),
+		store: store,
 	}
 
 	must(
 		meter.RegisterCallback(
-			func(_ context.Context, observer metric.Observer) error {
+			func(ctx context.Context, observer metric.Observer) error {
 				m.mu.RLock()
 				defer m.mu.RUnlock()
 
-				for key, value := range m.pressures {
-					platform, flavor := key[0], key[1]
-					observer.ObserveInt64(
-						flavorPressureMetric,
-						value,
-						metric.WithAttributes(
-							attribute.String("platform", platform),
-							attribute.String("flavor", flavor),
-						),
-					)
+				// Pressure value is read directly from database at collection time
+				// Performance should not be an issue since metics scraping typically occurs every 5-60 secods.
+				platforms := []string{flavorPlatform}
+				for _, platform := range platforms {
+					flavors, err := m.store.ListFlavors(ctx, platform)
+					if err != nil {
+						logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
+						continue
+					}
+					if len(flavors) == 0 {
+						continue
+					}
+					names := make([]string, 0, len(flavors))
+					for _, f := range flavors {
+						names = append(names, f.Name)
+					}
+					pressures, err := m.store.GetPressures(ctx, platform, names...)
+					if err != nil {
+						logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
+						continue
+					}
+					for _, f := range flavors {
+						v := pressures[f.Name]
+						observer.ObserveInt64(
+							flavorPressureMetric,
+							int64(v),
+							metric.WithAttributes(
+								attribute.String("platform", platform),
+								attribute.String("flavor", f.Name),
+							),
+						)
+					}
 				}
 				return nil
 			},
@@ -72,51 +94,4 @@ func NewMetrics() *Metrics {
 	)
 
 	return m
-}
-
-// ObserveFlavorPressure updates the gauge value for a given platform and flavor.
-func (m *Metrics) ObserveFlavorPressure(platform, flavor string, value int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.pressures[[2]string{platform, flavor}] = value
-}
-
-// PopulateExistingFlavors initializes the flavor pressure gauge with existing flavors from the database.
-func (m *Metrics) PopulateExistingFlavors(ctx context.Context, store FlavorStore) error {
-	platforms := []string{flavorPlatform}
-	for _, platform := range platforms {
-		// Get all flavors for the platform
-		flavors, err := store.ListFlavors(ctx, platform)
-		if err != nil {
-			return err
-		}
-		if len(flavors) == 0 {
-			continue
-		}
-
-		// Extract flavor names
-		flavorNames := make([]string, 0, len(flavors))
-		for _, flavor := range flavors {
-			flavorNames = append(flavorNames, flavor.Name)
-		}
-
-		// Get pressures for the flavors
-		pressures, err := store.GetPressures(ctx, platform, flavorNames...)
-		if err != nil {
-			return err
-		}
-
-		// Set gauge labels in the format (platform, flavor) with pressure value
-		for _, flavor := range flavors {
-			pressureValue, ok := pressures[flavor.Name]
-			if !ok {
-				pressureValue = 0
-			}
-			m.ObserveFlavorPressure(platform, flavor.Name, int64(pressureValue))
-		}
-	}
-
-	logger.Info("initialized flavor pressure metrics", "entries", len(m.pressures))
-	return nil
 }

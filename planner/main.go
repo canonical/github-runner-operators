@@ -62,11 +62,7 @@ func main() {
 		log.Fatalln("failed to connect to db:", err)
 	}
 
-	metrics := planner.NewMetrics()
-	if err := metrics.PopulateExistingFlavors(ctx, db); err != nil {
-		log.Println("failed to populate existing flavors metrics:", err)
-	}
-
+	metrics := planner.NewMetrics(db)
 	server := planner.NewServer(db, metrics)
 
 	log.Println("Starting planner API server on port", port)

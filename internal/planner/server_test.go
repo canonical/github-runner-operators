@@ -48,6 +48,9 @@ func (f *fakeStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string
 }
 
 func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
+	if f.lastFlavor != nil && f.lastFlavor.Platform == platform {
+		return []database.Flavor{*f.lastFlavor}, nil
+	}
 	return []database.Flavor{}, nil
 }
 
@@ -75,7 +78,7 @@ func TestCreateFlavor_shouldSucceed(t *testing.T) {
 		assert: 201 response and flavor stored in fake store
 	*/
 	store := &fakeStore{tokenIsValid: true}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	body := `{"platform":"github","labels":["x64"],"priority":2}`
@@ -96,7 +99,7 @@ func TestCreateFlavor_shouldSucceedWhenAlreadyExists(t *testing.T) {
 		assert: 201 response and flavor stored in fake store
 	*/
 	store := &fakeStore{errToReturn: database.ErrExist, tokenIsValid: true}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	req := newRequest(http.MethodPost, "/api/v1/flavors/existing-flavor", `{"platform":"github"}`, token)
@@ -122,7 +125,7 @@ func TestCreateFlavor_shouldFailOnInvalidJSON(t *testing.T) {
 		assert: 400 response
 	*/
 	store := &fakeStore{tokenIsValid: true}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	req := newRequest(http.MethodPost, "/api/v1/flavors/test", `{invalid-json}`, token)
@@ -142,7 +145,7 @@ func TestCreateFlavor_shouldFailWhenNameMissing(t *testing.T) {
 		assert: 404 response
 	*/
 	store := &fakeStore{tokenIsValid: true}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	req := newRequest(http.MethodPost, "/api/v1/flavors/", `{"platform":"github"}`, token)
@@ -162,7 +165,7 @@ func TestCreateFlavor_shouldFailUnauthorizedWhenTokenInvalid(t *testing.T) {
 		assert: 401 response
 	*/
 	store := &fakeStore{tokenIsValid: false}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	req := newRequest(http.MethodPost, "/api/v1/flavors/test", `{"platform":"github"}`, token)
@@ -182,7 +185,7 @@ func TestCreateFlavor_shouldFailForNonPostMethod(t *testing.T) {
 		assert: 405 response
 	*/
 	store := &fakeStore{tokenIsValid: true}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	req := newRequest(http.MethodGet, "/api/v1/flavors/test", `{"platform":"github"}`, token)
@@ -206,7 +209,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	store := &fakeStore{tokenIsValid: true}
-	server := NewServer(store, NewMetrics())
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	body := `{"platform": "github", "labels": ["self-hosted", "amd64"], "priority": 300}`
@@ -221,49 +224,6 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	// Collect and assert metric
 	tm := r.Collect(t)
 	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "test-flavor", 1)
-}
-
-// Define a custom fake store with only needed methods
-type populateFlavorsTestStore struct {
-	fakeStore
-}
-
-func (s *populateFlavorsTestStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
-	return []database.Flavor{
-		{Name: "small", Platform: "github"},
-		{Name: "medium", Platform: "github"},
-		{Name: "large", Platform: "github"},
-	}, nil
-}
-
-func (s *populateFlavorsTestStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
-	return map[string]int{
-		"small":  5,
-		"medium": 10,
-		"large":  20,
-	}, nil
-}
-
-func TestPopulateExistingFlavors_shouldRecordMetricsForExistingFlavors(t *testing.T) {
-	/*
-		arrange: fake store with multiple existing flavors and pressures
-		act: populate metrics using PopulateExistingFlavors
-		assert: gauge metric has correct datapoints with labels [platform, flavor] and correct pressures
-	*/
-	r := telemetry.AcquireTestMetricReader(t)
-	defer telemetry.ReleaseTestMetricReader(t)
-	ctx := context.Background()
-
-	store := &populateFlavorsTestStore{}
-	metrics := NewMetrics()
-
-	err := metrics.PopulateExistingFlavors(ctx, store)
-	assert.NoError(t, err, "PopulateExistingFlavors should succeed")
-
-	tm := r.Collect(t)
-	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "small", 5)
-	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "medium", 10)
-	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "large", 20)
 }
 
 // assertMetricObservedWithLabels checks if the specified metric has a datapoint with the expected value

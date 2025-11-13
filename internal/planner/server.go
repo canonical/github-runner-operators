@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 
@@ -124,23 +123,9 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 
 	err := s.store.AddFlavor(r.Context(), flavor)
 	if err == nil || errors.Is(err, database.ErrExist) {
-		s.updateMetrics(r.Context(), flavor)
 		w.WriteHeader(http.StatusCreated)
 		return
 	}
 
 	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
-}
-
-func (s *Server) updateMetrics(ctx context.Context, flavor *database.Flavor) {
-	pressure, err := s.store.GetPressures(ctx, flavor.Platform, flavor.Name)
-	if err != nil {
-		log.Printf("failed to fetch pressure for flavor %s: %v", flavor.Name, err)
-		return
-	}
-	pressureValue, ok := pressure[flavor.Name]
-	if !ok {
-		pressureValue = 0
-	}
-	s.metrics.ObserveFlavorPressure(flavor.Platform, flavor.Name, int64(pressureValue))
 }

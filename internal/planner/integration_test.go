@@ -46,7 +46,7 @@ func TestCreateFlavorIntegration(t *testing.T) {
 	const flavorName = "it-flavor"
 	_ = db.DeleteFlavor(ctx, platform, flavorName)
 
-	metrics := NewMetrics()
+	metrics := NewMetrics(db)
 	srv := NewServer(db, metrics)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
