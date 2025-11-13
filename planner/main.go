@@ -59,12 +59,12 @@ func main() {
 	// Connect to database and create server
 	db, err := database.New(ctx, uri)
 	if err != nil {
-		log.Fatalln("Failed to connect to db:", err)
+		log.Fatalln("failed to connect to db:", err)
 	}
 
 	metrics := planner.NewMetrics()
 	if err := metrics.PopulateExistingFlavors(ctx, db); err != nil {
-		log.Println("Failed to populate existing flavors metrics:", err)
+		log.Println("failed to populate existing flavors metrics:", err)
 	}
 
 	server := planner.NewServer(db, metrics)

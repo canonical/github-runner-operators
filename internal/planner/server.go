@@ -135,7 +135,7 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateMetrics(ctx context.Context, flavor *database.Flavor) {
 	pressure, err := s.store.GetPressures(ctx, flavor.Platform, flavor.Name)
 	if err != nil {
-		log.Printf("Failed to fetch pressure for flavor %s: %v", flavor.Name, err)
+		log.Printf("failed to fetch pressure for flavor %s: %v", flavor.Name, err)
 		return
 	}
 	pressureValue, ok := pressure[flavor.Name]
