@@ -82,6 +82,11 @@ The code structure is as follows
 - `webhook-gateway`: The webhook gateway application and charm code
 
 
+### Style & GitHub Copilot
+
+We like to follow idomatic Go practices and community standards when writing Go code.
+We have added an instruction file `go.instructions.md` in `.github/instructions.md` that is used by GitHub Copilot to help you write code that follows these practices.
+
 ### Test
 
 This project uses standard Go testing tools for unit tests and integration tests.
