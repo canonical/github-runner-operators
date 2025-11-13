@@ -55,7 +55,7 @@ func NewMetrics(store FlavorStore) *Metrics {
 				defer m.mu.RUnlock()
 
 				// Pressure value is read directly from database at collection time
-				// Performance should not be an issue since metics scraping typically occurs every 5-60 secods.
+				// Performance should not be an issue since metrics scraping typically occurs every 5-60 seconds.
 				platforms := []string{flavorPlatform}
 				for _, platform := range platforms {
 					flavors, err := m.store.ListFlavors(ctx, platform)
