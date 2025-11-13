@@ -81,6 +81,7 @@ jobs:
       self-hosted-runner-label: "edge"
       juju-channel: 3.6/stable
       provider: microk8s
+      microk8s-addons: "dns ingress rbac storage registry"
       channel: 1.34-strict
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
