@@ -57,6 +57,8 @@ jobs:
   charm-integration-tests:
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
+    permissions:
+      packages: write
 
     with:
       self-hosted-runner: true
