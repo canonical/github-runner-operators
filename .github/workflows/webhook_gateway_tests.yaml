@@ -1,15 +1,14 @@
 name: Webhook Gateway Integration Tests
 on:
-    pull_request:
-    workflow_call:
+  pull_request:
+  workflow_call:
 
 concurrency:
-  group:  ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-
 
 jobs:
   detect-changes:
@@ -69,12 +68,13 @@ jobs:
           - 5672:5672
           - 15672:15672
 
-
   charm-integration-tests:
     needs: detect-changes
     if: needs.detect-changes.outputs.webhook-gateway == 'true'
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
+    permissions:
+      packages: write
 
     with:
       self-hosted-runner: true
@@ -87,7 +87,6 @@ jobs:
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
       upload-image: ${{ startsWith(github.head_ref,  'copilot/') && 'artifact' || '' }}
-
 
   integration-status-check:
     runs-on: ubuntu-latest
