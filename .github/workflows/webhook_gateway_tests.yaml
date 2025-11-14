@@ -31,7 +31,7 @@ jobs:
             sleep 2
           done
 
-      - name: Build and Test
+      - name: Build and Test Test
         env:
           POSTGRESQL_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
