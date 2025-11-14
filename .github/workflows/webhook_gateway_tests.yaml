@@ -75,6 +75,8 @@ jobs:
     if: needs.detect-changes.outputs.webhook-gateway == 'true'
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
+    permissions:
+      packages: write
 
     with:
       self-hosted-runner: true
