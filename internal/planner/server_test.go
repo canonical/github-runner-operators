@@ -92,11 +92,11 @@ func TestCreateFlavor_shouldSucceed(t *testing.T) {
 	assert.Equal(t, "github", store.lastFlavor.Platform)
 }
 
-func TestCreateFlavor_shouldSucceedWhenAlreadyExists(t *testing.T) {
+func TestCreateFlavor_shouldFailWhenAlreadyExists(t *testing.T) {
 	/*
 		arrange: a store returning database.ErrExist and valid auth token
 		act: create flavor via HTTP request
-		assert: 201 response and flavor stored in fake store
+		assert: 409 response and flavor stored in fake store
 	*/
 	store := &fakeStore{errToReturn: database.ErrExist, tokenIsValid: true}
 	server := NewServer(store, NewMetrics(store))
@@ -107,15 +107,9 @@ func TestCreateFlavor_shouldSucceedWhenAlreadyExists(t *testing.T) {
 
 	server.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Errorf("expected status 201, got %d", w.Code)
-	}
-	if store.lastFlavor.Name != "existing-flavor" {
-		t.Errorf("expected flavor name 'existing-flavor', got %q", store.lastFlavor.Name)
-	}
-	if store.lastFlavor.Platform != "github" {
-		t.Errorf("expected platform 'github', got %q", store.lastFlavor.Platform)
-	}
+	assert.Equal(t, http.StatusConflict, w.Code, "expected status 409 Conflict")
+	assert.Equal(t, "existing-flavor", store.lastFlavor.Name)
+	assert.Equal(t, "github", store.lastFlavor.Platform)
 }
 
 func TestCreateFlavor_shouldFailOnInvalidJSON(t *testing.T) {
@@ -133,9 +127,7 @@ func TestCreateFlavor_shouldFailOnInvalidJSON(t *testing.T) {
 
 	server.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for invalid JSON, got %d", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code, "expected status 400 Bad Request")
 }
 
 func TestCreateFlavor_shouldFailWhenNameMissing(t *testing.T) {
@@ -153,9 +145,7 @@ func TestCreateFlavor_shouldFailWhenNameMissing(t *testing.T) {
 
 	server.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404 missing name, got %d", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "expected 404 Not Found")
 }
 
 func TestCreateFlavor_shouldFailUnauthorizedWhenTokenInvalid(t *testing.T) {
@@ -173,9 +163,7 @@ func TestCreateFlavor_shouldFailUnauthorizedWhenTokenInvalid(t *testing.T) {
 
 	server.ServeHTTP(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized, got %d", w.Code)
-	}
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "expected 401 Unauthorized")
 }
 
 func TestCreateFlavor_shouldFailForNonPostMethod(t *testing.T) {
@@ -193,9 +181,7 @@ func TestCreateFlavor_shouldFailForNonPostMethod(t *testing.T) {
 
 	server.ServeHTTP(w, req)
 
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405 for GET, got %d", w.Code)
-	}
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code, "expected 405 Method Not Allowed")
 }
 
 func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {

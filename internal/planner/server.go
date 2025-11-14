@@ -122,8 +122,13 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.store.AddFlavor(r.Context(), flavor)
-	if err == nil || errors.Is(err, database.ErrExist) {
+	if err == nil {
 		w.WriteHeader(http.StatusCreated)
+		return
+	}
+
+	if errors.Is(err, database.ErrExist) {
+		http.Error(w, "flavor already exists", http.StatusConflict)
 		return
 	}
 
