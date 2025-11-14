@@ -5,14 +5,27 @@ name: Terraform module tests (webhook-gateway)
 
 on:
   pull_request:
-    paths:
-      - "**/terraform/**"
 
 permissions:
   contents: read
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            terraform:
+              - "**/terraform/**"
+
   test-terraform:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.terraform == 'true'
     name: Test Terraform with Juju
     runs-on: ubuntu-latest
     env:
@@ -53,3 +66,30 @@ jobs:
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform test
         working-directory: ${{env.WORKING_DIR}}
+
+  terraform-status-check:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-terraform]
+    if: always()
+    steps:
+      - name: Check terraform test results
+        run: |
+          # If tests were skipped because no changes, that's success
+          if [ "${{ needs.detect-changes.outputs.terraform }}" != "true" ]; then
+            echo "No terraform changes detected, skipping tests is expected"
+            exit 0
+          fi
+
+          # If tests ran, check their results
+          test_result="${{ needs.test-terraform.result }}"
+
+          echo "Terraform test result: $test_result"
+
+          # Fail if test that ran actually failed (not skipped)
+          if [ "$test_result" = "failure" ]; then
+            echo "Terraform tests failed"
+            exit 1
+          fi
+
+          echo "Terraform tests passed or were skipped appropriately"
+          exit 0
