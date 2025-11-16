@@ -23,7 +23,10 @@ jobs:
           filters: |
             webhook-gateway:
               - 'webhook-gateway/**'
-              - 'internal/**'
+              - 'internal/migrations/**'
+              - 'internal/queue/**'
+              - 'internal/telemetry/**'
+              - 'internal/webhook/**'
               - '.github/workflows/webhook_gateway_tests.yaml'
 
   integration-test:

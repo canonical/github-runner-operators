@@ -23,7 +23,7 @@ jobs:
           filters: |
             planner:
               - 'planner/**'
-              - 'internal/**'
+              - 'internal/planner/**'
               - '.github/workflows/planner_tests.yaml'
   integration-test:
     needs: detect-changes
