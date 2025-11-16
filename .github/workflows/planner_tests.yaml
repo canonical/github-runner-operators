@@ -14,7 +14,7 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      planner: ${{ steps.filter.outputs.webhook-gateway }}
+      planner: ${{ steps.filter.outputs.planner }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
