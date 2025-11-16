@@ -15,12 +15,8 @@ import (
 )
 
 // TestCreateFlavorIntegration exercises the full HTTP path against a real Postgres database.
-// It requires TEST_DATABASE_URI to be set (postgres://...); otherwise it will be skipped.
 func TestCreateFlavorIntegration(t *testing.T) {
-	uri := os.Getenv("TEST_DATABASE_URI")
-	if uri == "" {
-		t.Skip("TEST_DATABASE_URI not set; skipping integration test")
-	}
+	uri := os.Getenv("POSTGRESQL_DB_CONNECT_STRING")
 
 	ctx := context.Background()
 
