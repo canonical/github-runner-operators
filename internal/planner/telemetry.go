@@ -1,3 +1,10 @@
+/*
+ * Copyright 2025 Canonical Ltd.
+ * See LICENSE file for licensing details.
+ *
+ * Package planner provides OpenTelemetry metrics for the planner service.
+ */
+
 package planner
 
 import (
