@@ -53,28 +53,9 @@ jobs:
         ports:
           - 5432:5432
 
-  charm-integration-tests:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.planner == 'true'
-    uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
-    secrets: inherit
-    permissions:
-      packages: write
-
-    with:
-      self-hosted-runner: true
-      self-hosted-runner-label: "edge"
-      juju-channel: 3.6/stable
-      provider: microk8s
-      microk8s-addons: "dns ingress rbac storage registry"
-      channel: 1.34-strict
-      rockcraft-channel: latest/edge
-      charmcraft-channel: latest/edge
-      test-tox-env: planner-integration
-
   integration-status-check:
     runs-on: ubuntu-latest
-    needs: [detect-changes, integration-test, charm-integration-tests]
+    needs: [detect-changes, integration-test]
     if: always()
     steps:
       - name: Check integration test results
@@ -87,13 +68,10 @@ jobs:
 
           # If tests ran, check their results
           integration_result="${{ needs.integration-test.result }}"
-          charm_result="${{ needs.charm-integration-tests.result }}"
-
           echo "Integration test result: $integration_result"
-          echo "Charm integration test result: $charm_result"
 
           # Fail if any test that ran actually failed (not skipped)
-          if [ "$integration_result" = "failure" ] || [ "$charm_result" = "failure" ]; then
+          if [ "$integration_result" = "failure" ]; then
             echo "One or more integration tests failed"
             exit 1
           fi

@@ -80,6 +80,7 @@ The code structure is as follows
 
 - `internal/`: Internal libraries for the applications
 - `webhook-gateway`: The webhook gateway application and charm code
+- `planner`: The planner application code
 
 
 ### Test
@@ -105,6 +106,13 @@ You can use `docker` to run a RabbitMQ server locally:
 ```shell
 docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
 ```
+
+Run `planner` integration tests using:
+```shell
+POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" POSTGRESQL_DB_PORT=8080 go test ./planner -v -count=1
+```
+
+It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
 
 ### Charm development
 

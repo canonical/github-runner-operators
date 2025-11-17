@@ -22,9 +22,8 @@ import (
 )
 
 type fakeStore struct {
-	lastFlavor   *database.Flavor
-	tokenIsValid bool
-	errToReturn  error
+	lastFlavor  *database.Flavor
+	errToReturn error
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -38,13 +37,6 @@ func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors .
 		res[name] = 1
 	}
 	return res, nil
-}
-
-func (f *fakeStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
-	if f.tokenIsValid {
-		return "validTokenName", nil
-	}
-	return "", database.ErrNotExist
 }
 
 func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
@@ -77,7 +69,7 @@ func TestCreateFlavor_shouldSucceed(t *testing.T) {
 		act: create flavor via HTTP request
 		assert: 201 response and flavor stored in fake store
 	*/
-	store := &fakeStore{tokenIsValid: true}
+	store := &fakeStore{}
 	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
@@ -98,7 +90,7 @@ func TestCreateFlavor_shouldFailWhenAlreadyExists(t *testing.T) {
 		act: create flavor via HTTP request
 		assert: 409 response and flavor stored in fake store
 	*/
-	store := &fakeStore{errToReturn: database.ErrExist, tokenIsValid: true}
+	store := &fakeStore{errToReturn: database.ErrExist}
 	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
@@ -118,7 +110,7 @@ func TestCreateFlavor_shouldFailOnInvalidJSON(t *testing.T) {
 		act: create flavor with invalid JSON via HTTP request
 		assert: 400 response
 	*/
-	store := &fakeStore{tokenIsValid: true}
+	store := &fakeStore{}
 	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
@@ -136,7 +128,7 @@ func TestCreateFlavor_shouldFailWhenNameMissing(t *testing.T) {
 		act: create flavor without name via HTTP request
 		assert: 404 response
 	*/
-	store := &fakeStore{tokenIsValid: true}
+	store := &fakeStore{}
 	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
@@ -148,31 +140,13 @@ func TestCreateFlavor_shouldFailWhenNameMissing(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code, "expected 404 Not Found")
 }
 
-func TestCreateFlavor_shouldFailUnauthorizedWhenTokenInvalid(t *testing.T) {
-	/*
-		arrange: a fake store that invalidates tokens
-		act: create flavor via HTTP request with invalid token
-		assert: 401 response
-	*/
-	store := &fakeStore{tokenIsValid: false}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
-
-	req := newRequest(http.MethodPost, "/api/v1/flavors/test", `{"platform":"github"}`, token)
-	w := httptest.NewRecorder()
-
-	server.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "expected 401 Unauthorized")
-}
-
 func TestCreateFlavor_shouldFailForNonPostMethod(t *testing.T) {
 	/*
 		arrange: a fake store that succeeds and valid auth token
 		act: create flavor via HTTP GET request
 		assert: 405 response
 	*/
-	store := &fakeStore{tokenIsValid: true}
+	store := &fakeStore{}
 	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
@@ -194,7 +168,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	r := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
 
-	store := &fakeStore{tokenIsValid: true}
+	store := &fakeStore{}
 	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
