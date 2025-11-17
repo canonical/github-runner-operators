@@ -24,7 +24,7 @@ func TestMain_CreateFlavor(t *testing.T) {
 	/*
 		arrange: server is listening on the configured port and prepare request payload
 		act: send create flavor request
-		assert: expected status code to be either Created (first time) or Conflict (already exists)
+		assert: 201 Created and flavor exists in database with expected fields
 	*/
 	go main()
 	waitForHTTP(t, "http://localhost:8080/api/v1/flavors/", 10*time.Second)
@@ -100,7 +100,6 @@ func checkAndCleanupDatabaseFlavor(t *testing.T, flavor, platform string, labels
 			if f.Priority != priority {
 				t.Fatalf("unexpected priority: %d", f.Priority)
 			}
-			// labels are stored as []string; order should be preserved as sent
 			if len(f.Labels) != len(labels) || f.Labels[0] != labels[0] || f.Labels[1] != labels[1] {
 				t.Fatalf("unexpected labels: %#v", f.Labels)
 			}
