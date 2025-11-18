@@ -81,7 +81,7 @@ func checkAndCleanupDatabaseFlavor(t *testing.T, flavor, platform string, labels
 	ctx := context.Background()
 	db := applyMigrationAndConnectDB(t, ctx)
 
-	verifyFlavorExistsInDB(t, db, flavor, platform, labels, priority)
+	verifyFlavorExistsInDB(t, ctx, db, flavor, platform, labels, priority)
 
 	// Cleanup
 	_ = db.DeleteFlavor(ctx, platform, flavor)
@@ -103,7 +103,7 @@ func applyMigrationAndConnectDB(t *testing.T, ctx context.Context) *database.Dat
 
 // verifyFlavorExistsInDB checks that the specified flavor exists in the database
 // with the expected labels and priority.
-func verifyFlavorExistsInDB(t *testing.T, db *database.Database, flavor, platform string, labels []string, priority int) {
+func verifyFlavorExistsInDB(t *testing.T, ctx context.Context, db *database.Database, flavor, platform string, labels []string, priority int) {
 	flavors, err := db.ListFlavors(ctx, platform)
 	if err != nil {
 		t.Fatalf("list flavors: %v", err)
