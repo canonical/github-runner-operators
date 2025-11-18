@@ -29,7 +29,8 @@ func TestMain_CreateFlavor(t *testing.T) {
 		assert: 201 Created and flavor exists in database with expected fields
 	*/
 	go main()
-	waitForHTTP(t, "http://localhost:8000/api/v1/flavors/", 10*time.Second)
+	port := os.Getenv("APP_PORT")
+	waitForHTTP(t, "http://localhost:"+port+"/api/v1/flavors/", 10*time.Second)
 
 	platform := "github"
 	labels := []string{"self-hosted", "amd64"}
@@ -46,7 +47,7 @@ func TestMain_CreateFlavor(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	resp, err := http.Post("http://localhost:8000/api/v1/flavors/"+flavor, "application/json", bytes.NewReader(b))
+	resp, err := http.Post("http://localhost:"+port+"/api/v1/flavors/"+flavor, "application/json", bytes.NewReader(b))
 	if err != nil {
 		t.Fatalf("do request: %v", err)
 	}

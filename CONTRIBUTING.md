@@ -107,7 +107,7 @@ docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-manag
 Run `planner` integration tests using:
 
 ```shell
-POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" SERVER_PORT=8000 go test ./planner -v -count=1
+POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" APP_PORT=8080 go test ./planner -v -count=1
 ```
 
 It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
