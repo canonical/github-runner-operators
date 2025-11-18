@@ -288,7 +288,7 @@ Follow idiomatic Go practices and community standards when writing Go code. Thes
 ### Writing Tests
 
 - Use table-driven tests for multiple test cases
-- Name tests descriptively using `Test_functionName_scenario`
+- Name tests descriptively using `TestFunctionNameScenario`
 - Use subtests with `t.Run` for better organization
 - Test both success and error cases
 - Consider using `testify` or similar libraries when they add value, but don't over-complicate simple tests
