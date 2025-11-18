@@ -1,4 +1,4 @@
-name: Tests
+name: Internal Packages Tests
 
 on:
   pull_request:
@@ -9,8 +9,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-test:
-    name: Run Unit and Lint Tests
+  test:
+    name: Test Internal Packages
     runs-on: [self-hosted-linux-amd64-noble-edge]
 
     steps:
