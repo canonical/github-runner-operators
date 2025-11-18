@@ -54,7 +54,7 @@ jobs:
           APP_PORT: 8080
           APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
-          go test -v -cover -tags=integration -race ./...
+          go test -v -cover -tags=integration -race ./webhook-gateway/...
 
     services:
       postgres:
