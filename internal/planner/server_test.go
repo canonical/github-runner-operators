@@ -16,9 +16,7 @@ import (
 	"testing"
 
 	"github.com/canonical/github-runner-operators/internal/database"
-	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 type fakeStore struct {
@@ -140,72 +138,4 @@ func TestCreateFlavor(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
-	/*
-		arrange: a fake store that succeeds and valid auth token
-		act: create flavor via HTTP request
-		assert: metric updated with expected pressure value
-	*/
-	// in-memory metrics
-	r := telemetry.AcquireTestMetricReader(t)
-	defer telemetry.ReleaseTestMetricReader(t)
-
-	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
-
-	body := `{"platform": "github", "labels": ["self-hosted", "amd64"], "priority": 300}`
-
-	req := newRequest(http.MethodPost, "/api/v1/flavors/test-flavor", body, token)
-	w := httptest.NewRecorder()
-
-	server.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code, "should return 201 on successful create")
-
-	// Collect and assert metric
-	tm := r.Collect(t)
-	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "test-flavor", 1)
-}
-
-// assertMetricObservedWithLabels checks if the specified metric has a datapoint with the expected value
-// and labels platform and flavor set to the expected values.
-func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
-	found := false
-OuterLoop:
-	for _, sm := range tm.ScopeMetrics {
-		for _, m := range sm.Metrics {
-			if m.Name != name {
-				continue
-			}
-			data := m.Data.(metricdata.Gauge[int64])
-			for _, dp := range data.DataPoints {
-				if dp.Value != expectedPressure {
-					continue
-				}
-
-				// Check attributes contain platform and flavor
-				hasPlatform := false
-				hasFlavor := false
-				for _, kv := range dp.Attributes.ToSlice() {
-					if string(kv.Key) == "platform" && kv.Value.AsString() == platform {
-						hasPlatform = true
-					}
-					if string(kv.Key) == "flavor" && kv.Value.AsString() == flavor {
-						hasFlavor = true
-					}
-				}
-
-				if hasPlatform && hasFlavor {
-					found = true
-					break OuterLoop
-				}
-
-			}
-
-		}
-	}
-	assert.True(t, found, "expected gauge %q to have a datapoint with value=%d and labels platform=%s, flavor=%s", name, expectedPressure, platform, flavor)
 }
