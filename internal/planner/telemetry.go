@@ -9,6 +9,7 @@ package planner
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/canonical/github-runner-operators/internal/database"
@@ -32,34 +33,38 @@ func must[T any](obj T, err error) T {
 }
 
 var (
-	pkg                  = "github.com/canonical/github-runner-operators/internal/planner"
-	meter                = otel.Meter(pkg)
-	logger               = telemetry.NewLogger(pkg)
-	flavorPressureMetric = must(
-		meter.Int64ObservableGauge(
-			flavorPressureMetricName,
-			metric.WithDescription("The current pressure value for each flavor"),
-			metric.WithUnit("{pressure}"),
-		),
-	)
+	pkg = "github.com/canonical/github-runner-operators/internal/planner"
 )
 
 // Metrics encapsulates all OpenTelemetry metrics for the planner service.
 type Metrics struct {
-	mu    sync.RWMutex
-	store FlavorStore
+	mu                   sync.RWMutex
+	store                FlavorStore
+	meter                metric.Meter
+	logger               *slog.Logger
+	flavorPressureMetric metric.Int64ObservableGauge
 }
 
 // NewMetrics initializes the planner metrics and registers the observable gauge.
 func NewMetrics(store FlavorStore) *Metrics {
 	m := &Metrics{
-		store: store,
+		store:  store,
+		meter:  otel.Meter(pkg),
+		logger: telemetry.NewLogger(pkg),
 	}
 
+	m.flavorPressureMetric = must(
+		m.meter.Int64ObservableGauge(
+			flavorPressureMetricName,
+			metric.WithDescription("The current pressure value for each flavor"),
+			metric.WithUnit("{pressure}"),
+		),
+	)
+
 	must(
-		meter.RegisterCallback(
+		m.meter.RegisterCallback(
 			m.collectFlavorPressure,
-			flavorPressureMetric,
+			m.flavorPressureMetric,
 		),
 	)
 
@@ -84,7 +89,7 @@ func (m *Metrics) collectFlavorPressure(ctx context.Context, observer metric.Obs
 func (m *Metrics) collectPlatformPressure(ctx context.Context, observer metric.Observer, platform string) {
 	flavors, err := m.store.ListFlavors(ctx, platform)
 	if err != nil {
-		logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
+		m.logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
 		return
 	}
 
@@ -95,7 +100,7 @@ func (m *Metrics) collectPlatformPressure(ctx context.Context, observer metric.O
 	flavorNames := extractFlavorNames(flavors)
 	pressures, err := m.store.GetPressures(ctx, platform, flavorNames...)
 	if err != nil {
-		logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
+		m.logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
 		return
 	}
 
@@ -116,7 +121,7 @@ func (m *Metrics) observeFlavorPressures(observer metric.Observer, platform stri
 	for _, f := range flavors {
 		v := pressures[f.Name]
 		observer.ObserveInt64(
-			flavorPressureMetric,
+			m.flavorPressureMetric,
 			int64(v),
 			metric.WithAttributes(
 				attribute.String("platform", platform),
