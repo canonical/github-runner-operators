@@ -76,9 +76,9 @@ var globalTestDatabase *testDatabase
 
 func setupDatabase(t *testing.T) *Database {
 	if globalTestDatabase == nil {
-		uri, ok := os.LookupEnv("POSTGRESQL_CONNECT_STRING")
+		uri, ok := os.LookupEnv("POSTGRESQL_DB_CONNECT_STRING")
 		if !ok {
-			t.Fatal("test database not configured, missing POSTGRESQL_CONNECT_STRING environment variable")
+			t.Fatal("test database not configured, missing POSTGRESQL_DB_CONNECT_STRING environment variable")
 		}
 
 		globalTestDatabase = &testDatabase{

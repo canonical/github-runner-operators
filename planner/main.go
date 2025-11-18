@@ -26,7 +26,7 @@ import (
 
 const (
 	dbURI       = "POSTGRESQL_DB_CONNECT_STRING"
-	portEnvVar  = "APP_PORT"
+	portEnvVar  = "SERVER_PORT"
 	serviceName = "github-runner-planner"
 )
 
