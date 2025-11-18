@@ -27,6 +27,9 @@ jobs:
           git diff --exit-code
 
       - name: Run Unit and Integration Test of internal packages
+        env:
+          POSTGRESQL_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
+
         run: |
           go test -v -coverprofile=coverage.out -race -tags=integration ./internal/...
 
