@@ -10,6 +10,8 @@ package planner
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/canonical/github-runner-operators/internal/database"
@@ -20,19 +22,25 @@ import (
 
 // mockStore is a mock implementation of FlavorStore for testing
 type mockStore struct {
-	flavors   []database.Flavor
-	pressures map[string]int
-	listErr   error
-	pressErr  error
+	flavors    []database.Flavor
+	pressures  map[string]int
+	listErr    error
+	pressErr   error
+	lastFlavor *database.Flavor
 }
 
 func (m *mockStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
+	m.lastFlavor = flavor
 	return nil
 }
 
 func (m *mockStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
+	}
+	// Return lastFlavor if it matches the platform
+	if m.lastFlavor != nil && m.lastFlavor.Platform == platform {
+		return []database.Flavor{*m.lastFlavor}, nil
 	}
 	return m.flavors, nil
 }
@@ -41,7 +49,55 @@ func (m *mockStore) GetPressures(ctx context.Context, platform string, flavors .
 	if m.pressErr != nil {
 		return nil, m.pressErr
 	}
-	return m.pressures, nil
+	if m.pressures != nil {
+		return m.pressures, nil
+	}
+	// Return 1 for each flavor if not specified
+	res := make(map[string]int)
+	for _, name := range flavors {
+		res[name] = 1
+	}
+	return res, nil
+}
+
+// assertMetricObservedWithLabels checks if the specified metric has a datapoint with the expected value
+// and labels platform and flavor set to the expected values.
+func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
+	found := false
+OuterLoop:
+	for _, sm := range tm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			data := m.Data.(metricdata.Gauge[int64])
+			for _, dp := range data.DataPoints {
+				if dp.Value != expectedPressure {
+					continue
+				}
+
+				// Check attributes contain platform and flavor
+				hasPlatform := false
+				hasFlavor := false
+				for _, kv := range dp.Attributes.ToSlice() {
+					if string(kv.Key) == "platform" && kv.Value.AsString() == platform {
+						hasPlatform = true
+					}
+					if string(kv.Key) == "flavor" && kv.Value.AsString() == flavor {
+						hasFlavor = true
+					}
+				}
+
+				if hasPlatform && hasFlavor {
+					found = true
+					break OuterLoop
+				}
+
+			}
+
+		}
+	}
+	assert.True(t, found, "expected gauge %q to have a datapoint with value=%d and labels platform=%s, flavor=%s", name, expectedPressure, platform, flavor)
 }
 
 func TestExtractFlavorNames(t *testing.T) {
@@ -79,6 +135,35 @@ func TestExtractFlavorNames(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
+	/*
+		arrange: a fake store that succeeds and valid auth token
+		act: create flavor via HTTP request
+		assert: metric updated with expected pressure value
+	*/
+	// arrange
+	r := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
+
+	store := &mockStore{}
+	server := NewServer(store, NewMetrics(store))
+	token := makeToken()
+
+	body := `{"platform": "github", "labels": ["self-hosted", "amd64"], "priority": 300}`
+
+	req := newRequest(http.MethodPost, "/api/v1/flavors/test-flavor", body, token)
+	w := httptest.NewRecorder()
+
+	// act
+	server.ServeHTTP(w, req)
+
+	// assert
+	assert.Equal(t, http.StatusCreated, w.Code, "should return 201 on successful create")
+
+	tm := r.Collect(t)
+	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "test-flavor", 1)
 }
 
 func TestObserveFlavorPressures(t *testing.T) {
@@ -271,10 +356,10 @@ func TestCollectFlavorPressure(t *testing.T) {
 
 func TestCollectFlavorPressure_Integration(t *testing.T) {
 	/*
-		Integration test that verifies metrics are properly exported
-		when collecting flavor pressure via the full callback mechanism.
+		arrange: Integration test setup with mock store containing test flavors
+		act: collect metrics via the full callback mechanism
+		assert: verify metrics are properly exported with correct values
 	*/
-
 	// arrange
 	r := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
@@ -291,31 +376,43 @@ func TestCollectFlavorPressure_Integration(t *testing.T) {
 	}
 	NewMetrics(store)
 
-	// act - collect metrics
+	// act
 	tm := r.Collect(t)
 
-	// assert - verify both flavors are present with correct values
+	// assert
 	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "test-flavor-1", 42)
 	assertMetricObservedWithLabels(t, tm, flavorPressureMetricName, "github", "test-flavor-2", 99)
 }
 
 func TestMust_shouldPanicOnError(t *testing.T) {
+	// arrange
 	testErr := errors.New("test error")
 
+	// act & assert
 	assert.Panics(t, func() {
 		must("value", testErr)
 	}, "must should panic when error is not nil")
 }
 
 func TestMust_shouldReturnValueOnSuccess(t *testing.T) {
-	result := must("test-value", nil)
-	assert.Equal(t, "test-value", result)
+	// arrange
+	expectedValue := "test-value"
+
+	// act
+	result := must(expectedValue, nil)
+
+	// assert
+	assert.Equal(t, expectedValue, result)
 }
 
 func TestNewMetrics_shouldInitializeSuccessfully(t *testing.T) {
+	// arrange
 	store := &mockStore{}
+
+	// act
 	m := NewMetrics(store)
 
+	// assert
 	assert.NotNil(t, m)
 	assert.NotNil(t, m.meter)
 	assert.NotNil(t, m.logger)
@@ -325,10 +422,10 @@ func TestNewMetrics_shouldInitializeSuccessfully(t *testing.T) {
 
 func TestNewMetrics_shouldRegisterMetric(t *testing.T) {
 	/*
-		Verify that NewMetrics properly registers the observable gauge
-		and that it can be collected via telemetry.
+		arrange: setup test metrics reader and mock store
+		act: create new Metrics instance and collect metrics
+		assert: verify observable gauge is properly registered
 	*/
-
 	// arrange
 	r := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
@@ -344,11 +441,9 @@ func TestNewMetrics_shouldRegisterMetric(t *testing.T) {
 
 	// act
 	m := NewMetrics(store)
-
-	// collect metrics
 	tm := r.Collect(t)
 
-	// assert - metric should be present
+	// assert
 	assert.NotNil(t, m, "metrics should be initialized")
 	found := false
 	for _, sm := range tm.ScopeMetrics {
