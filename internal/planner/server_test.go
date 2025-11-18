@@ -174,6 +174,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 // and labels platform and flavor set to the expected values.
 func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
 	found := false
+OuterLoop:
 	for _, sm := range tm.ScopeMetrics {
 		for _, m := range sm.Metrics {
 			if m.Name != name {
@@ -199,7 +200,7 @@ func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name
 
 				if hasPlatform && hasFlavor {
 					found = true
-					break
+					break OuterLoop
 				}
 
 			}
