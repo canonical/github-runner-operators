@@ -38,6 +38,13 @@ jobs:
         with:
           go-version: 1.25
 
+      - name: Wait for postgres
+        run: |
+          until curl -fs http://localhost:5432;
+            do echo "waiting for postgres"
+            sleep 2
+          done
+
       - name: Build and Test
         env:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
