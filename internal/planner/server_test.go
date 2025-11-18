@@ -63,99 +63,83 @@ func makeToken() string {
 	return hex.EncodeToString(b)
 }
 
-func TestCreateFlavor_shouldSucceed(t *testing.T) {
-	/*
-		arrange: a fake store that succeeds and valid auth token
-		act: create flavor via HTTP request
-		assert: 201 response and flavor stored in fake store
-	*/
-	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
+func TestCreateFlavor(t *testing.T) {
+	tests := []struct {
+		name               string
+		storeErr           error
+		method             string
+		url                string
+		body               string
+		expectedStatus     int
+		expectedFlavorName string
+		expectedPlatform   string
+	}{
+		{
+			name:               "shouldSucceed",
+			storeErr:           nil,
+			method:             http.MethodPost,
+			url:                "/api/v1/flavors/runner-small",
+			body:               `{"platform":"github","labels":["x64"],"priority":2}`,
+			expectedStatus:     http.StatusCreated,
+			expectedFlavorName: "runner-small",
+			expectedPlatform:   "github",
+		},
+		{
+			name:               "shouldFailWhenAlreadyExists",
+			storeErr:           database.ErrExist,
+			method:             http.MethodPost,
+			url:                "/api/v1/flavors/existing-flavor",
+			body:               `{"platform":"github"}`,
+			expectedStatus:     http.StatusConflict,
+			expectedFlavorName: "existing-flavor",
+			expectedPlatform:   "github",
+		},
+		{
+			name:           "shouldFailOnInvalidJSON",
+			storeErr:       nil,
+			method:         http.MethodPost,
+			url:            "/api/v1/flavors/test",
+			body:           `{invalid-json}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "shouldFailWhenNameMissing",
+			storeErr:       nil,
+			method:         http.MethodPost,
+			url:            "/api/v1/flavors/",
+			body:           `{"platform":"github"}`,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "shouldFailForNonPostMethod",
+			storeErr:       nil,
+			method:         http.MethodGet,
+			url:            "/api/v1/flavors/test",
+			body:           `{"platform":"github"}`,
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+	}
 
-	body := `{"platform":"github","labels":["x64"],"priority":2}`
-	req := newRequest(http.MethodPost, "/api/v1/flavors/runner-small", body, token)
-	w := httptest.NewRecorder()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{errToReturn: tt.storeErr}
+			server := NewServer(store, NewMetrics(store))
+			token := makeToken()
 
-	server.ServeHTTP(w, req)
+			req := newRequest(tt.method, tt.url, tt.body, token)
+			w := httptest.NewRecorder()
 
-	assert.Equal(t, http.StatusCreated, w.Code, "expected status 201")
-	assert.Equal(t, "runner-small", store.lastFlavor.Name)
-	assert.Equal(t, "github", store.lastFlavor.Platform)
-}
+			server.ServeHTTP(w, req)
 
-func TestCreateFlavor_shouldFailWhenAlreadyExists(t *testing.T) {
-	/*
-		arrange: a store returning database.ErrExist and valid auth token
-		act: create flavor via HTTP request
-		assert: 409 response and flavor stored in fake store
-	*/
-	store := &fakeStore{errToReturn: database.ErrExist}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
-
-	req := newRequest(http.MethodPost, "/api/v1/flavors/existing-flavor", `{"platform":"github"}`, token)
-	w := httptest.NewRecorder()
-
-	server.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code, "expected status 409 Conflict")
-	assert.Equal(t, "existing-flavor", store.lastFlavor.Name)
-	assert.Equal(t, "github", store.lastFlavor.Platform)
-}
-
-func TestCreateFlavor_shouldFailOnInvalidJSON(t *testing.T) {
-	/*
-		arrange: a fake store that succeeds and valid auth token
-		act: create flavor with invalid JSON via HTTP request
-		assert: 400 response
-	*/
-	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
-
-	req := newRequest(http.MethodPost, "/api/v1/flavors/test", `{invalid-json}`, token)
-	w := httptest.NewRecorder()
-
-	server.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "expected status 400 Bad Request")
-}
-
-func TestCreateFlavor_shouldFailWhenNameMissing(t *testing.T) {
-	/*
-		arrange: a fake store that succeeds and valid auth token
-		act: create flavor without name via HTTP request
-		assert: 404 response
-	*/
-	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
-
-	req := newRequest(http.MethodPost, "/api/v1/flavors/", `{"platform":"github"}`, token)
-	w := httptest.NewRecorder()
-
-	server.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code, "expected 404 Not Found")
-}
-
-func TestCreateFlavor_shouldFailForNonPostMethod(t *testing.T) {
-	/*
-		arrange: a fake store that succeeds and valid auth token
-		act: create flavor via HTTP GET request
-		assert: 405 response
-	*/
-	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
-	token := makeToken()
-
-	req := newRequest(http.MethodGet, "/api/v1/flavors/test", `{"platform":"github"}`, token)
-	w := httptest.NewRecorder()
-
-	server.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code, "expected 405 Method Not Allowed")
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.expectedFlavorName != "" {
+				assert.Equal(t, tt.expectedFlavorName, store.lastFlavor.Name)
+			}
+			if tt.expectedPlatform != "" {
+				assert.Equal(t, tt.expectedPlatform, store.lastFlavor.Platform)
+			}
+		})
+	}
 }
 
 func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
