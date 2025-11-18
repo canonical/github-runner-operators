@@ -57,6 +57,9 @@ func main() {
 	}
 
 	// Connect to database and create server
+	if err := database.Migrate(ctx, uri); err != nil {
+		log.Fatalln("migrate failed:", err)
+	}
 	db, err := database.New(ctx, uri)
 	if err != nil {
 		log.Fatalln("failed to connect to db:", err)
