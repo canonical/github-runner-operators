@@ -78,10 +78,19 @@ func waitForHTTP(t *testing.T, url string, timeout time.Duration) {
 // checkAndCleanupDatabaseFlavor verifies that the given flavor exists in the database
 // with the expected fields, and then deletes it.
 func checkAndCleanupDatabaseFlavor(t *testing.T, flavor, platform string, labels []string, priority int) {
-	uri := os.Getenv("POSTGRESQL_DB_CONNECT_STRING")
 	ctx := context.Background()
+	db := applyMigrationAndConnectDB(t, ctx)
 
-	// Apply migrations and connect
+	verifyFlavorExistsInDB(t, db, flavor, platform, labels, priority)
+
+	// Cleanup
+	_ = db.DeleteFlavor(ctx, platform, flavor)
+}
+
+// applyMigrationAndConnectDB applies database migrations and connects to the database.
+func applyMigrationAndConnectDB(t *testing.T, ctx context.Context) *database.Database {
+	uri := os.Getenv("POSTGRESQL_DB_CONNECT_STRING")
+
 	if err := database.Migrate(ctx, uri); err != nil {
 		t.Fatalf("migrate failed: %v", err)
 	}
@@ -89,8 +98,12 @@ func checkAndCleanupDatabaseFlavor(t *testing.T, flavor, platform string, labels
 	if err != nil {
 		t.Fatalf("db connect failed: %v", err)
 	}
+	return db
+}
 
-	// Verify flavor exists in DB with expected fields
+// verifyFlavorExistsInDB checks that the specified flavor exists in the database
+// with the expected labels and priority.
+func verifyFlavorExistsInDB(t *testing.T, db *database.Database, flavor, platform string, labels []string, priority int) {
 	flavors, err := db.ListFlavors(ctx, platform)
 	if err != nil {
 		t.Fatalf("list flavors: %v", err)
@@ -111,9 +124,6 @@ func checkAndCleanupDatabaseFlavor(t *testing.T, flavor, platform string, labels
 	if !found {
 		t.Fatalf("flavor %q not found in db", flavor)
 	}
-
-	// Cleanup
-	_ = db.DeleteFlavor(ctx, platform, flavor)
 }
 
 // randString generates a random string of the given length.
