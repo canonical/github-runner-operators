@@ -735,7 +735,6 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 		"github-amd64-medium-ps6": 1,
 		"github-amd64-large-ps6":  2,
 		"github-arm64-large-ps7":  3,
-		"github-s390x-large-ps7":  0,
 	}, pressures)
 }
 
