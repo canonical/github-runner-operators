@@ -18,13 +18,19 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const createFlavorPattern = "/api/v1/flavors/{name}"
+const (
+	createFlavorPattern      = "/api/v1/flavors/{name}"
+	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
+	allFlavorName            = "_"
+	flavorPlatform           = "github" // Currently only github is supported
+)
 
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
 type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
+	GetAllPressures(ctx context.Context, platform string) (map[string]int, error)
 }
 
 // Server holds dependencies for the planner HTTP handlers.
@@ -40,6 +46,7 @@ func NewServer(store FlavorStore, metrics *Metrics) *Server {
 
 	// Register routes
 	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, http.HandlerFunc(s.createFlavor)))
+	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, http.HandlerFunc(s.getFlavorPressure)))
 
 	return s
 }
@@ -91,4 +98,39 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
+}
+
+// getFlavorPressure handles retrieving the pressure for a specific or all flavors.
+func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
+	var (
+		pressures map[string]int
+		err       error
+	)
+
+	flavorName := r.PathValue("name")
+	switch flavorName {
+	case allFlavorName:
+		pressures, err = s.store.GetAllPressures(r.Context(), flavorPlatform)
+	default:
+		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform, flavorName)
+	}
+
+	if err == nil {
+		respondWithJSON(w, http.StatusOK, pressures)
+		return
+	}
+
+	if errors.Is(err, database.ErrNotExist) {
+		http.Error(w, "flavor not found", http.StatusNotFound)
+		return
+	}
+
+	http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
+}
+
+// respondWithJSON sends a JSON response with the given status code and payload.
+func respondWithJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(payload)
 }

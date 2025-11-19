@@ -671,6 +671,74 @@ func TestDatabase_GetPressures(t *testing.T) {
 	}, pressures)
 }
 
+func TestDatabase_GetAllPressures(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-amd64-medium-ps6",
+		Labels:   []string{"self-hosted", "amd64", "medium"},
+		Priority: 300,
+	}))
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-amd64-large-ps6",
+		Labels:   []string{"self-hosted", "amd64", "large"},
+		Priority: 200,
+	}))
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-arm64-large-ps7",
+		Labels:   []string{"self-hosted", "arm64", "large"},
+		Priority: 150,
+	}))
+
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "1",
+		Labels:   []string{"self-hosted", "amd64", "medium"},
+	}))
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "2",
+		Labels:   []string{"self-hosted", "amd64", "large"},
+	}))
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "3",
+		Labels:   []string{"self-hosted", "amd64", "large"},
+	}))
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "4",
+		Labels:   []string{"self-hosted", "arm64", "large"},
+	}))
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "5",
+		Labels:   []string{"self-hosted", "arm64", "large"},
+	}))
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "6",
+		Labels:   []string{"self-hosted", "arm64", "large"},
+	}))
+
+	pressures, err := db.GetAllPressures(
+		ctx,
+		"github",
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]int{
+		"github-amd64-medium-ps6": 1,
+		"github-amd64-large-ps6":  2,
+		"github-arm64-large-ps7":  3,
+		"github-s390x-large-ps7":  0,
+	}, pressures)
+}
+
 func TestDatabase_GetPressures_MinimumPressure(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)

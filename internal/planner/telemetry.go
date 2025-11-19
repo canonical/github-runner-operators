@@ -19,10 +19,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-const (
-	flavorPlatform           = "github" // Currently only github is supported
-	flavorPressureMetricName = "mayfly_planner_flavor_pressure"
-)
+const flavorPressureMetricName = "mayfly_planner_flavor_pressure"
 
 // must is a helper function that panics if an error is encountered, else returns the object.
 func must[T any](obj T, err error) T {

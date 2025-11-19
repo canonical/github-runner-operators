@@ -485,6 +485,40 @@ func (d *Database) GetPressures(ctx context.Context, platform string, flavors ..
 	return pressures, nil
 }
 
+// GetAllPressures returns the pressure for all flavors on the specified platform.
+func (d *Database) GetAllPressures(ctx context.Context, platform string) (map[string]int, error) {
+	sql := `
+	SELECT f.name                                    AS flavor,
+           GREATEST(f.minimum_pressure, COUNT(j.pk)) AS pressure
+	FROM flavor AS f
+			 LEFT JOIN job AS j
+					   ON f.platform = j.platform
+					       AND j.assigned_flavor = f.name
+						   AND j.completed_at IS NULL
+	WHERE f.platform = @platform
+	GROUP BY f.name, f.priority, f.minimum_pressure
+	`
+	rows, err := d.conn.Query(ctx, sql, pgx.NamedArgs{
+		"platform": platform,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate flavor pressure: %w", err)
+	}
+	type pressureRow struct {
+		Flavor   string
+		Pressure int
+	}
+	pressureRows, err := pgx.CollectRows[pressureRow](rows, pgx.RowToStructByName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate flavor pressure: %w", err)
+	}
+	pressures := make(map[string]int, len(pressureRows))
+	for _, row := range pressureRows {
+		pressures[row.Flavor] = row.Pressure
+	}
+	return pressures, nil
+}
+
 // New creates a new Database instance
 func New(ctx context.Context, uri string) (*Database, error) {
 	conn, err := pgxpool.New(ctx, uri)
