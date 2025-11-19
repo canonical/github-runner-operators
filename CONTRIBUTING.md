@@ -4,11 +4,11 @@
 
 This document explains the processes and practices recommended for contributing enhancements to the codebase.
 
-* Generally, before developing enhancements to this code base, you should consider [opening an issue](https://github.com/canonical/github-runner-operator/issues) explaining your use case.
-* If you would like to chat with us about your use-cases or proposed implementation, you can reach us at [Canonical Charm Development Matrix public channel](https://matrix.to/#/#charmhub-charmdev:ubuntu.com) or [Discourse](https://discourse.charmhub.io/).
-* All enhancements require review before being merged. Code review typically examines
-    * code quality
-    * test coverage
+- Generally, before developing enhancements to this code base, you should consider [opening an issue](https://github.com/canonical/github-runner-operator/issues) explaining your use case.
+- If you would like to chat with us about your use-cases or proposed implementation, you can reach us at [Canonical Charm Development Matrix public channel](https://matrix.to/#/#charmhub-charmdev:ubuntu.com) or [Discourse](https://discourse.charmhub.io/).
+- All enhancements require review before being merged. Code review typically examines
+  - code quality
+  - test coverage
 
 ## Code of conduct
 
@@ -44,10 +44,9 @@ your pull request must provide the following details:
 
 - **Rationale**: Explain why the change is needed.
 
-
 - **Checklist**: Complete the following items:
 
-    - The PR is tagged with appropriate label (`urgent`, `trivial`, `senior-review-required`, `documentation`).
+  - The PR is tagged with appropriate label (`urgent`, `trivial`, `senior-review-required`, `documentation`).
 
 ### Signing commits
 
@@ -65,7 +64,6 @@ All commits in a pull request must have cryptographic (verified) signatures.
 To add signatures on your commits, follow the
 [GitHub documentation](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
 
-
 ## Develop
 
 For any problems with this charm, please [report bugs here](https://github.com/canonical/github-runner-operator/issues).
@@ -80,7 +78,7 @@ The code structure is as follows
 
 - `internal/`: Internal libraries for the applications
 - `webhook-gateway`: The webhook gateway application and charm code
-
+- `planner`: The planner application code
 
 ### Test
 
@@ -117,9 +115,17 @@ You can use `docker` to run a RabbitMQ server locally:
 docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
 ```
 
+Run `planner` integration tests using:
+
+```shell
+POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" APP_PORT=8080 go test ./planner -v -count=1
+```
+
+It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
+
 ### Charm development
 
-The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/). 
+The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/).
 In order to build the webhook-gateway rock, use the
 `build-webhook-gateway-rock.sh` script.
 
@@ -132,7 +138,7 @@ for a step-by-step guide to develop a Kubernetes charm using Go.
 
 To run the charm integration test, the charm file and rock has to be provided as input.
 You would need an LXD and MicroK8s cloud to run the tests. Ensure the `microk8s`
-controller is active in your Juju client before running the tests. An 
+controller is active in your Juju client before running the tests. An
 example run command in the root directory is as follows:
 
 ```shell

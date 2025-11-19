@@ -1,15 +1,14 @@
 name: Webhook Gateway Integration Tests
 on:
-    pull_request:
-    workflow_call:
+  pull_request:
+  workflow_call:
 
 concurrency:
-  group:  ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-
 
 jobs:
   detect-changes:
@@ -62,7 +61,6 @@ jobs:
           - 5672:5672
           - 15672:15672
 
-
   charm-integration-tests:
     needs: detect-changes
     if: needs.detect-changes.outputs.webhook-gateway == 'true'
@@ -81,7 +79,6 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
-
 
   integration-status-check:
     runs-on: ubuntu-latest
