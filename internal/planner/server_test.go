@@ -2,7 +2,7 @@
  * Copyright 2025 Canonical Ltd.
  * See LICENSE file for licensing details.
  *
- * Unit tests for the planner server and telemetry.
+ * Unit tests for the planner server.
  */
 
 package planner
