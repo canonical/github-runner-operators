@@ -111,6 +111,25 @@ You can use `docker` to run a RabbitMQ server locally:
 docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
 ```
 
+### Test design
+
+We intend to have unit tests for all the logic in the internal packages (located in the `internal/` directory).
+Unit tests should test the logic in isolation using mocks/fakes for external dependencies. They should be fast to execute.
+
+Integration tests should test the integration of various components together. They should be located in the main
+package of the application they are testing (e.g. in `webhook-gateway/main_test.go` for the webhook gateway application).
+
+In addition to application integration tests, we also have charm integration tests located in the respective charm directories
+(e.g. in `webhook-gateway/charm/tests/integration` for the webhook gateway charm). These tests should test the charm 
+deployment and its integration with other charms. Aim to not duplicate application logic tests in charm integration tests.
+
+Aim to keep tests fast to execute and reliable.
+
+### Coverage
+
+We aim to have at least 80% code coverage for all internal packages. New code that lowers the current coverage
+should be avoided and discouraged during code reviews.
+
 ### Charm development
 
 The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/). 
