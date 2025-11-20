@@ -574,8 +574,6 @@ arange-act-assert commenting style:
 
 
 ```go
-// TestCreateDirs tests that Pebble will create the Pebble directory on startup
-// with the `--create-dirs` option.
 func TestCreateDirs(t *testing.T) {
 	/*
 	Arrange: Setup the test directory.
