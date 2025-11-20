@@ -80,10 +80,13 @@ The code structure is as follows
 - `webhook-gateway`: The webhook gateway application and charm code
 - `planner`: The planner application code
 
-### Style & GitHub Copilot
+### Style
 
+The applications written in this repository are written in Go.
 We like to follow idomatic Go practices and community standards when writing Go code.
 We have added an instruction file `go.instructions.md` in `.github/instructions.md` that is used by GitHub Copilot to help you write code that follows these practices.
+We have added a [Style Guide](./STYLE.md) that you can refer to for more details.
+
 
 ### Test
 

@@ -23,6 +23,7 @@ Follow idiomatic Go practices and community standards when writing Go code. Thes
 - Prefer standard library solutions over custom implementations when functionality exists
 - Write comments in English by default; translate only upon user request
 - Avoid using emoji in code and comments
+- Prefer the style and conventions in [STYLE.md](../../STYLE.md) when they differ from these instructions in this file.
 
 ## Naming Conventions
 
