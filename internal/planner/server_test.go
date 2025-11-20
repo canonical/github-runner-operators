@@ -21,6 +21,7 @@ import (
 )
 
 type fakeStore struct {
+	pressures   map[string]int
 	lastFlavor  *database.Flavor
 	errToReturn error
 }
@@ -31,19 +32,26 @@ func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) erro
 }
 
 func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
-	res := make(map[string]int)
-	for _, name := range flavors {
-		res[name] = 1
+	if f.pressures == nil {
+		return nil, database.ErrNotExist
 	}
-	return res, f.errToReturn
+	res := make(map[string]int)
+	for _, flavor := range flavors {
+		if pressure, ok := f.pressures[flavor]; ok {
+			res[flavor] = pressure
+		}
+	}
+	if len(res) == 0 {
+		return nil, database.ErrNotExist
+	}
+	return res, nil
 }
 
 func (f *fakeStore) GetAllPressures(ctx context.Context, platform string) (map[string]int, error) {
-	res := make(map[string]int)
-	for _, flavor := range []string{"runner-small", "runner-medium", "runner-large"} {
-		res[flavor] = 1
+	if f.pressures == nil {
+		return nil, database.ErrExist
 	}
-	return res, f.errToReturn
+	return f.pressures, nil
 }
 
 func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
@@ -146,41 +154,39 @@ func TestCreateFlavor(t *testing.T) {
 func TestGetFlavorPressure(t *testing.T) {
 	tests := []struct {
 		name              string
-		storeErr          error
+		pressures         map[string]int
 		method            string
 		url               string
 		expectedStatus    int
 		expectedPressures map[string]int
 	}{{
 		name:              "shouldSucceedForSingleFlavor",
-		storeErr:          nil,
+		pressures:         map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
 		method:            http.MethodGet,
 		url:               "/api/v1/flavors/runner-small/pressure",
 		expectedStatus:    http.StatusOK,
 		expectedPressures: map[string]int{"runner-small": 1},
 	}, {
 		name:              "shouldSucceedForAllFlavors",
-		storeErr:          nil,
+		pressures:         map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
 		method:            http.MethodGet,
 		url:               "/api/v1/flavors/_/pressure",
 		expectedStatus:    http.StatusOK,
 		expectedPressures: map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
 	}, {
 		name:              "shouldFailWhenFlavorNotExist",
-		storeErr:          database.ErrNotExist,
+		pressures:         map[string]int{"runner-medium": 1, "runner-large": 1},
 		method:            http.MethodGet,
 		url:               "/api/v1/flavors/runner-small/pressure",
 		expectedStatus:    http.StatusNotFound,
 		expectedPressures: nil,
 	}, {
 		name:           "shouldFailWhenNameMissing",
-		storeErr:       nil,
 		method:         http.MethodGet,
 		url:            "/api/v1/flavors//pressure",
 		expectedStatus: http.StatusMovedPermanently,
 	}, {
 		name:           "shouldFailForNonGetMethod",
-		storeErr:       nil,
 		method:         http.MethodPost,
 		url:            "/api/v1/flavors/runner-small/pressure",
 		expectedStatus: http.StatusMethodNotAllowed,
@@ -188,7 +194,7 @@ func TestGetFlavorPressure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{errToReturn: tt.storeErr}
+			store := &fakeStore{pressures: tt.pressures}
 			server := NewServer(store, NewMetrics(store))
 			token := makeToken()
 

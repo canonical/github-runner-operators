@@ -102,10 +102,8 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 
 // getFlavorPressure handles retrieving the pressure for a specific or all flavors.
 func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
-	var (
-		pressures map[string]int
-		err       error
-	)
+	var pressures = map[string]int{}
+	var err error
 
 	flavorName := r.PathValue("name")
 	switch flavorName {

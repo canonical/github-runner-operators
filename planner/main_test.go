@@ -40,16 +40,11 @@ func TestMain_FlavorPressure(t *testing.T) {
 
 	testCreateFlavor(t, port, flavor, platform, labels, priority, pressure)
 	testGetFlavorPressure(t, port, flavor, pressure)
-
-	checkAndCleanupDatabaseFlavor(t, flavor, platform, labels, priority)
 }
 
+// testCreateFlavor sends a create flavor request to the server
+// and verifies the response status is 201 Created.
 func testCreateFlavor(t *testing.T, port, flavor, platform string, labels []string, priority, pressure int) {
-	/*
-		arrange: server is listening on the configured port and prepare request payload
-		act: send create flavor
-		assert: 201 Created
-	*/
 	t.Helper()
 
 	body := map[string]any{
@@ -77,12 +72,9 @@ func testCreateFlavor(t *testing.T, port, flavor, platform string, labels []stri
 	}
 }
 
+// testGetFlavorPressure sends a get flavor pressure request to the server
+// and verifies the response contains the expected pressure value.
 func testGetFlavorPressure(t *testing.T, port, flavor string, expected int) {
-	/*
-		arrange: server is listening on the configured port
-		act: send get flavor pressure request
-		assert: 200 OK with expected pressure value
-	*/
 	t.Helper()
 
 	url := "http://localhost:" + port + "/api/v1/flavors/" + flavor + "/pressure"
