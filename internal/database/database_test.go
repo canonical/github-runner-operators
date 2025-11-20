@@ -694,6 +694,12 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 		Labels:   []string{"self-hosted", "arm64", "large"},
 		Priority: 150,
 	}))
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-s390x-large-ps7",
+		Labels:   []string{"self-hosted", "s390x", "large"},
+		Priority: 150,
+	}))
 
 	assert.NoError(t, db.AddJob(ctx, &Job{
 		Platform: "github",
@@ -735,6 +741,7 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 		"github-amd64-medium-ps6": 1,
 		"github-amd64-large-ps6":  2,
 		"github-arm64-large-ps7":  3,
+		"github-s390x-large-ps7":  0,
 	}, pressures)
 }
 

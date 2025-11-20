@@ -22,105 +22,94 @@ import (
 	"github.com/canonical/github-runner-operators/internal/database"
 )
 
-func TestMain_CreateFlavor(t *testing.T) {
+func TestMain_FlavorPressure(t *testing.T) {
 	/*
 		arrange: server is listening on the configured port and prepare request payload
-		act: send create flavor request
-		assert: 201 Created and flavor exists in database with expected fields
+		act: send create flavor request and get flavor pressure request
+		assert: 201 Created and 200 OK with expected pressure value
 	*/
-	baseURL, shutdown := startTestServer(t)
-	defer shutdown()
+	go main()
+	port := os.Getenv("APP_PORT")
+	waitForHTTP(t, "http://localhost:"+port+"/api/v1/flavors/", 10*time.Second)
 
 	platform := "github"
 	labels := []string{"self-hosted", "amd64"}
 	priority := 42
 	flavor := randString(10)
+	pressure := 7
+
+	testCreateFlavor(t, port, flavor, platform, labels, priority, pressure)
+	testGetFlavorPressure(t, port, flavor, pressure)
+
+	checkAndCleanupDatabaseFlavor(t, flavor, platform, labels, priority)
+}
+
+func testCreateFlavor(t *testing.T, port, flavor, platform string, labels []string, priority, pressure int) {
+	/*
+		arrange: server is listening on the configured port and prepare request payload
+		act: send create flavor
+		assert: 201 Created
+	*/
+	t.Helper()
 
 	body := map[string]any{
-		"platform": platform,
-		"labels":   labels,
-		"priority": priority,
+		"platform":         platform,
+		"labels":           labels,
+		"priority":         priority,
+		"minimum_pressure": pressure,
 	}
+
 	b, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	resp, err := http.Post(baseURL+"/api/v1/flavors/"+flavor, "application/json", bytes.NewReader(b))
+	url := "http://localhost:" + port + "/api/v1/flavors/" + flavor
+
+	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
 	if err != nil {
-		t.Fatalf("do request: %v", err)
+		t.Fatalf("create flavor request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("unexpected status: %d", resp.StatusCode)
+		t.Fatalf("unexpected status creating flavor: %d", resp.StatusCode)
 	}
-
-	checkAndCleanupDatabaseFlavor(t, flavor, platform, labels, priority)
 }
 
-func TestMain_GetFlavorPressure(t *testing.T) {
+func testGetFlavorPressure(t *testing.T, port, flavor string, expected int) {
 	/*
-		arrange: server is listening on the configured port and a flavor exists in the database
+		arrange: server is listening on the configured port
 		act: send get flavor pressure request
-		assert: 200 OK and expected pressure value in response
+		assert: 200 OK with expected pressure value
 	*/
-	baseURL, shutdown := startTestServer(t)
-	defer shutdown()
+	t.Helper()
 
-	flavor := randString(10)
-	addFlavorToDatabase(t, flavor, 7)
+	url := "http://localhost:" + port + "/api/v1/flavors/" + flavor + "/pressure"
 
-	reqURL := baseURL + "/api/v1/flavors/" + flavor + "/pressure"
-	resp, err := http.Get(reqURL)
+	resp, err := http.Get(url)
 	if err != nil {
-		t.Fatalf("do request: %v", err)
+		t.Fatalf("get flavor pressure request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected status: %d", resp.StatusCode)
+		t.Fatalf("unexpected status getting pressure: %d", resp.StatusCode)
 	}
 
 	var pressures map[string]int
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(&pressures); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&pressures); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
 	value, exists := pressures[flavor]
 	if !exists {
-		t.Fatalf("expected flavor %q in response, got %+v", flavor, value)
+		t.Fatalf("expected flavor %q in response, got %+v", flavor, pressures)
 	}
 
-	if value != 7 {
-		t.Fatalf("expected pressure 7 for flavor %q, got %d", flavor, value)
+	if value != expected {
+		t.Fatalf("expected pressure %d for flavor %q, got %d", expected, flavor, value)
 	}
-}
-
-// startTestServer starts the Planner API server for testing and returns its base URL and a shutdown function.
-func startTestServer(t *testing.T) (baseURL string, shutdown func()) {
-	t.Helper()
-
-	ctx := context.Background()
-	uri := os.Getenv("POSTGRESQL_DB_CONNECT_STRING")
-	port := os.Getenv("APP_PORT")
-
-	srv, err := StartServer(ctx, uri, port)
-	if err != nil {
-		t.Fatalf("failed to start server: %v", err)
-	}
-
-	baseURL = "http://localhost:" + port
-	waitForHTTP(t, baseURL+"/api/v1/flavors/", 10*time.Second)
-
-	shutdown = func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(ctx)
-	}
-
-	return baseURL, shutdown
 }
 
 // waitForHTTP keeps trying a POST request until the server responds
@@ -149,23 +138,6 @@ func checkAndCleanupDatabaseFlavor(t *testing.T, flavor, platform string, labels
 
 	// Cleanup
 	_ = db.DeleteFlavor(ctx, platform, flavor)
-}
-
-func addFlavorToDatabase(t *testing.T, flavor string, pressure int) {
-	ctx := context.Background()
-	db := applyMigrationAndConnectDB(t, ctx)
-
-	f := &database.Flavor{
-		Platform:        "github",
-		Name:            flavor,
-		Labels:          []string{"self-hosted", "amd64", "large"},
-		Priority:        0,
-		IsDisabled:      false,
-		MinimumPressure: pressure,
-	}
-	if err := db.AddFlavor(ctx, f); err != nil {
-		t.Fatalf("add flavor to db: %v", err)
-	}
 }
 
 // applyMigrationAndConnectDB applies database migrations and connects to the database.

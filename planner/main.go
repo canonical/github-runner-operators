@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -57,38 +56,18 @@ func main() {
 		log.Fatalln(portEnvVar, "environment variable not set.")
 	}
 
-	_, err = StartServer(ctx, uri, port)
-	if err != nil {
-		log.Fatalf("failed to start server: %v", err)
-	}
-
-	select {} // block forever
-}
-
-// StartServer initializes and starts the Planner API server.
-func StartServer(ctx context.Context, uri, port string) (*http.Server, error) {
+	// Connect to database and create server
 	if err := database.Migrate(ctx, uri); err != nil {
-		return nil, fmt.Errorf("migrate failed: %w", err)
+		log.Fatalln("migrate failed:", err)
 	}
 	db, err := database.New(ctx, uri)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to db: %w", err)
+		log.Fatalln("failed to connect to db:", err)
 	}
 
 	metrics := planner.NewMetrics(db)
 	server := planner.NewServer(db, metrics)
 
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: otelhttp.NewHandler(server, "planner-api", otelhttp.WithServerName("planner")),
-	}
-
-	go func() {
-		log.Println("Starting planner API server on port", port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %s\n", err)
-		}
-	}()
-
-	return srv, nil
+	log.Println("Starting planner API server on port", port)
+	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(server, "planner-api", otelhttp.WithServerName("planner"))))
 }
