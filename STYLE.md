@@ -619,10 +619,12 @@ if strings.HasPrefix(s, "foo") {
 }
 ```
 
-[//]: # (### Use `TODO`)
+### Avoid `TODO` comments
 
-[//]: # ()
-[//]: # (Add a "TODO" in a comment when handling a temporary workaround, so it's easier to search for later. However, avoid merging TODO comments unless you plan to fix them in a follow-up PR.)
+Having too many TODO comments clutters the code and makes it hard to find important ones. Usually, TODO comments are forgotten and remain in the code confusing future readers.
+Future work should be tracked in issues or project boards, not in code comments.
+
+A "TODO" comment in a feature branch that is work in progress is fine, but avoid leaving TODO comments when merging to main branches.
 
 ### Housekeeping rule
 
