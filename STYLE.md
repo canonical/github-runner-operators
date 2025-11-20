@@ -1,6 +1,6 @@
 # GitHub Runner Go style guide
 
-This is the Go style guide we use for the GitHub Runner Operator project, and mostly borrowed by the [Pebble Go style guide](https://github.com/canonical/pebble/blob/master/STYLE.md)
+This is the Go style guide we use for the GitHub Runner Operators project, and mostly borrowed from the [Pebble Go style guide](https://github.com/canonical/pebble/blob/master/STYLE.md)
 
 New code should follow these guidelines, unless there's a good reason not to. 
 
