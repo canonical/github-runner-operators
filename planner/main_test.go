@@ -35,13 +35,17 @@ func TestMain_FlavorPressure(t *testing.T) {
 	flavor := randString(10)
 	pressure := 7
 
-	testCreateFlavor(t, port, flavor, platform, labels, priority, pressure)
-	testGetFlavorPressure(t, port, flavor, pressure)
+	resp := createFlavor(t, port, flavor, platform, labels, priority, pressure)
+	if resp != http.StatusCreated {
+		t.Fatalf("unexpected status creating flavor: %d", resp)
+	}
+
+	pressures := getFlavorPressure(t, port, flavor)
+	assertFlavorPressureEquals(t, pressures, flavor, pressure)
 }
 
-// testCreateFlavor sends a create flavor request to the server
-// and verifies the response status is 201 Created.
-func testCreateFlavor(t *testing.T, port, flavor, platform string, labels []string, priority, pressure int) {
+// createFlavor sends a create flavor request to the server
+func createFlavor(t *testing.T, port, flavor, platform string, labels []string, priority, pressure int) int {
 	t.Helper()
 
 	body := map[string]any{
@@ -64,14 +68,11 @@ func testCreateFlavor(t *testing.T, port, flavor, platform string, labels []stri
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("unexpected status creating flavor: %d", resp.StatusCode)
-	}
+	return resp.StatusCode
 }
 
-// testGetFlavorPressure sends a get flavor pressure request to the server
-// and verifies the response contains the expected pressure value.
-func testGetFlavorPressure(t *testing.T, port, flavor string, expected int) {
+// getFlavorPressure sends a get flavor pressure request to the server
+func getFlavorPressure(t *testing.T, port, flavor string) map[string]int {
 	t.Helper()
 
 	url := "http://localhost:" + port + "/api/v1/flavors/" + flavor + "/pressure"
@@ -91,6 +92,12 @@ func testGetFlavorPressure(t *testing.T, port, flavor string, expected int) {
 		t.Fatalf("decode response: %v", err)
 	}
 
+	return pressures
+}
+
+// assertFlavorPressureEquals checks that the pressures map contains the expected pressure for the given flavor
+func assertFlavorPressureEquals(t *testing.T, pressures map[string]int, flavor string, expected int) {
+	t.Helper()
 	value, exists := pressures[flavor]
 	if !exists {
 		t.Fatalf("expected flavor %q in response, got %+v", flavor, pressures)
