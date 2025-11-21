@@ -80,6 +80,14 @@ The code structure is as follows
 - `webhook-gateway`: The webhook gateway application and charm code
 - `planner`: The planner application code
 
+### Style
+
+The applications written in this repository are written in Go.
+We like to follow idomatic Go practices and community standards when writing Go code.
+We have added an instruction file `go.instructions.md` in `.github/instructions.md` that is used by GitHub Copilot to help you write code that follows these practices.
+We have added a [Style Guide](./STYLE.md) that you can refer to for more details.
+
+
 ### Test
 
 This project uses standard Go testing tools for unit tests and integration tests.
@@ -111,6 +119,27 @@ POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_run
 ```
 
 It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
+
+
+### Test design
+
+We intend to have unit tests for all the logic in the internal packages (located in the `internal/` directory).
+Unit tests should test the logic in isolation using mocks/fakes for external dependencies. They should be fast to execute.
+
+Integration tests should test the integration of various components together. They should be located in the main
+package of the application they are testing (e.g. in `webhook-gateway/main_test.go` for the webhook gateway application).
+
+In addition to application integration tests, we also have charm integration tests located in the respective charm directories
+(e.g. in `webhook-gateway/charm/tests/integration` for the webhook gateway charm). These tests should test the charm 
+deployment and its integration with other charms. Aim to not duplicate application logic tests in charm integration tests.
+
+Aim to keep tests fast to execute and reliable.
+
+### Coverage
+
+We aim to have at least 80% code coverage for all internal packages. New code that lowers the current coverage
+should be avoided and discouraged during code reviews.
+
 
 ### Charm development
 
