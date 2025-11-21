@@ -19,6 +19,16 @@ description: |
 extensions:
   - go-framework
 
+# Configure the go-framework extension to build from ../cmd/webhook-gateway
+parts:
+  go-framework/app:
+    source: ..
+    override-build: |
+      cd "$CRAFT_PART_SRC"
+      go build -o bin/webhook-gateway ./cmd/webhook-gateway
+      mkdir -p "$CRAFT_PART_INSTALL/app"
+      cp bin/webhook-gateway "$CRAFT_PART_INSTALL/app/"
+
 config:
   options:
     webhook-secret:
