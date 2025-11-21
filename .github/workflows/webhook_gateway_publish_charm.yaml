@@ -13,4 +13,4 @@ jobs:
     with:
       integration-test-workflow-file: webhook_gateway_tests.yaml
       resource-mapping: '{"webhook-gateway": "app-image"}'
-      working-directory: ./webhook-gateway
+      working-directory: ./webhook-gateway-operator
