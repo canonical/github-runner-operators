@@ -22,7 +22,7 @@ jobs:
         with:
           filters: |
             planner:
-              - 'planner/**'
+              - 'cmd/planner/**'
               - 'internal/planner/**'
               - '.github/workflows/planner_tests.yaml'
   integration-test:
@@ -43,7 +43,7 @@ jobs:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
           APP_PORT: 8080
         run: |
-          go test -v -cover -tags=integration -race ./planner/...
+          go test -v -cover -tags=integration -race ./cmd/planner/...
 
     services:
       postgres:

@@ -21,31 +21,13 @@ platforms:
 extensions:
     - go-framework
 
-# uncomment the sections you need and adjust according to your requirements.
-# parts:
-
-#   go-framework/install-app:
-#    # select a specific Go version. Otherwise the current stable one will be used.
-#    build-snaps:
-#    - go/1.22/stable
-#    organize:
-#    # if the main package is in the base directory and the rockcraft name
-#    # attribute is equal to the go module name, the name of the server will
-#    # be selected correctly, otherwise you can adjust it.
-#    # the file in /usr/local/bin/ with the name of the rockcraft project will be
-#    # the binary to run your server.
-#    # you can also include here other binary files to be included in the rock.
-#      bin/otherbinary: usr/local/bin/projectname
-
-#   go-framework/assets:
-#     stage:
-#       # by default, only the files migrate, migrate.sh, templates/ and static/
-#       # are copied into the image. You can modify the list below to override
-#       # the default list and include or exclude specific files/directories
-#       # in your project.
-#       # note: Prefix each entry with "app/" followed by the local path.
-#       - app/templates
-#       - app/static
-#       - app/otherdirectory
-#       - app/otherfile
+# Configure the go-framework extension to build from cmd/webhook-gateway
+parts:
+  go-framework/install-app:
+    override-build: |
+      # Build the webhook-gateway binary from cmd/webhook-gateway
+      cd "$CRAFT_PART_SRC"
+      go build -o bin/webhook-gateway ./cmd/webhook-gateway
+      mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
+      cp bin/webhook-gateway "$CRAFT_PART_INSTALL/usr/local/bin/"
 
