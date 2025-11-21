@@ -16,7 +16,7 @@ jobs:
     outputs:
       webhook-gateway: ${{ steps.filter.outputs.webhook-gateway }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -32,7 +32,7 @@ jobs:
     runs-on: [self-hosted-linux-amd64-noble-edge]
     name: Run Integration Tests
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
