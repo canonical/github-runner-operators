@@ -56,11 +56,6 @@ func (m *mockStore) GetPressures(ctx context.Context, platform string, flavors .
 	return res, nil
 }
 
-func (m *mockStore) GetAllPressures(ctx context.Context, platform string) (map[string]int, error) {
-	res := make(map[string]int)
-	return res, nil
-}
-
 // assertMetricObservedWithLabels asserts the gauge has a datapoint matching flavor + platform + value.
 func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
 	t.Helper()

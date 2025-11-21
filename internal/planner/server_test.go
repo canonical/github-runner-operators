@@ -32,8 +32,8 @@ func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) erro
 }
 
 func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
-	if f.pressures == nil {
-		return nil, database.ErrNotExist
+	if len(flavors) == 0 {
+		return f.pressures, nil
 	}
 	res := make(map[string]int)
 	for _, flavor := range flavors {
@@ -41,17 +41,7 @@ func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors .
 			res[flavor] = pressure
 		}
 	}
-	if len(res) == 0 {
-		return nil, database.ErrNotExist
-	}
 	return res, nil
-}
-
-func (f *fakeStore) GetAllPressures(ctx context.Context, platform string) (map[string]int, error) {
-	if f.pressures == nil {
-		return nil, database.ErrExist
-	}
-	return f.pressures, nil
 }
 
 func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
@@ -174,12 +164,11 @@ func TestGetFlavorPressure(t *testing.T) {
 		expectedStatus:    http.StatusOK,
 		expectedPressures: map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
 	}, {
-		name:              "shouldFailWhenFlavorNotExist",
-		pressures:         map[string]int{"runner-medium": 1, "runner-large": 1},
-		method:            http.MethodGet,
-		url:               "/api/v1/flavors/runner-small/pressure",
-		expectedStatus:    http.StatusNotFound,
-		expectedPressures: nil,
+		name:           "shouldFailWhenFlavorNotExist",
+		pressures:      map[string]int{"runner-medium": 1, "runner-large": 1},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure",
+		expectedStatus: http.StatusNotFound,
 	}, {
 		name:           "shouldFailWhenNameMissing",
 		method:         http.MethodGet,

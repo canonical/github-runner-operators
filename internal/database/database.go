@@ -446,6 +446,7 @@ func (d *Database) ListFlavors(ctx context.Context, platform string) ([]Flavor, 
 }
 
 // GetPressures returns the pressure for the specified flavors.
+// If no flavors are specified, it returns the pressure for all flavors.
 // For details on how pressure is computed, see the package documentation
 // on the pressure algorithm.
 func (d *Database) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
@@ -457,62 +458,37 @@ func (d *Database) GetPressures(ctx context.Context, platform string, flavors ..
 					   ON f.platform = j.platform
 					       AND j.assigned_flavor = f.name
 						   AND j.completed_at IS NULL
-	WHERE f.platform = @platform AND f.name = ANY(@flavors)
-	GROUP BY f.name, f.priority, f.minimum_pressure
-	`
-	rows, err := d.conn.Query(ctx, sql, pgx.NamedArgs{
-		"platform": platform,
-		"flavors":  flavors,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate flavor pressure: %w", err)
-	}
-	type pressureRow struct {
-		Flavor   string
-		Pressure int
-	}
-	pressureRows, err := pgx.CollectRows[pressureRow](rows, pgx.RowToStructByName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate flavor pressure: %w", err)
-	}
-	pressures := make(map[string]int)
-	for _, flavor := range flavors {
-		pressures[flavor] = 0
-	}
-	for _, row := range pressureRows {
-		pressures[row.Flavor] = row.Pressure
-	}
-	return pressures, nil
-}
-
-// GetAllPressures returns the pressure for all flavors on the specified platform.
-func (d *Database) GetAllPressures(ctx context.Context, platform string) (map[string]int, error) {
-	sql := `
-	SELECT f.name                                    AS flavor,
-           GREATEST(f.minimum_pressure, COUNT(j.pk)) AS pressure
-	FROM flavor AS f
-			 LEFT JOIN job AS j
-					   ON f.platform = j.platform
-					       AND j.assigned_flavor = f.name
-						   AND j.completed_at IS NULL
 	WHERE f.platform = @platform
-	GROUP BY f.name, f.priority, f.minimum_pressure
 	`
-	rows, err := d.conn.Query(ctx, sql, pgx.NamedArgs{
+
+	args := pgx.NamedArgs{
 		"platform": platform,
-	})
+	}
+
+	// Add flavor filtering when needed
+	if len(flavors) > 0 {
+		sql += " AND f.name = ANY(@flavors)"
+		args["flavors"] = flavors
+	}
+
+	sql += "GROUP BY f.name, f.priority, f.minimum_pressure"
+
+	rows, err := d.conn.Query(ctx, sql, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate flavor pressure: %w", err)
 	}
+
 	type pressureRow struct {
 		Flavor   string
 		Pressure int
 	}
+
 	pressureRows, err := pgx.CollectRows[pressureRow](rows, pgx.RowToStructByName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate flavor pressure: %w", err)
 	}
-	pressures := make(map[string]int, len(pressureRows))
+
+	pressures := make(map[string]int)
 	for _, row := range pressureRows {
 		pressures[row.Flavor] = row.Pressure
 	}

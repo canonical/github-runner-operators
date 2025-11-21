@@ -30,7 +30,6 @@ type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
-	GetAllPressures(ctx context.Context, platform string) (map[string]int, error)
 }
 
 // Server holds dependencies for the planner HTTP handlers.
@@ -108,22 +107,22 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	flavorName := r.PathValue("name")
 	switch flavorName {
 	case allFlavorName:
-		pressures, err = s.store.GetAllPressures(r.Context(), flavorPlatform)
+		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform)
 	default:
 		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform, flavorName)
 	}
 
-	if err == nil {
-		respondWithJSON(w, http.StatusOK, pressures)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	if errors.Is(err, database.ErrNotExist) {
+	if len(pressures) == 0 {
 		http.Error(w, "flavor not found", http.StatusNotFound)
 		return
 	}
 
-	http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
+	respondWithJSON(w, http.StatusOK, pressures)
 }
 
 // respondWithJSON sends a JSON response with the given status code and payload.

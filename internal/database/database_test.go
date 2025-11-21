@@ -600,85 +600,14 @@ func TestDatabase_ListFlavors(t *testing.T) {
 }
 
 func TestDatabase_GetPressures(t *testing.T) {
-	db := setupDatabase(t)
-	defer teardownDatabase(t)
-	ctx := t.Context()
-
-	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
-		Platform: "github",
-		Name:     "github-amd64-medium-ps6",
-		Labels:   []string{"self-hosted", "amd64", "medium"},
-		Priority: 300,
-	}))
-	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
-		Platform: "github",
-		Name:     "github-amd64-large-ps6",
-		Labels:   []string{"self-hosted", "amd64", "large"},
-		Priority: 200,
-	}))
-	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
-		Platform: "github",
-		Name:     "github-arm64-large-ps7",
-		Labels:   []string{"self-hosted", "arm64", "large"},
-		Priority: 150,
-	}))
-
-	assert.NoError(t, db.AddJob(ctx, &Job{
-		Platform: "github",
-		ID:       "1",
-		Labels:   []string{"self-hosted", "amd64", "medium"},
-	}))
-	assert.NoError(t, db.AddJob(ctx, &Job{
-		Platform: "github",
-		ID:       "2",
-		Labels:   []string{"self-hosted", "amd64", "large"},
-	}))
-	assert.NoError(t, db.AddJob(ctx, &Job{
-		Platform: "github",
-		ID:       "3",
-		Labels:   []string{"self-hosted", "amd64", "large"},
-	}))
-	assert.NoError(t, db.AddJob(ctx, &Job{
-		Platform: "github",
-		ID:       "4",
-		Labels:   []string{"self-hosted", "arm64", "large"},
-	}))
-	assert.NoError(t, db.AddJob(ctx, &Job{
-		Platform: "github",
-		ID:       "5",
-		Labels:   []string{"self-hosted", "arm64", "large"},
-	}))
-	assert.NoError(t, db.AddJob(ctx, &Job{
-		Platform: "github",
-		ID:       "6",
-		Labels:   []string{"self-hosted", "arm64", "large"},
-	}))
-
-	pressures, err := db.GetPressures(
-		ctx,
-		"github",
-		"github-amd64-medium-ps6",
-		"github-amd64-large-ps6",
-		"github-arm64-large-ps7",
-		"github-s390x-large-ps7",
-	)
-	assert.NoError(t, err)
-	assert.Equal(t, map[string]int{
-		"github-amd64-medium-ps6": 1,
-		"github-amd64-large-ps6":  2,
-		"github-arm64-large-ps7":  3,
-		"github-s390x-large-ps7":  0,
-	}, pressures)
-}
-
-func TestDatabase_GetAllPressures(t *testing.T) {
 	tests := []struct {
-		name     string
-		flavors  []*Flavor
-		jobs     []*Job
-		expected map[string]int
+		name      string
+		flavors   []*Flavor
+		jobs      []*Job
+		requested []string
+		expected  map[string]int
 	}{{
-		name: "no pressures",
+		name: "return all with zero pressures when no flavors requested and no jobs exist",
 		flavors: []*Flavor{
 			{Platform: "github", Name: "github-amd64-medium-ps6", Labels: []string{"self-hosted", "amd64", "medium"}, Priority: 100},
 			{Platform: "github", Name: "github-arm64-large-ps7", Labels: []string{"self-hosted", "arm64", "large"}, Priority: 200},
@@ -689,7 +618,7 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 			"github-arm64-large-ps7":  0,
 		},
 	}, {
-		name: "some pressures",
+		name: "return all with calculated pressures when no flavors requested and some jobs exist",
 		flavors: []*Flavor{
 			{Platform: "github", Name: "github-amd64-medium-ps6", Labels: []string{"self-hosted", "amd64", "medium"}, Priority: 300},
 			{Platform: "github", Name: "github-amd64-large-ps6", Labels: []string{"self-hosted", "amd64", "large"}, Priority: 200},
@@ -705,7 +634,7 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 			"github-arm64-large-ps7":  1,
 		},
 	}, {
-		name: "all pressures",
+		name: "return all with calculated pressures when no flavors requested and all jobs exist",
 		flavors: []*Flavor{
 			{Platform: "github", Name: "github-amd64-medium-ps6", Labels: []string{"self-hosted", "amd64", "medium"}, Priority: 300},
 			{Platform: "github", Name: "github-amd64-large-ps6", Labels: []string{"self-hosted", "amd64", "large"}, Priority: 200},
@@ -719,12 +648,62 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 			{Platform: "github", ID: "4", Labels: []string{"self-hosted", "arm64", "large"}},
 			{Platform: "github", ID: "5", Labels: []string{"self-hosted", "arm64", "large"}},
 			{Platform: "github", ID: "6", Labels: []string{"self-hosted", "arm64", "large"}},
+			{Platform: "github", ID: "7", Labels: []string{"self-hosted", "s390x", "large"}},
 		},
 		expected: map[string]int{
 			"github-amd64-medium-ps6": 1,
 			"github-amd64-large-ps6":  2,
 			"github-arm64-large-ps7":  3,
-			"github-s390x-large-ps7":  0,
+			"github-s390x-large-ps7":  1,
+		},
+	}, {
+		name: "return empty flavors when flavors requested does not exist",
+		flavors: []*Flavor{
+			{Platform: "github", Name: "github-amd64-medium-ps6", Labels: []string{"self-hosted", "amd64", "medium"}, Priority: 300},
+			{Platform: "github", Name: "github-amd64-large-ps6", Labels: []string{"self-hosted", "amd64", "large"}, Priority: 200},
+			{Platform: "github", Name: "github-arm64-large-ps7", Labels: []string{"self-hosted", "arm64", "large"}, Priority: 150},
+		},
+		jobs: []*Job{
+			{Platform: "github", ID: "1", Labels: []string{"self-hosted", "amd64", "large"}},
+			{Platform: "github", ID: "2", Labels: []string{"self-hosted", "arm64", "large"}},
+		},
+		requested: []string{"github-s390x-large-ps7", "github-riscv64-large-ps8"},
+		expected:  map[string]int{},
+	}, {
+		name: "return only requested flavors with zero pressures when some flavors requested and no jobs exist",
+		flavors: []*Flavor{
+			{Platform: "github", Name: "github-amd64-medium-ps6", Labels: []string{"self-hosted", "amd64", "medium"}, Priority: 300},
+			{Platform: "github", Name: "github-amd64-large-ps6", Labels: []string{"self-hosted", "amd64", "large"}, Priority: 200},
+			{Platform: "github", Name: "github-arm64-large-ps7", Labels: []string{"self-hosted", "arm64", "large"}, Priority: 150},
+			{Platform: "github", Name: "github-s390x-large-ps7", Labels: []string{"self-hosted", "s390x", "large"}, Priority: 150},
+		},
+		jobs:      []*Job{},
+		requested: []string{"github-amd64-large-ps6", "github-s390x-large-ps7"},
+		expected: map[string]int{
+			"github-amd64-large-ps6": 0,
+			"github-s390x-large-ps7": 0,
+		},
+	}, {
+		name: "return only requested flavors that exist with calculated pressures",
+		flavors: []*Flavor{
+			{Platform: "github", Name: "github-amd64-medium-ps6", Labels: []string{"self-hosted", "amd64", "medium"}, Priority: 300},
+			{Platform: "github", Name: "github-amd64-large-ps6", Labels: []string{"self-hosted", "amd64", "large"}, Priority: 200},
+			{Platform: "github", Name: "github-arm64-large-ps7", Labels: []string{"self-hosted", "arm64", "large"}, Priority: 150},
+			{Platform: "github", Name: "github-s390x-large-ps7", Labels: []string{"self-hosted", "s390x", "large"}, Priority: 150},
+		},
+		jobs: []*Job{
+			{Platform: "github", ID: "2", Labels: []string{"self-hosted", "amd64", "large"}},
+			{Platform: "github", ID: "3", Labels: []string{"self-hosted", "amd64", "large"}},
+			{Platform: "github", ID: "4", Labels: []string{"self-hosted", "arm64", "large"}},
+			{Platform: "github", ID: "5", Labels: []string{"self-hosted", "arm64", "large"}},
+			{Platform: "github", ID: "6", Labels: []string{"self-hosted", "arm64", "large"}},
+			{Platform: "github", ID: "7", Labels: []string{"self-hosted", "s390x", "large"}},
+		},
+		requested: []string{"github-amd64-medium-ps6", "github-amd64-large-ps6", "github-s390x-large-ps7", "github-riscv64-large-ps8"},
+		expected: map[string]int{
+			"github-amd64-medium-ps6": 0,
+			"github-amd64-large-ps6":  2,
+			"github-s390x-large-ps7":  1,
 		},
 	}}
 
@@ -742,7 +721,7 @@ func TestDatabase_GetAllPressures(t *testing.T) {
 				assert.NoError(t, db.AddJob(ctx, j))
 			}
 
-			pressures, err := db.GetAllPressures(ctx, "github")
+			pressures, err := db.GetPressures(ctx, "github", test.requested...)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expected, pressures)
 		})
