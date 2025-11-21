@@ -8,4 +8,4 @@ jobs:
     uses: canonical/operator-workflows/.github/workflows/bot_pr_approval.yaml@main
     secrets: inherit
     permissions:
-      packages: write
+      pull_requests: write
