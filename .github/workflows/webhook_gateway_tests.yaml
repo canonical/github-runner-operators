@@ -16,13 +16,14 @@ jobs:
     outputs:
       webhook-gateway: ${{ steps.filter.outputs.webhook-gateway }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             webhook-gateway:
-              - 'webhook-gateway/**'
+              - 'cmd/webhook-gateway/**'
+              - 'webhook-gateway-operator/**'
               - 'internal/**'
               - '.github/workflows/webhook_gateway_tests.yaml'
 
@@ -32,7 +33,7 @@ jobs:
     runs-on: [self-hosted-linux-amd64-noble-edge]
     name: Run Integration Tests
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -52,7 +53,7 @@ jobs:
           APP_PORT: 8080
           APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
-          go test -v -cover -tags=integration -race ./webhook-gateway/...
+          go test -v -cover -tags=integration -race ./cmd/webhook-gateway/...
 
     services:
       rabbitmq:

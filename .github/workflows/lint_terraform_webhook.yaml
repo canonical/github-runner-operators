@@ -15,7 +15,7 @@ jobs:
     outputs:
       terraform: ${{ steps.filter.outputs.terraform }}
     steps:
-      - uses: actions/checkout@v5.0.1
+      - uses: actions/checkout@v6.0.0
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -29,10 +29,10 @@ jobs:
     name: Validate terraform configuration files
     runs-on: ubuntu-latest
     env:
-      WORKING_DIR: "webhook-gateway/charm/terraform"
+      WORKING_DIR: "webhook-gateway-operator/terraform"
     steps:
       - name: Check out code
-        uses: actions/checkout@v5.0.1
+        uses: actions/checkout@v6.0.0
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3.1.2

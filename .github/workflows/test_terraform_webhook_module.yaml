@@ -15,7 +15,7 @@ jobs:
     outputs:
       terraform: ${{ steps.filter.outputs.terraform }}
     steps:
-      - uses: actions/checkout@v5.0.1
+      - uses: actions/checkout@v6.0.0
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -27,11 +27,11 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.terraform == 'true'
     name: Test Terraform with Juju
-    runs-on: ubuntu-latest
+    runs-on: self-hosted-linux-amd64-noble-edge
     env:
-      WORKING_DIR: "webhook-gateway/charm/terraform/tests"
+      WORKING_DIR: "webhook-gateway-operator/terraform/tests"
     steps:
-      - uses: actions/checkout@v5.0.1
+      - uses: actions/checkout@v6.0.0
       - uses: charmed-kubernetes/actions-operator@main
         with:
           provider: "microk8s"
