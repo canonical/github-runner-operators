@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,6 +21,7 @@ import (
 )
 
 type fakeStore struct {
+	pressures   map[string]int
 	lastFlavor  *database.Flavor
 	errToReturn error
 }
@@ -30,9 +32,14 @@ func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) erro
 }
 
 func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
+	if len(flavors) == 0 {
+		return f.pressures, nil
+	}
 	res := make(map[string]int)
-	for _, name := range flavors {
-		res[name] = 1
+	for _, flavor := range flavors {
+		if pressure, ok := f.pressures[flavor]; ok {
+			res[flavor] = pressure
+		}
 	}
 	return res, nil
 }
@@ -71,52 +78,46 @@ func TestCreateFlavor(t *testing.T) {
 		expectedStatus     int
 		expectedFlavorName string
 		expectedPlatform   string
-	}{
-		{
-			name:               "shouldSucceed",
-			storeErr:           nil,
-			method:             http.MethodPost,
-			url:                "/api/v1/flavors/runner-small",
-			body:               `{"platform":"github","labels":["x64"],"priority":2}`,
-			expectedStatus:     http.StatusCreated,
-			expectedFlavorName: "runner-small",
-			expectedPlatform:   "github",
-		},
-		{
-			name:               "shouldFailWhenAlreadyExists",
-			storeErr:           database.ErrExist,
-			method:             http.MethodPost,
-			url:                "/api/v1/flavors/existing-flavor",
-			body:               `{"platform":"github"}`,
-			expectedStatus:     http.StatusConflict,
-			expectedFlavorName: "existing-flavor",
-			expectedPlatform:   "github",
-		},
-		{
-			name:           "shouldFailOnInvalidJSON",
-			storeErr:       nil,
-			method:         http.MethodPost,
-			url:            "/api/v1/flavors/test",
-			body:           `{invalid-json}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "shouldFailWhenNameMissing",
-			storeErr:       nil,
-			method:         http.MethodPost,
-			url:            "/api/v1/flavors/",
-			body:           `{"platform":"github"}`,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "shouldFailForNonPostMethod",
-			storeErr:       nil,
-			method:         http.MethodGet,
-			url:            "/api/v1/flavors/test",
-			body:           `{"platform":"github"}`,
-			expectedStatus: http.StatusMethodNotAllowed,
-		},
-	}
+	}{{
+		name:               "shouldSucceed",
+		storeErr:           nil,
+		method:             http.MethodPost,
+		url:                "/api/v1/flavors/runner-small",
+		body:               `{"platform":"github","labels":["x64"],"priority":2}`,
+		expectedStatus:     http.StatusCreated,
+		expectedFlavorName: "runner-small",
+		expectedPlatform:   "github",
+	}, {
+		name:               "shouldFailWhenAlreadyExists",
+		storeErr:           database.ErrExist,
+		method:             http.MethodPost,
+		url:                "/api/v1/flavors/existing-flavor",
+		body:               `{"platform":"github"}`,
+		expectedStatus:     http.StatusConflict,
+		expectedFlavorName: "existing-flavor",
+		expectedPlatform:   "github",
+	}, {
+		name:           "shouldFailOnInvalidJSON",
+		storeErr:       nil,
+		method:         http.MethodPost,
+		url:            "/api/v1/flavors/test",
+		body:           `{invalid-json}`,
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailWhenNameMissing",
+		storeErr:       nil,
+		method:         http.MethodPost,
+		url:            "/api/v1/flavors/",
+		body:           `{"platform":"github"}`,
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name:           "shouldFailForNonPostMethod",
+		storeErr:       nil,
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/test",
+		body:           `{"platform":"github"}`,
+		expectedStatus: http.StatusMethodNotAllowed,
+	}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -136,6 +137,65 @@ func TestCreateFlavor(t *testing.T) {
 			if tt.expectedPlatform != "" {
 				assert.Equal(t, tt.expectedPlatform, store.lastFlavor.Platform)
 			}
+		})
+	}
+}
+
+func TestGetFlavorPressure(t *testing.T) {
+	tests := []struct {
+		name              string
+		pressures         map[string]int
+		method            string
+		url               string
+		expectedStatus    int
+		expectedPressures map[string]int
+	}{{
+		name:              "shouldSucceedForSingleFlavor",
+		pressures:         map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
+		method:            http.MethodGet,
+		url:               "/api/v1/flavors/runner-small/pressure",
+		expectedStatus:    http.StatusOK,
+		expectedPressures: map[string]int{"runner-small": 1},
+	}, {
+		name:              "shouldSucceedForAllFlavors",
+		pressures:         map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
+		method:            http.MethodGet,
+		url:               "/api/v1/flavors/_/pressure",
+		expectedStatus:    http.StatusOK,
+		expectedPressures: map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1},
+	}, {
+		name:           "shouldFailWhenFlavorNotExist",
+		pressures:      map[string]int{"runner-medium": 1, "runner-large": 1},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure",
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name:           "shouldFailWhenNameMissing",
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors//pressure",
+		expectedStatus: http.StatusMovedPermanently,
+	}, {
+		name:           "shouldFailForNonGetMethod",
+		method:         http.MethodPost,
+		url:            "/api/v1/flavors/runner-small/pressure",
+		expectedStatus: http.StatusMethodNotAllowed,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{pressures: tt.pressures}
+			server := NewServer(store, NewMetrics(store))
+			token := makeToken()
+
+			req := newRequest(tt.method, tt.url, "", token)
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, req)
+
+			var resp map[string]int
+			json.NewDecoder(w.Body).Decode(&resp)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			assert.Equal(t, tt.expectedPressures, resp)
 		})
 	}
 }

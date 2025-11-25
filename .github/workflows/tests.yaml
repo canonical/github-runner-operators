@@ -11,10 +11,10 @@ concurrency:
 jobs:
   unit-test:
     name: Run Unit and Lint Tests
-    runs-on: [self-hosted-linux-amd64-noble-edge]
+    runs-on: [ubuntu-latest]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
