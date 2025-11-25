@@ -28,7 +28,7 @@ jobs:
   integration-test:
     needs: detect-changes
     if: needs.detect-changes.outputs.planner == 'true'
-    runs-on: [self-hosted-linux-amd64-noble-edge]
+    runs-on: [ubuntu-latest]
     name: Run Integration Tests
     steps:
       - uses: actions/checkout@v6
