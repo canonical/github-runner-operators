@@ -76,9 +76,9 @@ git clone https://github.com/canonical/github-runner-operators.git
 
 The code structure is as follows
 
-- `internal/`: Internal libraries for the applications
-- `webhook-gateway`: The webhook gateway application and charm code
-- `planner`: The planner application code
+- `internal/`: Internal Go libraries for the applications
+- `cmd/`: Entry points for Go applications (planner, webhook-gateway)
+- `webhook-gateway-operator/`: Charm related code for webhook-gateway
 
 ### Test
 
@@ -94,7 +94,7 @@ go test -race -v ./...
 Run `webhook-gateway` integration tests using:
 
 ```shell
-APP_PORT=8080 WEBHOOK_SECRET=fake RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -cover -v  ./webhook-gateway -integration
+APP_PORT=8080 APP_WEBHOOK_SECRET_VALUE=fake RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -cover -v  ./cmd/webhook-gateway -integration
 ```
 
 It assumes you have access to a RabbitMQ server running reachable at $RABBITMQ_CONNECT_STRING.
@@ -107,7 +107,7 @@ docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-manag
 Run `planner` integration tests using:
 
 ```shell
-POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" APP_PORT=8080 go test ./planner -v -count=1
+POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" APP_PORT=8080 go test ./cmd/planner -v -count=1
 ```
 
 It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
@@ -118,9 +118,9 @@ The charm uses the [12 factor app pattern](https://canonical-12-factor-app-suppo
 In order to build the webhook-gateway rock, use the
 `build-webhook-gateway-rock.sh` script.
 
-The `github-runner-webhook-gateway` charm code is in the `webhook-gateway/charm` directory.
+The `github-runner-webhook-gateway` charm code is in the `webhook-gateway-operator` directory.
 
-Integration tests for the charm are in the `webhook-gateway/charm/tests/integration` directory.
+Integration tests for the charm are in the `webhook-gateway-operator/tests/integration` directory.
 
 Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)
 for a step-by-step guide to develop a Kubernetes charm using Go.

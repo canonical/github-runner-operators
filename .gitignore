@@ -11,6 +11,10 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Built binaries
+/planner
+/webhook-gateway
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
