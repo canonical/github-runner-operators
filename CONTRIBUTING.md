@@ -127,10 +127,10 @@ We intend to have unit tests for all the logic in the internal packages (located
 Unit tests should test the logic in isolation using mocks/fakes for external dependencies. They should be fast to execute.
 
 Integration tests should test the integration of various components together. They should be located in the main
-package of the application they are testing (e.g. in `webhook-gateway/main_test.go` for the webhook gateway application).
+package of the application they are testing (e.g. in `cmd/webhook-gateway/main_test.go` for the webhook gateway application).
 
 In addition to application integration tests, we also have charm integration tests located in the respective charm directories
-(e.g. in `webhook-gateway/charm/tests/integration` for the webhook gateway charm). These tests should test the charm 
+(e.g. in `webhook-gateway-operator/tests/integration` for the webhook gateway charm). These tests should test the charm 
 deployment and its integration with other charms. These tests are usually slower than application integration tests, and
 should not cover application logic tests; those should be covered in the application integration test.
 Aim to focus the charm integration tests only on operational aspects. E.g.
