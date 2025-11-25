@@ -131,9 +131,22 @@ package of the application they are testing (e.g. in `webhook-gateway/main_test.
 
 In addition to application integration tests, we also have charm integration tests located in the respective charm directories
 (e.g. in `webhook-gateway/charm/tests/integration` for the webhook gateway charm). These tests should test the charm 
-deployment and its integration with other charms. Aim to not duplicate application logic tests in charm integration tests.
+deployment and its integration with other charms. These tests are usually slower than application integration tests, and
+should not cover application logic tests; those should be covered in the application integration test.
+Aim to focus the charm integration tests only on operational aspects. E.g.
 
-Aim to keep tests fast to execute and reliable.
+- Testing if the charm deploys correctly
+- Testing if the charm config options work as expected
+- Testing if the charm integrates correctly with other charms 
+
+Aim to keep all tests (unit, integration, charm integration) 
+
+- fast to execute
+- be reliable
+- be deterministic/repeatable
+- easy to set up locally
+
+in order to be able to have fast iterations during development.
 
 ### Coverage
 
