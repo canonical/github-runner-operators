@@ -81,7 +81,7 @@ jobs:
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
 
-  integration-status-check:
+  webhook-gateway-integration-status-check:
     runs-on: ubuntu-latest
     needs: [detect-changes, integration-test, charm-integration-tests]
     if: always()
