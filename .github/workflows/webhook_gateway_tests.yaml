@@ -22,14 +22,15 @@ jobs:
         with:
           filters: |
             webhook-gateway:
-              - 'webhook-gateway/**'
+              - 'cmd/webhook-gateway/**'
+              - 'webhook-gateway-operator/**'
               - 'internal/**'
               - '.github/workflows/webhook_gateway_tests.yaml'
 
   integration-test:
     needs: detect-changes
     if: needs.detect-changes.outputs.webhook-gateway == 'true'
-    runs-on: [self-hosted-linux-amd64-noble-edge]
+    runs-on: [ubuntu-latest]
     name: Run Integration Tests
     steps:
       - uses: actions/checkout@v6
@@ -53,7 +54,7 @@ jobs:
           APP_PORT: 8080
           APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
-          go test -v -cover -tags=integration -race ./webhook-gateway/...
+          go test -v -cover -tags=integration -race ./cmd/webhook-gateway/...
           go test -v -cover -tags=integration -race ./internal/database/...
 
     services:
