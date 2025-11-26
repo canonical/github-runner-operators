@@ -99,6 +99,17 @@ Run unit tests using:
 go test -race -v ./...
 ```
 
+Currently, the internal database package is only covered by integration tests. You can run the database integration tests using:
+
+```shell
+DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" go test -cover -tags=integration -v ./internal/database 
+```
+It assumes you have access to a Postgres server running reachable at $DB_CONNECT_STRING.
+You can use `docker` to run a Postgres server locally:
+```shell
+docker run -d --rm --name postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
+```
+
 Run `webhook-gateway` integration tests using:
 
 ```shell

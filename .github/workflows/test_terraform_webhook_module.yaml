@@ -27,7 +27,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.terraform == 'true'
     name: Test Terraform with Juju
-    runs-on: ubuntu-latest
+    runs-on: self-hosted-linux-amd64-noble-edge
     env:
       WORKING_DIR: "webhook-gateway-operator/terraform/tests"
     steps:
