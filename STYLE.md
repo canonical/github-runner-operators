@@ -575,11 +575,9 @@ arange-act-assert commenting style:
 
 ```go
 func TestCreateDirs(t *testing.T) {
-	/*
-	Arrange: Setup the test directory.
-	Act: Start the daemon with create-dirs option.
-    Assert: Check that the directory was created.
-	 */
+	// Arrange: Setup the test directory.
+	// Act: Start the daemon with create-dirs option.
+    // Assert: Check that the directory was created.
 	tmpDir := t.TempDir()
 	daemonDir := filepath.Join(tmpDir, "pebble")
 	_, stderrCh := daemon(t, daemonDir, "run", "--create-dirs")
