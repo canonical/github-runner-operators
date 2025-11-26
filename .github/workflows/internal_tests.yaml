@@ -30,7 +30,10 @@ jobs:
         env:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
         run: |
-          go test -v -coverprofile=coverage.out -race -tags=integration ./internal/...
+          # We exclude some packages from coverage analysis as they are either not relevant or highly uncovered at the moment
+          EXCLUDE_PKGS="internal/telemetry|internal/version"
+          COVER_PKG=$(go list ./internal/... | grep -Ev "$EXCLUDE_PKGS" | tr '\n' ',')
+          go test -v -coverprofile=coverage.out -race -tags=integration -coverpkg=$COVER_PKG ./internal/...
 
       - name: Print coverage report
         run: |
