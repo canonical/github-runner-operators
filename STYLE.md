@@ -487,7 +487,7 @@ It's also okay to use a few lines of duplicated code if it makes the test cleare
 
 ### Environment variables in tests
 
-`Setenv` calls `os.Setenv(key, value)` and uses Cleanup to restore the environment variable to its original value after the test. So, instead of doing:
+`Setenv` calls `os.Setenv(key, value)` and uses Cleanup to restore the environment variable to its original value after the test.
 
 Avoid:
 
