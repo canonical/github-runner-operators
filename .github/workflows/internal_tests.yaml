@@ -46,11 +46,9 @@ jobs:
 
       - name: Enforce min coverage (85%)
         run: |
-          go tool cover -func=coverage.out | tail -1 | awk '{if ($3 < 85) exit 1}'
-          if [ "$?" -ne 0 ]; then
-              # use github actions log to print message
-              echo "::error::Code coverage is below 85%"
-              exit 1
+          if ! go tool cover -func=coverage.out | tail -1 | awk '{if ($3 < 85) exit 1}'; then
+          echo "::error::Code coverage is below 85%"
+          exit 1
           fi
 
 
