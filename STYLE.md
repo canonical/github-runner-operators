@@ -74,54 +74,6 @@ if i == 1 {
 }
 ```
 
-[//]: # (### Avoid very small functions)
-
-[//]: # ()
-[//]: # (In many cases, it's not worth creating a function or method for one-liners that aren't exported. For example, below you could simply write `positions` inline:)
-
-[//]: # ()
-[//]: # (Avoid:)
-
-[//]: # ()
-[//]: # (```go)
-
-[//]: # (func &#40;rb *RingBuffer&#41; Positions&#40;&#41; &#40;start RingPos, end RingPos&#41; {)
-
-[//]: # (	rb.rwlock.RLock&#40;&#41;)
-
-[//]: # (	defer rb.rwlock.RUnlock&#40;&#41;)
-
-[//]: # (	return rb.positions&#40;&#41;)
-
-[//]: # (})
-
-[//]: # ()
-[//]: # (func &#40;rb *RingBuffer&#41; positions&#40;&#41; &#40;start RingPos, end RingPos&#41; {)
-
-[//]: # (	return rb.readIndex, rb.writeIndex)
-
-[//]: # (})
-
-[//]: # (```)
-
-[//]: # ()
-[//]: # (Prefer:)
-
-[//]: # ()
-[//]: # (```go)
-
-[//]: # (func &#40;rb *RingBuffer&#41; Positions&#40;&#41; &#40;start RingPos, end RingPos&#41; {)
-
-[//]: # (	rb.rwlock.RLock&#40;&#41;)
-
-[//]: # (	defer rb.rwlock.RUnlock&#40;&#41;)
-
-[//]: # (	return rb.readIndex, rb.writeIndex)
-
-[//]: # (})
-
-[//]: # (```)
-
 ### Cuddled braces
 
 Avoid:
@@ -561,10 +513,23 @@ func TestSomething(t *testing.T) {
 }
 ```
 
-[//]: # (### `t.Fatalf` or `t.Errorf`?)
+### Usage of `assert` framework instead of `t.Errorf`
 
-[//]: # ()
-[//]: # (If a test should not continue at a certain point, use `t.Fatalf` instead of `t.Errorf`. Do not use `t.Errorf` everywhere without thinking about it.)
+We recommend using `assert` from `github.com/stretchr/testify/assert`
+for better readability and maintainability of tests.
+
+Avoid:
+
+```go
+if got != want {
+    t.Errorf("got %v, want %v", got, want)
+}
+```
+Prefer:
+
+```go
+assert.Equal(t, want, got)
+```
 
 ### Comments in tests
 
