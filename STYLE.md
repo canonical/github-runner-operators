@@ -513,10 +513,12 @@ func TestSomething(t *testing.T) {
 }
 ```
 
-### Usage of `assert` framework instead of `t.Errorf`
+### Usage of testify framework instead of using `t.Errorf` and `t.Fatalf`
 
 We recommend using `assert` from `github.com/stretchr/testify/assert`
-for better readability and maintainability of tests.
+for better readability and maintainability of tests. So, when
+asserting expected vs actual values, prefer using `assert.Equal` instead of
+`t.Errorf`.
 
 Avoid:
 
@@ -529,6 +531,24 @@ Prefer:
 
 ```go
 assert.Equal(t, want, got)
+```
+
+Note that `assert` doesn't halt execution, so it might not be 
+well suited for setup failures of tests. Instead of using `t.Fatalf` for these cases,
+`testify` provides `require` package that halts execution on failure.
+
+Avoid:
+
+```go
+if err != nil {
+    t.Fatalf("failed to setup test: %v", err)
+}
+```
+
+Prefer:
+
+```go
+require.NoError(t, err, "failed to setup test")
 ```
 
 ### Comments in tests
