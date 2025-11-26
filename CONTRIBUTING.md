@@ -150,7 +150,7 @@ in order to be able to have fast iterations during development.
 
 ### Coverage
 
-We aim to have at least 80% code coverage for all internal packages. New code that lowers the current coverage
+We aim to have at least 85% code coverage for all internal packages. New code that lowers the current coverage
 should be avoided and discouraged during code reviews.
 
 
