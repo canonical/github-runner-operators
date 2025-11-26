@@ -126,8 +126,8 @@ It assumes you are connected to a local PostgreSQL database "gh_runner_operators
 We intend to have unit tests for all the logic in the internal packages (located in the `internal/` directory).
 Unit tests should test the logic in isolation using mocks/fakes for external dependencies. They should be fast to execute.
 
-Integration tests should test the integration of various components together. They should be located in the main
-package of the application they are testing (e.g. in `cmd/webhook-gateway/main_test.go` for the webhook gateway application).
+Integration tests should test the integration of various components together.
+There should be at least an integration test located in the main package of the application they are testing (e.g. in `cmd/webhook-gateway/main_test.go` for the webhook gateway application).
 
 In addition to application integration tests, we also have charm integration tests located in the respective charm directories
 (e.g. in `webhook-gateway-operator/tests/integration` for the webhook gateway charm). These tests should test the charm 
