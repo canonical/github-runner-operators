@@ -49,21 +49,13 @@ jobs:
 
       - name: Build and Test
         env:
-          POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
           RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
           APP_PORT: 8080
           APP_WEBHOOK_SECRET_VALUE: fake-secret
         run: |
           go test -v -cover -tags=integration -race ./cmd/webhook-gateway/...
-          go test -v -cover -tags=integration -race ./internal/database/...
 
     services:
-      postgres:
-        image: postgres:latest
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
       rabbitmq:
         image: rabbitmq:4-management
         ports:
@@ -89,7 +81,7 @@ jobs:
       charmcraft-channel: latest/edge
       test-tox-env: webhook-gateway-integration
 
-  integration-status-check:
+  webhook-gateway-integration-status-check:
     runs-on: ubuntu-latest
     needs: [detect-changes, integration-test, charm-integration-tests]
     if: always()
