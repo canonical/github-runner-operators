@@ -30,6 +30,7 @@ type amqpChannel interface {
 	IsClosed() bool
 	Confirm(noWait bool) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 }
 
 type amqpConnection interface {
@@ -57,4 +58,8 @@ type amqpChannelWrapper struct {
 
 func (ch *amqpChannelWrapper) PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (confirmation, error) {
 	return ch.Channel.PublishWithDeferredConfirm(exchange, key, mandatory, immediate, msg)
+}
+
+func (ch *amqpChannelWrapper) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+	return ch.Channel.Consume(queue, consumer, autoAck, exclusive, noLocal, noWait, args)
 }

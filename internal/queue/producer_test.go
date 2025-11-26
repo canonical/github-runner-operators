@@ -73,6 +73,10 @@ func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ am
 	return amqp.Queue{}, nil
 }
 
+func (ch *MockAmqpChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+	return nil, nil
+}
+
 type MockConfirmation struct {
 	done <-chan struct{}
 	ack  bool

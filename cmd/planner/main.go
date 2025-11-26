@@ -19,15 +19,18 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/planner"
+	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
-	dbURI       = "POSTGRESQL_DB_CONNECT_STRING"
-	portEnvVar  = "APP_PORT"
-	serviceName = "github-runner-planner"
+	dbURI             = "POSTGRESQL_DB_CONNECT_STRING"
+	portEnvVar        = "APP_PORT"
+	serviceName       = "github-runner-planner"
+	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
+	queueName         = "webhook-queue"
 )
 
 func main() {
@@ -56,6 +59,11 @@ func main() {
 		log.Fatalln(portEnvVar, "environment variable not set.")
 	}
 
+	rabbitMQUri, found := os.LookupEnv(rabbitMQUriEnvVar)
+	if !found {
+		log.Fatalln(rabbitMQUriEnvVar, "environment variable not set.")
+	}
+
 	// Connect to database and create server
 	if err := database.Migrate(ctx, uri); err != nil {
 		log.Fatalln("migrate failed:", err)
@@ -64,6 +72,16 @@ func main() {
 	if err != nil {
 		log.Fatalln("failed to connect to db:", err)
 	}
+
+	consumer := queue.NewAmqpConsumer(rabbitMQUri, queueName, db, nil)
+	consumerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		err := consumer.Start(consumerCtx)
+		if err != nil {
+			slog.ErrorContext(consumerCtx, "failed to start AMQP consumer", "error", err)
+		}
+	}()
 
 	metrics := planner.NewMetrics(db)
 	server := planner.NewServer(db, metrics)
