@@ -44,7 +44,7 @@ jobs:
       - name: Generate coverage report
         run: go tool cover -html=coverage.out -o=coverage.html
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v5.0.0
         with:
           name: coverage-report
           path: coverage.html
@@ -59,7 +59,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:latest
+        image: postgres:18.1
         env:
           POSTGRES_PASSWORD: postgres
         ports:
