@@ -4,7 +4,7 @@ This is the Go style guide we use for the GitHub Runner Operators project, and m
 
 New code should follow these guidelines, unless there's a good reason not to. 
 
-Sometimes existing code doesn't follow these, but we're happy for it to be updated to do so (either all at once, or as you change nearby code).
+Sometimes existing code doesn't follow these guidelines, but we're happy for it to be updated to do so (either all at once, or as you change nearby code).
 
 ## Naming conventions
 
@@ -554,7 +554,6 @@ require.NoError(t, err, "failed to setup test")
 ### Comments in tests
 
 Tests should be as self-explanatory as possible. Still, in order to quickly understand the purpose of a test, use the
-
 arange-act-assert commenting style:
 
 

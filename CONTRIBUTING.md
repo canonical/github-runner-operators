@@ -152,16 +152,16 @@ Aim to focus the charm integration tests only on operational aspects. E.g.
 
 Aim to keep all tests (unit, integration, charm integration) 
 
-- fast to execute
-- be reliable
-- be deterministic/repeatable
-- easy to set up locally
+- Fast to execute
+- Reliable
+- Deterministic and repeatable
+- Easy to set up locally
 
 in order to be able to have fast iterations during development.
 
 ### Coverage
 
-We aim to have at least 85% code coverage for all internal packages. New code that lowers the current coverage
+We require at least 85% code coverage for all internal packages. New code that lowers the current coverage
 should be avoided and discouraged during code reviews.
 
 
