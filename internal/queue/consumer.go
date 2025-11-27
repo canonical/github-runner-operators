@@ -31,6 +31,7 @@ type JobDatabase interface {
 	UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]any) error
 }
 
+// AmqpConsumer is an AMQP consumer for workflow job events.
 type AmqpConsumer struct {
 	amqpChannel    amqpChannel
 	amqpConnection amqpConnection
@@ -42,6 +43,7 @@ type AmqpConsumer struct {
 	logger         *slog.Logger
 }
 
+// NewAmqpConsumer creates a new AmqpConsumer with the given dependencies.
 func NewAmqpConsumer(uri, queueName string, db JobDatabase, logger *slog.Logger) *AmqpConsumer {
 	if logger == nil {
 		logger = slog.Default()
@@ -55,6 +57,7 @@ func NewAmqpConsumer(uri, queueName string, db JobDatabase, logger *slog.Logger)
 	}
 }
 
+// Start begins consuming messages from the AMQP queue and processing them.
 func (c *AmqpConsumer) Start(ctx context.Context) error {
 	err := c.resetConnectionOrChannelIfNecessary()
 	if err != nil {
@@ -83,11 +86,13 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 	}
 }
 
+// WorkflowJobWebhook represents the structure of a workflow job webhook message.
 type WorkflowJobWebhook struct {
 	Action      string      `json:"action"`
 	WorkflowJob WorkflowJob `json:"workflow_job"`
 }
 
+// WorkflowJob represents the structure of a workflow job in the webhook message.
 type WorkflowJob struct {
 	ID          int      `json:"id"`
 	Labels      []string `json:"labels"`
@@ -97,6 +102,7 @@ type WorkflowJob struct {
 	CompletedAt *string  `json:"completed_at,omitempty"`
 }
 
+// handleMessage processes a single AMQP message.
 func (c *AmqpConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) error {
 	webhook := WorkflowJobWebhook{}
 	if err := json.Unmarshal(msg.Body, &webhook); err != nil {
@@ -117,6 +123,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) err
 	}
 }
 
+// insertJobToDB inserts a new job into the database.
 func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
 	job := &database.Job{
 		ID:          strconv.Itoa(j.ID),
@@ -140,6 +147,7 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amq
 	return nil
 }
 
+// updateJobStartedInDB updates the job's started_at timestamp in the database.
 func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
 	if c.parseToTime(j.StartedAt).IsZero() {
 		msg.Nack(false, false) // don't requeue
@@ -158,6 +166,7 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 	return nil
 }
 
+// updateJobCompletedInDB updates the job's completed_at timestamp in the database.
 func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
 	if c.parseToTime(j.CompletedAt).IsZero() {
 		msg.Nack(false, false) // don't requeue
@@ -176,6 +185,7 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 	return nil
 }
 
+// extractRaw extracts the raw payload from the AMQP message.
 func (c *AmqpConsumer) extractRaw(msg amqp.Delivery) map[string]any {
 	var payload map[string]any
 	if err := json.Unmarshal(msg.Body, &payload); err != nil {
@@ -185,6 +195,7 @@ func (c *AmqpConsumer) extractRaw(msg amqp.Delivery) map[string]any {
 	return payload
 }
 
+// consumeMsgs starts consuming messages from the AMQP queue.
 func (c *AmqpConsumer) consumeMsgs() (<-chan amqp.Delivery, error) {
 	msgs, err := c.amqpChannel.Consume(
 		c.queueName, // queue
@@ -201,6 +212,7 @@ func (c *AmqpConsumer) consumeMsgs() (<-chan amqp.Delivery, error) {
 	return msgs, nil
 }
 
+// resetConnectionOrChannelIfNecessary resets the AMQP connection or channel if they are nil or closed.
 func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary() error {
 	c.mu.Lock() // Lock to prevent concurrent access to connection/channel object
 	defer c.mu.Unlock()
@@ -222,6 +234,7 @@ func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary() error {
 	return nil
 }
 
+// resetConnection establishes a new AMQP connection.
 func (c *AmqpConsumer) resetConnection() error {
 	conn, err := c.connectFunc(c.uri)
 	if err != nil {
@@ -231,6 +244,7 @@ func (c *AmqpConsumer) resetConnection() error {
 	return nil
 }
 
+// resetChannel opens a new AMQP channel and declares the queue.
 func (c *AmqpConsumer) resetChannel() error {
 	ch, err := c.amqpConnection.Channel()
 	if err != nil {
@@ -258,6 +272,7 @@ func (c *AmqpConsumer) resetChannel() error {
 	return nil
 }
 
+// parseToTime parses a string pointer to time.Time, returning zero time if nil or invalid.
 func (c *AmqpConsumer) parseToTime(timeStr *string) time.Time {
 	if timeStr == nil || *timeStr == "" || *timeStr == "null" {
 		return time.Time{}
