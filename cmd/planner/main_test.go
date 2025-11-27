@@ -19,13 +19,14 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain_FlavorPressure(t *testing.T) {
 	/*
 		arrange: server is listening on the configured port and prepare request payload
-		act: send create flavor request and get flavor pressure request
-		assert: 201 Created and 200 OK with expected pressure value
+		act: send create flavor request, get flavor pressure request and publish webhook message
+		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
 	go main()
 	port := os.Getenv("APP_PORT")
@@ -49,6 +50,17 @@ func TestMain_FlavorPressure(t *testing.T) {
 
 	// Test consume webhook and reflect pressure
 	rabbitURI := os.Getenv("RABBITMQ_CONNECT_STRING")
+	body := constructWebhookPayload(t, labels)
+	publishAndWaitAck(t, rabbitURI, "webhook-queue", body)
+
+	require.Eventually(t, func() bool {
+		press := getFlavorPressure(t, port, flavor)
+		return press[flavor] > pressure
+	}, 45*time.Second, 500*time.Millisecond)
+}
+
+// constructWebhookPayload creates a webhook payload with the given labels.
+func constructWebhookPayload(t *testing.T, labels []string) []byte {
 	jobID := rand.Intn(1_000_000)
 	payload := map[string]any{
 		"action": "queued",
@@ -61,43 +73,42 @@ func TestMain_FlavorPressure(t *testing.T) {
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("marshal webhook: %v", err)
+		require.NoError(t, err, "marshal webhook payload")
 	}
-
-	publishWebhookMessage(t, rabbitURI, "webhook-queue", body)
-	time.Sleep(1 * time.Second)
-
-	// Poll pressure endpoint until assignment reflected
-	deadline := time.Now().Add(45 * time.Second)
-	for time.Now().Before(deadline) {
-		pressures := getFlavorPressure(t, port, flavor)
-		if p, ok := pressures[flavor]; ok && p > pressure {
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatalf("pressure did not reflect consumed job for flavor %s within timeout", flavor)
+	return body
 }
 
-// publishWebhookMessage declares the queue and publishes a message for the consumer.
-func publishWebhookMessage(t *testing.T, uri, queue string, body []byte) {
+// publishAndWaitAck publishes a message to the given RabbitMQ queue and waits for an ack.
+func publishAndWaitAck(t *testing.T, uri, queue string, body []byte) {
 	t.Helper()
+
 	conn, err := amqp.Dial(uri)
-	if err != nil {
-		t.Fatalf("connect rabbitmq: %v", err)
-	}
+	require.NoError(t, err, "connect rabbitmq")
 	defer conn.Close()
+
 	ch, err := conn.Channel()
-	if err != nil {
-		t.Fatalf("open channel: %v", err)
-	}
+	require.NoError(t, err, "open channel")
 	defer ch.Close()
-	if _, err = ch.QueueDeclare(queue, true, false, false, false, nil); err != nil {
-		t.Fatalf("declare queue: %v", err)
-	}
-	_ = ch.Confirm(false)
-	if err = ch.Publish("", queue, false, false, amqp.Publishing{ContentType: "application/json", Body: body}); err != nil {
-		t.Fatalf("publish message: %v", err)
+
+	_, err = ch.QueueDeclare(queue, true, false, false, false, nil)
+	require.NoError(t, err, "declare queue")
+
+	err = ch.Confirm(false)
+	require.NoError(t, err, "enable confirms")
+
+	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+
+	err = ch.Publish(
+		"", queue, false, false,
+		amqp.Publishing{ContentType: "application/json", Body: body},
+	)
+	require.NoError(t, err, "publish")
+
+	select {
+	case c := <-confirms:
+		require.True(t, c.Ack, "message not acked")
+	case <-time.After(10 * time.Second):
+		require.Fail(t, "timeout waiting for ack")
 	}
 }
 

@@ -73,8 +73,16 @@ func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ am
 	return amqp.Queue{}, nil
 }
 
+func (ch *MockAmqpChannel) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
+	return amqp.Queue{}, nil
+}
+
 func (ch *MockAmqpChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
 	return nil, nil
+}
+
+func (ch *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
+	return nil
 }
 
 type MockConfirmation struct {

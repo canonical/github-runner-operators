@@ -7,7 +7,9 @@ package queue
 
 import (
 	"context"
+	"log/slog"
 	"sync"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -30,7 +32,9 @@ type amqpChannel interface {
 	IsClosed() bool
 	Confirm(noWait bool) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
+	Qos(prefetchCount, prefetchSize int, global bool) error
 }
 
 type amqpConnection interface {
@@ -62,4 +66,21 @@ func (ch *amqpChannelWrapper) PublishWithDeferredConfirm(exchange string, key st
 
 func (ch *amqpChannelWrapper) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
 	return ch.Channel.Consume(queue, consumer, autoAck, exclusive, noLocal, noWait, args)
+}
+
+func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) error {
+	return ch.Channel.Qos(prefetchCount, prefetchSize, global)
+}
+
+// parseToTime parses a string pointer to time.Time, returning zero time if nil or invalid.
+func parseToTime(timeStr *string, logger *slog.Logger) time.Time {
+	if timeStr == nil || *timeStr == "" || *timeStr == "null" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, *timeStr) // github timestamps are in ISO 8601 format
+	if err != nil {
+		logger.Warn("failed to parse time", "timeStr", *timeStr, "error", err)
+		return time.Time{}
+	}
+	return t
 }

@@ -121,6 +121,10 @@ func (ch *fakeChan) IsClosed() bool            { return ch.closed }
 func (ch *fakeChan) Confirm(noWait bool) error { return ch.confirmErr }
 
 func (ch *fakeChan) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
+	return amqp.Queue{}, nil
+}
+
+func (ch *fakeChan) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
 	if ch.queueDeclareErr != nil {
 		return amqp.Queue{}, ch.queueDeclareErr
 	}
@@ -132,6 +136,10 @@ func (ch *fakeChan) Consume(queue, consumer string, autoAck, exclusive, noLocal,
 		return nil, ch.consumeErr
 	}
 	return ch.deliveries, nil
+}
+
+func (ch *fakeChan) Qos(prefetchCount, prefetchSize int, global bool) error {
+	return nil
 }
 
 func TestConsumer(t *testing.T) {

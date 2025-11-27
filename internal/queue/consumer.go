@@ -110,8 +110,11 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) err
 		return fmt.Errorf("failed to unmarshal message body: %w", err)
 	}
 	switch webhook.Action {
-	case "queued": // other possible action: "waiting"
+	case "queued":
 		return c.insertJobToDB(ctx, webhook.WorkflowJob, msg)
+	case "waiting":
+		msg.Ack(false) // already handled in "queued"
+		return nil
 	case "in_progress":
 		return c.updateJobStartedInDB(ctx, webhook.WorkflowJob, msg)
 	case "completed":
@@ -129,10 +132,10 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amq
 		ID:          strconv.Itoa(j.ID),
 		Platform:    platform,
 		Labels:      j.Labels,
-		CreatedAt:   c.parseToTime(j.CreatedAt),
+		CreatedAt:   parseToTime(j.CreatedAt, c.logger),
 		StartedAt:   nil,
 		CompletedAt: nil,
-		Raw:         c.extractRaw(msg),
+		Raw:         c.extractRaw(msg.Body),
 	}
 	if err := c.db.AddJob(ctx, job); err != nil {
 		if errors.Is(err, database.ErrExist) {
@@ -149,11 +152,11 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amq
 
 // updateJobStartedInDB updates the job's started_at timestamp in the database.
 func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
-	if c.parseToTime(j.StartedAt).IsZero() {
+	if parseToTime(j.StartedAt, c.logger).IsZero() {
 		msg.Nack(false, false) // don't requeue
 		return errors.New("started_at missing in job_started event")
 	}
-	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), c.parseToTime(j.StartedAt), c.extractRaw(msg)); err != nil {
+	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), parseToTime(j.StartedAt, c.logger), c.extractRaw(msg.Body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			c.logger.Warn("job not found in database on start", "job_id", j.ID)
 			msg.Nack(false, false) // don't requeue
@@ -168,11 +171,11 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 
 // updateJobCompletedInDB updates the job's completed_at timestamp in the database.
 func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
-	if c.parseToTime(j.CompletedAt).IsZero() {
+	if parseToTime(j.CompletedAt, c.logger).IsZero() {
 		msg.Nack(false, false) // don't requeue
 		return errors.New("completed_at missing in job_completed event")
 	}
-	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), c.parseToTime(j.CompletedAt), c.extractRaw(msg)); err != nil {
+	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), parseToTime(j.CompletedAt, c.logger), c.extractRaw(msg.Body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			c.logger.Warn("job not found in database on completion", "job_id", j.ID)
 			msg.Nack(false, false) // don't requeue
@@ -185,10 +188,10 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 	return nil
 }
 
-// extractRaw extracts the raw payload from the AMQP message.
-func (c *AmqpConsumer) extractRaw(msg amqp.Delivery) map[string]any {
+// extractRaw extracts the raw payload from the AMQP message body.
+func (c *AmqpConsumer) extractRaw(body []byte) map[string]any {
 	var payload map[string]any
-	if err := json.Unmarshal(msg.Body, &payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		c.logger.Warn("failed to extract raw payload", "error", err)
 		return nil
 	}
@@ -197,11 +200,20 @@ func (c *AmqpConsumer) extractRaw(msg amqp.Delivery) map[string]any {
 
 // consumeMsgs starts consuming messages from the AMQP queue.
 func (c *AmqpConsumer) consumeMsgs() (<-chan amqp.Delivery, error) {
+	err := c.amqpChannel.Qos(
+		1,     // one message delivered at a time
+		0,     // no specific size limit
+		false, // apply to all consumers on this channel
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set QoS: %w", err)
+	}
+
 	msgs, err := c.amqpChannel.Consume(
 		c.queueName, // queue
 		"",          // consumer tag, empty string means a unique random tag will be generated
 		false,       // whether rabbitmq auto-acknowledges messages
-		false,       // whether only this consumer can access the queue
+		true,        // whether only this consumer can access the queue
 		false,       // no-local
 		false,       // false means wait for server confirmation that consumer is registered
 		nil,         // args
@@ -257,7 +269,7 @@ func (c *AmqpConsumer) resetChannel() error {
 		return fmt.Errorf("failed to put channel in confirm mode: %w", err)
 	}
 
-	_, err = ch.QueueDeclare(
+	_, err = ch.QueueDeclarePassive(
 		c.queueName, // queueName
 		true,        // durable
 		false,       // delete when unused
@@ -270,17 +282,4 @@ func (c *AmqpConsumer) resetChannel() error {
 	}
 
 	return nil
-}
-
-// parseToTime parses a string pointer to time.Time, returning zero time if nil or invalid.
-func (c *AmqpConsumer) parseToTime(timeStr *string) time.Time {
-	if timeStr == nil || *timeStr == "" || *timeStr == "null" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339, *timeStr) // github timestamps are in ISO 8601 format
-	if err != nil {
-		c.logger.Warn("failed to parse time", "timeStr", *timeStr, "error", err)
-		return time.Time{}
-	}
-	return t
 }
