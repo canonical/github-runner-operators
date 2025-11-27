@@ -277,7 +277,7 @@ func (c *AmqpConsumer) parseToTime(timeStr *string) time.Time {
 	if timeStr == nil || *timeStr == "" || *timeStr == "null" {
 		return time.Time{}
 	}
-	t, err := time.Parse(time.RFC3339, *timeStr) // github timestaps are in ISO 8601 format
+	t, err := time.Parse(time.RFC3339, *timeStr) // github timestamps are in ISO 8601 format
 	if err != nil {
 		c.logger.Warn("failed to parse time", "timeStr", *timeStr, "error", err)
 		return time.Time{}
