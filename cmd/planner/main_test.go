@@ -28,8 +28,11 @@ func TestMain_FlavorPressure(t *testing.T) {
 		act: send create flavor request, get flavor pressure request and publish webhook message
 		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
-	go main()
+	rabbitURI := os.Getenv("RABBITMQ_CONNECT_STRING")
 	port := os.Getenv("APP_PORT")
+	declareQueue(t, rabbitURI, "webhook-queue")
+
+	go main()
 	waitForHTTP(t, "http://localhost:"+port+"/api/v1/flavors/", 10*time.Second)
 
 	platform := "github"
@@ -49,7 +52,6 @@ func TestMain_FlavorPressure(t *testing.T) {
 	assertFlavorPressureEquals(t, pressures, flavor, pressure)
 
 	// Test consume webhook and reflect pressure
-	rabbitURI := os.Getenv("RABBITMQ_CONNECT_STRING")
 	body := constructWebhookPayload(t, labels)
 	publishAndWaitAck(t, rabbitURI, "webhook-queue", body)
 
@@ -78,6 +80,29 @@ func constructWebhookPayload(t *testing.T, labels []string) []byte {
 	return body
 }
 
+// declareQueue declares a RabbitMQ queue for testing purposes.
+func declareQueue(t *testing.T, uri, queue string) {
+	t.Helper()
+
+	conn, err := amqp.Dial(uri)
+	require.NoError(t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(t, err, "open channel")
+	defer ch.Close()
+
+	_, err = ch.QueueDeclare(
+		queue,
+		true,  // durable
+		false, // auto-delete
+		false, // exclusive
+		false, // no-wait
+		nil,
+	)
+	require.NoError(t, err, "declare queue")
+}
+
 // publishAndWaitAck publishes a message to the given RabbitMQ queue and waits for an ack.
 func publishAndWaitAck(t *testing.T, uri, queue string, body []byte) {
 	t.Helper()
@@ -89,9 +114,6 @@ func publishAndWaitAck(t *testing.T, uri, queue string, body []byte) {
 	ch, err := conn.Channel()
 	require.NoError(t, err, "open channel")
 	defer ch.Close()
-
-	_, err = ch.QueueDeclare(queue, true, false, false, false, nil)
-	require.NoError(t, err, "declare queue")
 
 	err = ch.Confirm(false)
 	require.NoError(t, err, "enable confirms")
