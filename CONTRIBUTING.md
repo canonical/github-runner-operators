@@ -80,6 +80,14 @@ The code structure is as follows
 - `cmd/`: Entry points for Go applications (planner, webhook-gateway)
 - `webhook-gateway-operator/`: Charm related code for webhook-gateway
 
+### Style
+
+The applications written in this repository are written in Go.
+We like to follow idomatic Go practices and community standards when writing Go code.
+We have added an instruction file `go.instructions.md` in `.github/instructions.md` that is used by GitHub Copilot to help you write code that follows these practices.
+We have added a [Style Guide](./STYLE.md) that you can refer to for more details.
+
+
 ### Test
 
 This project uses standard Go testing tools for unit tests and integration tests.
@@ -122,6 +130,40 @@ POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_run
 ```
 
 It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
+
+
+### Test design
+
+We intend to have unit tests for all the logic in the internal packages (located in the `internal/` directory).
+Unit tests should test the logic in isolation using mocks/fakes for external dependencies. They should be fast to execute.
+
+Integration tests should test the integration of various components together.
+There should be at least an integration test located in the main package of the application they are testing (e.g. in `cmd/webhook-gateway/main_test.go` for the webhook gateway application).
+
+In addition to application integration tests, we also have charm integration tests located in the respective charm directories
+(e.g. in `webhook-gateway-operator/tests/integration` for the webhook gateway charm). These tests should test the charm 
+deployment and its integration with other charms. These tests are usually slower than application integration tests, and
+should not cover application logic tests; those should be covered in the application integration test.
+Aim to focus the charm integration tests only on operational aspects. E.g.
+
+- Testing if the charm deploys correctly
+- Testing if the charm config options work as expected
+- Testing if the charm integrates correctly with other charms 
+
+Aim to keep all tests (unit, integration, charm integration) 
+
+- Fast to execute
+- Reliable
+- Deterministic and repeatable
+- Easy to set up locally
+
+in order to be able to have fast iterations during development.
+
+### Coverage
+
+We require at least 85% code coverage for all internal packages. New code that lowers the current coverage
+should be avoided and discouraged during code reviews.
+
 
 ### Charm development
 
