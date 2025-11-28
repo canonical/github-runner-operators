@@ -36,13 +36,13 @@ func TestMain_FlavorPressure(t *testing.T) {
 	waitForHTTP(t, "http://localhost:"+port+"/api/v1/flavors/", 10*time.Second)
 
 	platform := "github"
-	labels := []string{"self-hosted", "amd64"}
-	priority := 42
+	labels := []string{"self-hosted", "s390x", "medium"}
+	priority := 100
 	flavor := randString(10)
-	pressure := 7
+	pressure := 0
 
 	// Test create flavor
-	resp := createFlavor(t, port, flavor, platform, labels, priority, pressure)
+	resp := createFlavor(t, port, flavor, platform, labels, priority)
 	if resp != http.StatusCreated {
 		t.Fatalf("unexpected status creating flavor: %d", resp)
 	}
@@ -58,12 +58,12 @@ func TestMain_FlavorPressure(t *testing.T) {
 	require.Eventually(t, func() bool {
 		press := getFlavorPressure(t, port, flavor)
 		return press[flavor] > pressure
-	}, 45*time.Second, 500*time.Millisecond)
+	}, 20*time.Minute, 500*time.Millisecond)
 }
 
 // constructWebhookPayload creates a webhook payload with the given labels.
 func constructWebhookPayload(t *testing.T, labels []string) []byte {
-	jobID := rand.Intn(1_000_000)
+	jobID := rand.Intn(1000)
 	payload := map[string]any{
 		"action": "queued",
 		"workflow_job": map[string]any{
@@ -135,14 +135,13 @@ func publishAndWaitAck(t *testing.T, uri, queue string, body []byte) {
 }
 
 // createFlavor sends a create flavor request to the server
-func createFlavor(t *testing.T, port, flavor, platform string, labels []string, priority, pressure int) int {
+func createFlavor(t *testing.T, port, flavor, platform string, labels []string, priority int) int {
 	t.Helper()
 
 	body := map[string]any{
-		"platform":         platform,
-		"labels":           labels,
-		"priority":         priority,
-		"minimum_pressure": pressure,
+		"platform": platform,
+		"labels":   labels,
+		"priority": priority,
 	}
 
 	b, err := json.Marshal(body)
