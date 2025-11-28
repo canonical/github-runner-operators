@@ -203,7 +203,7 @@ func (d *Database) createListJobsSqlArgs(platform string, options ListJobOptions
 		limit = DefaultLimit
 	}
 
-	sql += fmt.Sprintf("\n ORDER BY created_at LIMIT @limit")
+	sql += "\n ORDER BY created_at LIMIT @limit"
 	args["limit"] = limit
 	return sql, args
 }

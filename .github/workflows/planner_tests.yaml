@@ -38,10 +38,18 @@ jobs:
         with:
           go-version: 1.25
 
+      - name: Wait for rabbitmq
+        run: |
+          until curl -fs http://localhost:15672;
+            do echo "waiting for rabbit mq"
+            sleep 2
+          done
+
       - name: Build and Test
         env:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
           APP_PORT: 8080
+          RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
         run: |
           go test -v -cover -tags=integration -race ./cmd/planner/...
 
@@ -52,6 +60,11 @@ jobs:
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
+      rabbitmq:
+        image: rabbitmq:4-management
+        ports:
+          - 5672:5672
+          - 15672:15672
 
   planner-integration-status-check:
     runs-on: ubuntu-latest
