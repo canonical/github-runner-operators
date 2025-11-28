@@ -107,7 +107,7 @@ DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=
 It assumes you have access to a Postgres server running reachable at $DB_CONNECT_STRING.
 You can use `docker` to run a Postgres server locally:
 ```shell
-docker run -d --rm --name postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
+docker run -d --rm --name postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:18.1
 ```
 
 Run `webhook-gateway` integration tests using:

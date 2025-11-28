@@ -12,6 +12,8 @@ jobs:
   test:
     name: Test Internal Packages
     runs-on: [self-hosted-linux-amd64-noble-edge]
+    env:
+      COVERAGE_THRESHOLD: 85
 
     steps:
       - uses: actions/checkout@v6
@@ -30,15 +32,34 @@ jobs:
         env:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
         run: |
-          go test -v -coverprofile=coverage.out -race -tags=integration ./internal/...
+          # We exclude packages from coverage analysis as they are highly uncovered at the moment
+          EXCLUDE_PKGS="internal/telemetry"
+          COVER_PKG=$(go list ./internal/... | grep -Ev "$EXCLUDE_PKGS" | tr '\n' ',')
+          go test -v -coverprofile=coverage.out -race -tags=integration -coverpkg=$COVER_PKG ./internal/...
 
       - name: Print coverage report
         run: |
           go tool cover -func=coverage.out
 
+      - name: Generate coverage report
+        run: go tool cover -html=coverage.out -o=coverage.html
+
+      - uses: actions/upload-artifact@v5.0.0
+        with:
+          name: coverage-report
+          path: coverage.html
+
+      - name: Enforce min coverage
+        run: |
+          if ! go tool cover -func=coverage.out | tail -1 | awk '{if ($3 < ENVIRON["COVERAGE_THRESHOLD"]) exit 1}'; then
+          echo "::error::Code coverage is below $COVERAGE_THRESHOLD"
+          exit 1
+          fi
+
+
     services:
       postgres:
-        image: postgres:latest
+        image: postgres:18.1
         env:
           POSTGRES_PASSWORD: postgres
         ports:
