@@ -1,0 +1,42 @@
+# See https://documentation.ubuntu.com/rockcraft/latest/reference/extensions/go-framework
+# For questions or help, visit https://matrix.to/#/#12-factor-charms:ubuntu.com
+
+name: planner
+# see https://documentation.ubuntu.com/rockcraft/latest/explanation/bases/
+# for more information about bases and using 'bare' bases for chiselled rocks
+base: bare # as an alternative, a ubuntu base can be used
+build-base: ubuntu@24.04 # build-base is required when the base is bare
+version: "0.1" # just for humans. Semantic versioning is recommended
+summary: Planner API service # 79 char long summary
+description: |
+  This application provides a HTTP REST API for GitHub runner
+  charm and operations management.
+# the platforms this rock should be built on and run on.
+# you can check your architecture with `dpkg --print-architecture`
+platforms:
+  amd64:
+  # arm64:
+  # ppc64el:
+  # s390x:
+
+# to ensure the go-framework extension functions properly, your Go project
+# should have a go.mod file. Check the parts section for the selection of
+# the default binary.
+# see https://documentation.ubuntu.com/rockcraft/latest/reference/extensions/go-framework
+# for more information.
+# +-- planner
+# |   |-- go.mod
+# |   |-- migrate.sh
+
+extensions:
+  - go-framework
+
+# Configure the go-framework extension to build from cmd/planner
+parts:
+  go-framework/install-app:
+    override-build: |
+      # Build the planner binary from cmd/planner
+      cd "$CRAFT_PART_SRC"
+      go build -o bin/planner ./cmd/planner
+      mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
+      cp bin/planner "$CRAFT_PART_INSTALL/usr/local/bin/"
