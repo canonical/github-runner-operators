@@ -80,6 +80,7 @@ func main() {
 		err := consumer.Start(consumerCtx)
 		if err != nil {
 			slog.ErrorContext(consumerCtx, "failed to start AMQP consumer", "error", err)
+			log.Fatalln("failed to start AMQP consumer:", err)
 		}
 	}()
 
