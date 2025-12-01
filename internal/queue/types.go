@@ -73,14 +73,14 @@ func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) 
 }
 
 // parseToTime parses a string pointer to time.Time, returning zero time if nil or invalid.
-func parseToTime(timeStr *string, logger *slog.Logger) time.Time {
-	if timeStr == nil || *timeStr == "" || *timeStr == "null" {
-		return time.Time{}
+func parseToTime(timeStr string, logger *slog.Logger) *time.Time {
+	if timeStr == "" || timeStr == "null" {
+		return nil
 	}
-	t, err := time.Parse(time.RFC3339, *timeStr) // github timestamps are in ISO 8601 format
+	t, err := time.Parse(time.RFC3339, timeStr) // github timestamps are in ISO 8601 format
 	if err != nil {
-		logger.Warn("failed to parse time", "timeStr", *timeStr, "error", err)
-		return time.Time{}
+		logger.Warn("failed to parse time", "timeStr", timeStr, "error", err)
+		return nil
 	}
-	return t
+	return &t
 }

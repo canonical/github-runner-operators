@@ -97,9 +97,9 @@ type WorkflowJob struct {
 	ID          int      `json:"id"`
 	Labels      []string `json:"labels"`
 	Status      string   `json:"status"`
-	CreatedAt   *string  `json:"created_at"`
-	StartedAt   *string  `json:"started_at,omitempty"`
-	CompletedAt *string  `json:"completed_at,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+	StartedAt   string   `json:"started_at,omitempty"`
+	CompletedAt string   `json:"completed_at,omitempty"`
 }
 
 // handleMessage processes a single AMQP message.
@@ -124,6 +124,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) err
 		msg.Nack(false, false) // don't requeue
 		return nil
 	}
+
 }
 
 // insertJobToDB inserts a new job into the database.
@@ -132,10 +133,10 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amq
 		ID:          strconv.Itoa(j.ID),
 		Platform:    platform,
 		Labels:      j.Labels,
-		CreatedAt:   parseToTime(j.CreatedAt, c.logger),
-		StartedAt:   nil,
-		CompletedAt: nil,
-		Raw:         c.extractRaw(msg.Body),
+		CreatedAt:   *parseToTime(j.CreatedAt, c.logger),
+		StartedAt:   parseToTime(j.StartedAt, c.logger),
+		CompletedAt: parseToTime(j.CompletedAt, c.logger),
+		Raw:         c.extractRaw(j.Status, msg.Body),
 	}
 	if err := c.db.AddJob(ctx, job); err != nil {
 		if errors.Is(err, database.ErrExist) {
@@ -156,11 +157,10 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 		msg.Nack(false, false) // don't requeue
 		return errors.New("started_at missing in job_started event")
 	}
-	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), parseToTime(j.StartedAt, c.logger), c.extractRaw(msg.Body)); err != nil {
+	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), *parseToTime(j.StartedAt, c.logger), c.extractRaw(j.Status, msg.Body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
-			c.logger.Warn("job not found in database on start", "job_id", j.ID)
-			msg.Nack(false, false) // don't requeue
-			return nil
+			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", j.ID)
+			return c.insertJobToDB(ctx, j, msg)
 		}
 		msg.Nack(false, true) // requeue
 		return fmt.Errorf("failed to update job started in database: %w", err)
@@ -175,11 +175,10 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 		msg.Nack(false, false) // don't requeue
 		return errors.New("completed_at missing in job_completed event")
 	}
-	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), parseToTime(j.CompletedAt, c.logger), c.extractRaw(msg.Body)); err != nil {
+	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), *parseToTime(j.CompletedAt, c.logger), c.extractRaw(j.Status, msg.Body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
-			c.logger.Warn("job not found in database on completion", "job_id", j.ID)
-			msg.Nack(false, false) // don't requeue
-			return nil
+			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", j.ID)
+			return c.insertJobToDB(ctx, j, msg)
 		}
 		msg.Nack(false, true) // requeue
 		return fmt.Errorf("failed to update job completed in database: %w", err)
@@ -188,12 +187,10 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 	return nil
 }
 
-// extractRaw extracts the raw payload from the AMQP message body.
-func (c *AmqpConsumer) extractRaw(body []byte) map[string]any {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		c.logger.Warn("failed to extract raw payload", "error", err)
-		return nil
+// extractRaw extracts the raw payload from the message body.
+func (c *AmqpConsumer) extractRaw(action string, body []byte) map[string]any {
+	payload := map[string]any{
+		action: string(body),
 	}
 	return payload
 }

@@ -225,7 +225,7 @@ func TestConsumer(t *testing.T) {
 
 		},
 	}, {
-		name:    "skips update when job not found on start",
+		name:    "insert and update when job not found on start",
 		setupDB: func(db *fakeDB) {},
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
@@ -243,7 +243,8 @@ func TestConsumer(t *testing.T) {
 		},
 		expectErrSub: "messages channel closed",
 		checkDB: func(t *testing.T, db *fakeDB) {
-			assert.Nil(t, db.jobs["github:21"], "job should not be created on start when missing")
+			assert.NotNil(t, db.jobs["github:21"], "job should be created on start when missing")
+			assert.NotNil(t, db.jobs["github:21"].StartedAt, "started_at not set")
 		},
 	}, {
 		name: "succeeds when job updated to completed",
