@@ -445,6 +445,7 @@ func TestConsumer(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			go func() {
+				time.Sleep(100 * time.Millisecond)
 				cancel() // Cancel immediately after Start to end the test
 			}()
 
