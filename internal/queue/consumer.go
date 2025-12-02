@@ -85,7 +85,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 				continue
 			}
 
-			err := c.handleMessage(ctx, msg)
+			err := c.handleMessage(ctx, msg.Body)
 			if err == nil {
 				msg.Ack(false)
 				continue
@@ -171,21 +171,20 @@ type WorkflowJob struct {
 }
 
 // handleMessage processes a single AMQP message.
-func (c *AmqpConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) error {
+func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 	webhook := WorkflowJobWebhook{}
-	if err := json.Unmarshal(msg.Body, &webhook); err != nil {
-		msg.Nack(false, false) // don't requeue
-		return fmt.Errorf("failed to unmarshal message body: %w", err)
+	if err := json.Unmarshal(body, &webhook); err != nil {
+		return NoRequeue(fmt.Sprintf("failed to unmarshal message body: %v", err))
 	}
 	switch webhook.Action {
 	case "queued":
-		return c.insertJobToDB(ctx, webhook.WorkflowJob, msg)
+		return c.insertJobToDB(ctx, webhook.WorkflowJob, body)
 	case "waiting":
 		return nil
 	case "in_progress":
-		return c.updateJobStartedInDB(ctx, webhook.WorkflowJob, msg)
+		return c.updateJobStartedInDB(ctx, webhook.WorkflowJob, body)
 	case "completed":
-		return c.updateJobCompletedInDB(ctx, webhook.WorkflowJob, msg)
+		return c.updateJobCompletedInDB(ctx, webhook.WorkflowJob, body)
 	default:
 		c.logger.Warn("ignoring other type", "status", webhook.Action)
 		return NoRequeue(fmt.Sprintf("ignoring webhook action type: %s", webhook.Action))
@@ -194,7 +193,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) err
 }
 
 // insertJobToDB inserts a new job into the database.
-func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
+func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	createdAt := parseToTime(j.CreatedAt, c.logger)
 	if createdAt == nil {
 		return NoRequeue("created_at missing in job_queued event")
@@ -207,7 +206,7 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amq
 		CreatedAt:   *createdAt,
 		StartedAt:   parseToTime(j.StartedAt, c.logger),
 		CompletedAt: parseToTime(j.CompletedAt, c.logger),
-		Raw:         c.extractRaw(j.Status, msg.Body),
+		Raw:         c.extractRaw(j.Status, body),
 	}
 
 	if err := c.db.AddJob(ctx, job); err != nil {
@@ -222,16 +221,16 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, msg amq
 }
 
 // updateJobStartedInDB updates the job's started_at timestamp in the database.
-func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
+func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	startedAt := parseToTime(j.StartedAt, c.logger)
 	if startedAt == nil {
 		return NoRequeue("started_at missing in job_in_progress event")
 	}
 
-	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), *startedAt, c.extractRaw(j.Status, msg.Body)); err != nil {
+	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), *startedAt, c.extractRaw(j.Status, body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", j.ID)
-			return c.insertJobToDB(ctx, j, msg)
+			return c.insertJobToDB(ctx, j, body)
 		}
 		return Requeue(fmt.Sprintf("failed to update job started in database: %v", err))
 	}
@@ -240,16 +239,16 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 }
 
 // updateJobCompletedInDB updates the job's completed_at timestamp in the database.
-func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, msg amqp.Delivery) error {
+func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	completedAt := parseToTime(j.CompletedAt, c.logger)
 	if completedAt == nil {
 		return NoRequeue("completed_at missing in job_completed event")
 	}
 
-	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), *completedAt, c.extractRaw(j.Status, msg.Body)); err != nil {
+	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), *completedAt, c.extractRaw(j.Status, body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", j.ID)
-			return c.insertJobToDB(ctx, j, msg)
+			return c.insertJobToDB(ctx, j, body)
 		}
 		return Requeue(fmt.Sprintf("failed to update job completed in database: %v", err))
 	}
