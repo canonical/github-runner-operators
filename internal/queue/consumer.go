@@ -94,15 +94,17 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 			var errHandle *MessageHandlingError
 			if errors.As(err, &errHandle) && !errHandle.Requeue {
 				msg.Nack(false, false) // don't requeue
+				c.logger.Error("failed to handle message without requeue", "error", err)
 				continue
 			}
 
 			if errors.As(err, &errHandle) && errHandle.Requeue {
 				msg.Nack(false, true) // requeue
+				c.logger.Error("failed to handle message, requeuing", "error", err)
 				continue
 			}
 
-			c.logger.Error("failed to handle message", "error", err)
+			c.logger.Error("failed to handle message, requeuing", "error", err)
 			msg.Nack(false, true) // requeue
 		}
 	}
