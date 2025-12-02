@@ -31,3 +31,7 @@ requires:
     interface: tracing
     optional: true
     limit: 1
+  postgresql:
+    interface: postgresql-client
+    optional: false
+    limit: 1

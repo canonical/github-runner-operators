@@ -40,3 +40,13 @@ parts:
       go build -o bin/planner ./cmd/planner
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/planner "$CRAFT_PART_INSTALL/usr/local/bin/"
+  runtime-debs:
+    plugin: nil
+    stage-packages:
+      # Added manually for the migrations
+      - postgresql-client
+  runtime-slices:
+    plugin: nil
+    stage-packages:
+      # Added manually for the migrations
+      - bash_bins
