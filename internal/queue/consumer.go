@@ -97,13 +97,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 				c.logger.Error("failed to handle message without requeue", "error", err)
 				continue
 			}
-
-			if errors.As(err, &errHandle) && errHandle.Requeue {
-				msg.Nack(false, true) // requeue
-				c.logger.Error("failed to handle message, requeuing", "error", err)
-				continue
-			}
-
+			// Other errors are requeued by default
 			c.logger.Error("failed to handle message, requeuing", "error", err)
 			msg.Nack(false, true) // requeue
 		}
@@ -170,7 +164,7 @@ type WorkflowJob struct {
 	CompletedAt string   `json:"completed_at,omitempty"`
 }
 
-// handleMessage processes a single AMQP message.
+// handleMessage processes a single AMQP message body.
 func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 	webhook := WorkflowJobWebhook{}
 	if err := json.Unmarshal(body, &webhook); err != nil {
@@ -221,6 +215,7 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []
 }
 
 // updateJobStartedInDB updates the job's started_at timestamp in the database.
+// If the job does not exist, it inserts the missing job to the database.
 func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	startedAt := parseToTime(j.StartedAt, c.logger)
 	if startedAt == nil {
@@ -239,6 +234,7 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 }
 
 // updateJobCompletedInDB updates the job's completed_at timestamp in the database.
+// If the job does not exist, it inserts the missing job to the database.
 func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	completedAt := parseToTime(j.CompletedAt, c.logger)
 	if completedAt == nil {
@@ -256,7 +252,8 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 	return nil
 }
 
-// extractRaw extracts the raw payload from the message body.
+// extractRaw returns a map with the action type as the key and the
+// stringified raw message body as the value.
 func (c *AmqpConsumer) extractRaw(action string, body []byte) map[string]any {
 	payload := map[string]any{
 		action: string(body),
