@@ -170,7 +170,7 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:1"], "job not inserted")
 		},
@@ -195,7 +195,10 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			assert.NotNil(t, db.jobs["github:2"], "job not found")
+		},
 	}, {
 		name: "succeeds when job updated to in_progress",
 		setupDB: func(db *fakeDB) {
@@ -217,11 +220,11 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:3"], "job not found")
 			assert.NotNil(t, db.jobs["github:3"].StartedAt, "started_at not set")
-			assert.False(t, db.jobs["github:3"].StartedAt.IsZero(), "started_at is zero")
+			assert.Equal(t, "2025-01-02T00:00:00Z", db.jobs["github:3"].StartedAt.Format(time.RFC3339), "started_at incorrect")
 
 		},
 	}, {
@@ -242,7 +245,7 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:21"], "job should be created on start when missing")
 			assert.NotNil(t, db.jobs["github:21"].StartedAt, "started_at not set")
@@ -268,14 +271,14 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:5"], "job not found")
 			assert.NotNil(t, db.jobs["github:5"].CompletedAt, "completed_at not set")
-			assert.False(t, db.jobs["github:5"].CompletedAt.IsZero(), "completed_at is zero")
+			assert.Equal(t, "2025-01-03T00:00:00Z", db.jobs["github:5"].CompletedAt.Format(time.RFC3339), "completed_at incorrect")
 		},
 	}, {
-		name:    "continues when JSON is invalid",
+		name:    "skips when JSON is invalid",
 		setupDB: func(db *fakeDB) {},
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
@@ -283,7 +286,7 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 	}, {
 		name:    "ignores when action is unknown",
 		setupDB: func(db *fakeDB) {},
@@ -303,7 +306,7 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Nil(t, db.jobs["github:16"], "job should not be inserted")
 		},
@@ -340,7 +343,7 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Nil(t, db.jobs["github:10"], "job should not be inserted")
 		},
@@ -363,7 +366,7 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			j := db.jobs["github:11"]
 			assert.NotNil(t, j, "job should exist")
@@ -388,14 +391,14 @@ func TestConsumer(t *testing.T) {
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			j := db.jobs["github:12"]
 			assert.NotNil(t, j, "job should exist")
 			assert.Nil(t, j.CompletedAt, "completed_at should not be set on invalid time")
 		},
 	}, {
-		name:    "skips update when job not found on completion",
+		name:    "insert and update when job not found on completion",
 		setupDB: func(db *fakeDB) {},
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
@@ -405,15 +408,19 @@ func TestConsumer(t *testing.T) {
 					"id":           22,
 					"labels":       []string{},
 					"status":       "completed",
+					"created_at":   "2025-01-01T00:00:00Z",
+					"started_at":   "2025-01-02T00:00:00Z",
 					"completed_at": "2025-01-03T00:00:00Z",
 				},
 			})}
 			close(ch)
 			return ch
 		},
-		expectErrSub: "messages channel closed",
+		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
-			assert.Nil(t, db.jobs["github:22"], "job should not be created on completion when missing")
+			assert.NotNil(t, db.jobs["github:22"], "job should be created on completion when missing")
+			assert.NotNil(t, db.jobs["github:22"].CompletedAt, "completed_at not set")
+			assert.Equal(t, "2025-01-03T00:00:00Z", db.jobs["github:22"].CompletedAt.Format(time.RFC3339), "completed_at incorrect")
 		},
 	}}
 
@@ -426,6 +433,7 @@ func TestConsumer(t *testing.T) {
 				fch.deliveries = tt.deliveries()
 			}
 			fconn := &fakeConn{channel: fch}
+
 			consumer := &AmqpConsumer{
 				client: &Client{
 					uri:         "amqp://x",
@@ -434,14 +442,15 @@ func TestConsumer(t *testing.T) {
 				db:        db,
 				logger:    slog.Default(),
 			}
-			err := consumer.Start(context.Background())
 
-			if tt.expectErrSub == "" {
-				assert.NoError(t, err, "unexpected error from Start")
-			} else {
-				assert.ErrorContains(t, err, tt.expectErrSub, "expected error containing %q, got %v", tt.expectErrSub, err)
-			}
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() {
+				cancel() // Cancel immediately after Start to end the test
+			}()
 
+			err := consumer.Start(ctx)
+
+			assert.ErrorContains(t, err, tt.expectErrSub, "expected error containing %q, got %v", tt.expectErrSub, err)
 			if tt.checkDB != nil {
 				tt.checkDB(t, db)
 			}

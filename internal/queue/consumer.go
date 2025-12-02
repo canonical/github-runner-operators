@@ -84,6 +84,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 				}
 				continue
 			}
+
 			err := c.handleMessage(ctx, msg)
 			if err == nil {
 				msg.Ack(false)
@@ -108,6 +109,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 }
 
 // resetConnectionOrChannelIfNecessary resets the AMQP connection or channel if they are nil or closed.
+// It includes a retry mechanism with exponential backoff.
 func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary(ctx context.Context) error {
 	backoff := time.Second
 	maxBackoff := time.Minute
@@ -121,12 +123,13 @@ func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary(ctx context.Context) 
 
 		c.client.mu.Lock() // Lock to prevent concurrent access to connection/channel object
 
-		if err := c.client.resetConnection(); err != nil {
+		var err error
+		if err = c.client.resetConnection(); err != nil {
 			c.client.mu.Unlock()
 			goto retry
 		}
 
-		if err := c.client.resetChannel(c.queueName, true); err != nil {
+		if err = c.client.resetChannel(c.queueName, true); err != nil {
 			c.client.mu.Unlock()
 			goto retry
 		}
@@ -135,12 +138,16 @@ func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary(ctx context.Context) 
 		return nil
 
 	retry:
-		c.logger.Warn("failed to reset AMQP connection or channel, retrying", "backoff", backoff)
-		time.Sleep(backoff)
-		if backoff < maxBackoff {
-			backoff *= 2
-		} else {
-			return fmt.Errorf("max backoff reached while resetting AMQP connection or channel")
+		select {
+		case <-time.After(backoff):
+			if backoff < maxBackoff {
+				backoff *= 2
+			}
+		case <-ctx.Done():
+			if err != nil {
+				return fmt.Errorf("retry canceled after error: %w", err)
+			}
+			return ctx.Err()
 		}
 	}
 }
@@ -226,6 +233,7 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 		}
 		return Requeue(fmt.Sprintf("failed to update job started in database: %v", err))
 	}
+
 	return nil
 }
 
@@ -243,6 +251,7 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 		}
 		return Requeue(fmt.Sprintf("failed to update job completed in database: %v", err))
 	}
+
 	return nil
 }
 
