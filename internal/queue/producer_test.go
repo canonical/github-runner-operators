@@ -129,9 +129,11 @@ func TestPush(t *testing.T) {
 	*/
 	mockAmqpChannel := &MockAmqpChannel{}
 	amqpProducer := &AmqpProducer{
-		amqpChannel: mockAmqpChannel,
-		amqpConnection: &MockAmqpConnection{
+		client: &Client{
 			amqpChannel: mockAmqpChannel,
+			amqpConnection: &MockAmqpConnection{
+				amqpChannel: mockAmqpChannel,
+			},
 		},
 		queueName: queueName,
 	}
@@ -183,9 +185,11 @@ func TestPushFailure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockAmqpChannel := &MockAmqpChannel{}
 			amqpProducer := &AmqpProducer{
-				amqpChannel: mockAmqpChannel,
-				amqpConnection: &MockAmqpConnection{
+				client: &Client{
 					amqpChannel: mockAmqpChannel,
+					amqpConnection: &MockAmqpConnection{
+						amqpChannel: mockAmqpChannel,
+					},
 				},
 				queueName: tt.queueName,
 			}
@@ -223,8 +227,10 @@ func TestPushNoChannel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockAmqpConnection := &MockAmqpConnection{}
 			amqpProducer := &AmqpProducer{
-				amqpChannel:    tt.channel,
-				amqpConnection: mockAmqpConnection,
+				client: &Client{
+					amqpChannel:    tt.channel,
+					amqpConnection: mockAmqpConnection,
+				},
 			}
 
 			amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
@@ -245,8 +251,10 @@ func TestPushNoChannelFailure(t *testing.T) {
 		errMode:     true,
 	}
 	amqpProducer := &AmqpProducer{
-		amqpChannel:    nil,
-		amqpConnection: mockAmqpConnection,
+		client: &Client{
+			amqpChannel:    nil,
+			amqpConnection: mockAmqpConnection,
+		},
 	}
 	err := amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 	assert.Error(t, err, "expected error when channel fails to open")
@@ -280,10 +288,12 @@ func TestPushNoConnection(t *testing.T) {
 				amqpChannel: &MockAmqpChannel{},
 			}
 			amqpProducer := &AmqpProducer{
-				amqpConnection: tt.connection,
-				uri:            "amqp://guest:guest@localhost:5672/",
-				connectFunc: func(uri string) (amqpConnection, error) {
-					return mockAmqpConnection, nil
+				client: &Client{
+					amqpConnection: tt.connection,
+					uri:            "amqp://guest:guest@localhost:5672/",
+					connectFunc: func(uri string) (amqpConnection, error) {
+						return mockAmqpConnection, nil
+					},
 				},
 			}
 
@@ -301,10 +311,12 @@ func TestPushNoConnectionFailure(t *testing.T) {
 		assert: push returns an error
 	*/
 	amqpProducer := &AmqpProducer{
-		amqpConnection: nil,
-		uri:            "amqp://guest:guest@localhost:5672/",
-		connectFunc: func(uri string) (amqpConnection, error) {
-			return nil, errors.New("connection error")
+		client: &Client{
+			amqpConnection: nil,
+			uri:            "amqp://guest:guest@localhost:5672/",
+			connectFunc: func(uri string) (amqpConnection, error) {
+				return nil, errors.New("connection error")
+			},
 		},
 	}
 
@@ -321,9 +333,11 @@ func TestPushQueueDeclare(t *testing.T) {
 	*/
 	mockAmqpConnection := &MockAmqpConnection{}
 	amqpProducer := &AmqpProducer{
-		amqpChannel:    nil,
-		amqpConnection: mockAmqpConnection,
-		queueName:      queueName,
+		client: &Client{
+			amqpChannel:    nil,
+			amqpConnection: mockAmqpConnection,
+		},
+		queueName: queueName,
 	}
 
 	amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
@@ -364,9 +378,11 @@ func TestPushQueueDeclareFailure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			amqpProducer := &AmqpProducer{
-				amqpChannel:    nil,
-				amqpConnection: tt.mockAmqpConnection,
-				queueName:      tt.queueName,
+				client: &Client{
+					amqpChannel:    nil,
+					amqpConnection: tt.mockAmqpConnection,
+				},
+				queueName: tt.queueName,
 			}
 
 			err := amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))

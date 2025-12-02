@@ -235,6 +235,7 @@ func TestConsumer(t *testing.T) {
 					"id":         21,
 					"labels":     []string{},
 					"status":     "in_progress",
+					"created_at": "2025-01-01T00:00:00Z",
 					"started_at": "2025-01-02T00:00:00Z",
 				},
 			})}
@@ -425,8 +426,14 @@ func TestConsumer(t *testing.T) {
 				fch.deliveries = tt.deliveries()
 			}
 			fconn := &fakeConn{channel: fch}
-			consumer := NewAmqpConsumer("amqp://x", "queue-x", db, slog.Default())
-			consumer.connectFunc = func(uri string) (amqpConnection, error) { return fconn, nil }
+			consumer := &AmqpConsumer{
+				client: &Client{
+					uri:         "amqp://x",
+					connectFunc: func(uri string) (amqpConnection, error) { return fconn, nil }},
+				queueName: "queue-x",
+				db:        db,
+				logger:    slog.Default(),
+			}
 			err := consumer.Start(context.Background())
 
 			if tt.expectErrSub == "" {
