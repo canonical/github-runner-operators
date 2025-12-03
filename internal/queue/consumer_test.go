@@ -225,7 +225,6 @@ func TestConsumer(t *testing.T) {
 			assert.NotNil(t, db.jobs["github:3"], "job not found")
 			assert.NotNil(t, db.jobs["github:3"].StartedAt, "started_at not set")
 			assert.Equal(t, "2025-01-02T00:00:00Z", db.jobs["github:3"].StartedAt.Format(time.RFC3339), "started_at incorrect")
-
 		},
 	}, {
 		name:    "insert and update when job not found on start",
