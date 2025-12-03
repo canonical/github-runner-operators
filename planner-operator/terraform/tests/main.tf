@@ -4,7 +4,7 @@
 locals {
   planner_app_name     = "github-runner-planner"
   planner_metrics_port = 9464
-  juju_model_name              = "stg-deploy-planner"
+  juju_model_name      = "stg-deploy-planner"
 }
 
 variable "channel" {

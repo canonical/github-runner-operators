@@ -8,7 +8,7 @@ output "app_name" {
 
 output "endpoints" {
   value = {
-    rabbitmq = "rabbitmq"
+    rabbitmq   = "rabbitmq"
     postgresql = "postgresql"
   }
 }
