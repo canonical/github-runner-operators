@@ -8,8 +8,9 @@ type: charm
 
 # the platforms this charm should be built on and run on.
 # you can check your architecture with `dpkg --print-architecture`
+base: ubuntu@24.04
 platforms:
-  ubuntu@24.04:amd64:
+  amd64:
 
 # (Required)
 summary: Provides planner API service.
