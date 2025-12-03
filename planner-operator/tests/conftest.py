@@ -5,7 +5,7 @@
 
 from pytest import Parser
 
-CHARM_FILE_PARAM = "--charm-file"
+CHARM_FILE_PARAM = "--planner-charm-file"
 APP_IMAGE_PARAM = "--planner-image"
 
 
