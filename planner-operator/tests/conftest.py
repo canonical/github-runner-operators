@@ -5,7 +5,7 @@
 
 from pytest import Parser
 
-CHARM_FILE_PARAM = "--planner-charm-file"
+CHARM_FILE_PARAM = "--charm-file"
 APP_IMAGE_PARAM = "--planner-image"
 
 
@@ -15,7 +15,9 @@ def pytest_addoption(parser: Parser) -> None:
     Args:
         parser: Pytest parser.
     """
-    parser.addoption(CHARM_FILE_PARAM, action="store", help="Charm file to be deployed")
+    parser.addoption(
+        CHARM_FILE_PARAM, action="append", help="Charm file to be deployed"
+    )
     parser.addoption(
         APP_IMAGE_PARAM, action="store", help="Flask app image to be deployed"
     )

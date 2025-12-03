@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 def charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the built charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if len(charm) > 1:
+        planner_charm = [file for file in charm if "planner" in file]
+        return planner_charm[0]
     return charm
 
 
