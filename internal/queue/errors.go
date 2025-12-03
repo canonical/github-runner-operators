@@ -20,16 +20,16 @@ func (e *MessageHandlingError) Error() string {
 	return e.Reason
 }
 
-// NoRequeue creates a MessageHandlingError indicating the message should not be requeued.
-func NoRequeue(reason string) error {
+// NoRetryableError creates a MessageHandlingError indicating the message should not be requeued.
+func NoRetryableError(reason string) error {
 	return &MessageHandlingError{
 		Reason:  reason,
 		Requeue: false,
 	}
 }
 
-// Requeue creates a MessageHandlingError indicating the message should be requeued.
-func Requeue(reason string) error {
+// RetryableError creates a MessageHandlingError indicating the message should be requeued.
+func RetryableError(reason string) error {
 	return &MessageHandlingError{
 		Reason:  reason,
 		Requeue: true,

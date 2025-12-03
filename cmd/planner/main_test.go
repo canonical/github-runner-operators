@@ -19,6 +19,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,7 +56,7 @@ func TestMain_FlavorPressure(t *testing.T) {
 	body := constructWebhookPayload(t, labels)
 	publishAndWaitAck(t, rabbitURI, "webhook-queue", body)
 
-	require.Eventually(t, func() bool {
+	assert.Eventually(t, func() bool {
 		press := getFlavorPressure(t, port, flavor)
 		return press[flavor] > pressure
 	}, 20*time.Minute, 500*time.Millisecond)

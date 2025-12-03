@@ -119,31 +119,24 @@ func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary(ctx context.Context) 
 
 		c.client.mu.Lock() // Lock to prevent concurrent access to connection/channel object
 
-		var err error
-		if err = c.client.resetConnection(); err != nil {
-			c.client.mu.Unlock()
-			goto retry
-		}
-
-		if err = c.client.resetChannel(c.queueName, true); err != nil {
-			c.client.mu.Unlock()
-			goto retry
+		err := c.client.resetConnection()
+		if err == nil {
+			err = c.client.resetChannel(c.queueName, true)
 		}
 
 		c.client.mu.Unlock()
-		return nil
 
-	retry:
+		if err == nil {
+			return nil
+		}
+
 		select {
 		case <-time.After(backoff):
 			if backoff < maxBackoff {
 				backoff *= 2
 			}
 		case <-ctx.Done():
-			if err != nil {
-				return fmt.Errorf("retry canceled after error: %w", err)
-			}
-			return ctx.Err()
+			return fmt.Errorf("retry canceled after error: %w", err)
 		}
 	}
 }
@@ -168,7 +161,7 @@ type WorkflowJob struct {
 func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 	webhook := WorkflowJobWebhook{}
 	if err := json.Unmarshal(body, &webhook); err != nil {
-		return NoRequeue(fmt.Sprintf("failed to unmarshal message body: %v", err))
+		return NoRetryableError(fmt.Sprintf("failed to unmarshal message body: %v", err))
 	}
 	switch webhook.Action {
 	case "queued":
@@ -181,7 +174,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 		return c.updateJobCompletedInDB(ctx, webhook.WorkflowJob, body)
 	default:
 		c.logger.Warn("ignoring other type", "status", webhook.Action)
-		return NoRequeue(fmt.Sprintf("ignoring webhook action type: %s", webhook.Action))
+		return NoRetryableError(fmt.Sprintf("ignoring webhook action type: %s", webhook.Action))
 	}
 
 }
@@ -190,7 +183,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	createdAt := parseToTime(j.CreatedAt, c.logger)
 	if createdAt == nil {
-		return NoRequeue("created_at missing in job_queued event")
+		return NoRetryableError("created_at missing in job_queued event")
 	}
 
 	job := &database.Job{
@@ -206,9 +199,9 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []
 	if err := c.db.AddJob(ctx, job); err != nil {
 		if errors.Is(err, database.ErrExist) {
 			c.logger.Info("job already exists in database", "job_id", j.ID)
-			return NoRequeue("job already exists in database")
+			return NoRetryableError("job already exists in database")
 		}
-		return Requeue(fmt.Sprintf("failed to add job to database: %v", err))
+		return RetryableError(fmt.Sprintf("failed to add job to database: %v", err))
 	}
 
 	return nil
@@ -219,7 +212,7 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []
 func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	startedAt := parseToTime(j.StartedAt, c.logger)
 	if startedAt == nil {
-		return NoRequeue("started_at missing in job_in_progress event")
+		return NoRetryableError("started_at missing in job_in_progress event")
 	}
 
 	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), *startedAt, c.extractRaw(j.Status, body)); err != nil {
@@ -227,7 +220,7 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", j.ID)
 			return c.insertJobToDB(ctx, j, body)
 		}
-		return Requeue(fmt.Sprintf("failed to update job started in database: %v", err))
+		return RetryableError(fmt.Sprintf("failed to update job started in database: %v", err))
 	}
 
 	return nil
@@ -238,7 +231,7 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
 	completedAt := parseToTime(j.CompletedAt, c.logger)
 	if completedAt == nil {
-		return NoRequeue("completed_at missing in job_completed event")
+		return NoRetryableError("completed_at missing in job_completed event")
 	}
 
 	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), *completedAt, c.extractRaw(j.Status, body)); err != nil {
@@ -246,7 +239,7 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", j.ID)
 			return c.insertJobToDB(ctx, j, body)
 		}
-		return Requeue(fmt.Sprintf("failed to update job completed in database: %v", err))
+		return RetryableError(fmt.Sprintf("failed to update job completed in database: %v", err))
 	}
 
 	return nil
