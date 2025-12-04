@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
@@ -163,8 +164,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte, headers a
 	// Extract X-GitHub-Event from headers
 	githubEvent, ok := headers["X-GitHub-Event"].(string)
 	if !ok || githubEvent == "" {
-		headerValue := headers["X-GitHub-Event"]
-		c.logger.Warn("X-GitHub-Event header missing or invalid, falling back to JSON parsing", "header_value", headerValue)
+		c.logger.Warn("X-GitHub-Event header missing or invalid, falling back to JSON parsing", "header_value", headers["X-GitHub-Event"])
 		// Fallback to the old method if header is not present
 		return c.handleMessageLegacy(ctx, body)
 	}
@@ -308,7 +308,7 @@ func (c *AmqpConsumer) insertJobToDBFromGithub(ctx context.Context, jobEvent *gi
 	job := &database.Job{
 		ID:          strconv.FormatInt(wfJob.GetID(), 10),
 		Platform:    platform,
-		Labels:      append([]string(nil), wfJob.Labels...),
+		Labels:      slices.Clone(wfJob.Labels),
 		CreatedAt:   createdAt.Time,
 		StartedAt:   parseTimePtr(wfJob.StartedAt),
 		CompletedAt: parseTimePtr(wfJob.CompletedAt),
