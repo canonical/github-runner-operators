@@ -23,18 +23,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testContext holds test configuration and dependencies.
+type testContext struct {
+	t         *testing.T
+	port      string
+	rabbitURI string
+	queueName string
+}
+
+func newTestContext(t *testing.T) *testContext {
+	return &testContext{
+		t:         t,
+		port:      os.Getenv("APP_PORT"),
+		rabbitURI: os.Getenv("RABBITMQ_CONNECT_STRING"),
+		queueName: "webhook-queue",
+	}
+}
+
 func TestMain_FlavorPressure(t *testing.T) {
 	/*
 		arrange: server is listening on the configured port and prepare request payload
 		act: send create flavor request, get flavor pressure request and publish webhook message
 		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
-	rabbitURI := os.Getenv("RABBITMQ_CONNECT_STRING")
-	port := os.Getenv("APP_PORT")
-	declareQueue(t, rabbitURI, "webhook-queue")
+	ctx := newTestContext(t)
+	ctx.declareQueue()
 
 	go main()
-	waitForHTTP(t, "http://localhost:"+port+"/api/v1/flavors/", 10*time.Second)
+	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
 
 	platform := "github"
 	labels := []string{"self-hosted", "s390x", "medium"}
@@ -43,27 +59,25 @@ func TestMain_FlavorPressure(t *testing.T) {
 	pressure := 0
 
 	// Test create flavor
-	resp := createFlavor(t, port, flavor, platform, labels, priority)
-	if resp != http.StatusCreated {
-		t.Fatalf("unexpected status creating flavor: %d", resp)
-	}
+	resp := ctx.createFlavor(flavor, platform, labels, priority)
+	require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
 
 	// Test get flavor pressure
-	pressures := getFlavorPressure(t, port, flavor)
-	assertFlavorPressureEquals(t, pressures, flavor, pressure)
+	pressures := ctx.getFlavorPressure(flavor)
+	ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
 
 	// Test consume webhook and reflect pressure
-	body := constructWebhookPayload(t, labels)
-	publishAndWaitAck(t, rabbitURI, "webhook-queue", body)
+	body := ctx.constructWebhookPayload(labels)
+	ctx.publishAndWaitAck(body)
 
 	assert.Eventually(t, func() bool {
-		press := getFlavorPressure(t, port, flavor)
+		press := ctx.getFlavorPressure(flavor)
 		return press[flavor] > pressure
 	}, 20*time.Minute, 500*time.Millisecond)
 }
 
 // constructWebhookPayload creates a webhook payload with the given labels.
-func constructWebhookPayload(t *testing.T, labels []string) []byte {
+func (ctx *testContext) constructWebhookPayload(labels []string) []byte {
 	jobID := rand.Intn(1000)
 	payload := map[string]any{
 		"action": "queued",
@@ -76,68 +90,68 @@ func constructWebhookPayload(t *testing.T, labels []string) []byte {
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		require.NoError(t, err, "marshal webhook payload")
+		require.NoError(ctx.t, err, "marshal webhook payload")
 	}
 	return body
 }
 
 // declareQueue declares a RabbitMQ queue for testing purposes.
-func declareQueue(t *testing.T, uri, queue string) {
-	t.Helper()
+func (ctx *testContext) declareQueue() {
+	ctx.t.Helper()
 
-	conn, err := amqp.Dial(uri)
-	require.NoError(t, err, "connect rabbitmq")
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
 	defer conn.Close()
 
 	ch, err := conn.Channel()
-	require.NoError(t, err, "open channel")
+	require.NoError(ctx.t, err, "open channel")
 	defer ch.Close()
 
 	_, err = ch.QueueDeclare(
-		queue,
+		ctx.queueName,
 		true,  // durable
 		false, // auto-delete
 		false, // exclusive
 		false, // no-wait
 		nil,
 	)
-	require.NoError(t, err, "declare queue")
+	require.NoError(ctx.t, err, "declare queue")
 }
 
 // publishAndWaitAck publishes a message to the given RabbitMQ queue and waits for an ack.
-func publishAndWaitAck(t *testing.T, uri, queue string, body []byte) {
-	t.Helper()
+func (ctx *testContext) publishAndWaitAck(body []byte) {
+	ctx.t.Helper()
 
-	conn, err := amqp.Dial(uri)
-	require.NoError(t, err, "connect rabbitmq")
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
 	defer conn.Close()
 
 	ch, err := conn.Channel()
-	require.NoError(t, err, "open channel")
+	require.NoError(ctx.t, err, "open channel")
 	defer ch.Close()
 
 	err = ch.Confirm(false)
-	require.NoError(t, err, "enable confirms")
+	require.NoError(ctx.t, err, "enable confirms")
 
 	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 
 	err = ch.Publish(
-		"", queue, false, false,
+		"", ctx.queueName, false, false,
 		amqp.Publishing{ContentType: "application/json", Body: body},
 	)
-	require.NoError(t, err, "publish")
+	require.NoError(ctx.t, err, "publish")
 
 	select {
 	case c := <-confirms:
-		require.True(t, c.Ack, "message not acked")
+		require.True(ctx.t, c.Ack, "message not acked")
 	case <-time.After(10 * time.Second):
-		require.Fail(t, "timeout waiting for ack")
+		require.Fail(ctx.t, "timeout waiting for ack")
 	}
 }
 
 // createFlavor sends a create flavor request to the server
-func createFlavor(t *testing.T, port, flavor, platform string, labels []string, priority int) int {
-	t.Helper()
+func (ctx *testContext) createFlavor(flavor, platform string, labels []string, priority int) int {
+	ctx.t.Helper()
 
 	body := map[string]any{
 		"platform": platform,
@@ -146,72 +160,57 @@ func createFlavor(t *testing.T, port, flavor, platform string, labels []string, 
 	}
 
 	b, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
-	}
+	require.NoError(ctx.t, err, "marshal payload")
 
-	url := "http://localhost:" + port + "/api/v1/flavors/" + flavor
+	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor
 
 	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
-	if err != nil {
-		t.Fatalf("create flavor request: %v", err)
-	}
+	require.NoError(ctx.t, err, "create flavor request")
 	defer resp.Body.Close()
 
 	return resp.StatusCode
 }
 
 // getFlavorPressure sends a get flavor pressure request to the server
-func getFlavorPressure(t *testing.T, port, flavor string) map[string]int {
-	t.Helper()
+func (ctx *testContext) getFlavorPressure(flavor string) map[string]int {
+	ctx.t.Helper()
 
-	url := "http://localhost:" + port + "/api/v1/flavors/" + flavor + "/pressure"
+	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor + "/pressure"
 
 	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("get flavor pressure request: %v", err)
-	}
+	require.NoError(ctx.t, err, "get flavor pressure request")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected status getting pressure: %d", resp.StatusCode)
-	}
+	require.Equal(ctx.t, http.StatusOK, resp.StatusCode, "unexpected status getting pressure")
 
 	var pressures map[string]int
-	if err := json.NewDecoder(resp.Body).Decode(&pressures); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	require.NoError(ctx.t, json.NewDecoder(resp.Body).Decode(&pressures), "decode response")
 
 	return pressures
 }
 
 // assertFlavorPressureEquals checks that the pressures map contains the expected pressure for the given flavor
-func assertFlavorPressureEquals(t *testing.T, pressures map[string]int, flavor string, expected int) {
-	t.Helper()
+func (ctx *testContext) assertFlavorPressureEquals(pressures map[string]int, flavor string, expected int) {
+	ctx.t.Helper()
 	value, exists := pressures[flavor]
-	if !exists {
-		t.Fatalf("expected flavor %q in response, got %+v", flavor, pressures)
-	}
-
-	if value != expected {
-		t.Fatalf("expected pressure %d for flavor %q, got %d", expected, flavor, value)
-	}
+	require.True(ctx.t, exists, "expected flavor %q in response, got %+v", flavor, pressures)
+	require.Equal(ctx.t, expected, value, "expected pressure %d for flavor %q, got %d", expected, flavor, value)
 }
 
-// waitForHTTP keeps trying a POST request until the server responds
+// waitForHTTP keeps trying a GET request until the server responds
 // with any HTTP status (including 4xx/5xx), or until timeout elapses.
-func waitForHTTP(t *testing.T, url string, timeout time.Duration) {
-	t.Helper()
+func (ctx *testContext) waitForHTTP(url string, timeout time.Duration) {
+	ctx.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		resp, err := http.Post(url, "application/json", nil)
+		resp, err := http.Get(url)
 		if err == nil {
 			resp.Body.Close()
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("server did not start responding at %s within %s", url, timeout)
+	require.Fail(ctx.t, "server did not start responding", "server did not start responding at %s within %s", url, timeout)
 }
 
 // randString generates a random string of the given length.

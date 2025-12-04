@@ -199,3 +199,21 @@ func TestGetFlavorPressure(t *testing.T) {
 		})
 	}
 }
+
+func TestHealth(t *testing.T) {
+	store := &fakeStore{}
+	server := NewServer(store, NewMetrics(store))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	server.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var resp map[string]string
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", resp["status"])
+}

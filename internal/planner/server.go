@@ -21,6 +21,7 @@ import (
 const (
 	createFlavorPattern      = "/api/v1/flavors/{name}"
 	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
+	healthPattern            = "/health"
 	allFlavorName            = "_"
 	flavorPlatform           = "github" // Currently only github is supported
 )
@@ -46,6 +47,7 @@ func NewServer(store FlavorStore, metrics *Metrics) *Server {
 	// Register routes
 	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, http.HandlerFunc(s.createFlavor)))
 	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, http.HandlerFunc(s.getFlavorPressure)))
+	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
 
 	return s
 }
@@ -123,6 +125,11 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJSON(w, http.StatusOK, pressures)
+}
+
+// health handles health check requests.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // respondWithJSON sends a JSON response with the given status code and payload.
