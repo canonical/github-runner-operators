@@ -177,8 +177,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte, headers a
 	// Type assert to WorkflowJobEvent
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
-		c.logger.Info("event is not a workflow_job, discarding", "event_type", githubEvent)
-		return NoRetryableError(fmt.Sprintf("event is not a workflow_job: %s", githubEvent))
+		return NoRetryableError(fmt.Sprintf("discarding non-workflow_job event: %s", githubEvent))
 	}
 
 	// Switch on the action
@@ -192,8 +191,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte, headers a
 	case "completed":
 		return c.updateJobCompletedInDBFromGithub(ctx, jobEvent, body)
 	default:
-		c.logger.Warn("ignoring other action type", "action", jobEvent.GetAction())
-		return NoRetryableError(fmt.Sprintf("ignoring webhook action type: %s", jobEvent.GetAction()))
+		return NoRetryableError(fmt.Sprintf("unsupported workflow_job action: %s", jobEvent.GetAction()))
 	}
 }
 
