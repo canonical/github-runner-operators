@@ -72,12 +72,16 @@ func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, 
 	return body, nil
 }
 
-func (h *Handler) sendWebhook(ctx context.Context, body []byte) error {
+func (h *Handler) sendWebhook(ctx context.Context, body []byte, githubEvent string) error {
 	header := make(map[string]string)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.MapCarrier(header))
 	rabbitHeaders := make(map[string]interface{})
 	for k, v := range header {
 		rabbitHeaders[k] = v
+	}
+	// Add X-GitHub-Event header if present
+	if githubEvent != "" {
+		rabbitHeaders["X-GitHub-Event"] = githubEvent
 	}
 	err := h.Producer.Push(ctx, rabbitHeaders, body)
 	if err != nil {
@@ -105,7 +109,8 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 	}
 
 	ctx, span = trace.Start(ctx, "send webhook")
-	err = h.sendWebhook(ctx, webhook)
+	githubEvent := r.Header.Get("X-GitHub-Event")
+	err = h.sendWebhook(ctx, webhook, githubEvent)
 	if err != nil {
 		outboundWebhookErrors.Add(ctx, 1)
 		span.RecordError(err)

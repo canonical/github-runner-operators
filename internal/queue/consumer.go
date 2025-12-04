@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	"github.com/google/go-github/v68/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -85,7 +86,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 				continue
 			}
 
-			err := c.handleMessage(ctx, msg.Body)
+			err := c.handleMessage(ctx, msg.Body, msg.Headers)
 			if err == nil {
 				msg.Ack(false)
 				continue
@@ -158,7 +159,46 @@ type WorkflowJob struct {
 }
 
 // handleMessage processes a single AMQP message body.
-func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
+func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte, headers amqp.Table) error {
+	// Extract X-GitHub-Event from headers
+	githubEvent, ok := headers["X-GitHub-Event"].(string)
+	if !ok || githubEvent == "" {
+		c.logger.Warn("X-GitHub-Event header missing or invalid, falling back to JSON parsing")
+		// Fallback to the old method if header is not present
+		return c.handleMessageLegacy(ctx, body)
+	}
+
+	// Parse webhook using github library
+	event, err := github.ParseWebHook(githubEvent, body)
+	if err != nil {
+		return NoRetryableError(fmt.Sprintf("failed to parse webhook: %v", err))
+	}
+
+	// Type assert to WorkflowJobEvent
+	jobEvent, ok := event.(*github.WorkflowJobEvent)
+	if !ok {
+		c.logger.Info("event is not a workflow_job, discarding", "event_type", githubEvent)
+		return NoRetryableError(fmt.Sprintf("event is not a workflow_job: %s", githubEvent))
+	}
+
+	// Switch on the action
+	switch jobEvent.GetAction() {
+	case "queued":
+		return c.insertJobToDBFromGithub(ctx, jobEvent, body)
+	case "waiting":
+		return nil
+	case "in_progress":
+		return c.updateJobStartedInDBFromGithub(ctx, jobEvent, body)
+	case "completed":
+		return c.updateJobCompletedInDBFromGithub(ctx, jobEvent, body)
+	default:
+		c.logger.Warn("ignoring other action type", "action", jobEvent.GetAction())
+		return NoRetryableError(fmt.Sprintf("ignoring webhook action type: %s", jobEvent.GetAction()))
+	}
+}
+
+// handleMessageLegacy is the old implementation for backwards compatibility
+func (c *AmqpConsumer) handleMessageLegacy(ctx context.Context, body []byte) error {
 	webhook := WorkflowJobWebhook{}
 	if err := json.Unmarshal(body, &webhook); err != nil {
 		return NoRetryableError(fmt.Sprintf("failed to unmarshal message body: %v", err))
@@ -176,7 +216,6 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 		c.logger.Warn("ignoring other type", "status", webhook.Action)
 		return NoRetryableError(fmt.Sprintf("ignoring webhook action type: %s", webhook.Action))
 	}
-
 }
 
 // insertJobToDB inserts a new job into the database.
@@ -252,6 +291,96 @@ func (c *AmqpConsumer) extractRaw(action string, body []byte) map[string]any {
 		action: string(body),
 	}
 	return payload
+}
+
+// insertJobToDBFromGithub inserts a new job into the database from a github.WorkflowJobEvent.
+func (c *AmqpConsumer) insertJobToDBFromGithub(ctx context.Context, jobEvent *github.WorkflowJobEvent, body []byte) error {
+	wfJob := jobEvent.GetWorkflowJob()
+	if wfJob == nil {
+		return NoRetryableError("workflow_job is nil in event")
+	}
+
+	createdAt := wfJob.GetCreatedAt()
+	if createdAt.IsZero() {
+		return NoRetryableError("created_at missing in job_queued event")
+	}
+
+	job := &database.Job{
+		ID:          strconv.FormatInt(wfJob.GetID(), 10),
+		Platform:    platform,
+		Labels:      wfJob.Labels,
+		CreatedAt:   createdAt.Time,
+		StartedAt:   parseTimePtr(wfJob.StartedAt),
+		CompletedAt: parseTimePtr(wfJob.CompletedAt),
+		Raw:         c.extractRaw(wfJob.GetStatus(), body),
+	}
+
+	if err := c.db.AddJob(ctx, job); err != nil {
+		if errors.Is(err, database.ErrExist) {
+			c.logger.Info("job already exists in database", "job_id", wfJob.GetID())
+			return NoRetryableError("job already exists in database")
+		}
+		return RetryableError(fmt.Sprintf("failed to add job to database: %v", err))
+	}
+
+	return nil
+}
+
+// updateJobStartedInDBFromGithub updates the job's started_at timestamp from a github.WorkflowJobEvent.
+func (c *AmqpConsumer) updateJobStartedInDBFromGithub(ctx context.Context, jobEvent *github.WorkflowJobEvent, body []byte) error {
+	wfJob := jobEvent.GetWorkflowJob()
+	if wfJob == nil {
+		return NoRetryableError("workflow_job is nil in event")
+	}
+
+	startedAt := wfJob.GetStartedAt()
+	if startedAt.IsZero() {
+		return NoRetryableError("started_at missing in job_in_progress event")
+	}
+
+	jobID := strconv.FormatInt(wfJob.GetID(), 10)
+	if err := c.db.UpdateJobStarted(ctx, platform, jobID, startedAt.Time, c.extractRaw(wfJob.GetStatus(), body)); err != nil {
+		if errors.Is(err, database.ErrNotExist) {
+			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", wfJob.GetID())
+			return c.insertJobToDBFromGithub(ctx, jobEvent, body)
+		}
+		return RetryableError(fmt.Sprintf("failed to update job started in database: %v", err))
+	}
+
+	return nil
+}
+
+// updateJobCompletedInDBFromGithub updates the job's completed_at timestamp from a github.WorkflowJobEvent.
+func (c *AmqpConsumer) updateJobCompletedInDBFromGithub(ctx context.Context, jobEvent *github.WorkflowJobEvent, body []byte) error {
+	wfJob := jobEvent.GetWorkflowJob()
+	if wfJob == nil {
+		return NoRetryableError("workflow_job is nil in event")
+	}
+
+	completedAt := wfJob.GetCompletedAt()
+	if completedAt.IsZero() {
+		return NoRetryableError("completed_at missing in job_completed event")
+	}
+
+	jobID := strconv.FormatInt(wfJob.GetID(), 10)
+	if err := c.db.UpdateJobCompleted(ctx, platform, jobID, completedAt.Time, c.extractRaw(wfJob.GetStatus(), body)); err != nil {
+		if errors.Is(err, database.ErrNotExist) {
+			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", wfJob.GetID())
+			return c.insertJobToDBFromGithub(ctx, jobEvent, body)
+		}
+		return RetryableError(fmt.Sprintf("failed to update job completed in database: %v", err))
+	}
+
+	return nil
+}
+
+// parseTimePtr converts a github.Timestamp pointer to a *time.Time.
+func parseTimePtr(t *github.Timestamp) *time.Time {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	result := t.Time
+	return &result
 }
 
 // consumeMsgs starts consuming messages from the AMQP queue.

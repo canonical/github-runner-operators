@@ -457,3 +457,143 @@ func TestConsumer(t *testing.T) {
 		})
 	}
 }
+
+func TestConsumerWithGithubEventHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupDB      func(*fakeDB)
+		payload      string
+		eventType    string
+		expectErrSub string
+		checkDB      func(*testing.T, *fakeDB)
+	}{{
+		name:    "parses workflow_job queued event with header",
+		setupDB: func(db *fakeDB) {},
+		payload: `{
+			"action": "queued",
+			"workflow_job": {
+				"id": 100,
+				"labels": ["self-hosted"],
+				"status": "queued",
+				"created_at": "2025-01-01T00:00:00Z"
+			}
+		}`,
+		eventType:    "workflow_job",
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			assert.NotNil(t, db.jobs["github:100"], "job not inserted")
+			assert.Equal(t, []string{"self-hosted"}, db.jobs["github:100"].Labels)
+		},
+	}, {
+		name:    "parses workflow_job in_progress event with header",
+		setupDB: func(db *fakeDB) { db.jobs["github:101"] = &database.Job{ID: "101", Platform: "github"} },
+		payload: `{
+			"action": "in_progress",
+			"workflow_job": {
+				"id": 101,
+				"labels": ["x"],
+				"status": "in_progress",
+				"started_at": "2025-01-02T00:00:00Z"
+			}
+		}`,
+		eventType:    "workflow_job",
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			j := db.jobs["github:101"]
+			assert.NotNil(t, j, "job not found")
+			assert.NotNil(t, j.StartedAt, "started_at not set")
+		},
+	}, {
+		name:    "parses workflow_job completed event with header",
+		setupDB: func(db *fakeDB) { db.jobs["github:102"] = &database.Job{ID: "102", Platform: "github"} },
+		payload: `{
+			"action": "completed",
+			"workflow_job": {
+				"id": 102,
+				"labels": [],
+				"status": "completed",
+				"completed_at": "2025-01-03T00:00:00Z"
+			}
+		}`,
+		eventType:    "workflow_job",
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			j := db.jobs["github:102"]
+			assert.NotNil(t, j, "job not found")
+			assert.NotNil(t, j.CompletedAt, "completed_at not set")
+		},
+	}, {
+		name:    "discards non-workflow_job events",
+		setupDB: func(db *fakeDB) {},
+		payload: `{
+			"action": "opened",
+			"pull_request": {
+				"id": 200
+			}
+		}`,
+		eventType:    "pull_request",
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			assert.Nil(t, db.jobs["github:200"], "pull_request event should not create a job")
+		},
+	}, {
+		name:    "ignores unknown action types",
+		setupDB: func(db *fakeDB) {},
+		payload: `{
+			"action": "unknown_action",
+			"workflow_job": {
+				"id": 103,
+				"labels": ["l"],
+				"status": "queued",
+				"created_at": "2025-01-01T00:00:00Z"
+			}
+		}`,
+		eventType:    "workflow_job",
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			assert.Nil(t, db.jobs["github:103"], "job should not be inserted for unknown action")
+		},
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newFakeDB()
+			tt.setupDB(db)
+
+			ch := make(chan amqp.Delivery, 1)
+			headers := amqp.Table{
+				"X-GitHub-Event": tt.eventType,
+			}
+			ch <- amqp.Delivery{
+				Body:    []byte(tt.payload),
+				Headers: headers,
+			}
+			close(ch)
+
+			fch := &fakeChan{deliveries: ch}
+			fconn := &fakeConn{channel: fch}
+
+			consumer := &AmqpConsumer{
+				client: &Client{
+					uri:         "amqp://x",
+					connectFunc: func(uri string) (amqpConnection, error) { return fconn, nil }},
+				queueName: "queue-x",
+				db:        db,
+				logger:    slog.Default(),
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				cancel()
+			}()
+
+			err := consumer.Start(ctx)
+
+			assert.ErrorContains(t, err, tt.expectErrSub, "expected error containing %q, got %v", tt.expectErrSub, err)
+			if tt.checkDB != nil {
+				tt.checkDB(t, db)
+			}
+		})
+	}
+}

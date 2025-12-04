@@ -25,10 +25,12 @@ const valid_signature_header = "sha256=0aca2d7154cddad4f56f246cad61f1485df34b805
 
 type FakeProducer struct {
 	Messages [][]byte
+	Headers  []map[string]interface{}
 }
 
-func (q *FakeProducer) Push(_ context.Context, _ map[string]interface{}, msg []byte) error {
+func (q *FakeProducer) Push(_ context.Context, headers map[string]interface{}, msg []byte) error {
 	q.Messages = append(q.Messages, msg)
+	q.Headers = append(q.Headers, headers)
 	return nil
 }
 
@@ -74,6 +76,34 @@ func setupRequest() *http.Request {
 	req.Header.Set(WebhookSignatureHeader, valid_signature_header)
 
 	return req
+}
+
+func TestWebhookGithubEventHeader(t *testing.T) {
+	/*
+		arrange: create request with valid signature header and X-GitHub-Event header
+		act: call WebhookHandler
+		assert: status 200, X-GitHub-Event header is included in AMQP message headers
+	*/
+	mr := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
+	req := setupRequest()
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	fakeProducer := &FakeProducer{}
+	handler := Handler{
+		WebhookSecret: secret,
+		Producer:      fakeProducer,
+	}
+	w := httptest.NewRecorder()
+	handler.Webhook(w, req)
+	res := w.Result()
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusOK, res.StatusCode, "expected status 200 got %v", res.Status)
+	assert.Equal(t, 1, len(fakeProducer.Headers), "expected 1 message with headers in queue")
+	assert.Equal(t, "workflow_job", fakeProducer.Headers[0]["X-GitHub-Event"], "expected X-GitHub-Event header to be set")
+	m := mr.Collect(t)
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
+	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.outbound"))
 }
 
 func TestWebhookQueueError(t *testing.T) {
