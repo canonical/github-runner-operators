@@ -163,7 +163,8 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte, headers a
 	// Extract X-GitHub-Event from headers
 	githubEvent, ok := headers["X-GitHub-Event"].(string)
 	if !ok || githubEvent == "" {
-		c.logger.Warn("X-GitHub-Event header missing or invalid, falling back to JSON parsing")
+		headerValue := headers["X-GitHub-Event"]
+		c.logger.Warn("X-GitHub-Event header missing or invalid, falling back to JSON parsing", "header_value", headerValue)
 		// Fallback to the old method if header is not present
 		return c.handleMessageLegacy(ctx, body)
 	}
@@ -191,6 +192,7 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte, headers a
 	case "completed":
 		return c.updateJobCompletedInDBFromGithub(ctx, jobEvent, body)
 	default:
+		c.logger.Warn("unsupported workflow_job action", "action", jobEvent.GetAction())
 		return NoRetryableError(fmt.Sprintf("unsupported workflow_job action: %s", jobEvent.GetAction()))
 	}
 }
@@ -306,7 +308,7 @@ func (c *AmqpConsumer) insertJobToDBFromGithub(ctx context.Context, jobEvent *gi
 	job := &database.Job{
 		ID:          strconv.FormatInt(wfJob.GetID(), 10),
 		Platform:    platform,
-		Labels:      wfJob.Labels,
+		Labels:      append([]string(nil), wfJob.Labels...),
 		CreatedAt:   createdAt.Time,
 		StartedAt:   parseTimePtr(wfJob.StartedAt),
 		CompletedAt: parseTimePtr(wfJob.CompletedAt),
