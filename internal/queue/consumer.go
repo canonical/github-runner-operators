@@ -91,8 +91,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 				continue
 			}
 
-			var errHandle *MessageHandlingError
-			if errors.As(err, &errHandle) && !errHandle.Requeue {
+			if errors.Is(err, ErrNonRetryable) {
 				msg.Nack(false, false) // don't requeue
 				c.logger.Error("failed to handle message without requeue", "error", err)
 				continue
@@ -161,66 +160,92 @@ type WorkflowJob struct {
 func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 	webhook := WorkflowJobWebhook{}
 	if err := json.Unmarshal(body, &webhook); err != nil {
-		return NoRetryableError(fmt.Sprintf("failed to unmarshal message body: %v", err))
+		return classifyError(fmt.Errorf("%w: %v", ErrInvalidJSON, err))
 	}
+
+	var err error
 	switch webhook.Action {
 	case "queued":
-		return c.insertJobToDB(ctx, webhook.WorkflowJob, body)
+		err = c.insertJobToDB(ctx, webhook.WorkflowJob, body)
 	case "waiting":
 		return nil
 	case "in_progress":
-		return c.updateJobStartedInDB(ctx, webhook.WorkflowJob, body)
+		err = c.updateJobStartedInDB(ctx, webhook.WorkflowJob, body)
 	case "completed":
-		return c.updateJobCompletedInDB(ctx, webhook.WorkflowJob, body)
+		err = c.updateJobCompletedInDB(ctx, webhook.WorkflowJob, body)
 	default:
 		c.logger.Warn("ignoring other type", "status", webhook.Action)
-		return NoRetryableError(fmt.Sprintf("ignoring webhook action type: %s", webhook.Action))
+		return classifyError(fmt.Errorf("%w: %s", ErrUnknownAction, webhook.Action))
 	}
 
+	// Classify the error to determine if it should be retried
+	if err != nil {
+		return classifyError(err)
+	}
+	return nil
 }
 
 // insertJobToDB inserts a new job into the database.
 func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []byte) error {
-	createdAt := parseToTime(j.CreatedAt, c.logger)
-	if createdAt == nil {
-		return NoRetryableError("created_at missing in job_queued event")
+	if j.CreatedAt == "" || j.CreatedAt == "null" {
+		return fmt.Errorf("%w: created_at in job_queued event", ErrMissingField)
+	}
+	createdAt, err := time.Parse(time.RFC3339, j.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("%w: failed to parse created_at: %v", ErrInvalidTimestamp, err)
 	}
 
 	job := &database.Job{
 		ID:          strconv.Itoa(j.ID),
 		Platform:    platform,
 		Labels:      j.Labels,
-		CreatedAt:   *createdAt,
-		StartedAt:   parseToTime(j.StartedAt, c.logger),
-		CompletedAt: parseToTime(j.CompletedAt, c.logger),
+		CreatedAt:   createdAt,
+		StartedAt:   c.parseOptionalTime(j.StartedAt),
+		CompletedAt: c.parseOptionalTime(j.CompletedAt),
 		Raw:         c.extractRaw(j.Status, body),
 	}
 
 	if err := c.db.AddJob(ctx, job); err != nil {
 		if errors.Is(err, database.ErrExist) {
 			c.logger.Info("job already exists in database", "job_id", j.ID)
-			return NoRetryableError("job already exists in database")
+			return fmt.Errorf("%w: job %d", ErrJobAlreadyExists, j.ID)
 		}
-		return RetryableError(fmt.Sprintf("failed to add job to database: %v", err))
+		return fmt.Errorf("failed to add job to database: %w", err)
 	}
 
 	return nil
 }
 
+// parseOptionalTime parses an optional time string, returning nil if empty or invalid.
+func (c *AmqpConsumer) parseOptionalTime(timeStr string) *time.Time {
+	if timeStr == "" || timeStr == "null" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, timeStr)
+	if err != nil {
+		c.logger.Warn("failed to parse time", "timeStr", timeStr, "error", err)
+		return nil
+	}
+	return &t
+}
+
 // updateJobStartedInDB updates the job's started_at timestamp in the database.
 // If the job does not exist, it inserts the missing job to the database.
 func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
-	startedAt := parseToTime(j.StartedAt, c.logger)
-	if startedAt == nil {
-		return NoRetryableError("started_at missing in job_in_progress event")
+	if j.StartedAt == "" || j.StartedAt == "null" {
+		return fmt.Errorf("%w: started_at in job_in_progress event", ErrMissingField)
+	}
+	startedAt, err := time.Parse(time.RFC3339, j.StartedAt)
+	if err != nil {
+		return fmt.Errorf("%w: failed to parse started_at: %v", ErrInvalidTimestamp, err)
 	}
 
-	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), *startedAt, c.extractRaw(j.Status, body)); err != nil {
+	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), startedAt, c.extractRaw(j.Status, body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", j.ID)
 			return c.insertJobToDB(ctx, j, body)
 		}
-		return RetryableError(fmt.Sprintf("failed to update job started in database: %v", err))
+		return fmt.Errorf("failed to update job started in database: %w", err)
 	}
 
 	return nil
@@ -229,17 +254,20 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 // updateJobCompletedInDB updates the job's completed_at timestamp in the database.
 // If the job does not exist, it inserts the missing job to the database.
 func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
-	completedAt := parseToTime(j.CompletedAt, c.logger)
-	if completedAt == nil {
-		return NoRetryableError("completed_at missing in job_completed event")
+	if j.CompletedAt == "" || j.CompletedAt == "null" {
+		return fmt.Errorf("%w: completed_at in job_completed event", ErrMissingField)
+	}
+	completedAt, err := time.Parse(time.RFC3339, j.CompletedAt)
+	if err != nil {
+		return fmt.Errorf("%w: failed to parse completed_at: %v", ErrInvalidTimestamp, err)
 	}
 
-	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), *completedAt, c.extractRaw(j.Status, body)); err != nil {
+	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), completedAt, c.extractRaw(j.Status, body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", j.ID)
 			return c.insertJobToDB(ctx, j, body)
 		}
-		return RetryableError(fmt.Sprintf("failed to update job completed in database: %v", err))
+		return fmt.Errorf("failed to update job completed in database: %w", err)
 	}
 
 	return nil

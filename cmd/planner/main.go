@@ -77,10 +77,8 @@ func main() {
 	consumerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		err := consumer.Start(consumerCtx)
-		if err != nil {
-			slog.ErrorContext(consumerCtx, "failed to start AMQP consumer", "error", err)
-			log.Fatalln("failed to start AMQP consumer:", err)
+		if err := consumer.Start(consumerCtx); err != nil {
+			log.Fatalf("failed to start AMQP consumer: %v", err)
 		}
 	}()
 

@@ -8,9 +8,7 @@ package queue
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
-	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -131,17 +129,4 @@ func (ch *amqpChannelWrapper) Consume(queue, consumer string, autoAck, exclusive
 
 func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) error {
 	return ch.Channel.Qos(prefetchCount, prefetchSize, global)
-}
-
-// parseToTime parses a string pointer to time.Time, returning zero time if nil or invalid.
-func parseToTime(timeStr string, logger *slog.Logger) *time.Time {
-	if timeStr == "" || timeStr == "null" {
-		return nil
-	}
-	t, err := time.Parse(time.RFC3339, timeStr) // github timestamps are in ISO 8601 format
-	if err != nil {
-		logger.Warn("failed to parse time", "timeStr", timeStr, "error", err)
-		return nil
-	}
-	return &t
 }
