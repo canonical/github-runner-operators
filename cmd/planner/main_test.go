@@ -197,8 +197,8 @@ func (ctx *testContext) getFlavorPressure(flavor string) map[string]int {
 func (ctx *testContext) assertFlavorPressureEquals(pressures map[string]int, flavor string, expected int) {
 	ctx.t.Helper()
 	value, exists := pressures[flavor]
-	require.True(ctx.t, exists, "expected flavor %q in response, got %+v", flavor, pressures)
-	require.Equal(ctx.t, expected, value, "expected pressure %d for flavor %q, got %d", expected, flavor, value)
+	assert.True(ctx.t, exists, "expected flavor %q in response, got %+v", flavor, pressures)
+	assert.Equal(ctx.t, expected, value, "expected pressure %d for flavor %q, got %d", expected, flavor, value)
 }
 
 // waitForHTTP keeps trying a GET request until the server responds
