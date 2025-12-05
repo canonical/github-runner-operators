@@ -122,8 +122,15 @@ func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary(ctx context.Context) 
 		c.client.mu.Lock() // Lock to prevent concurrent access to connection/channel object
 
 		err := c.client.resetConnection()
+		if err != nil {
+			c.logger.ErrorContext(ctx, "failed to reset connection", "error", err)
+		}
+
 		if err == nil {
 			err = c.client.resetChannel(c.queueName, true)
+			if err != nil {
+				c.logger.ErrorContext(ctx, "failed to reset channel", "error", err)
+			}
 		}
 
 		c.client.mu.Unlock()
