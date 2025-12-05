@@ -137,7 +137,11 @@ func (ctx *testContext) publishAndWaitAck(body []byte) {
 
 	err = ch.Publish(
 		"", ctx.queueName, false, false,
-		amqp.Publishing{ContentType: "application/json", Body: body},
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+			Headers:     amqp.Table{"X-GitHub-Event": "workflow_job"},
+		},
 	)
 	require.NoError(ctx.t, err, "publish")
 

@@ -20,9 +20,11 @@ var (
 var (
 	ErrInvalidJSON      = errors.New("invalid JSON in message")
 	ErrMissingField     = errors.New("missing required field")
+	ErrInvalidHeader    = errors.New("invalid message header")
 	ErrInvalidTimestamp = errors.New("invalid timestamp format")
 	ErrUnknownAction    = errors.New("unknown webhook action")
 	ErrJobAlreadyExists = errors.New("job already exists")
+	ErrUnsupportedEvent = errors.New("unsupported event type")
 )
 
 // MessageHandlingError represents an error that occurred while handling a message,
@@ -52,9 +54,11 @@ func classifyError(err error) error {
 	// Errors that should not be retried (data validation errors and already existing records)
 	if errors.Is(err, ErrInvalidJSON) ||
 		errors.Is(err, ErrMissingField) ||
+		errors.Is(err, ErrInvalidHeader) ||
 		errors.Is(err, ErrInvalidTimestamp) ||
 		errors.Is(err, ErrUnknownAction) ||
-		errors.Is(err, ErrJobAlreadyExists) {
+		errors.Is(err, ErrJobAlreadyExists) ||
+		errors.Is(err, ErrUnsupportedEvent) {
 		return &MessageHandlingError{
 			Reason:  err.Error(),
 			Requeue: false,

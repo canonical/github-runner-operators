@@ -10,7 +10,6 @@ package queue
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,10 +17,14 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	"github.com/google/go-github/v67/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-const platform = "github"
+const (
+	platform             = "github"
+	githubEventHeaderKey = "X-GitHub-Event"
+)
 
 // JobDatabase is a small interface that matches the relevant method on internal/database.Database.
 type JobDatabase interface {
@@ -85,7 +88,7 @@ func (c *AmqpConsumer) Start(ctx context.Context) error {
 				continue
 			}
 
-			err := c.handleMessage(ctx, msg.Body)
+			err := c.handleMessage(ctx, msg.Headers, msg.Body)
 			if err == nil {
 				msg.Ack(false)
 				continue
@@ -140,42 +143,48 @@ func (c *AmqpConsumer) resetConnectionOrChannelIfNecessary(ctx context.Context) 
 	}
 }
 
-// WorkflowJobWebhook represents the structure of a workflow job webhook message.
-type WorkflowJobWebhook struct {
-	Action      string      `json:"action"`
-	WorkflowJob WorkflowJob `json:"workflow_job"`
-}
+// handleMessage processes a single AMQP message with headers and body.
+func (c *AmqpConsumer) handleMessage(ctx context.Context, headers amqp.Table, body []byte) error {
+	// Extract the event type from headers
+	eventTypeHeader, ok := headers[githubEventHeaderKey]
+	if !ok {
+		c.logger.Warn("missing X-GitHub-Event header, discarding message")
+		return classifyError(fmt.Errorf("%w: X-GitHub-Event header", ErrMissingField))
+	}
 
-// WorkflowJob represents the structure of a workflow job in the webhook message.
-type WorkflowJob struct {
-	ID          int      `json:"id"`
-	Labels      []string `json:"labels"`
-	Status      string   `json:"status"`
-	CreatedAt   string   `json:"created_at"`
-	StartedAt   string   `json:"started_at,omitempty"`
-	CompletedAt string   `json:"completed_at,omitempty"`
-}
+	eventType, ok := eventTypeHeader.(string)
+	if !ok {
+		c.logger.Warn("X-GitHub-Event header is not a string, discarding message")
+		return classifyError(fmt.Errorf("%w: X-GitHub-Event must be string", ErrInvalidHeader))
+	}
 
-// handleMessage processes a single AMQP message body.
-func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
-	webhook := WorkflowJobWebhook{}
-	if err := json.Unmarshal(body, &webhook); err != nil {
+	// Parse the webhook using go-github library
+	event, err := github.ParseWebHook(eventType, body)
+	if err != nil {
 		return classifyError(fmt.Errorf("%w: %v", ErrInvalidJSON, err))
 	}
 
-	var err error
-	switch webhook.Action {
+	// Check if it's a workflow_job event
+	jobEvent, ok := event.(*github.WorkflowJobEvent)
+	if !ok {
+		c.logger.Info("event is not a workflow_job, discarding", "event_type", eventType)
+		return classifyError(fmt.Errorf("%w: %s", ErrUnsupportedEvent, eventType))
+	}
+
+	// Process the workflow job event based on action
+	action := jobEvent.GetAction()
+	switch action {
 	case "queued":
-		err = c.insertJobToDB(ctx, webhook.WorkflowJob, body)
+		err = c.insertJobToDB(ctx, jobEvent, body)
 	case "waiting":
 		return nil
 	case "in_progress":
-		err = c.updateJobStartedInDB(ctx, webhook.WorkflowJob, body)
+		err = c.updateJobStartedInDB(ctx, jobEvent, body)
 	case "completed":
-		err = c.updateJobCompletedInDB(ctx, webhook.WorkflowJob, body)
+		err = c.updateJobCompletedInDB(ctx, jobEvent, body)
 	default:
-		c.logger.Warn("ignoring other type", "status", webhook.Action)
-		return classifyError(fmt.Errorf("%w: %s", ErrUnknownAction, webhook.Action))
+		c.logger.Warn("ignoring other action type", "action", action)
+		return classifyError(fmt.Errorf("%w: %s", ErrUnknownAction, action))
 	}
 
 	// Classify the error to determine if it should be retried
@@ -186,29 +195,31 @@ func (c *AmqpConsumer) handleMessage(ctx context.Context, body []byte) error {
 }
 
 // insertJobToDB inserts a new job into the database.
-func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []byte) error {
-	if j.CreatedAt == "" || j.CreatedAt == "null" {
+func (c *AmqpConsumer) insertJobToDB(ctx context.Context, jobEvent *github.WorkflowJobEvent, body []byte) error {
+	job := jobEvent.GetWorkflowJob()
+	if job == nil {
+		return fmt.Errorf("%w: workflow_job field", ErrMissingField)
+	}
+
+	createdAt := job.GetCreatedAt()
+	if createdAt.IsZero() {
 		return fmt.Errorf("%w: created_at in job_queued event", ErrMissingField)
 	}
-	createdAt, err := time.Parse(time.RFC3339, j.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("%w: failed to parse created_at: %v", ErrInvalidTimestamp, err)
-	}
 
-	job := &database.Job{
-		ID:          strconv.Itoa(j.ID),
+	dbJob := &database.Job{
+		ID:          strconv.FormatInt(job.GetID(), 10),
 		Platform:    platform,
-		Labels:      j.Labels,
-		CreatedAt:   createdAt,
-		StartedAt:   c.parseOptionalTime(j.StartedAt),
-		CompletedAt: c.parseOptionalTime(j.CompletedAt),
-		Raw:         c.extractRaw(j.Status, body),
+		Labels:      job.Labels,
+		CreatedAt:   createdAt.Time,
+		StartedAt:   c.parseOptionalGitHubTime(job.StartedAt),
+		CompletedAt: c.parseOptionalGitHubTime(job.CompletedAt),
+		Raw:         c.extractRaw(jobEvent, body),
 	}
 
-	if err := c.db.AddJob(ctx, job); err != nil {
+	if err := c.db.AddJob(ctx, dbJob); err != nil {
 		if errors.Is(err, database.ErrExist) {
-			c.logger.Info("job already exists in database", "job_id", j.ID)
-			return fmt.Errorf("%w: job %d", ErrJobAlreadyExists, j.ID)
+			c.logger.Info("job already exists in database", "job_id", job.GetID())
+			return fmt.Errorf("%w: job %d", ErrJobAlreadyExists, job.GetID())
 		}
 		return fmt.Errorf("failed to add job to database: %w", err)
 	}
@@ -216,34 +227,32 @@ func (c *AmqpConsumer) insertJobToDB(ctx context.Context, j WorkflowJob, body []
 	return nil
 }
 
-// parseOptionalTime parses an optional time string, returning nil if empty or invalid.
-func (c *AmqpConsumer) parseOptionalTime(timeStr string) *time.Time {
-	if timeStr == "" || timeStr == "null" {
+// parseOptionalGitHubTime parses an optional GitHub timestamp, returning nil if not set.
+func (c *AmqpConsumer) parseOptionalGitHubTime(ts *github.Timestamp) *time.Time {
+	if ts == nil || ts.IsZero() {
 		return nil
 	}
-	t, err := time.Parse(time.RFC3339, timeStr)
-	if err != nil {
-		c.logger.Warn("failed to parse time", "timeStr", timeStr, "error", err)
-		return nil
-	}
+	t := ts.Time
 	return &t
 }
 
 // updateJobStartedInDB updates the job's started_at timestamp in the database.
 // If the job does not exist, it inserts the missing job to the database.
-func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
-	if j.StartedAt == "" || j.StartedAt == "null" {
-		return fmt.Errorf("%w: started_at in job_in_progress event", ErrMissingField)
-	}
-	startedAt, err := time.Parse(time.RFC3339, j.StartedAt)
-	if err != nil {
-		return fmt.Errorf("%w: failed to parse started_at: %v", ErrInvalidTimestamp, err)
+func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, jobEvent *github.WorkflowJobEvent, body []byte) error {
+	job := jobEvent.GetWorkflowJob()
+	if job == nil {
+		return fmt.Errorf("%w: workflow_job field", ErrMissingField)
 	}
 
-	if err := c.db.UpdateJobStarted(ctx, platform, strconv.Itoa(j.ID), startedAt, c.extractRaw(j.Status, body)); err != nil {
+	startedAt := job.GetStartedAt()
+	if startedAt.IsZero() {
+		return fmt.Errorf("%w: started_at in job_in_progress event", ErrMissingField)
+	}
+
+	if err := c.db.UpdateJobStarted(ctx, platform, strconv.FormatInt(job.GetID(), 10), startedAt.Time, c.extractRaw(jobEvent, body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
-			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", j.ID)
-			return c.insertJobToDB(ctx, j, body)
+			c.logger.Warn("job not found in database on start, inserting missing job", "job_id", job.GetID())
+			return c.insertJobToDB(ctx, jobEvent, body)
 		}
 		return fmt.Errorf("failed to update job started in database: %w", err)
 	}
@@ -253,19 +262,21 @@ func (c *AmqpConsumer) updateJobStartedInDB(ctx context.Context, j WorkflowJob, 
 
 // updateJobCompletedInDB updates the job's completed_at timestamp in the database.
 // If the job does not exist, it inserts the missing job to the database.
-func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob, body []byte) error {
-	if j.CompletedAt == "" || j.CompletedAt == "null" {
-		return fmt.Errorf("%w: completed_at in job_completed event", ErrMissingField)
-	}
-	completedAt, err := time.Parse(time.RFC3339, j.CompletedAt)
-	if err != nil {
-		return fmt.Errorf("%w: failed to parse completed_at: %v", ErrInvalidTimestamp, err)
+func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, jobEvent *github.WorkflowJobEvent, body []byte) error {
+	job := jobEvent.GetWorkflowJob()
+	if job == nil {
+		return fmt.Errorf("%w: workflow_job field", ErrMissingField)
 	}
 
-	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.Itoa(j.ID), completedAt, c.extractRaw(j.Status, body)); err != nil {
+	completedAt := job.GetCompletedAt()
+	if completedAt.IsZero() {
+		return fmt.Errorf("%w: completed_at in job_completed event", ErrMissingField)
+	}
+
+	if err := c.db.UpdateJobCompleted(ctx, platform, strconv.FormatInt(job.GetID(), 10), completedAt.Time, c.extractRaw(jobEvent, body)); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
-			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", j.ID)
-			return c.insertJobToDB(ctx, j, body)
+			c.logger.Warn("job not found in database on completion, inserting missing job", "job_id", job.GetID())
+			return c.insertJobToDB(ctx, jobEvent, body)
 		}
 		return fmt.Errorf("failed to update job completed in database: %w", err)
 	}
@@ -275,9 +286,9 @@ func (c *AmqpConsumer) updateJobCompletedInDB(ctx context.Context, j WorkflowJob
 
 // extractRaw returns a map with the action type as the key and the
 // stringified raw message body as the value.
-func (c *AmqpConsumer) extractRaw(action string, body []byte) map[string]any {
+func (c *AmqpConsumer) extractRaw(jobEvent *github.WorkflowJobEvent, body []byte) map[string]any {
 	payload := map[string]any{
-		action: string(body),
+		jobEvent.GetAction(): string(body),
 	}
 	return payload
 }

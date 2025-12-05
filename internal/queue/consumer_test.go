@@ -157,6 +157,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "queued",
 					"workflow_job": map[string]any{
@@ -182,6 +183,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "queued",
 					"workflow_job": map[string]any{
@@ -207,6 +209,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "in_progress",
 					"workflow_job": map[string]any{
@@ -231,16 +234,19 @@ func TestConsumer(t *testing.T) {
 		setupDB: func(db *fakeDB) {},
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
-			ch <- amqp.Delivery{Body: mk(map[string]any{
-				"action": "in_progress",
-				"workflow_job": map[string]any{
-					"id":         21,
-					"labels":     []string{},
-					"status":     "in_progress",
-					"created_at": "2025-01-01T00:00:00Z",
-					"started_at": "2025-01-02T00:00:00Z",
-				},
-			})}
+			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
+				Body: mk(map[string]any{
+					"action": "in_progress",
+					"workflow_job": map[string]any{
+						"id":         21,
+						"labels":     []string{},
+						"status":     "in_progress",
+						"created_at": "2025-01-01T00:00:00Z",
+						"started_at": "2025-01-02T00:00:00Z",
+					},
+				}),
+			}
 			close(ch)
 			return ch
 		},
@@ -257,6 +263,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "completed",
 					"workflow_job": map[string]any{
@@ -281,7 +288,10 @@ func TestConsumer(t *testing.T) {
 		setupDB: func(db *fakeDB) {},
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
-			ch <- amqp.Delivery{Body: []byte("{not-json}")}
+			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
+				Body:    []byte("{not-json}"),
+			}
 			close(ch)
 			return ch
 		},
@@ -292,6 +302,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "unknown",
 					"workflow_job": map[string]any{
@@ -329,6 +340,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "queued",
 					"workflow_job": map[string]any{
@@ -352,6 +364,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "in_progress",
 					"workflow_job": map[string]any{
@@ -377,6 +390,7 @@ func TestConsumer(t *testing.T) {
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
 			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "completed",
 					"workflow_job": map[string]any{
@@ -401,17 +415,20 @@ func TestConsumer(t *testing.T) {
 		setupDB: func(db *fakeDB) {},
 		deliveries: func() <-chan amqp.Delivery {
 			ch := make(chan amqp.Delivery, 1)
-			ch <- amqp.Delivery{Body: mk(map[string]any{
-				"action": "completed",
-				"workflow_job": map[string]any{
-					"id":           22,
-					"labels":       []string{},
-					"status":       "completed",
-					"created_at":   "2025-01-01T00:00:00Z",
-					"started_at":   "2025-01-02T00:00:00Z",
-					"completed_at": "2025-01-03T00:00:00Z",
-				},
-			})}
+			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
+				Body: mk(map[string]any{
+					"action": "completed",
+					"workflow_job": map[string]any{
+						"id":           22,
+						"labels":       []string{},
+						"status":       "completed",
+						"created_at":   "2025-01-01T00:00:00Z",
+						"started_at":   "2025-01-02T00:00:00Z",
+						"completed_at": "2025-01-03T00:00:00Z",
+					},
+				}),
+			}
 			close(ch)
 			return ch
 		},
@@ -420,6 +437,51 @@ func TestConsumer(t *testing.T) {
 			assert.NotNil(t, db.jobs["github:22"], "job should be created on completion when missing")
 			assert.NotNil(t, db.jobs["github:22"].CompletedAt, "completed_at not set")
 			assert.Equal(t, "2025-01-03T00:00:00Z", db.jobs["github:22"].CompletedAt.Format(time.RFC3339), "completed_at incorrect")
+		},
+	}, {
+		name:    "discards message when X-GitHub-Event header is missing",
+		setupDB: func(db *fakeDB) {},
+		deliveries: func() <-chan amqp.Delivery {
+			ch := make(chan amqp.Delivery, 1)
+			ch <- amqp.Delivery{
+				Headers: amqp.Table{}, // No X-GitHub-Event header
+				Body: mk(map[string]any{
+					"action": "queued",
+					"workflow_job": map[string]any{
+						"id":         23,
+						"labels":     []string{"linux"},
+						"status":     "queued",
+						"created_at": "2025-01-01T00:00:00Z",
+					},
+				}),
+			}
+			close(ch)
+			return ch
+		},
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			assert.Nil(t, db.jobs["github:23"], "job should not be inserted when header is missing")
+		},
+	}, {
+		name:    "discards non-workflow_job events",
+		setupDB: func(db *fakeDB) {},
+		deliveries: func() <-chan amqp.Delivery {
+			ch := make(chan amqp.Delivery, 1)
+			ch <- amqp.Delivery{
+				Headers: amqp.Table{"X-GitHub-Event": "pull_request"},
+				Body: mk(map[string]any{
+					"action": "opened",
+					"pull_request": map[string]any{
+						"id": 24,
+					},
+				}),
+			}
+			close(ch)
+			return ch
+		},
+		expectErrSub: "context canceled",
+		checkDB: func(t *testing.T, db *fakeDB) {
+			assert.Empty(t, db.jobs, "no jobs should be inserted for non-workflow_job events")
 		},
 	}}
 
