@@ -25,10 +25,12 @@ const valid_signature_header = "sha256=0aca2d7154cddad4f56f246cad61f1485df34b805
 
 type FakeProducer struct {
 	Messages [][]byte
+	Headers  []map[string]interface{}
 }
 
-func (q *FakeProducer) Push(_ context.Context, _ map[string]interface{}, msg []byte) error {
+func (q *FakeProducer) Push(_ context.Context, headers map[string]interface{}, msg []byte) error {
 	q.Messages = append(q.Messages, msg)
+	q.Headers = append(q.Headers, headers)
 	return nil
 }
 
@@ -61,6 +63,8 @@ func TestWebhookForwarded(t *testing.T) {
 	assert.NotNil(t, fakeProducer.Messages, "expected messages in queue")
 	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
 	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
+	assert.Equal(t, 1, len(fakeProducer.Headers), "expected 1 header set")
+	assert.Equal(t, "workflow_job", fakeProducer.Headers[0]["X-GitHub-Event"], "expected X-GitHub-Event header to match")
 	m := mr.Collect(t)
 	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
 	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
@@ -72,6 +76,7 @@ func setupRequest() *http.Request {
 	req := httptest.NewRequest(http.MethodPost, webhookPath, strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(WebhookSignatureHeader, valid_signature_header)
+	req.Header.Set(WebhookEventHeader, "workflow_job")
 
 	return req
 }

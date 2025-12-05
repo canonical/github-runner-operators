@@ -22,9 +22,14 @@ import (
 )
 
 const (
-	WebhookSignatureHeader = "X-Hub-Signature-256"
-	bodyLimit              = 1048576
-	WebhookSignaturePrefix = "sha256="
+	WebhookSignatureHeader                  = "X-Hub-Signature-256"
+	WebhookEventHeader                      = "X-GitHub-Event"
+	WebhookHookIDHeader                     = "X-GitHub-Hook-ID"
+	WebhookDeliveryHeader                   = "X-GitHub-Delivery"
+	WebhookHookInstallationTargetTypeHeader = "X-GitHub-Hook-Installation-Target-Type"
+	WebhookHookInstallationTargetIDHeader   = "X-GitHub-Hook-Installation-Target-ID"
+	bodyLimit                               = 1048576
+	WebhookSignaturePrefix                  = "sha256="
 )
 
 type httpError struct {
@@ -72,11 +77,15 @@ func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, 
 	return body, nil
 }
 
-func (h *Handler) sendWebhook(ctx context.Context, body []byte) error {
+func (h *Handler) sendWebhook(ctx context.Context, githubHeaders map[string]string, body []byte) error {
 	header := make(map[string]string)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.MapCarrier(header))
 	rabbitHeaders := make(map[string]interface{})
 	for k, v := range header {
+		rabbitHeaders[k] = v
+	}
+	// Add the GitHub headers to the AMQP headers
+	for k, v := range githubHeaders {
 		rabbitHeaders[k] = v
 	}
 	err := h.Producer.Push(ctx, rabbitHeaders, body)
@@ -104,8 +113,17 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 		span.End()
 	}
 
+	// Extract GitHub headers from the request
+	githubHeaders := map[string]string{
+		WebhookEventHeader:                      r.Header.Get(WebhookEventHeader),
+		WebhookHookIDHeader:                     r.Header.Get(WebhookHookIDHeader),
+		WebhookDeliveryHeader:                   r.Header.Get(WebhookDeliveryHeader),
+		WebhookHookInstallationTargetTypeHeader: r.Header.Get(WebhookHookInstallationTargetTypeHeader),
+		WebhookHookInstallationTargetIDHeader:   r.Header.Get(WebhookHookInstallationTargetIDHeader),
+	}
+
 	ctx, span = trace.Start(ctx, "send webhook")
-	err = h.sendWebhook(ctx, webhook)
+	err = h.sendWebhook(ctx, githubHeaders, webhook)
 	if err != nil {
 		outboundWebhookErrors.Add(ctx, 1)
 		span.RecordError(err)
