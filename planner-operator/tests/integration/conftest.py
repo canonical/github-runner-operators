@@ -78,7 +78,7 @@ def deploy_postgresql_server_fixture(juju: jubilant.Juju, app: str) -> str:
     """Deploy postgresql charm and integrate it with the app."""
     postgresql_app = "postgresql-k8s"
 
-    juju.deploy(postgresql_app, channel="14/edge", trust=True)
+    juju.deploy(postgresql_app, channel="16/edge", trust=True)
 
     juju.integrate(app, postgresql_app)
     juju.wait(
