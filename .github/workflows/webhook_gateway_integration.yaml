@@ -1,0 +1,89 @@
+name: Webhook Gateway Go App Integration Tests
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      webhook-gateway: ${{ steps.filter.outputs.webhook-gateway }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            webhook-gateway:
+              - 'cmd/webhook-gateway/**'
+              - 'internal/**'
+              - '.github/workflows/webhook_gateway_integration.yaml'
+
+  integration-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.webhook-gateway == 'true'
+    runs-on: [self-hosted-linux-amd64-noble-edge]
+    name: Run Go Integration Tests
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25
+
+      - name: Wait for rabbitmq
+        run: |
+          until curl -fs http://localhost:15672;
+            do echo "waiting for rabbit mq"
+            sleep 2
+          done
+
+      - name: Build and Test
+        env:
+          RABBITMQ_CONNECT_STRING: amqp://guest:guest@localhost:5672/
+          APP_PORT: 8080
+          APP_WEBHOOK_SECRET_VALUE: fake-secret
+        run: |
+          go test -v -cover -tags=integration -race ./cmd/webhook-gateway/...
+
+    services:
+      rabbitmq:
+        image: rabbitmq:4-management
+        ports:
+          - 5672:5672
+          - 15672:15672
+
+  webhook-gateway-integration-status-check:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, integration-test]
+    if: always()
+    steps:
+      - name: Check integration test results
+        run: |
+          # If tests were skipped because no changes, that's success
+          if [ "${{ needs.detect-changes.outputs.webhook-gateway }}" != "true" ]; then
+            echo "No webhook-gateway changes detected, skipping tests is expected"
+            exit 0
+          fi
+
+          # If tests ran, check their results
+          integration_result="${{ needs.integration-test.result }}"
+
+          echo "Integration test result: $integration_result"
+
+          # Fail if test that ran actually failed (not skipped)
+          if [ "$integration_result" = "failure" ]; then
+            echo "Integration test failed"
+            exit 1
+          fi
+
+          echo "Integration test passed or was skipped appropriately"
+          exit 0

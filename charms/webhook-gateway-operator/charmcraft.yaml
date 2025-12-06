@@ -1,0 +1,37 @@
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: github-runner-webhook-gateway
+
+type: charm
+
+base: ubuntu@24.04
+
+platforms:
+  amd64:
+
+summary: Receive and forward GitHub webhooks to a MQ
+
+description: |
+  This charm charms an application provides a WebService that receives GitHub webhooks and forwards
+  them to an AMQP-0.9-1 compatible message broker.
+
+extensions:
+  - go-framework
+
+config:
+  options:
+    webhook-secret:
+      type: secret
+      optional: false
+      description: "The secret used to validate the webhook"
+
+requires:
+   rabbitmq:
+     interface: rabbitmq
+     optional: false
+     limit: 1
+   tracing:
+     interface: tracing
+     optional: true
+     limit: 1

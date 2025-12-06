@@ -1,0 +1,73 @@
+name: Charms Integration Tests
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      charms: ${{ steps.filter.outputs.charms }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            charms:
+              - 'charms/**'
+              - 'internal/**'
+              - '.github/workflows/charms_integration.yaml'
+
+  charm-integration-tests:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.charms == 'true'
+    uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
+    secrets: inherit
+    permissions:
+      packages: write
+
+    with:
+      self-hosted-runner: true
+      self-hosted-runner-label: "edge"
+      juju-channel: 3.6/stable
+      provider: microk8s
+      microk8s-addons: "dns ingress rbac storage registry"
+      channel: 1.34-strict
+      rockcraft-channel: latest/edge
+      charmcraft-channel: latest/edge
+      test-tox-env: charms-integration
+
+  charms-integration-status-check:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, charm-integration-tests]
+    if: always()
+    steps:
+      - name: Check integration test results
+        run: |
+          # If tests were skipped because no changes, that's success
+          if [ "${{ needs.detect-changes.outputs.charms }}" != "true" ]; then
+            echo "No charms changes detected, skipping tests is expected"
+            exit 0
+          fi
+
+          # If tests ran, check their results
+          charm_result="${{ needs.charm-integration-tests.result }}"
+
+          echo "Charm integration test result: $charm_result"
+
+          # Fail if test that ran actually failed (not skipped)
+          if [ "$charm_result" = "failure" ]; then
+            echo "Charm integration test failed"
+            exit 1
+          fi
+
+          echo "Charm integration test passed or was skipped appropriately"
+          exit 0

@@ -1,0 +1,7 @@
+jubilant
+juju
+ops
+pytest
+pytest-asyncio
+pytest-operator
+requests
