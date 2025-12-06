@@ -16,8 +16,8 @@ def charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the built charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
     if len(charm) > 1:
-        webhook_gateway_charm = [file for file in charm if "webhook-gateway" in file]
-        return webhook_gateway_charm[0]
+        planner_charm = [file for file in charm if "planner" in file]
+        return planner_charm[0]
     return charm
 
 
@@ -42,7 +42,7 @@ def juju(keep_models: bool) -> Iterator[jubilant.Juju]:
 
 @pytest.fixture(scope="module", name="app")
 def deploy_app_fixture(juju: jubilant.Juju, charm_file: str, app_image: str) -> str:
-    app_name = "github-runner-webhook-gateway"
+    app_name = "github-runner-planner"
 
     resources = {
         "app-image": app_image,
@@ -53,9 +53,7 @@ def deploy_app_fixture(juju: jubilant.Juju, charm_file: str, app_image: str) -> 
         timeout=6 * 60,
         delay=10,
     )
-    secret_uri = juju.add_secret(name="webhook", content={"value": "fake-secret"})
-    juju.grant_secret(secret_uri, app_name)
-    juju.config(app_name, values={"webhook-secret": secret_uri, "metrics-port": 9464})
+    juju.config(app_name, values={"metrics-port": 9464})
     return app_name
 
 
@@ -73,3 +71,19 @@ def deploy_rabbitmq_server_fixture(juju: jubilant.Juju, app: str) -> str:
         delay=30,
     )
     return rabbitmq_app
+
+
+@pytest.fixture(scope="module", name="postgresql")
+def deploy_postgresql_server_fixture(juju: jubilant.Juju, app: str) -> str:
+    """Deploy postgresql charm and integrate it with the app."""
+    postgresql_app = "postgresql-k8s"
+
+    juju.deploy(postgresql_app, channel="16/edge", trust=True)
+
+    juju.integrate(app, postgresql_app)
+    juju.wait(
+        lambda status: jubilant.all_active(status, app),
+        timeout=(10 * 60),
+        delay=30,
+    )
+    return postgresql_app
