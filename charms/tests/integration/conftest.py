@@ -152,9 +152,16 @@ def integrate_both_rabbitmq_fixture(
 
 
 @pytest.fixture(scope="module", name="postgresql")
-def deploy_postgresql_server_fixture(juju: jubilant.Juju, planner_app: str) -> str:
-    """Deploy postgresql charm and integrate it with the planner app."""
+def deploy_postgresql_server_fixture(
+    juju: jubilant.Juju, planner_with_rabbitmq: None
+) -> str:
+    """Deploy postgresql charm and integrate it with the planner app.
+
+    Planner requires both rabbitmq and postgresql, so this fixture depends on
+    planner_with_rabbitmq being set up first.
+    """
     postgresql_app = "postgresql-k8s"
+    planner_app = "github-runner-planner"
 
     juju.deploy(postgresql_app, channel="16/edge", trust=True)
 
@@ -165,3 +172,17 @@ def deploy_postgresql_server_fixture(juju: jubilant.Juju, planner_app: str) -> s
         delay=30,
     )
     return postgresql_app
+
+
+@pytest.fixture(scope="module", name="planner_and_webhook_gateway_ready")
+def planner_and_webhook_gateway_ready_fixture(
+    postgresql: str,
+    webhook_gateway_with_rabbitmq: None,
+) -> None:
+    """Fixture that ensures both planner and webhook gateway are fully integrated and ready.
+
+    Depends on:
+    - postgresql: which ensures planner has both PostgreSQL and RabbitMQ integrated
+    - webhook_gateway_with_rabbitmq: which ensures webhook gateway has RabbitMQ integrated
+    """
+    pass

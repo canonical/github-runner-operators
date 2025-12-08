@@ -40,9 +40,10 @@ def test_planner_postgresql_integration(
 def test_planner_prometheus_metrics(
     juju: jubilant.Juju,
     planner_app: str,
+    postgresql: str,
 ):
     """
-    arrange: The planner app is deployed.
+    arrange: The planner app is deployed with required integrations.
     act: Get Prometheus metrics from the charm.
     assert: Assert that the server responds with a status code of 200
     """

@@ -12,7 +12,7 @@ import requests
 APP_PORT = 8080
 
 
-@pytest.mark.usefixtures("postgresql", "both_apps_with_rabbitmq")
+@pytest.mark.usefixtures("planner_and_webhook_gateway_ready")
 def test_webhook_gateway_and_planner_integration(
     juju: jubilant.Juju,
     planner_app: str,
