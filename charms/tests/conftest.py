@@ -27,9 +27,3 @@ def pytest_addoption(parser: Parser) -> None:
         action="store",
         help="Webhook gateway app image to be deployed",
     )
-    parser.addoption(
-        "--keep-models",
-        action="append",
-        default=False,
-        help="Keep the Juju models after tests complete",
-    )

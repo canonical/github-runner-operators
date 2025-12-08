@@ -52,8 +52,7 @@ def webhook_gateway_app_image_fixture(pytestconfig: pytest.Config) -> str | None
 @pytest.fixture(name="keep_models", scope="module")
 def keep_models_fixture(pytestconfig: pytest.Config) -> bool:
     """Return whether to keep models after deploying."""
-    option = pytestconfig.getoption("--keep-models")
-    return option[0]
+    return pytestconfig.getoption("--keep-models")
 
 
 @pytest.fixture(scope="module")
