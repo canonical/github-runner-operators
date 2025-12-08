@@ -36,6 +36,7 @@ def test_webhook_gateway_rabbitmq_integration(
     assert response.status_code == requests.status_codes.codes.OK
 
 
+@pytest.mark.usefixtures("webhook_gateway_with_rabbitmq")
 def test_webhook_gateway_prometheus_metrics(
     juju: jubilant.Juju,
     webhook_gateway_app: str,

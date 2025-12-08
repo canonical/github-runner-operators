@@ -23,5 +23,13 @@ def pytest_addoption(parser: Parser) -> None:
         PLANNER_IMAGE_PARAM, action="store", help="Planner app image to be deployed"
     )
     parser.addoption(
-        WEBHOOK_GATEWAY_IMAGE_PARAM, action="store", help="Webhook gateway app image to be deployed"
+        WEBHOOK_GATEWAY_IMAGE_PARAM,
+        action="store",
+        help="Webhook gateway app image to be deployed",
+    )
+    parser.addoption(
+        "--keep-models",
+        action="store_true",
+        default=False,
+        help="Keep the Juju models after tests complete",
     )

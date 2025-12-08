@@ -37,6 +37,7 @@ def test_planner_postgresql_integration(
     assert response.status_code == requests.status_codes.codes.OK
 
 
+@pytest.mark.usefixtures("postgresql")
 def test_planner_prometheus_metrics(
     juju: jubilant.Juju,
     planner_app: str,

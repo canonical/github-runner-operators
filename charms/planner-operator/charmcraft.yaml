@@ -31,6 +31,6 @@ requires:
     optional: true
     limit: 1
   postgresql:
-    interface: postgresql-client
+    interface: postgresql_client
     optional: false
     limit: 1
