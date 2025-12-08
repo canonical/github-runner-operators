@@ -8,7 +8,7 @@ APP_PORT = 8080
 METRICS_PORT = 9464
 
 
-@pytest.mark.usefixtures("postgresql")
+@pytest.mark.usefixtures("planner_with_integrations")
 def test_planner_postgresql_integration(
     juju: jubilant.Juju,
     planner_app: str,
@@ -37,11 +37,10 @@ def test_planner_postgresql_integration(
     assert response.status_code == requests.status_codes.codes.OK
 
 
-@pytest.mark.usefixtures("postgresql")
+@pytest.mark.usefixtures("planner_with_integrations")
 def test_planner_prometheus_metrics(
     juju: jubilant.Juju,
     planner_app: str,
-    postgresql: str,
 ):
     """
     arrange: The planner app is deployed with required integrations.

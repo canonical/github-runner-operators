@@ -114,19 +114,6 @@ def deploy_rabbitmq_server_fixture(juju: jubilant.Juju) -> str:
     return rabbitmq_app
 
 
-@pytest.fixture(scope="module", name="planner_with_rabbitmq")
-def integrate_planner_rabbitmq_fixture(
-    juju: jubilant.Juju, planner_app: str, rabbitmq: str
-) -> None:
-    """Integrate planner with rabbitmq."""
-    juju.integrate(planner_app, rabbitmq)
-    juju.wait(
-        lambda status: jubilant.all_active(status, planner_app),
-        timeout=(10 * 60),
-        delay=30,
-    )
-
-
 @pytest.fixture(scope="module", name="webhook_gateway_with_rabbitmq")
 def integrate_webhook_gateway_rabbitmq_fixture(
     juju: jubilant.Juju, webhook_gateway_app: str, rabbitmq: str
@@ -140,43 +127,26 @@ def integrate_webhook_gateway_rabbitmq_fixture(
     )
 
 
-@pytest.fixture(scope="module", name="both_apps_with_rabbitmq")
-def integrate_both_rabbitmq_fixture(
-    juju: jubilant.Juju,
-    planner_with_rabbitmq: None,
-    webhook_gateway_with_rabbitmq: None,
+@pytest.fixture(scope="module", name="planner_with_integrations")
+def integrate_planner_rabbitmq_postgresql_fixture(
+    juju: jubilant.Juju, planner_app: str, rabbitmq: str
 ) -> None:
-    """Integrate both planner and webhook gateway with rabbitmq."""
-    # Dependencies handle the integrations
-    pass
-
-
-@pytest.fixture(scope="module", name="postgresql")
-def deploy_postgresql_server_fixture(
-    juju: jubilant.Juju, planner_with_rabbitmq: None
-) -> str:
-    """Deploy postgresql charm and integrate it with the planner app.
-
-    Planner requires both rabbitmq and postgresql, so this fixture depends on
-    planner_with_rabbitmq being set up first.
-    """
+    """Integrate planner with rabbitmq and postgresql."""
     postgresql_app = "postgresql-k8s"
-    planner_app = "github-runner-planner"
-
     juju.deploy(postgresql_app, channel="16/edge", trust=True)
 
     juju.integrate(planner_app, postgresql_app)
+    juju.integrate(planner_app, rabbitmq)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
         timeout=(10 * 60),
         delay=30,
     )
-    return postgresql_app
 
 
 @pytest.fixture(scope="module", name="planner_and_webhook_gateway_ready")
 def planner_and_webhook_gateway_ready_fixture(
-    postgresql: str,
+    planner_with_integrations: None,
     webhook_gateway_with_rabbitmq: None,
 ) -> None:
     """Fixture that ensures both planner and webhook gateway are fully integrated and ready.

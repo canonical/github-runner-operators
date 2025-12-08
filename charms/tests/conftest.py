@@ -27,9 +27,3 @@ def pytest_addoption(parser: Parser) -> None:
         action="store",
         help="Webhook gateway app image to be deployed",
     )
-    parser.addoption(
-        "--keep-models",
-        default=False,
-        action="store_true",
-        help="Keep models after tests complete",
-    )
