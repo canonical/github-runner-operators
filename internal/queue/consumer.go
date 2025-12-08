@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
-	"github.com/google/go-github/v67/github"
+	"github.com/google/go-github/v80/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
