@@ -12,17 +12,20 @@ import requests
 APP_PORT = 8080
 
 
-@pytest.mark.usefixtures("planner_and_webhook_gateway_ready")
 def test_webhook_gateway_and_planner_integration(
     juju: jubilant.Juju,
-    planner_app: str,
-    webhook_gateway_app: str,
+    planner_with_integrations: str,
+    webhook_gateway_with_rabbitmq: str,
 ):
     """
     arrange: Both planner and webhook gateway deployed with postgresql and rabbitmq.
     act: Send a webhook to webhook gateway and check planner pressure.
     assert: Verify that the webhook is consumed and planner pressure updates.
     """
+    # Use the integrated app names from fixtures
+    planner_app = planner_with_integrations
+    webhook_gateway_app = webhook_gateway_with_rabbitmq
+
     # First, create a flavor in planner
     status = juju.status()
     planner_ip = status.apps[planner_app].units[planner_app + "/0"].address

@@ -117,42 +117,46 @@ def deploy_rabbitmq_server_fixture(juju: jubilant.Juju) -> str:
 @pytest.fixture(scope="module", name="webhook_gateway_with_rabbitmq")
 def integrate_webhook_gateway_rabbitmq_fixture(
     juju: jubilant.Juju, webhook_gateway_app: str, rabbitmq: str
-) -> None:
-    """Integrate webhook gateway with rabbitmq."""
+) -> str:
+    """Integrate webhook gateway with rabbitmq.
+
+    Returns the webhook gateway app name after ensuring integration is active.
+    """
     juju.integrate(webhook_gateway_app, rabbitmq)
     juju.wait(
         lambda status: jubilant.all_active(status, webhook_gateway_app),
         timeout=(10 * 60),
         delay=30,
     )
+    return webhook_gateway_app
+
+
+@pytest.fixture(scope="module", name="postgresql")
+def deploy_postgresql_server_fixture(juju: jubilant.Juju) -> str:
+    """Deploy postgresql charm (without integrations)."""
+    postgresql_app = "postgresql-k8s"
+    juju.deploy(postgresql_app, channel="16/edge", trust=True)
+    juju.wait(
+        lambda status: jubilant.all_active(status, postgresql_app),
+        timeout=(10 * 60),
+        delay=30,
+    )
+    return postgresql_app
 
 
 @pytest.fixture(scope="module", name="planner_with_integrations")
 def integrate_planner_rabbitmq_postgresql_fixture(
-    juju: jubilant.Juju, planner_app: str, rabbitmq: str
-) -> None:
-    """Integrate planner with rabbitmq and postgresql."""
-    postgresql_app = "postgresql-k8s"
-    juju.deploy(postgresql_app, channel="16/edge", trust=True)
+    juju: jubilant.Juju, planner_app: str, rabbitmq: str, postgresql: str
+) -> str:
+    """Integrate planner with rabbitmq and postgresql.
 
-    juju.integrate(planner_app, postgresql_app)
+    Returns the planner app name after ensuring all integrations are active.
+    """
+    juju.integrate(planner_app, postgresql)
     juju.integrate(planner_app, rabbitmq)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
         timeout=(10 * 60),
         delay=30,
     )
-
-
-@pytest.fixture(scope="module", name="planner_and_webhook_gateway_ready")
-def planner_and_webhook_gateway_ready_fixture(
-    planner_with_integrations: None,
-    webhook_gateway_with_rabbitmq: None,
-) -> None:
-    """Fixture that ensures both planner and webhook gateway are fully integrated and ready.
-
-    Depends on:
-    - postgresql: which ensures planner has both PostgreSQL and RabbitMQ integrated
-    - webhook_gateway_with_rabbitmq: which ensures webhook gateway has RabbitMQ integrated
-    """
-    pass
+    return planner_app
