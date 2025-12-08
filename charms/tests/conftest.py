@@ -29,7 +29,7 @@ def pytest_addoption(parser: Parser) -> None:
     )
     parser.addoption(
         "--keep-models",
-        action="store_true",
+        action="append",
         default=False,
         help="Keep the Juju models after tests complete",
     )
