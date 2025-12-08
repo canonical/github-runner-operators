@@ -24,11 +24,11 @@ extensions:
 requires:
   rabbitmq:
     interface: rabbitmq
-    optional: true
+    optional: false
     limit: 1
   tracing:
     interface: tracing
-    optional: true
+    optional: false
     limit: 1
   postgresql:
     interface: postgresql_client

@@ -131,6 +131,22 @@ def integrate_webhook_gateway_rabbitmq_fixture(
     return webhook_gateway_app
 
 
+@pytest.fixture(scope="module", name="planner_with_rabbitmq")
+def integrate_planner_rabbitmq_fixture(
+    juju: jubilant.Juju, planner_app: str, rabbitmq: str
+) -> str:
+    """Integrate planner with rabbitmq.
+    Returns the webhook gateway app name after ensuring integration is active.
+    """
+    juju.integrate(planner_app, rabbitmq)
+    juju.wait(
+        lambda status: jubilant.all_active(status, planner_app),
+        timeout=(10 * 60),
+        delay=30,
+    )
+    return planner_app
+
+
 @pytest.fixture(scope="module", name="postgresql")
 def deploy_postgresql_server_fixture(juju: jubilant.Juju) -> str:
     """Deploy postgresql charm (without integrations)."""
@@ -154,8 +170,20 @@ def integrate_planner_rabbitmq_postgresql_fixture(
     """
     juju.integrate(planner_app, rabbitmq)
     juju.integrate(planner_app, postgresql)
+
+    def wait_for_relations_ready(status):
+        if planner_app not in status.apps:
+            return False
+        planner_status = status.apps[planner_app]
+
+        has_rabbitmq = "rabbitmq" in planner_status.relations
+        has_postgresql = "postgresql" in planner_status.relations
+        is_active = planner_status.app_status.current == "active"
+
+        return has_rabbitmq and has_postgresql and is_active
+
     juju.wait(
-        lambda status: jubilant.all_active(status, planner_app),
+        wait_for_relations_ready,
         timeout=(10 * 60),
         delay=30,
     )
