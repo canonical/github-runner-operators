@@ -32,5 +32,5 @@ requires:
     limit: 1
   postgresql:
     interface: postgresql_client
-    optional: true
+    optional: false
     limit: 1
