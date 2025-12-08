@@ -156,7 +156,7 @@ def integrate_planner_rabbitmq_postgresql_fixture(
     juju.integrate(planner_app, postgresql)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
-        timeout=(20 * 60),
+        timeout=(10 * 60),
         delay=30,
     )
     return planner_app

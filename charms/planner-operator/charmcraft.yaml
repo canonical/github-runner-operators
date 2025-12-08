@@ -24,7 +24,7 @@ extensions:
 requires:
   rabbitmq:
     interface: rabbitmq
-    optional: false
+    optional: true
     limit: 1
   tracing:
     interface: tracing
@@ -32,5 +32,5 @@ requires:
     limit: 1
   postgresql:
     interface: postgresql_client
-    optional: false
+    optional: true
     limit: 1
