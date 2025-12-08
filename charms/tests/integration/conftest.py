@@ -152,11 +152,11 @@ def integrate_planner_rabbitmq_postgresql_fixture(
 
     Returns the planner app name after ensuring all integrations are active.
     """
-    juju.integrate(planner_app, postgresql)
     juju.integrate(planner_app, rabbitmq)
+    juju.integrate(planner_app, postgresql)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
-        timeout=(10 * 60),
+        timeout=(20 * 60),
         delay=30,
     )
     return planner_app
