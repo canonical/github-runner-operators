@@ -163,35 +163,20 @@ def integrate_planner_rabbitmq_postgresql_fixture(
 
     def wait_for_relations_ready(status):
         # Check that rabbitmq and postgresql have finished their relation hooks
-        if (
-            rabbitmq not in status.apps
-            or postgresql not in status.apps
-            or planner_app not in status.apps
-        ):
-            return False
-
         rabbitmq_status = status.apps[rabbitmq]
         postgresql_status = status.apps[postgresql]
         planner_status = status.apps[planner_app]
 
         for unit in planner_status.units.values():
-            if (
-                unit.juju_status.current == "idle"
-                and "rabbitmq-relation-created hook" in (unit.juju_status.message or "")
-            ):
+            if "rabbitmq-relation-created hook" in (unit.juju_status.message or ""):
                 hooks_completed["planner_rabbitmq"] = True
 
         for unit in rabbitmq_status.units.values():
-            if unit.juju_status.current == "idle" and "amqp-relation-created hook" in (
-                unit.juju_status.message or ""
-            ):
+            if "amqp-relation-created hook" in (unit.juju_status.message or ""):
                 hooks_completed["rabbitmq"] = True
 
         for unit in postgresql_status.units.values():
-            if (
-                unit.juju_status.current == "idle"
-                and "database-relation-created hook" in (unit.juju_status.message or "")
-            ):
+            if "database-relation-created hook" in (unit.juju_status.message or ""):
                 hooks_completed["postgresql"] = True
 
         return all(hooks_completed.values())
