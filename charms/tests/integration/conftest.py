@@ -155,34 +155,8 @@ def integrate_planner_rabbitmq_postgresql_fixture(
     juju.integrate(planner_app, rabbitmq)
     juju.integrate(planner_app, postgresql)
 
-    hooks_completed = {
-        "planner_rabbitmq": False,
-        "rabbitmq": False,
-        "postgresql": False,
-    }
-
-    def wait_for_relations_ready(status):
-        # Check that rabbitmq and postgresql have finished their relation hooks
-        rabbitmq_status = status.apps[rabbitmq]
-        postgresql_status = status.apps[postgresql]
-        planner_status = status.apps[planner_app]
-
-        for unit in planner_status.units.values():
-            if "rabbitmq-relation-created hook" in (unit.juju_status.message or ""):
-                hooks_completed["planner_rabbitmq"] = True
-
-        for unit in rabbitmq_status.units.values():
-            if "amqp-relation-created hook" in (unit.juju_status.message or ""):
-                hooks_completed["rabbitmq"] = True
-
-        for unit in postgresql_status.units.values():
-            if "database-relation-created hook" in (unit.juju_status.message or ""):
-                hooks_completed["postgresql"] = True
-
-        return all(hooks_completed.values())
-
     juju.wait(
-        wait_for_relations_ready,
+        lambda status: jubilant.all_active(status, planner_app),
         timeout=(10 * 60),
         delay=30,
     )

@@ -28,7 +28,7 @@ requires:
     limit: 1
   tracing:
     interface: tracing
-    optional: false
+    optional: true
     limit: 1
   postgresql:
     interface: postgresql_client
