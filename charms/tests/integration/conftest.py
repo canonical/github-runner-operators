@@ -155,20 +155,50 @@ def integrate_planner_rabbitmq_postgresql_fixture(
     juju.integrate(planner_app, rabbitmq)
     juju.integrate(planner_app, postgresql)
 
+    hooks_completed = {
+        "planner_rabbitmq": False,
+        "rabbitmq": False,
+        "postgresql": False,
+    }
+
     def wait_for_relations_ready(status):
-        if planner_app not in status.apps:
+        # Check that rabbitmq and postgresql have finished their relation hooks
+        if (
+            rabbitmq not in status.apps
+            or postgresql not in status.apps
+            or planner_app not in status.apps
+        ):
             return False
+
+        rabbitmq_status = status.apps[rabbitmq]
+        postgresql_status = status.apps[postgresql]
         planner_status = status.apps[planner_app]
 
-        has_rabbitmq = "rabbitmq" in planner_status.relations
-        has_postgresql = "postgresql" in planner_status.relations
-        is_active = planner_status.app_status.current == "active"
+        for unit in planner_status.units.values():
+            if (
+                unit.juju_status.current == "idle"
+                and "rabbitmq-relation-created hook" in (unit.juju_status.message or "")
+            ):
+                hooks_completed["planner_rabbitmq"] = True
 
-        return has_rabbitmq and has_postgresql and is_active
+        for unit in rabbitmq_status.units.values():
+            if unit.juju_status.current == "idle" and "amqp-relation-created hook" in (
+                unit.juju_status.message or ""
+            ):
+                hooks_completed["rabbitmq"] = True
+
+        for unit in postgresql_status.units.values():
+            if (
+                unit.juju_status.current == "idle"
+                and "database-relation-created hook" in (unit.juju_status.message or "")
+            ):
+                hooks_completed["postgresql"] = True
+
+        return all(hooks_completed.values())
 
     juju.wait(
         wait_for_relations_ready,
-        timeout=(20 * 60),
+        timeout=(10 * 60),
         delay=30,
     )
     return planner_app
