@@ -135,7 +135,7 @@ def integrate_webhook_gateway_rabbitmq_fixture(
 def deploy_postgresql_server_fixture(juju: jubilant.Juju) -> str:
     """Deploy postgresql charm (without integrations)."""
     postgresql_app = "postgresql-k8s"
-    juju.deploy(postgresql_app, channel="16/edge", trust=True)
+    juju.deploy(postgresql_app, channel="14/stable", trust=True)
     juju.wait(
         lambda status: jubilant.all_active(status, postgresql_app),
         timeout=(10 * 60),
