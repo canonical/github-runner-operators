@@ -1,10 +1,6 @@
 <!--
-    Remember to update this file for your charm!!
-    If applicable, use this placeholder to provide information on how to
-    upgrade the charm. Some questions to answer:
-    * Should we suggest that the user back up the charm or its database
-      before upgrading?
-    * Does the user need to reset any configurations?
+Copyright 2025 Canonical Ltd.
+See LICENSE file for licensing details.
 -->
 
 # How to upgrade
@@ -13,7 +9,11 @@ To upgrade the planner charm, use the [`juju refresh`](https://documentation.ubu
 
 ## Before you begin
 
-Before performing an upgrade, ensure that your Juju model is in a healthy state:
+Before performing an upgrade, ensure that:
+
+- you have followed this [instruction](https://canonical-charmed-postgresql-k8s.readthedocs-hosted.com/14/how-to/back-up-and-restore/create-a-backup/) to backup your database.
+
+- your Juju model is in a healthy state:
 
 ```bash
 juju status
