@@ -40,7 +40,7 @@ resource "juju_application" "rabbitmq" {
 
   charm {
     name    = "rabbitmq-k8s"
-    channel = "3.12/stable"
+    channel = "3.12/edge"
   }
 
   trust       = true
