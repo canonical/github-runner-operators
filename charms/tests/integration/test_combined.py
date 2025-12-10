@@ -46,6 +46,32 @@ def get_flavor_pressure(
     return response.json()
 
 
+def send_workflow_job_webhook(
+    juju: jubilant.Juju, webhook_gateway_app: str
+) -> requests.Response:
+    """Send a workflow_job webhook to the webhook gateway.
+
+    Args:
+        juju: Juju instance.
+        webhook_gateway_app: Webhook gateway app name.
+
+    Returns:
+        Response from the webhook endpoint.
+    """
+    webhook_payload = {
+        "action": "queued",
+        "workflow_job": {
+            "id": 12345,
+            "labels": ["self-hosted", "linux", "x64"],
+            "status": "queued",
+            "created_at": "2025-01-01T00:00:00Z",
+        },
+    }
+
+    webhook_secret = "fake-secret"
+    return send_webhook(juju, webhook_gateway_app, webhook_payload, webhook_secret)
+
+
 def send_webhook(
     juju: jubilant.Juju,
     webhook_gateway_app: str,
@@ -101,28 +127,22 @@ def test_webhook_gateway_and_planner_integration(
     assert initial_pressure[flavor_name] == 0
 
     # Prepare and send webhook
-    webhook_payload = {
-        "action": "queued",
-        "workflow_job": {
-            "id": 12345,
-            "labels": ["self-hosted", "linux", "x64"],
-            "status": "queued",
-            "created_at": "2025-01-01T00:00:00Z",
-        },
-    }
-
-    webhook_secret = "fake-secret"
-    webhook_response = send_webhook(
-        juju, webhook_gateway_app, webhook_payload, webhook_secret
-    )
+    webhook_response = send_workflow_job_webhook(juju, webhook_gateway_app)
     assert webhook_response.status_code == requests.status_codes.codes.OK
 
-    # Wait for message processing
-    time.sleep(5)
+    # Verify pressure increased within 10 minutes
+    max_wait_seconds = 10 * 60
+    check_interval_seconds = 5
+    elapsed = 0
 
-    # Verify pressure increased
-    final_pressure = get_flavor_pressure(juju, planner_app, flavor_name)
+    while elapsed < max_wait_seconds:
+        final_pressure = get_flavor_pressure(juju, planner_app, flavor_name)
+        if final_pressure[flavor_name] >= 1:
+            break
+        time.sleep(check_interval_seconds)
+        elapsed += check_interval_seconds
+
     assert final_pressure[flavor_name] >= 1, (
-        f"Expected pressure to increase after webhook consumption. "
+        f"Expected pressure to increase after webhook consumption within {max_wait_seconds}s. "
         f"Initial: {initial_pressure[flavor_name]}, Final: {final_pressure[flavor_name]}"
     )

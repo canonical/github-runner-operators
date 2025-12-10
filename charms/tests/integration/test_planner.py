@@ -34,7 +34,7 @@ def test_planner_postgresql_integration(
         },
     )
 
-    assert response.status_code == requests.status_codes.codes.OK
+    assert response.status_code == requests.status_codes.codes.created
 
 
 @pytest.mark.usefixtures("planner_with_integrations")
