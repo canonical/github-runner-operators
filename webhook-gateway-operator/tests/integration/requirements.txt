@@ -1,3 +1,0 @@
-jubilant==1.4
-juju == 3.6.1.2
-requests
