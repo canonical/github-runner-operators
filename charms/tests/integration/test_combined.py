@@ -46,23 +46,6 @@ def get_flavor_pressure(
     return response.json()
 
 
-def get_webhook_secret(juju: jubilant.Juju) -> str:
-    """Retrieve the webhook secret from Juju secrets."""
-    secrets = juju.list_secrets()
-    webhook_secret_id = None
-
-    for secret in secrets:
-        if secret.get("label") == "webhook":
-            webhook_secret_id = secret["id"]
-            break
-
-    if webhook_secret_id:
-        secret_content = juju.show_secret(webhook_secret_id)
-        return secret_content.get("value", "fake-secret")
-
-    return "fake-secret"
-
-
 def send_webhook(
     juju: jubilant.Juju,
     webhook_gateway_app: str,
@@ -128,7 +111,7 @@ def test_webhook_gateway_and_planner_integration(
         },
     }
 
-    webhook_secret = get_webhook_secret(juju)
+    webhook_secret = "fake-secret"
     webhook_response = send_webhook(
         juju, webhook_gateway_app, webhook_payload, webhook_secret
     )

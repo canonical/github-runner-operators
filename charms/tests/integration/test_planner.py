@@ -22,7 +22,7 @@ def test_planner_postgresql_integration(
     status = juju.status()
     unit_ip = status.apps[planner_app].units[planner_app + "/0"].address
     response = requests.post(
-        f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/",
+        f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/test-flavor",
         json={
             "platform": "github",
             "labels": ["self-hosted", "amd64"],
