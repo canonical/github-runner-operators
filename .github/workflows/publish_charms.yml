@@ -62,9 +62,16 @@ jobs:
         working-directory: charms/${{ matrix.charm }}-operator/
         shell: python
         run: |
+          import os
+          import subprocess
+          
           import yaml
           
-          charmcraft_yaml = yaml.safe_load(open("charmcraft.yaml"))
+          expanded_charmcraft_yaml = subprocess.check_output(
+            ["charmcraft", "expand-extensions"], 
+            env={**os.environ, "CHARMCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS": "true"}
+          )
+          charmcraft_yaml = yaml.safe_load(expanded_charmcraft_yaml)
           resources = charmcraft_yaml["resources"]
           resources[list(resources)[0]]["upstream-source"] = "localhost:5000/rock:latest"
           yaml.dump(charmcraft_yaml, open("charmcraft.yaml", "w"), sort_keys=False)
