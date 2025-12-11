@@ -1,4 +1,4 @@
-name: Planner Integration Tests
+name: Planner Go App Integration Tests
 on:
   pull_request:
   workflow_call:
@@ -24,12 +24,13 @@ jobs:
             planner:
               - 'cmd/planner/**'
               - 'internal/planner/**'
-              - '.github/workflows/planner_tests.yaml'
+              - '.github/workflows/planner_integration.yaml'
+
   integration-test:
     needs: detect-changes
     if: needs.detect-changes.outputs.planner == 'true'
     runs-on: [self-hosted-linux-amd64-noble-edge]
-    name: Run Integration Tests
+    name: Run Go Integration Tests
     steps:
       - uses: actions/checkout@v6
 
@@ -81,13 +82,14 @@ jobs:
 
           # If tests ran, check their results
           integration_result="${{ needs.integration-test.result }}"
+
           echo "Integration test result: $integration_result"
 
-          # Fail if any test that ran actually failed (not skipped)
+          # Fail if test that ran actually failed (not skipped)
           if [ "$integration_result" = "failure" ]; then
-            echo "One or more integration tests failed"
+            echo "Integration test failed"
             exit 1
           fi
 
-          echo "All integration tests passed or were skipped appropriately"
+          echo "Integration test passed or was skipped appropriately"
           exit 0
