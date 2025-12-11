@@ -11,9 +11,9 @@ To upgrade the planner charm, use the [`juju refresh`](https://documentation.ubu
 
 Before performing an upgrade, ensure that:
 
-- you have followed this [instruction](https://canonical-charmed-postgresql-k8s.readthedocs-hosted.com/14/how-to/back-up-and-restore/create-a-backup/) to backup your database.
+- You have followed the [PostgreSQL charm documentation](https://canonical-charmed-postgresql-k8s.readthedocs-hosted.com/14/how-to/back-up-and-restore/create-a-backup/) to back up your database.
 
-- your Juju model is in a healthy state:
+- Your Juju model is in a healthy state:
 
 ```bash
 juju status
@@ -23,7 +23,7 @@ Confirm that all units are active and idle.
 
 ## Refresh to the latest revision
 
-To upgrade planner to the latest revision from Charmhub:
+Upgrade the planner charm to the latest revision from Charmhub:
 
 ```bash
 juju refresh github-runner-planner

@@ -19,7 +19,7 @@ Confirm that all units are active and idle.
 
 ## Refresh to the latest revision
 
-To upgrade webhook gateway to the latest revision from Charmhub:
+Upgrade the webhook gateway charm to the latest revision from Charmhub:
 
 ```bash
 juju refresh github-runner-webhook-gateway
