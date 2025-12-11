@@ -78,7 +78,7 @@ The code structure is as follows
 
 - `internal/`: Internal Go libraries for the applications
 - `cmd/`: Entry points for Go applications (planner, webhook-gateway)
-- `webhook-gateway-operator/`: Charm related code for webhook-gateway
+- `charms/`: Entry point for charms (planner, webhook-gateway)
 
 ### Style
 
@@ -102,9 +102,9 @@ go test -race -v ./...
 Currently, the internal database package is only covered by integration tests. You can run the database integration tests using:
 
 ```shell
-DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" go test -cover -tags=integration -v ./internal/database 
+POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" go test -cover -tags=integration -v ./internal/database 
 ```
-It assumes you have access to a Postgres server running reachable at $DB_CONNECT_STRING.
+It assumes you have access to a Postgres server running reachable at $POSTGRESQL_DB_CONNECT_STRING.
 You can use `docker` to run a Postgres server locally:
 ```shell
 docker run -d --rm --name postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:18.1
@@ -140,8 +140,7 @@ Unit tests should test the logic in isolation using mocks/fakes for external dep
 Integration tests should test the integration of various components together.
 There should be at least an integration test located in the main package of the application they are testing (e.g. in `cmd/webhook-gateway/main_test.go` for the webhook gateway application).
 
-In addition to application integration tests, we also have charm integration tests located in the respective charm directories
-(e.g. in `webhook-gateway-operator/tests/integration` for the webhook gateway charm). These tests should test the charm 
+In addition to application integration tests, we also have charm integration tests located in the `charms/tests/integration` directory. These tests should test the charm 
 deployment and its integration with other charms. These tests are usually slower than application integration tests, and
 should not cover application logic tests; those should be covered in the application integration test.
 Aim to focus the charm integration tests only on operational aspects. E.g.
@@ -168,12 +167,12 @@ should be avoided and discouraged during code reviews.
 ### Charm development
 
 The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/).
-In order to build the webhook-gateway rock, use the
-`build-webhook-gateway-rock.sh` script.
+In order to build the `charm-name` rock, use the
+`build-charm-name-rock.sh` script.
 
-The `github-runner-webhook-gateway` charm code is in the `webhook-gateway-operator` directory.
+The respective charm code is in the `charms/charm-name` directory.
 
-Integration tests for the charm are in the `webhook-gateway-operator/tests/integration` directory.
+Integration tests for the charm are in the `charms/tests/integration` directory.
 
 Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)
 for a step-by-step guide to develop a Kubernetes charm using Go.
