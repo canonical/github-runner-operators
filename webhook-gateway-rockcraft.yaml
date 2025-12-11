@@ -1,4 +1,4 @@
-name: webhook-gateway
+rname: webhook-gateway
 base: bare
 build-base: ubuntu@24.04
 version: '0.1'
