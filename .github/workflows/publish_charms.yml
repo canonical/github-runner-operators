@@ -55,7 +55,6 @@ jobs:
       - id: charm-name
         working-directory: charms/${{ matrix.charm }}-operator/
         run: |
-          cd charms/${{ matrix.charm }}-operator/
           echo charm-name=`yq -r .name charmcraft.yaml` >> $GITHUB_OUTPUT
       - run: |
           sudo apt update && sudo apt install python3-yaml -y
