@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+env:
+  CHARMCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
+  ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
+
 jobs:
   publish-charm:
     strategy:
