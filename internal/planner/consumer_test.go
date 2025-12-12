@@ -5,7 +5,7 @@
  * Unit tests for the consumer.
  */
 
-package queue
+package planner
 
 import (
 	"context"
@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	"github.com/canonical/github-runner-operators/internal/queue"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
@@ -95,7 +96,7 @@ type fakeConn struct {
 	channelCalled int32
 }
 
-func (c *fakeConn) Channel() (amqpChannel, error) {
+func (c *fakeConn) Channel() (queue.amqpChannel, error) {
 	atomic.AddInt32(&c.channelCalled, 1)
 	if c.channelErr != nil {
 		return nil, c.channelErr
@@ -113,7 +114,7 @@ type fakeChan struct {
 	deliveries      <-chan amqp.Delivery
 }
 
-func (ch *fakeChan) PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (confirmation, error) {
+func (ch *fakeChan) PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (queue.confirmation, error) {
 	return nil, errors.New("not implemented in fake")
 }
 
@@ -495,10 +496,10 @@ func TestConsumer(t *testing.T) {
 			}
 			fconn := &fakeConn{channel: fch}
 
-			consumer := &AmqpConsumer{
-				client: &Client{
+			consumer := &queue.AmqpConsumer{
+				client: &queue.Client{
 					uri:         "amqp://x",
-					connectFunc: func(uri string) (amqpConnection, error) { return fconn, nil }},
+					connectFunc: func(uri string) (queue.amqpConnection, error) { return fconn, nil }},
 				queueName: "queue-x",
 				db:        db,
 				logger:    slog.Default(),

@@ -19,7 +19,6 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/planner"
-	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -73,7 +72,7 @@ func main() {
 		log.Fatalln("failed to connect to db:", err)
 	}
 
-	consumer := queue.NewAmqpConsumer(rabbitMQUri, queueName, db, nil)
+	consumer := planner.NewJobConsumer(rabbitMQUri, queueName, db)
 	consumerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {

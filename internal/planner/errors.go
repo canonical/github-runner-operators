@@ -6,7 +6,7 @@
  *
  */
 
-package queue
+package planner
 
 import "errors"
 

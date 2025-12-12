@@ -9,7 +9,6 @@ package planner
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 
 	"github.com/canonical/github-runner-operators/internal/database"
@@ -30,7 +29,8 @@ func must[T any](obj T, err error) T {
 }
 
 var (
-	pkg = "github.com/canonical/github-runner-operators/internal/planner"
+	pkg    = "github.com/canonical/github-runner-operators/internal/planner"
+	logger = telemetry.NewLogger(pkg)
 )
 
 // Metrics encapsulates all OpenTelemetry metrics for the planner service.
@@ -38,16 +38,14 @@ type Metrics struct {
 	mu                   sync.RWMutex
 	store                FlavorStore
 	meter                metric.Meter
-	logger               *slog.Logger
 	flavorPressureMetric metric.Int64ObservableGauge
 }
 
 // NewMetrics initializes the planner metrics and registers the observable gauge.
 func NewMetrics(store FlavorStore) *Metrics {
 	m := &Metrics{
-		store:  store,
-		meter:  otel.Meter(pkg),
-		logger: telemetry.NewLogger(pkg),
+		store: store,
+		meter: otel.Meter(pkg),
 	}
 
 	m.flavorPressureMetric = must(
@@ -86,7 +84,7 @@ func (m *Metrics) collectFlavorPressure(ctx context.Context, observer metric.Obs
 func (m *Metrics) collectPlatformPressure(ctx context.Context, observer metric.Observer, platform string) {
 	flavors, err := m.store.ListFlavors(ctx, platform)
 	if err != nil {
-		m.logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
+		logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
 		return
 	}
 
@@ -97,7 +95,7 @@ func (m *Metrics) collectPlatformPressure(ctx context.Context, observer metric.O
 	flavorNames := extractFlavorNames(flavors)
 	pressures, err := m.store.GetPressures(ctx, platform, flavorNames...)
 	if err != nil {
-		m.logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
+		logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
 		return
 	}
 

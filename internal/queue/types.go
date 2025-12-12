@@ -130,3 +130,8 @@ func (ch *amqpChannelWrapper) Consume(queue, consumer string, autoAck, exclusive
 func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) error {
 	return ch.Channel.Qos(prefetchCount, prefetchSize, global)
 }
+
+type AmqpMessage struct {
+	Headers map[string]interface{}
+	Body    []byte
+}
