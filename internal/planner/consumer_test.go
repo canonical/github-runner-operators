@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
@@ -119,6 +120,7 @@ func TestConsumer(t *testing.T) {
 		pullErr      error
 		expectErrSub string
 		checkDB      func(*testing.T, *fakeDB)
+		checkMetrics func(*testing.T, *telemetry.TestMetricReader)
 	}{{
 		name:    "succeeds when queued job is inserted",
 		setupDB: func(db *fakeDB) {},
@@ -142,6 +144,13 @@ func TestConsumer(t *testing.T) {
 		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:1"], "job not inserted")
+		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 2 errors: 1 from ack failure, 1 from context cancellation
+			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
 		},
 	}, {
 		name: "skips insert when queued job already exists",
@@ -168,6 +177,14 @@ func TestConsumer(t *testing.T) {
 		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:2"], "job not found")
+		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			// processed = 0 because insertJobToDB returned an error (job already exists)
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
 		},
 	}, {
 		name: "succeeds when job updated to in_progress",
@@ -197,6 +214,13 @@ func TestConsumer(t *testing.T) {
 			assert.NotNil(t, db.jobs["github:3"].StartedAt, "started_at not set")
 			assert.Equal(t, "2025-01-02T00:00:00Z", db.jobs["github:3"].StartedAt.Format(time.RFC3339), "started_at incorrect")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 2 errors: 1 from ack failure, 1 from context cancellation
+			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "insert and update when job not found on start",
 		setupDB: func(db *fakeDB) {},
@@ -222,6 +246,13 @@ func TestConsumer(t *testing.T) {
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.NotNil(t, db.jobs["github:21"], "job should be created on start when missing")
 			assert.NotNil(t, db.jobs["github:21"].StartedAt, "started_at not set")
+		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 2 errors: 1 from ack failure, 1 from context cancellation
+			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
 		},
 	}, {
 		name: "succeeds when job updated to completed",
@@ -251,6 +282,13 @@ func TestConsumer(t *testing.T) {
 			assert.NotNil(t, db.jobs["github:5"].CompletedAt, "completed_at not set")
 			assert.Equal(t, "2025-01-03T00:00:00Z", db.jobs["github:5"].CompletedAt.Format(time.RFC3339), "completed_at incorrect")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 2 errors: 1 from ack failure, 1 from context cancellation
+			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "skips when JSON is invalid",
 		setupDB: func(db *fakeDB) {},
@@ -264,6 +302,13 @@ func TestConsumer(t *testing.T) {
 			return ch
 		},
 		expectErrSub: "context canceled",
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "ignores when action is unknown",
 		setupDB: func(db *fakeDB) {},
@@ -288,6 +333,13 @@ func TestConsumer(t *testing.T) {
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Nil(t, db.jobs["github:16"], "job should not be inserted")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "requeues when AddJob fails with other error",
 		setupDB: func(db *fakeDB) { db.addErr = errors.New("db down") },
@@ -311,6 +363,15 @@ func TestConsumer(t *testing.T) {
 		expectErrSub: "context canceled",
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Nil(t, db.jobs["github:10"], "job should not be inserted")
+		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			// processed = 0 because insertJobToDB returned an error (db down)
+			// discarded = 0 because it's requeued (retryable error)
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
 		},
 	}, {
 		name:    "fails when started_at is invalid",
@@ -338,6 +399,13 @@ func TestConsumer(t *testing.T) {
 			assert.NotNil(t, j, "job should exist")
 			assert.Nil(t, j.StartedAt, "started_at should not be set on invalid time")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "fails when completed_at is invalid",
 		setupDB: func(db *fakeDB) { db.jobs["github:12"] = &database.Job{ID: "12", Platform: "github"} },
@@ -363,6 +431,13 @@ func TestConsumer(t *testing.T) {
 			j := db.jobs["github:12"]
 			assert.NotNil(t, j, "job should exist")
 			assert.Nil(t, j.CompletedAt, "completed_at should not be set on invalid time")
+		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
 		},
 	}, {
 		name:    "insert and update when job not found on completion",
@@ -392,6 +467,13 @@ func TestConsumer(t *testing.T) {
 			assert.NotNil(t, db.jobs["github:22"].CompletedAt, "completed_at not set")
 			assert.Equal(t, "2025-01-03T00:00:00Z", db.jobs["github:22"].CompletedAt.Format(time.RFC3339), "completed_at incorrect")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 2 errors: 1 from ack failure, 1 from context cancellation
+			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "discards message when X-GitHub-Event header is missing",
 		setupDB: func(db *fakeDB) {},
@@ -416,6 +498,13 @@ func TestConsumer(t *testing.T) {
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Nil(t, db.jobs["github:23"], "job should not be inserted when header is missing")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}, {
 		name:    "discards non-workflow_job events",
 		setupDB: func(db *fakeDB) {},
@@ -437,10 +526,20 @@ func TestConsumer(t *testing.T) {
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Empty(t, db.jobs, "no jobs should be inserted for non-workflow_job events")
 		},
+		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
+			m := mr.Collect(t)
+			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
+			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
+			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+		},
 	}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mr := telemetry.AcquireTestMetricReader(t)
+			defer telemetry.ReleaseTestMetricReader(t)
+
 			db := newFakeDB()
 			tt.setupDB(db)
 
@@ -470,6 +569,9 @@ func TestConsumer(t *testing.T) {
 			assert.ErrorContains(t, err, tt.expectErrSub, "expected error containing %q, got %v", tt.expectErrSub, err)
 			if tt.checkDB != nil {
 				tt.checkDB(t, db)
+			}
+			if tt.checkMetrics != nil {
+				tt.checkMetrics(t, mr)
 			}
 		})
 	}

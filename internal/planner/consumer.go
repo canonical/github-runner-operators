@@ -119,7 +119,7 @@ func (c *JobConsumer) handleMessage(ctx context.Context, headers amqp.Table, bod
 	switch action {
 	case "queued":
 		err = c.insertJobToDB(ctx, jobEvent, body)
-		if err != nil {
+		if err == nil {
 			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
 		}
 	case "waiting":
@@ -127,12 +127,12 @@ func (c *JobConsumer) handleMessage(ctx context.Context, headers amqp.Table, bod
 		return nil
 	case "in_progress":
 		err = c.updateJobStartedInDB(ctx, jobEvent, body)
-		if err != nil {
+		if err == nil {
 			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
 		}
 	case "completed":
 		err = c.updateJobCompletedInDB(ctx, jobEvent, body)
-		if err != nil {
+		if err == nil {
 			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
 		}
 	default:
