@@ -34,6 +34,7 @@ func NewAmqpConsumer(uri, queueName string) *AmqpConsumer {
 	}
 }
 
+// Pull retrieves one message from the AMQP queue.
 func (c *AmqpConsumer) Pull(ctx context.Context) (amqp.Delivery, error) {
 	c.client.mu.Lock() // Lock to prevent concurrent access to connection/channel object
 	defer c.client.mu.Unlock()
@@ -41,7 +42,6 @@ func (c *AmqpConsumer) Pull(ctx context.Context) (amqp.Delivery, error) {
 	return c.pullMsg(ctx)
 }
 
-// pullMsg starts consuming messages from the AMQP queue.
 func (c *AmqpConsumer) pullMsg(ctx context.Context) (amqp.Delivery, error) {
 	err := c.ensureChannel()
 	if err != nil {
@@ -53,6 +53,8 @@ func (c *AmqpConsumer) pullMsg(ctx context.Context) (amqp.Delivery, error) {
 		if ok {
 			return msg, nil
 		}
+		// channel is closed
+		c.channel = nil
 		return amqp.Delivery{}, errors.New("amqp message channel closed")
 	case <-ctx.Done():
 		return amqp.Delivery{}, ctx.Err()
@@ -63,6 +65,10 @@ func (c *AmqpConsumer) ensureChannel() error {
 	err := c.ensureAmqpChannel()
 	if err != nil {
 		return err
+	}
+
+	if c.channel != nil {
+		return nil
 	}
 
 	err = c.client.amqpChannel.Qos(

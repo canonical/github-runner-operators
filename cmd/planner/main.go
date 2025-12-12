@@ -72,7 +72,9 @@ func main() {
 		log.Fatalln("failed to connect to db:", err)
 	}
 
-	consumer := planner.NewJobConsumer(rabbitMQUri, queueName, db)
+	metrics := planner.NewMetrics(db)
+
+	consumer := planner.NewJobConsumer(rabbitMQUri, queueName, db, metrics)
 	consumerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -81,7 +83,6 @@ func main() {
 		}
 	}()
 
-	metrics := planner.NewMetrics(db)
 	server := planner.NewServer(db, metrics)
 
 	log.Println("Starting planner API server on port", port)

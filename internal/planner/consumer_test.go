@@ -11,14 +11,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"maps"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
-	"github.com/canonical/github-runner-operators/internal/queue"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
@@ -89,69 +86,39 @@ func mergeRaw(job *database.Job, raw map[string]interface{}) {
 
 func jobKey(platform, id string) string { return platform + ":" + id }
 
-type fakeConn struct {
-	closed        bool
-	channelErr    error
-	channel       *fakeChan
-	channelCalled int32
+// fakeAmqpConsumer mocks the queue.AmqpConsumer for testing JobConsumer
+type fakeAmqpConsumer struct {
+	deliveries <-chan amqp.Delivery
+	pullErr    error
 }
 
-func (c *fakeConn) Channel() (queue.amqpChannel, error) {
-	atomic.AddInt32(&c.channelCalled, 1)
-	if c.channelErr != nil {
-		return nil, c.channelErr
+func (c *fakeAmqpConsumer) Pull(ctx context.Context) (amqp.Delivery, error) {
+	if c.pullErr != nil {
+		return amqp.Delivery{}, c.pullErr
 	}
-	return c.channel, nil
-}
 
-func (c *fakeConn) IsClosed() bool { return c.closed }
-
-type fakeChan struct {
-	closed          bool
-	confirmErr      error
-	queueDeclareErr error
-	consumeErr      error
-	deliveries      <-chan amqp.Delivery
-}
-
-func (ch *fakeChan) PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (queue.confirmation, error) {
-	return nil, errors.New("not implemented in fake")
-}
-
-func (ch *fakeChan) IsClosed() bool            { return ch.closed }
-func (ch *fakeChan) Confirm(noWait bool) error { return ch.confirmErr }
-
-func (ch *fakeChan) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
-	return amqp.Queue{}, nil
-}
-
-func (ch *fakeChan) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
-	if ch.queueDeclareErr != nil {
-		return amqp.Queue{}, ch.queueDeclareErr
+	select {
+	case msg, ok := <-c.deliveries:
+		if !ok {
+			// Channel closed, wait for context to be done
+			<-ctx.Done()
+			return amqp.Delivery{}, ctx.Err()
+		}
+		return msg, nil
+	case <-ctx.Done():
+		return amqp.Delivery{}, ctx.Err()
 	}
-	return amqp.Queue{Name: name}, nil
-}
-
-func (ch *fakeChan) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
-	if ch.consumeErr != nil {
-		return nil, ch.consumeErr
-	}
-	return ch.deliveries, nil
-}
-
-func (ch *fakeChan) Qos(prefetchCount, prefetchSize int, global bool) error {
-	return nil
 }
 
 func TestConsumer(t *testing.T) {
 	mk := func(m map[string]any) []byte { b, _ := json.Marshal(m); return b }
 	tests := []struct {
-		name                                string
-		setupDB                             func(*fakeDB)
-		deliveries                          func() <-chan amqp.Delivery
-		confirmErr, qDeclareErr, consumeErr error
-		expectErrSub                        string
-		checkDB                             func(*testing.T, *fakeDB)
+		name         string
+		setupDB      func(*fakeDB)
+		deliveries   func() <-chan amqp.Delivery
+		pullErr      error
+		expectErrSub string
+		checkDB      func(*testing.T, *fakeDB)
 	}{{
 		name:    "succeeds when queued job is inserted",
 		setupDB: func(db *fakeDB) {},
@@ -322,20 +289,6 @@ func TestConsumer(t *testing.T) {
 			assert.Nil(t, db.jobs["github:16"], "job should not be inserted")
 		},
 	}, {
-		name:    "fail when queue declare failure",
-		setupDB: func(db *fakeDB) {},
-		deliveries: func() <-chan amqp.Delivery {
-			return make(chan amqp.Delivery)
-		},
-		qDeclareErr:  errors.New("queue declare fail"),
-		expectErrSub: "failed to declare AMQP queue: queue declare fail",
-	}, {
-		name:         "fail when consume failure",
-		setupDB:      func(db *fakeDB) {},
-		deliveries:   func() <-chan amqp.Delivery { return nil },
-		consumeErr:   errors.New("consume fail"),
-		expectErrSub: "failed to consume message: consume fail",
-	}, {
 		name:    "requeues when AddJob fails with other error",
 		setupDB: func(db *fakeDB) { db.addErr = errors.New("db down") },
 		deliveries: func() <-chan amqp.Delivery {
@@ -490,19 +443,20 @@ func TestConsumer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := newFakeDB()
 			tt.setupDB(db)
-			fch := &fakeChan{deliveries: nil, confirmErr: tt.confirmErr, queueDeclareErr: tt.qDeclareErr, consumeErr: tt.consumeErr}
-			if tt.deliveries != nil {
-				fch.deliveries = tt.deliveries()
-			}
-			fconn := &fakeConn{channel: fch}
 
-			consumer := &queue.AmqpConsumer{
-				client: &queue.Client{
-					uri:         "amqp://x",
-					connectFunc: func(uri string) (queue.amqpConnection, error) { return fconn, nil }},
-				queueName: "queue-x",
-				db:        db,
-				logger:    slog.Default(),
+			var deliveries <-chan amqp.Delivery
+			if tt.deliveries != nil {
+				deliveries = tt.deliveries()
+			}
+
+			fakeConsumer := &fakeAmqpConsumer{
+				deliveries: deliveries,
+				pullErr:    tt.pullErr,
+			}
+			consumer := &JobConsumer{
+				consumer: fakeConsumer,
+				db:       db,
+				metrics:  NewMetrics(&fakeStore{}),
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())

@@ -20,8 +20,10 @@ type JobDatabase interface {
 }
 
 type JobConsumer struct {
-	consumer *queue.AmqpConsumer
+	consumer queue.Consumer
 	db       JobDatabase
+
+	metrics *Metrics
 }
 
 const (
@@ -29,10 +31,11 @@ const (
 	githubEventHeaderKey = "X-GitHub-Event"
 )
 
-func NewJobConsumer(amqpUri, queueName string, db JobDatabase) *JobConsumer {
+func NewJobConsumer(amqpUri, queueName string, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
 		consumer: queue.NewAmqpConsumer(amqpUri, queueName),
 		db:       db,
+		metrics:  metrics,
 	}
 }
 
@@ -41,25 +44,45 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 	logger.InfoContext(ctx, "start consume workflow jobs from queue")
 
 	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		msg, err := c.consumer.Pull(ctx)
 		if err != nil {
 			logger.ErrorContext(ctx, "cannot receive message from amqp, retrying", "error", err)
+			c.metrics.ObserveWebhookError(ctx, platform)
+			continue
 		}
 
 		err = c.handleMessage(ctx, msg.Headers, msg.Body)
 		if err == nil {
-			msg.Ack(false)
+			if err := msg.Ack(false); err != nil {
+				logger.ErrorContext(ctx, "cannot ack queue message", "error", err)
+				c.metrics.ObserveWebhookError(ctx, platform)
+			}
 			continue
 		}
 
 		if errors.Is(err, ErrNonRetryable) {
-			msg.Nack(false, false) // don't requeue
+			c.metrics.ObserveWebhookError(ctx, platform)
+			c.metrics.ObserveDiscardedWebhook(ctx, platform)
+			// don't requeue
+			if err := msg.Nack(false, false); err != nil {
+				logger.ErrorContext(ctx, "cannot nack message without requeue", "error", err)
+				c.metrics.ObserveWebhookError(ctx, platform)
+			}
 			logger.ErrorContext(ctx, "failed to handle message without requeue", "error", err)
 			continue
 		}
 		// Other errors are requeued by default
 		logger.ErrorContext(ctx, "failed to handle message, requeuing", "error", err)
-		msg.Nack(false, true) // requeue
+		c.metrics.ObserveWebhookError(ctx, platform)
+		// requeue
+		if err := msg.Nack(false, true); err != nil {
+			logger.ErrorContext(ctx, "cannot nack message with requeue", "error", err)
+			c.metrics.ObserveWebhookError(ctx, platform)
+		}
 	}
 }
 
@@ -96,12 +119,22 @@ func (c *JobConsumer) handleMessage(ctx context.Context, headers amqp.Table, bod
 	switch action {
 	case "queued":
 		err = c.insertJobToDB(ctx, jobEvent, body)
+		if err != nil {
+			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
+		}
 	case "waiting":
+		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		return nil
 	case "in_progress":
 		err = c.updateJobStartedInDB(ctx, jobEvent, body)
+		if err != nil {
+			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
+		}
 	case "completed":
 		err = c.updateJobCompletedInDB(ctx, jobEvent, body)
+		if err != nil {
+			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
+		}
 	default:
 		logger.WarnContext(ctx, "ignoring other action type", "action", action)
 		return classifyError(fmt.Errorf("%w: %s", ErrUnknownAction, action))
