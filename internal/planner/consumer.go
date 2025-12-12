@@ -11,6 +11,8 @@ import (
 	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/google/go-github/v80/github"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type JobDatabase interface {
@@ -42,8 +44,9 @@ func NewJobConsumer(amqpUri, queueName string, db JobDatabase, metrics *Metrics)
 // Start begins consuming messages from the AMQP queue and processing them.
 func (c *JobConsumer) Start(ctx context.Context) error {
 	logger.InfoContext(ctx, "start consume workflow jobs from queue")
-
+	parentCtx := ctx
 	for {
+		ctx := parentCtx
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -55,24 +58,36 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 			continue
 		}
 
+		headers := make(map[string]string)
+		for h, v := range msg.Headers {
+			if strVal, ok := v.(string); ok {
+				headers[h] = strVal
+			}
+		}
+		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(headers))
+		ctx, span := trace.Start(ctx, "consume webhook")
 		err = c.handleMessage(ctx, msg.Headers, msg.Body)
 		if err == nil {
 			if err := msg.Ack(false); err != nil {
 				logger.ErrorContext(ctx, "cannot ack queue message", "error", err)
 				c.metrics.ObserveWebhookError(ctx, platform)
+				span.RecordError(err)
 			}
+			span.End()
 			continue
 		}
-
+		span.RecordError(err)
 		if errors.Is(err, ErrNonRetryable) {
 			c.metrics.ObserveWebhookError(ctx, platform)
 			c.metrics.ObserveDiscardedWebhook(ctx, platform)
 			// don't requeue
 			if err := msg.Nack(false, false); err != nil {
 				logger.ErrorContext(ctx, "cannot nack message without requeue", "error", err)
+				span.RecordError(err)
 				c.metrics.ObserveWebhookError(ctx, platform)
 			}
 			logger.ErrorContext(ctx, "failed to handle message without requeue", "error", err)
+			span.End()
 			continue
 		}
 		// Other errors are requeued by default
@@ -82,7 +97,9 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 		if err := msg.Nack(false, true); err != nil {
 			logger.ErrorContext(ctx, "cannot nack message with requeue", "error", err)
 			c.metrics.ObserveWebhookError(ctx, platform)
+			span.RecordError(err)
 		}
+		span.End()
 	}
 }
 
