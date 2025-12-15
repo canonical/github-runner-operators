@@ -148,9 +148,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name: "skips insert when queued job already exists",
@@ -182,9 +182,9 @@ func TestConsumer(t *testing.T) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
 			// processed = 0 because insertJobToDB returned an error (job already exists)
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name: "succeeds when job updated to in_progress",
@@ -217,9 +217,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "insert and update when job not found on start",
@@ -250,9 +250,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name: "succeeds when job updated to completed",
@@ -285,9 +285,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "skips when JSON is invalid",
@@ -305,9 +305,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "ignores when action is unknown",
@@ -336,9 +336,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "requeues when AddJob fails with other error",
@@ -369,9 +369,9 @@ func TestConsumer(t *testing.T) {
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
 			// processed = 0 because insertJobToDB returned an error (db down)
 			// discarded = 0 because it's requeued (retryable error)
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "fails when started_at is invalid",
@@ -402,9 +402,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "fails when completed_at is invalid",
@@ -435,9 +435,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "insert and update when job not found on completion",
@@ -470,9 +470,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "discards message when X-GitHub-Event header is missing",
@@ -501,9 +501,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "discards non-workflow_job events",
@@ -529,9 +529,9 @@ func TestConsumer(t *testing.T) {
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
 			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, "github-runner.planner.webhook.errors"))
-			assert.Equal(t, 0.0, m.Counter(t, "github-runner.planner.webhook.processed"))
-			assert.Equal(t, 1.0, m.Counter(t, "github-runner.planner.webhook.discarded"))
+			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}}
 

@@ -137,7 +137,7 @@ func (c *JobConsumer) handleMessage(ctx context.Context, headers amqp.Table, bod
 	case "queued":
 		err = c.insertJobToDB(ctx, jobEvent, body)
 		if err == nil {
-			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
+			c.metrics.ObserveConsumedGitHubWebhook(ctx, jobEvent)
 		}
 	case "waiting":
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
@@ -145,12 +145,12 @@ func (c *JobConsumer) handleMessage(ctx context.Context, headers amqp.Table, bod
 	case "in_progress":
 		err = c.updateJobStartedInDB(ctx, jobEvent, body)
 		if err == nil {
-			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
+			c.metrics.ObserveConsumedGitHubWebhook(ctx, jobEvent)
 		}
 	case "completed":
 		err = c.updateJobCompletedInDB(ctx, jobEvent, body)
 		if err == nil {
-			c.metrics.ObserveProcessedGitHubWebhook(ctx, jobEvent)
+			c.metrics.ObserveConsumedGitHubWebhook(ctx, jobEvent)
 		}
 	default:
 		logger.WarnContext(ctx, "ignoring other action type", "action", action)

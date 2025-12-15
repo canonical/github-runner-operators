@@ -22,7 +22,7 @@ import (
 const (
 	flavorPressureMetricName        = "github-runner.planner.flavor.pressure"
 	webhookErrorsMetricName         = "github-runner.planner.webhook.errors"
-	processedWebhooksMetricName     = "github-runner.planner.webhook.processed"
+	consumedWebhooksMetricName      = "github-runner.planner.webhook.consumed"
 	discardedWebhooksMetricName     = "github-runner.planner.webhook.discarded"
 	webhookJobWaitingTimeMetricName = "github-runner.planner.webhook.job.waiting"
 	webhookJobRunningTimeMetricName = "github-runner.planner.webhook.job.running"
@@ -86,7 +86,7 @@ func NewMetrics(store FlavorStore) *Metrics {
 	)
 	m.processedWebhooks = must(
 		m.meter.Int64Counter(
-			processedWebhooksMetricName,
+			consumedWebhooksMetricName,
 			metric.WithDescription("Total number of processed received"),
 			metric.WithUnit("{webhook}"),
 		),
@@ -211,7 +211,7 @@ func (m *Metrics) ObserveDiscardedWebhook(ctx context.Context, platform string) 
 	m.discardedWebhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("platform", platform)))
 }
 
-func (m *Metrics) ObserveProcessedGitHubWebhook(ctx context.Context, webhook *github.WorkflowJobEvent) {
+func (m *Metrics) ObserveConsumedGitHubWebhook(ctx context.Context, webhook *github.WorkflowJobEvent) {
 	attributes := metric.WithAttributes(attribute.String("platform", "github"), attribute.String("event", webhook.GetAction()))
 	if webhook.WorkflowJob == nil {
 		return
