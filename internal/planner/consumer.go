@@ -45,6 +45,7 @@ func NewJobConsumer(amqpUri, queueName string, db JobDatabase, metrics *Metrics)
 func (c *JobConsumer) Start(ctx context.Context) error {
 	logger.InfoContext(ctx, "start consume workflow jobs from queue")
 	parentCtx := ctx
+	backoff := time.Second
 	for {
 		ctx := parentCtx
 		if ctx.Err() != nil {
@@ -100,6 +101,11 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 			span.RecordError(err)
 		}
 		span.End()
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+		}
+		backoff = min(5*time.Minute, backoff*2)
 	}
 }
 

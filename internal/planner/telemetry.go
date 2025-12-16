@@ -212,16 +212,30 @@ func (m *Metrics) ObserveDiscardedWebhook(ctx context.Context, platform string) 
 }
 
 func (m *Metrics) ObserveConsumedGitHubWebhook(ctx context.Context, webhook *github.WorkflowJobEvent) {
-	attributes := metric.WithAttributes(attribute.String("platform", "github"), attribute.String("event", webhook.GetAction()))
-	if webhook.WorkflowJob == nil {
+	eventMap := map[string]string{
+		"queued":      "created",
+		"in_progress": "started",
+		"completed":   "completed",
+	}
+	event := eventMap[webhook.GetAction()]
+	if event == "" {
+		return
+	}
+	attributes := metric.WithAttributes(
+		attribute.String("platform", "github"),
+		attribute.String("event", event),
+		attribute.String("repo", webhook.GetRepo().GetFullName()),
+	)
+	workflowJob := webhook.GetWorkflowJob()
+	if workflowJob == nil {
 		return
 	}
 	m.processedWebhooks.Add(ctx, 1, attributes)
-	if webhook.WorkflowJob.CompletedAt != nil && webhook.WorkflowJob.StartedAt != nil {
-		runningTime := webhook.WorkflowJob.CompletedAt.Sub(webhook.WorkflowJob.StartedAt.Time).Seconds()
+	if workflowJob.CompletedAt != nil && workflowJob.StartedAt != nil {
+		runningTime := workflowJob.CompletedAt.Sub(workflowJob.StartedAt.Time).Seconds()
 		m.webhookJobRunningTime.Record(ctx, runningTime, attributes)
-	} else if webhook.WorkflowJob.StartedAt != nil && webhook.WorkflowJob.CreatedAt != nil {
-		waitingTime := webhook.WorkflowJob.StartedAt.Sub(webhook.WorkflowJob.CreatedAt.Time).Seconds()
+	} else if workflowJob.StartedAt != nil && workflowJob.CreatedAt != nil {
+		waitingTime := workflowJob.StartedAt.Sub(workflowJob.CreatedAt.Time).Seconds()
 		m.webhookJobWaitingTime.Record(ctx, waitingTime, attributes)
 	}
 }
