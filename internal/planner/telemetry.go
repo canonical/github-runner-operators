@@ -50,7 +50,7 @@ type Metrics struct {
 
 	flavorPressure        metric.Int64ObservableGauge
 	webhookErrors         metric.Int64Counter
-	processedWebhooks     metric.Int64Counter
+	consumedWebhooks      metric.Int64Counter
 	discardedWebhooks     metric.Int64Counter
 	webhookJobWaitingTime metric.Float64Histogram
 	webhookJobRunningTime metric.Float64Histogram
@@ -84,10 +84,10 @@ func NewMetrics(store FlavorStore) *Metrics {
 			metric.WithUnit("{webhook}"),
 		),
 	)
-	m.processedWebhooks = must(
+	m.consumedWebhooks = must(
 		m.meter.Int64Counter(
 			consumedWebhooksMetricName,
-			metric.WithDescription("Total number of processed received"),
+			metric.WithDescription("Total number of consumed webhooks"),
 			metric.WithUnit("{webhook}"),
 		),
 	)
@@ -116,12 +116,13 @@ func NewMetrics(store FlavorStore) *Metrics {
 		300*60,
 		360*60,
 	)
+	jobWaitingBucket := jobDurationBucket
 	m.webhookJobWaitingTime = must(
 		m.meter.Float64Histogram(
 			webhookJobWaitingTimeMetricName,
 			metric.WithDescription("Histogram of job waiting times from webhook reception to job start"),
 			metric.WithUnit("s"),
-			jobDurationBucket,
+			jobWaitingBucket,
 		),
 	)
 	m.webhookJobRunningTime = must(
@@ -230,7 +231,7 @@ func (m *Metrics) ObserveConsumedGitHubWebhook(ctx context.Context, webhook *git
 	if workflowJob == nil {
 		return
 	}
-	m.processedWebhooks.Add(ctx, 1, attributes)
+	m.consumedWebhooks.Add(ctx, 1, attributes)
 	if workflowJob.CompletedAt != nil && workflowJob.StartedAt != nil {
 		runningTime := workflowJob.CompletedAt.Sub(workflowJob.StartedAt.Time).Seconds()
 		m.webhookJobRunningTime.Record(ctx, runningTime, attributes)
