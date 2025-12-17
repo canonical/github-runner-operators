@@ -130,9 +130,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "queued",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         1,
-						"labels":     []string{"linux"},
+						"labels":     []string{"self-hosted", "linux"},
 						"status":     "queued",
 						"created_at": "2025-01-01T00:00:00Z",
 					},
@@ -147,8 +150,8 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			// 1 errors: 1 from ack failure
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
@@ -163,9 +166,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "queued",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         2,
-						"labels":     []string{"x"},
+						"labels":     []string{"self-hosted", "x"},
 						"status":     "queued",
 						"created_at": "2025-01-01T00:00:00Z",
 					},
@@ -180,11 +186,11 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			// 1 error: 1 from ack failure
 			// processed = 0 because insertJobToDB returned an error (job already exists)
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
-			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name: "succeeds when job updated to in_progress",
@@ -197,10 +203,14 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "in_progress",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         3,
-						"labels":     []string{},
+						"labels":     []string{"self-hosted"},
 						"status":     "in_progress",
+						"created_at": "2025-01-01T23:00:00Z",
 						"started_at": "2025-01-02T00:00:00Z",
 					},
 				}),
@@ -216,8 +226,8 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			// 1 errors: 1 from ack failure
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
@@ -230,9 +240,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "in_progress",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         21,
-						"labels":     []string{},
+						"labels":     []string{"self-hosted"},
 						"status":     "in_progress",
 						"created_at": "2025-01-01T00:00:00Z",
 						"started_at": "2025-01-02T00:00:00Z",
@@ -249,8 +262,8 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			// 1 errors: 1 from ack failure
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
@@ -265,10 +278,15 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "completed",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":           5,
-						"labels":       []string{},
+						"labels":       []string{"self-hosted"},
 						"status":       "completed",
+						"created_at":   "2025-01-01T23:00:00Z",
+						"started_at":   "2025-01-02T23:30:00Z",
 						"completed_at": "2025-01-03T00:00:00Z",
 					},
 				}),
@@ -284,8 +302,8 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			// 1 errors: 1 from ack failure
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
@@ -304,10 +322,10 @@ func TestConsumer(t *testing.T) {
 		expectErrSub: "context canceled",
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			// 2 errors: 1 from processing error, 1 from nack failure
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "ignores when action is unknown",
@@ -318,9 +336,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "unknown",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         16,
-						"labels":     []string{"l"},
+						"labels":     []string{"l", "self-hosted"},
 						"status":     "queued",
 						"created_at": "2025-01-01T00:00:00Z",
 					},
@@ -335,10 +356,10 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			// 2 errors: 1 from processing error, 1 from nack failure
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "requeues when AddJob fails with other error",
@@ -349,9 +370,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "queued",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         10,
-						"labels":     []string{"l"},
+						"labels":     []string{"l", "self-hosted"},
 						"status":     "queued",
 						"created_at": "2025-01-01T00:00:00Z",
 					},
@@ -366,10 +390,10 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
+			// 2 errors: 1 from processing error, 1 from nack failure
 			// processed = 0 because insertJobToDB returned an error (db down)
 			// discarded = 0 because it's requeued (retryable error)
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
@@ -382,9 +406,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "in_progress",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":         11,
-						"labels":     []string{},
+						"labels":     []string{"self-hosted"},
 						"status":     "in_progress",
 						"started_at": "invalid",
 					},
@@ -401,10 +428,10 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			// 2 errors: 1 from processing error, 1 from nack failure
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "fails when completed_at is invalid",
@@ -417,7 +444,7 @@ func TestConsumer(t *testing.T) {
 					"action": "completed",
 					"workflow_job": map[string]any{
 						"id":           12,
-						"labels":       []string{},
+						"labels":       []string{"self-hosted"},
 						"status":       "completed",
 						"completed_at": "invalid",
 					},
@@ -434,10 +461,10 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			// 2 errors: 1 from processing error, 1 from nack failure
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "insert and update when job not found on completion",
@@ -448,9 +475,12 @@ func TestConsumer(t *testing.T) {
 				Headers: amqp.Table{"X-GitHub-Event": "workflow_job"},
 				Body: mk(map[string]any{
 					"action": "completed",
+					"repository": map[string]any{
+						"full_name": "canonical/test",
+					},
 					"workflow_job": map[string]any{
 						"id":           22,
-						"labels":       []string{},
+						"labels":       []string{"self-hosted"},
 						"status":       "completed",
 						"created_at":   "2025-01-01T00:00:00Z",
 						"started_at":   "2025-01-02T00:00:00Z",
@@ -469,8 +499,8 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from ack failure, 1 from context cancellation
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			// 1 errors: 1 from ack failure
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 1.0, m.Counter(t, consumedWebhooksMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
@@ -500,10 +530,10 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			// 2 errors: 1 from processing error, 1 from nack failure
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "discards non-workflow_job events",
@@ -528,10 +558,10 @@ func TestConsumer(t *testing.T) {
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 3 errors: 1 from processing error, 1 from nack failure, 1 from context cancellation
-			assert.Equal(t, 3.0, m.Counter(t, webhookErrorsMetricName))
+			// 2 errors: 1 from processing error, 1 from nack failure
+			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}}
 
