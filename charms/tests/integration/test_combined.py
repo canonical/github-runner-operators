@@ -60,6 +60,9 @@ def send_workflow_job_webhook(
     """
     webhook_payload = {
         "action": "queued",
+        "repository": {
+            "full_name": "canonical/test",
+        }
         "workflow_job": {
             "id": 12345,
             "labels": ["self-hosted", "linux", "x64"],
