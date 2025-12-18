@@ -112,6 +112,11 @@ func (c *fakeAmqpConsumer) Pull(ctx context.Context) (amqp.Delivery, error) {
 }
 
 func TestConsumer(t *testing.T) {
+	/*
+		arrange: setup test environment with fake database, consumer, and metrics
+		act: pull and process the message from the queue
+		assert: check error state, database changes, and metrics
+	*/
 	mk := func(m map[string]any) []byte { b, _ := json.Marshal(m); return b }
 	tests := []struct {
 		name         string
@@ -596,6 +601,11 @@ func TestConsumer(t *testing.T) {
 }
 
 func TestParseGithubWebhookPayload(t *testing.T) {
+	/*
+		arrange: setup context for parsing webhook payload
+		act: parse the GitHub webhook payload with provided headers and body
+		assert: check for expected errors and validate parsed job data
+	*/
 	mk := func(m map[string]any) []byte { b, _ := json.Marshal(m); return b }
 
 	tests := []struct {

@@ -172,6 +172,16 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 	}
 }
 
+// isSelfHosted checks if the job is intended for self-hosted runners.
+func isSelfHosted(job *githubWebhookJob) bool {
+	for _, label := range job.labels {
+		if strings.Contains(label, "self-hosted") {
+			return true
+		}
+	}
+	return false
+}
+
 // pullMessage receive one message from the AMQP queue and process it.
 // pullMessage can return errors, but it's mostly for testing and can be ignored,
 // as all errors are handled internally before return.
@@ -207,14 +217,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 		return nil
 	}
 
-	isSelfHosted := false
-	for _, label := range job.labels {
-		if strings.Contains(label, "self-hosted") {
-			isSelfHosted = true
-			break
-		}
-	}
-	if !isSelfHosted {
+	if !isSelfHosted(&job) {
 		logger.InfoContext(ctx, "ignore non self-hosted job", "repo", job.repo, "labels", strings.Join(job.labels, ","))
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.discardMessage(ctx, &msg)
