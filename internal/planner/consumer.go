@@ -242,8 +242,8 @@ func (c *JobConsumer) discardMessage(ctx context.Context, delivery *amqp.Deliver
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot discard queue message", "error", err)
 		oteltrace.SpanFromContext(ctx).RecordError(err)
+		c.metrics.ObserveWebhookError(ctx, platform)
 	}
-	c.metrics.ObserveWebhookError(ctx, platform)
 	return
 }
 
@@ -252,8 +252,8 @@ func (c *JobConsumer) consumedMessage(ctx context.Context, delivery *amqp.Delive
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot ack queue message", "error", err)
 		oteltrace.SpanFromContext(ctx).RecordError(err)
+		c.metrics.ObserveWebhookError(ctx, platform)
 	}
-	c.metrics.ObserveWebhookError(ctx, platform)
 }
 
 func (c *JobConsumer) requeueMessage(ctx context.Context, delivery *amqp.Delivery) {
@@ -261,8 +261,8 @@ func (c *JobConsumer) requeueMessage(ctx context.Context, delivery *amqp.Deliver
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot requeue message", "error", err)
 		oteltrace.SpanFromContext(ctx).RecordError(err)
+		c.metrics.ObserveWebhookError(ctx, platform)
 	}
-	c.metrics.ObserveWebhookError(ctx, platform)
 }
 
 // handleMessage processes a single AMQP message with headers and body.
