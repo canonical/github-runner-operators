@@ -162,7 +162,7 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 	logger.InfoContext(ctx, "start consume workflow jobs from queue")
 	backoff := time.Second
 	for {
-		c.pullMessage(ctx)
+		_ = c.pullMessage(ctx)
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
@@ -172,12 +172,15 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 	}
 }
 
-func (c *JobConsumer) pullMessage(ctx context.Context) {
+// pullMessage receive one message from the AMQP queue and process it.
+// pullMessage can return errors, but it's mostly for testing and can be ignored,
+// as all errors are handled internally before return.
+func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	msg, err := c.consumer.Pull(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot receive message from amqp, retrying", "error", err)
 		c.metrics.ObserveWebhookError(ctx, platform)
-		return
+		return err
 	}
 	headers := make(map[string]string)
 	for h, v := range msg.Headers {
@@ -194,14 +197,14 @@ func (c *JobConsumer) pullMessage(ctx context.Context) {
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
-		return
+		return err
 	}
 
 	if !slices.Contains([]string{"queued", "in_progress", "completed"}, job.action) {
 		logger.InfoContext(ctx, "ignore other action types for GitHub webhook job", "action", job.action)
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.discardMessage(ctx, &msg)
-		return
+		return nil
 	}
 
 	isSelfHosted := false
@@ -215,20 +218,20 @@ func (c *JobConsumer) pullMessage(ctx context.Context) {
 		logger.InfoContext(ctx, "ignore non self-hosted job", "repo", job.repo, "labels", strings.Join(job.labels, ","))
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.discardMessage(ctx, &msg)
-		return
+		return nil
 	}
 
 	err = c.handleMessage(ctx, &job)
 	if err == nil {
 		c.consumedMessage(ctx, &msg)
 		c.metrics.ObserveConsumedGitHubWebhook(ctx, job.payload)
-		return
+		return err
 	}
 
 	span.RecordError(err)
 	c.metrics.ObserveWebhookError(ctx, platform)
 	c.requeueMessage(ctx, &msg)
-	return
+	return err
 }
 
 func (c *JobConsumer) discardMessage(ctx context.Context, delivery *amqp.Delivery) {
