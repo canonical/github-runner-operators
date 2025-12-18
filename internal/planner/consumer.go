@@ -282,7 +282,7 @@ func (c *JobConsumer) handleMessage(ctx context.Context, job *githubWebhookJob) 
 func (c *JobConsumer) insertJobToDB(ctx context.Context, job *githubWebhookJob) error {
 	if err := c.db.AddJob(ctx, job.job); err != nil {
 		if errors.Is(err, database.ErrExist) {
-			logger.ErrorContext(ctx, "job already exists in database", "job_id", job.id)
+			logger.InfoContext(ctx, "job already exists in database", "job_id", job.id)
 			return nil
 		}
 		return fmt.Errorf("failed to add job to database: %w", err)
