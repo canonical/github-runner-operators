@@ -70,63 +70,63 @@ func parseGithubWebhookPayload(ctx context.Context, headers map[string]interface
 	eventTypeHeader, ok := headers[githubEventHeaderKey]
 	if !ok {
 		logger.WarnContext(ctx, "missing X-GitHub-Event header, discarding message")
-		return githubWebhookJob{}, fmt.Errorf("%w: X-GitHub-Event header", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing X-GitHub-Event header")
 	}
 
 	eventType, ok := eventTypeHeader.(string)
 	if !ok {
 		logger.WarnContext(ctx, "X-GitHub-Event header is not a string, discarding message")
-		return githubWebhookJob{}, fmt.Errorf("%w: X-GitHub-Event must be string", ErrInvalidHeader)
+		return githubWebhookJob{}, fmt.Errorf("X-GitHub-Event must be string")
 	}
 
 	// Parse the webhook using go-github library
 	event, err := github.ParseWebHook(eventType, body)
 	if err != nil {
-		return githubWebhookJob{}, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		return githubWebhookJob{}, fmt.Errorf("unable to parse webhook: %w", err)
 	}
 
 	// Check if it's a workflow_job event
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
 		logger.InfoContext(ctx, "event is not a workflow_job, discarding", "event_type", eventType)
-		return githubWebhookJob{}, fmt.Errorf("%w: %s", ErrUnsupportedEvent, eventType)
+		return githubWebhookJob{}, fmt.Errorf("unsupported webhook event: %s", eventType)
 	}
 
 	// Process the workflow job event based on action
 	action := jobEvent.GetAction()
 	if !slices.Contains([]string{"queued", "in_progress", "completed", "waiting"}, action) {
-		return githubWebhookJob{}, fmt.Errorf("%w: %s", ErrUnknownAction, action)
+		return githubWebhookJob{}, fmt.Errorf("unknown webhook event action: %s", action)
 	}
 
 	job := jobEvent.GetWorkflowJob()
 	if job == nil {
-		return githubWebhookJob{}, fmt.Errorf("%w: workflow_job field", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing workflow_job field in event webhook")
 	}
 
 	createdAt := job.GetCreatedAt()
 	if createdAt.IsZero() {
-		return githubWebhookJob{}, fmt.Errorf("%w: created_at in job_queued event", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing created_at in queued event webhook")
 	}
 
 	startedAt := job.GetStartedAt()
 	if startedAt.IsZero() && action == "in_progress" {
-		return githubWebhookJob{}, fmt.Errorf("%w: started_at in job_in_progress event", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing started_at in in_progress event webhook")
 	}
 
 	completedAt := job.GetCompletedAt()
 	if completedAt.IsZero() && action == "completed" {
-		return githubWebhookJob{}, fmt.Errorf("%w: completed_at in job_completed event", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing completed_at in completed event webhook")
 	}
 
 	id := strconv.FormatInt(job.GetID(), 10)
 	if id == "0" {
-		return githubWebhookJob{}, fmt.Errorf("%w: job ID", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing job id in event webhook")
 	}
 
 	var rawJson map[string]interface{}
 	err = json.Unmarshal(body, &rawJson)
 	if err != nil {
-		return githubWebhookJob{}, fmt.Errorf("%w: %v", ErrInvalidJSON, err)
+		return githubWebhookJob{}, fmt.Errorf("invalid github webhook: %v", err)
 	}
 
 	dbJob := &database.Job{
@@ -142,7 +142,7 @@ func parseGithubWebhookPayload(ctx context.Context, headers map[string]interface
 	repo := jobEvent.GetRepo().GetFullName()
 
 	if repo == "" {
-		return githubWebhookJob{}, fmt.Errorf("%w: repo full name", ErrMissingField)
+		return githubWebhookJob{}, fmt.Errorf("missing repo full name in webhook payload")
 	}
 
 	return githubWebhookJob{
