@@ -222,21 +222,24 @@ func (m *Metrics) ObserveConsumedGitHubWebhook(ctx context.Context, webhook *git
 	if event == "" {
 		return
 	}
-	attributes := metric.WithAttributes(
-		attribute.String("platform", "github"),
-		attribute.String("event", event),
-		attribute.String("repo", webhook.GetRepo().GetFullName()),
-	)
 	workflowJob := webhook.GetWorkflowJob()
 	if workflowJob == nil {
 		return
 	}
-	m.consumedWebhooks.Add(ctx, 1, attributes)
+	m.consumedWebhooks.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("platform", "github"),
+		attribute.String("event", event),
+		attribute.String("repo", webhook.GetRepo().GetFullName()),
+	))
+	timeAttrs := metric.WithAttributes(
+		attribute.String("platform", "github"),
+		attribute.String("repo", webhook.GetRepo().GetFullName()),
+	)
 	if workflowJob.CompletedAt != nil && workflowJob.StartedAt != nil {
 		runningTime := workflowJob.CompletedAt.Sub(workflowJob.StartedAt.Time).Seconds()
-		m.webhookJobRunningTime.Record(ctx, runningTime, attributes)
+		m.webhookJobRunningTime.Record(ctx, runningTime, timeAttrs)
 	} else if workflowJob.StartedAt != nil && workflowJob.CreatedAt != nil {
 		waitingTime := workflowJob.StartedAt.Sub(workflowJob.CreatedAt.Time).Seconds()
-		m.webhookJobWaitingTime.Record(ctx, waitingTime, attributes)
+		m.webhookJobWaitingTime.Record(ctx, waitingTime, timeAttrs)
 	}
 }
