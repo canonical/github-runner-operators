@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
-	"github.com/stretchr/testify/assert"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
 )
 
 // fakeChannel implements amqpChannel for unit testing without external deps.
@@ -128,8 +128,8 @@ func TestClient_Close_Table(t *testing.T) {
 			expectConnClose: true,
 		},
 		{
-			name:   "nil resources",
-			client: &Client{},
+			name:            "nil resources",
+			client:          &Client{},
 			expectErr:       nil,
 			expectChCalls:   0,
 			expectConnCalls: 0,
