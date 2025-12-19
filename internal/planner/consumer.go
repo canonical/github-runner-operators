@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
@@ -25,16 +26,10 @@ type JobDatabase interface {
 	UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]any) error
 }
 
-type JobConsumer struct {
-	consumer queue.Consumer
-	db       JobDatabase
-
-	metrics *Metrics
-}
-
 const (
 	platform             = "github"
 	githubEventHeaderKey = "X-GitHub-Event"
+	maxBackoff           = 5 * time.Minute
 )
 
 func NewJobConsumer(amqpUri, queueName string, db JobDatabase, metrics *Metrics) *JobConsumer {
@@ -157,21 +152,6 @@ func parseGithubWebhookPayload(ctx context.Context, headers map[string]interface
 	}, nil
 }
 
-// Start begins consuming messages from the AMQP queue and processing them.
-func (c *JobConsumer) Start(ctx context.Context) error {
-	logger.InfoContext(ctx, "start consume workflow jobs from queue")
-	backoff := time.Second
-	for {
-		_ = c.pullMessage(ctx)
-		select {
-		case <-time.After(backoff):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		backoff = min(5*time.Minute, backoff*2)
-	}
-}
-
 // isSelfHosted checks if the job is intended for self-hosted runners.
 func isSelfHosted(job *githubWebhookJob) bool {
 	for _, label := range job.labels {
@@ -180,6 +160,44 @@ func isSelfHosted(job *githubWebhookJob) bool {
 		}
 	}
 	return false
+}
+
+type JobConsumer struct {
+	consumer queue.Consumer
+	db       JobDatabase
+
+	started        sync.Mutex
+	currentBackoff time.Duration
+
+	metrics *Metrics
+}
+
+// Start begins consuming messages from the AMQP queue and processing them.
+func (c *JobConsumer) Start(ctx context.Context) error {
+	logger.InfoContext(ctx, "start consume workflow jobs from queue")
+	c.started.Lock()
+	defer c.started.Unlock()
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		_ = c.pullMessage(ctx)
+	}
+}
+
+func (c *JobConsumer) backoff(ctx context.Context) {
+	if c.currentBackoff == 0 {
+		c.currentBackoff = 1 * time.Second
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(c.currentBackoff):
+	}
+	c.currentBackoff = min(maxBackoff, c.currentBackoff*2)
+}
+
+func (c *JobConsumer) clearBackoff() {
+	c.currentBackoff = 0
 }
 
 // pullMessage receive one message from the AMQP queue and process it.
@@ -204,6 +222,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 
 	job, err := parseGithubWebhookPayload(ctx, msg.Headers, msg.Body)
 	if err != nil {
+		logger.ErrorContext(ctx, "cannot parse webhook payload", "error", err)
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
@@ -228,12 +247,14 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	if err == nil {
 		c.consumedMessage(ctx, &msg)
 		c.metrics.ObserveConsumedGitHubWebhook(ctx, job.payload)
-		return err
+		c.clearBackoff()
+		return nil
 	}
 
 	span.RecordError(err)
 	c.metrics.ObserveWebhookError(ctx, platform)
 	c.requeueMessage(ctx, &msg)
+	c.backoff(ctx)
 	return err
 }
 
