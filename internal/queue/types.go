@@ -77,6 +77,28 @@ func (c *Client) resetChannel(queue string, passive bool) error {
 	return nil
 }
 
+// Close gracefully closes the AMQP channel and connection.
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var firstErr error
+
+	if c.amqpChannel != nil && !c.amqpChannel.IsClosed() {
+		if err := c.amqpChannel.Close(); err != nil {
+			firstErr = err
+		}
+	}
+
+	if c.amqpConnection != nil && !c.amqpConnection.IsClosed() {
+		if err := c.amqpConnection.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
 type AmqpProducer struct {
 	client    *Client
 	queueName string
@@ -89,6 +111,7 @@ type Producer interface {
 type amqpChannel interface {
 	PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (confirmation, error)
 	IsClosed() bool
+	Close() error
 	Confirm(noWait bool) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
@@ -99,6 +122,7 @@ type amqpChannel interface {
 type amqpConnection interface {
 	Channel() (amqpChannel, error)
 	IsClosed() bool
+	Close() error
 }
 
 type confirmation interface {

@@ -325,3 +325,8 @@ func (c *AmqpConsumer) consumeMsgs() (<-chan amqp.Delivery, error) {
 	}
 	return msgs, nil
 }
+
+// Close close the AMQP consumer connection.
+func (c *AmqpConsumer) Close() error {
+	return c.client.Close()
+}

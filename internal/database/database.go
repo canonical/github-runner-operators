@@ -503,3 +503,10 @@ func New(ctx context.Context, uri string) (*Database, error) {
 	}
 	return &Database{conn: conn}, nil
 }
+
+// Close all database connections in the pool.
+func (d *Database) Close() {
+	if d.conn != nil {
+		d.conn.Close()
+	}
+}
