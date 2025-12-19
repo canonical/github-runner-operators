@@ -200,6 +200,40 @@ func TestGetFlavorPressure(t *testing.T) {
 	}
 }
 
+func TestGetFlavorPressureStream(t *testing.T) {
+	tests := []struct {
+		name              string
+		pressures         map[string]int
+		method            string
+		url               string
+		expectedStatus    int
+		expectedPressures map[string]int
+	}{{
+		name:           "streamingNotImplemented",
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus: http.StatusNotImplemented,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{pressures: tt.pressures}
+			server := NewServer(store, NewMetrics(store))
+			token := makeToken()
+
+			req := newRequest(tt.method, tt.url, "", token)
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, req)
+
+			var resp map[string]int
+			json.NewDecoder(w.Body).Decode(&resp)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			assert.Equal(t, tt.expectedPressures, resp)
+		})
+	}
+}
+
 func TestHealth(t *testing.T) {
 	store := &fakeStore{}
 	server := NewServer(store, NewMetrics(store))

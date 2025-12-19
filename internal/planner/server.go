@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -106,25 +107,34 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	var pressures = map[string]int{}
 	var err error
 
-	flavorName := r.PathValue("name")
+	query := r.URL.Query()
+	if strings.ToLower(query.Get("stream")) != "true" {
+		flavorName := r.PathValue("name")
+		pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if len(pressures) == 0 {
+			http.Error(w, "flavor not found", http.StatusNotFound)
+			return
+		}
+
+		respondWithJSON(w, http.StatusOK, pressures)
+	}
+
+	http.Error(w, "streaming not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) getPressures(ctx context.Context, platform string, flavorName string) (map[string]int, error) {
 	switch flavorName {
 	case allFlavorName:
-		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform)
+		return s.store.GetPressures(ctx, flavorPlatform)
 	default:
-		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform, flavorName)
+		return s.store.GetPressures(ctx, flavorPlatform, flavorName)
 	}
-
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	if len(pressures) == 0 {
-		http.Error(w, "flavor not found", http.StatusNotFound)
-		return
-	}
-
-	respondWithJSON(w, http.StatusOK, pressures)
 }
 
 // health handles health check requests.
