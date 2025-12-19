@@ -9,17 +9,24 @@ package planner
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
+	"github.com/google/go-github/v80/github"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
-const flavorPressureMetricName = "github-runner.planner.flavor.pressure"
+const (
+	flavorPressureMetricName        = "github-runner.planner.flavor.pressure"
+	webhookErrorsMetricName         = "github-runner.planner.webhook.errors"
+	consumedWebhooksMetricName      = "github-runner.planner.webhook.consumed"
+	discardedWebhooksMetricName     = "github-runner.planner.webhook.discarded"
+	webhookJobWaitingTimeMetricName = "github-runner.planner.webhook.job.waiting"
+	webhookJobRunningTimeMetricName = "github-runner.planner.webhook.job.running"
+)
 
 // must is a helper function that panics if an error is encountered, else returns the object.
 func must[T any](obj T, err error) T {
@@ -30,38 +37,107 @@ func must[T any](obj T, err error) T {
 }
 
 var (
-	pkg = "github.com/canonical/github-runner-operators/internal/planner"
+	pkg    = "github.com/canonical/github-runner-operators/internal/planner"
+	logger = telemetry.NewLogger(pkg)
+	trace  = otel.Tracer(pkg)
 )
 
 // Metrics encapsulates all OpenTelemetry metrics for the planner service.
 type Metrics struct {
-	mu                   sync.RWMutex
-	store                FlavorStore
-	meter                metric.Meter
-	logger               *slog.Logger
-	flavorPressureMetric metric.Int64ObservableGauge
+	mu    sync.RWMutex
+	store FlavorStore
+	meter metric.Meter
+
+	flavorPressure        metric.Int64ObservableGauge
+	webhookErrors         metric.Int64Counter
+	consumedWebhooks      metric.Int64Counter
+	discardedWebhooks     metric.Int64Counter
+	webhookJobWaitingTime metric.Float64Histogram
+	webhookJobRunningTime metric.Float64Histogram
 }
 
 // NewMetrics initializes the planner metrics and registers the observable gauge.
 func NewMetrics(store FlavorStore) *Metrics {
 	m := &Metrics{
-		store:  store,
-		meter:  otel.Meter(pkg),
-		logger: telemetry.NewLogger(pkg),
+		store: store,
+		meter: otel.Meter(pkg),
 	}
 
-	m.flavorPressureMetric = must(
+	m.flavorPressure = must(
 		m.meter.Int64ObservableGauge(
 			flavorPressureMetricName,
 			metric.WithDescription("The current pressure value for each flavor"),
 			metric.WithUnit("{pressure}"),
 		),
 	)
+	m.webhookErrors = must(
+		m.meter.Int64Counter(
+			webhookErrorsMetricName,
+			metric.WithDescription("Total number of webhook processing errors"),
+			metric.WithUnit("{error}"),
+		),
+	)
+	m.discardedWebhooks = must(
+		m.meter.Int64Counter(
+			discardedWebhooksMetricName,
+			metric.WithDescription("Total number of discarded webhooks"),
+			metric.WithUnit("{webhook}"),
+		),
+	)
+	m.consumedWebhooks = must(
+		m.meter.Int64Counter(
+			consumedWebhooksMetricName,
+			metric.WithDescription("Total number of consumed webhooks"),
+			metric.WithUnit("{webhook}"),
+		),
+	)
+	jobDurationBucket := metric.WithExplicitBucketBoundaries(
+		0,
+		30,
+		60,
+		2*60,
+		3*60,
+		5*60,
+		7.5*60,
+		10*60,
+		15*60,
+		20*60,
+		25*60,
+		30*60,
+		40*60,
+		50*60,
+		60*60,
+		80*60,
+		100*60,
+		120*60,
+		150*60,
+		180*60,
+		240*60,
+		300*60,
+		360*60,
+	)
+	jobWaitingBucket := jobDurationBucket
+	m.webhookJobWaitingTime = must(
+		m.meter.Float64Histogram(
+			webhookJobWaitingTimeMetricName,
+			metric.WithDescription("Histogram of job waiting times from webhook reception to job start"),
+			metric.WithUnit("s"),
+			jobWaitingBucket,
+		),
+	)
+	m.webhookJobRunningTime = must(
+		m.meter.Float64Histogram(
+			webhookJobRunningTimeMetricName,
+			metric.WithDescription("Histogram of job running times from job start to job completion"),
+			metric.WithUnit("s"),
+			jobDurationBucket,
+		),
+	)
 
 	must(
 		m.meter.RegisterCallback(
 			m.collectFlavorPressure,
-			m.flavorPressureMetric,
+			m.flavorPressure,
 		),
 	)
 
@@ -86,7 +162,7 @@ func (m *Metrics) collectFlavorPressure(ctx context.Context, observer metric.Obs
 func (m *Metrics) collectPlatformPressure(ctx context.Context, observer metric.Observer, platform string) {
 	flavors, err := m.store.ListFlavors(ctx, platform)
 	if err != nil {
-		m.logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
+		logger.ErrorContext(ctx, "failed to list flavors for metrics", "platform", platform, "error", err)
 		return
 	}
 
@@ -97,7 +173,7 @@ func (m *Metrics) collectPlatformPressure(ctx context.Context, observer metric.O
 	flavorNames := extractFlavorNames(flavors)
 	pressures, err := m.store.GetPressures(ctx, platform, flavorNames...)
 	if err != nil {
-		m.logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
+		logger.ErrorContext(ctx, "failed to get pressures for metrics", "platform", platform, "error", err)
 		return
 	}
 
@@ -118,12 +194,52 @@ func (m *Metrics) observeFlavorPressures(observer metric.Observer, platform stri
 	for _, f := range flavors {
 		v := pressures[f.Name]
 		observer.ObserveInt64(
-			m.flavorPressureMetric,
+			m.flavorPressure,
 			int64(v),
 			metric.WithAttributes(
 				attribute.String("platform", platform),
 				attribute.String("flavor", f.Name),
 			),
 		)
+	}
+}
+
+func (m *Metrics) ObserveWebhookError(ctx context.Context, platform string) {
+	m.webhookErrors.Add(ctx, 1, metric.WithAttributes(attribute.String("platform", platform)))
+}
+
+func (m *Metrics) ObserveDiscardedWebhook(ctx context.Context, platform string) {
+	m.discardedWebhooks.Add(ctx, 1, metric.WithAttributes(attribute.String("platform", platform)))
+}
+
+func (m *Metrics) ObserveConsumedGitHubWebhook(ctx context.Context, webhook *github.WorkflowJobEvent) {
+	eventMap := map[string]string{
+		"queued":      "created",
+		"in_progress": "started",
+		"completed":   "completed",
+	}
+	event := eventMap[webhook.GetAction()]
+	if event == "" {
+		return
+	}
+	workflowJob := webhook.GetWorkflowJob()
+	if workflowJob == nil {
+		return
+	}
+	m.consumedWebhooks.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("platform", "github"),
+		attribute.String("event", event),
+		attribute.String("repo", webhook.GetRepo().GetFullName()),
+	))
+	timeAttrs := metric.WithAttributes(
+		attribute.String("platform", "github"),
+		attribute.String("repo", webhook.GetRepo().GetFullName()),
+	)
+	if workflowJob.CompletedAt != nil && workflowJob.StartedAt != nil {
+		runningTime := workflowJob.CompletedAt.Sub(workflowJob.StartedAt.Time).Seconds()
+		m.webhookJobRunningTime.Record(ctx, runningTime, timeAttrs)
+	} else if workflowJob.StartedAt != nil && workflowJob.CreatedAt != nil {
+		waitingTime := workflowJob.StartedAt.Sub(workflowJob.CreatedAt.Time).Seconds()
+		m.webhookJobWaitingTime.Record(ctx, waitingTime, timeAttrs)
 	}
 }
