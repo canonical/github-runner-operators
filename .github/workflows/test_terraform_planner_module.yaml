@@ -1,7 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-name: Terraform module tests (webhook-gateway)
+name: Terraform module tests (planner)
 
 on:
   pull_request:
@@ -29,7 +29,7 @@ jobs:
     name: Test Terraform with Juju
     runs-on: self-hosted-linux-amd64-noble-edge
     env:
-      WORKING_DIR: "charms/webhook-gateway-operator/terraform/tests"
+      WORKING_DIR: "charms/planner-operator/terraform/tests"
     steps:
       - uses: actions/checkout@v6.0.1
       - uses: charmed-kubernetes/actions-operator@main
@@ -54,7 +54,7 @@ jobs:
             juju show-controller $(echo $CONTROLLER|tr -d '"') | yq '.[$CONTROLLER]'.details.\"ca-cert\"|tr -d '"'
             echo EOF
           } >> "$GITHUB_ENV"
-      - run: juju add-model stg-deploy-webhook-gateway
+      - run: juju add-model stg-deploy-planner
       - uses: hashicorp/setup-terraform@v3.1.2
       - run: terraform init
         working-directory: ${{env.WORKING_DIR}}

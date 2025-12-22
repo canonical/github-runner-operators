@@ -1,0 +1,42 @@
+<!--
+Copyright 2025 Canonical Ltd.
+See LICENSE file for licensing details.
+-->
+
+# How to upgrade
+
+To upgrade the webhook gateway charm, use the [`juju refresh`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/refresh/) command.
+
+## Before you begin
+
+Before performing an upgrade, ensure that your Juju model is in a healthy state:
+
+```bash
+juju status
+```
+
+Confirm that all units are active and idle.
+
+## Refresh to the latest revision
+
+Upgrade the webhook gateway charm to the latest revision from Charmhub:
+
+```bash
+juju refresh github-runner-webhook-gateway
+```
+
+This command will pull and apply the most recent revision of the webhook gateway charm from the same channel it was originally deployed from.
+
+## Verify the upgrade
+
+After the refresh completes, confirm that the charm and its units are active:
+
+```bash
+juju status github-runner-webhook-gateway
+```
+
+The application status should display as:
+
+```
+Active   github-runner-webhook-gateway/0  ...
+```

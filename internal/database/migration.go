@@ -21,11 +21,14 @@ import (
 var migrationsFS embed.FS
 
 func Migrate(ctx context.Context, dbUri string) error {
-	if !strings.HasPrefix(dbUri, "postgres://") {
-		return errors.New("only postgres uri is supported")
+	if !strings.HasPrefix(dbUri, "postgres://") && !strings.HasPrefix(dbUri, "postgresql://") {
+		return errors.New("only postgres or postgresql uri is supported")
 	}
 
-	dbUri = "pgx5://" + strings.TrimPrefix(dbUri, "postgres://")
+	// Normalize both postgres:// and postgresql:// to pgx5://
+	dbUri = strings.TrimPrefix(dbUri, "postgresql://")
+	dbUri = strings.TrimPrefix(dbUri, "postgres://")
+	dbUri = "pgx5://" + dbUri
 
 	src, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
