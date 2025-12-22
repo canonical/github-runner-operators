@@ -81,6 +81,7 @@ func (f *fakeJobDB) UpdateJobCompleted(ctx context.Context, platform, id string,
 }
 
 func TestClient_Close_Table(t *testing.T) {
+	// Arrange: Setup test error scenarios and expected outcomes.
 	chErr := errors.New("channel close failed")
 	connErr := errors.New("connection close failed")
 
@@ -149,14 +150,15 @@ func TestClient_Close_Table(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			// Act: Close the client.
 			err := tt.client.Close()
+			// Assert: Check error and verify close calls.
 			if tt.expectErr != nil {
 				assert.ErrorIs(t, err, tt.expectErr)
 			} else {
 				assert.NoError(t, err)
 			}
 
-			// Inspect internal fakes when present
 			if fc, ok := tt.client.amqpChannel.(*fakeChannel); ok {
 				assert.Equal(t, tt.expectChCalls, fc.closeCalls)
 				if tt.expectChClosed {
@@ -176,6 +178,7 @@ func TestClient_Close_Table(t *testing.T) {
 func TestAmqpConsumer_Table(t *testing.T) {
 	t.Run("Close delegates to client", func(t *testing.T) {
 		t.Parallel()
+		// Arrange: Setup fake channel and connection.
 		ch := &fakeChannel{isClosedRet: false}
 		conn := &fakeConnection{isClosedRet: false}
 
@@ -189,7 +192,9 @@ func TestAmqpConsumer_Table(t *testing.T) {
 			logger: slog.Default(),
 		}
 
+		// Act: Close the consumer.
 		err := cons.Close()
+		// Assert: Check no error and verify close calls.
 		assert.NoError(t, err)
 		assert.Equal(t, 1, ch.closeCalls)
 		assert.Equal(t, 1, conn.closeCalls)
@@ -197,6 +202,7 @@ func TestAmqpConsumer_Table(t *testing.T) {
 
 	t.Run("Start exits on context cancellation", func(t *testing.T) {
 		t.Parallel()
+		// Arrange: Setup consumer with cancelable context.
 		msgs := make(chan amqp.Delivery)
 		ch := &fakeChannel{isClosedRet: false, consumeCh: msgs}
 		conn := &fakeConnection{isClosedRet: false}
@@ -214,9 +220,11 @@ func TestAmqpConsumer_Table(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		errCh := make(chan error, 1)
 
+		// Act: Start consumer and cancel context.
 		go func() { errCh <- cons.Start(ctx) }()
 		cancel()
 
+		// Assert: Check consumer exits with context.Canceled error.
 		select {
 		case err := <-errCh:
 			assert.ErrorIs(t, err, context.Canceled)
@@ -227,6 +235,7 @@ func TestAmqpConsumer_Table(t *testing.T) {
 }
 
 func TestClient_Close_Idempotent(t *testing.T) {
+	// Arrange: Setup client with open channel and connection.
 	ch := &fakeChannel{isClosedRet: false}
 	conn := &fakeConnection{isClosedRet: false}
 
@@ -235,14 +244,15 @@ func TestClient_Close_Idempotent(t *testing.T) {
 		amqpConnection: conn,
 	}
 
-	// First close should close both
+	// Act: Close the client twice.
 	err := c.Close()
+	// Assert: First close should close both.
 	assert.NoError(t, err)
 	assert.Equal(t, 1, ch.closeCalls)
 	assert.Equal(t, 1, conn.closeCalls)
 
-	// Second close should be a no-op
 	err = c.Close()
+	// Assert: Second close should be a no-op.
 	assert.NoError(t, err)
 	assert.Equal(t, 1, ch.closeCalls)
 	assert.Equal(t, 1, conn.closeCalls)
