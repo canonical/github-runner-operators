@@ -39,17 +39,14 @@ const (
 )
 
 func main() {
-	// Create context that listens for shutdown signals
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Initialize telemetry
 	err := telemetry.Start(ctx, serviceName, version.String())
 	if err != nil {
 		log.Fatalf("failed to start telemetry: %v", err)
 	}
 
-	// Load environment variables
 	uri, found := os.LookupEnv(dbURI)
 	if !found {
 		log.Fatalln(dbURI, "environment variable not set.")
@@ -65,7 +62,6 @@ func main() {
 		log.Fatalln(rabbitMQUriEnvVar, "environment variable not set.")
 	}
 
-	// Connect to database and create server
 	if err := database.Migrate(ctx, uri); err != nil {
 		log.Fatalln("migrate failed:", err)
 	}
@@ -74,18 +70,16 @@ func main() {
 		log.Fatalln("failed to connect to db:", err)
 	}
 
-	// Start AMQP consumer
 	consumer := queue.NewAmqpConsumer(rabbitMQUri, queueName, db, nil)
 	var consumerWg sync.WaitGroup
 	consumerWg.Add(1)
 	go func() {
 		defer consumerWg.Done()
 		if err := consumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("AMQP consumer error: %v", err)
+			log.Fatalf("AMQP consumer error: %v", err)
 		}
 	}()
 
-	// Create HTTP server
 	metrics := planner.NewMetrics(db)
 	handler := planner.NewServer(db, metrics)
 	server := &http.Server{
@@ -93,7 +87,6 @@ func main() {
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
 	}
 
-	// Start HTTP server
 	go func() {
 		log.Println("Starting planner API server on port", port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -101,39 +94,35 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal
 	<-ctx.Done()
 	log.Println("Shutdown signal received, starting graceful shutdown...")
 
-	// Create shutdown context with timeout
+	shutdown(server, consumer, &consumerWg, db)
+	log.Println("Graceful shutdown complete")
+}
+
+func shutdown(server *http.Server, consumer *queue.AmqpConsumer, consumerWg *sync.WaitGroup, db *database.Database) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
-	// Shutdown HTTP server (stop accepting new requests)
 	log.Println("Shutting down HTTP server...")
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	// Wait for consumer to finish processing current message
 	log.Println("Waiting for AMQP consumer to stop...")
 	consumerWg.Wait()
 
-	// Close AMQP connection
 	log.Println("Closing AMQP connection...")
 	if err := consumer.Close(); err != nil {
 		log.Printf("failed to close AMQP consumer: %v", err)
 	}
 
-	// Close database connection pool
 	log.Println("Closing database connection...")
 	db.Close()
 
-	// Shutdown telemetry (flush metrics and traces)
 	log.Println("Shutting down telemetry...")
 	if err := telemetry.Shutdown(shutdownCtx); err != nil {
 		log.Printf("failed to shutdown telemetry: %v", err)
 	}
-
-	log.Println("Graceful shutdown complete")
 }
