@@ -33,6 +33,7 @@ import (
 
 const (
 	DefaultLimit            = 100
+	pressureUpdateSql       = `NOTIFY pressure_update;`
 	updateAssignedFlavorSql = `
 	UPDATE job AS j
 	SET assigned_flavor = (SELECT f.name
@@ -125,7 +126,7 @@ func (d *Database) DeleteAuthToken(ctx context.Context, name string) error {
 // by the flavor-assignment (pressure) algorithm.
 // If a job with the same (platform, id) already exists, it returns ErrExist.
 func (d *Database) AddJob(ctx context.Context, job *Job) error {
-	const sql = `
+	const stmt = `
 	INSERT INTO job (
 	  platform, id, labels, created_at, started_at, completed_at, raw, assigned_flavor
 	)
@@ -151,20 +152,35 @@ func (d *Database) AddJob(ctx context.Context, job *Job) error {
 		raw = map[string]interface{}{}
 	}
 
-	tag, err := d.conn.Exec(ctx, sql, pgx.NamedArgs{
-		"platform":     job.Platform,
-		"id":           job.ID,
-		"labels":       job.Labels,
-		"created_at":   job.CreatedAt,
-		"started_at":   job.StartedAt,
-		"completed_at": job.CompletedAt,
-		"raw":          raw,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to insert job: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrExist
+	batch := &pgx.Batch{}
+	batch.Queue(
+		stmt,
+		pgx.NamedArgs{
+			"platform":     job.Platform,
+			"id":           job.ID,
+			"labels":       job.Labels,
+			"created_at":   job.CreatedAt,
+			"started_at":   job.StartedAt,
+			"completed_at": job.CompletedAt,
+			"raw":          raw,
+		})
+	batch.Queue(pressureUpdateSql)
+	result := d.conn.SendBatch(ctx, batch)
+	defer func() {
+		err := result.Close()
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to close batch execution for inserting job", "error", err)
+		}
+	}()
+
+	for i := range batch.Len() {
+		tag, err := result.Exec()
+		if err != nil {
+			return fmt.Errorf("failed to insert job: %w", err)
+		}
+		if i == 0 && tag.RowsAffected() == 0 {
+			return ErrExist
+		}
 	}
 	return nil
 }
@@ -267,17 +283,32 @@ func (d *Database) UpdateJobCompleted(ctx context.Context, platform, id string, 
 		WHERE platform = @platform AND id = @id;
 	`
 
-	tag, err := d.conn.Exec(ctx, stmt, pgx.NamedArgs{
-		"platform":     platform,
-		"id":           id,
-		"completed_at": completedAt,
-		"raw":          raw,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to update job completed_at time: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotExist
+	batch := &pgx.Batch{}
+	batch.Queue(
+		stmt,
+		pgx.NamedArgs{
+			"platform":     platform,
+			"id":           id,
+			"completed_at": completedAt,
+			"raw":          raw,
+		})
+	batch.Queue(pressureUpdateSql)
+	result := d.conn.SendBatch(ctx, batch)
+	defer func() {
+		err := result.Close()
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to close batch execution for updating job completed_at time", "error", err)
+		}
+	}()
+
+	for i := range batch.Len() {
+		tag, err := result.Exec()
+		if err != nil {
+			return fmt.Errorf("failed to update job completed_at time: %w", err)
+		}
+		if i == 0 && tag.RowsAffected() == 0 {
+			return ErrNotExist
+		}
 	}
 	return nil
 }
@@ -302,7 +333,7 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 		"minimum_pressure": flavor.MinimumPressure,
 	})
 	batch.Queue(updateAssignedFlavorSql)
-
+	batch.Queue(pressureUpdateSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -344,6 +375,7 @@ func (d *Database) setFlavorIsDisabled(ctx context.Context, platform, name strin
 		"is_disabled": isDisabled,
 	})
 	batch.Queue(updateAssignedFlavorSql)
+	batch.Queue(pressureUpdateSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -409,6 +441,7 @@ func (d *Database) DeleteFlavor(ctx context.Context, platform, name string) erro
 		"name":     name,
 	})
 	batch.Queue(updateAssignedFlavorSql)
+	batch.Queue(pressureUpdateSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
