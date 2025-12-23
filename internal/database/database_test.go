@@ -101,6 +101,15 @@ func teardownDatabase(t *testing.T) {
 	}
 }
 
+func setupDatabaseEventListener(t *testing.T) *DatabaseEventListener {
+	if globalTestDatabase == nil {
+		t.Fatal("test database not configured")
+	}
+	listener, err := NewDatabaseEventListener(t.Context(), globalTestDatabase.uri)
+	assert.NoError(t, err)
+	return listener
+}
+
 func TestDatabase_CreateAuthToken(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
@@ -163,6 +172,10 @@ func TestDatabase_AddJob(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
+	listener := setupDatabaseEventListener(t)
+	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, ch, 0)
 
 	job := Job{
 		Platform:  "github",
@@ -172,6 +185,12 @@ func TestDatabase_AddJob(t *testing.T) {
 		Raw:       map[string]interface{}{"queued": "queued"},
 	}
 	assert.NoError(t, db.AddJob(ctx, &job))
+
+	value, ok := <-ch
+	assert.True(t, ok)
+	assert.NotNil(t, value)
+	// Only one notification should be received, the channel should now be empty.
+	assert.Len(t, ch, 0)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -401,7 +420,19 @@ func TestDatabase_UpdateJobCompleted(t *testing.T) {
 	completedAt := time.Date(2025, time.January, 1, 2, 0, 0, 0, time.Local)
 
 	assert.NoError(t, db.AddJob(ctx, &job))
+
+	listener := setupDatabaseEventListener(t)
+	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, ch, 0)
+
 	assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
+
+	value, ok := <-ch
+	assert.True(t, ok)
+	assert.NotNil(t, value)
+	// Only one notification should be received, the channel should now be empty.
+	assert.Len(t, ch, 0)
 
 	job.CompletedAt = &completedAt
 	job.Raw["completed"] = "completed"
@@ -445,7 +476,19 @@ func TestDatabase_AddFlavor(t *testing.T) {
 	}
 
 	assert.NoError(t, db.AddJob(ctx, &job))
+
+	listener := setupDatabaseEventListener(t)
+	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, ch, 0)
+
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+
+	value, ok := <-ch
+	assert.True(t, ok)
+	assert.NotNil(t, value)
+	// Only one notification should be received, the channel should now be empty.
+	assert.Len(t, ch, 0)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -496,7 +539,19 @@ func TestDatabase_DisableFlavor(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+
+	listener := setupDatabaseEventListener(t)
+	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, ch, 0)
+
 	assert.NoError(t, db.DisableFlavor(ctx, flavor.Platform, flavor.Name))
+
+	value, ok := <-ch
+	assert.True(t, ok)
+	assert.NotNil(t, value)
+	// Only one notification should be received, the channel should now be empty.
+	assert.Len(t, ch, 0)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -560,7 +615,18 @@ func TestDatabase_DeleteFlavor(t *testing.T) {
 	assert.Equal(t, flavorSmall.Name, *jobs[0].AssignedFlavor)
 	assert.Equal(t, flavorSmall.Name, *jobs[1].AssignedFlavor)
 
+	listener := setupDatabaseEventListener(t)
+	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, ch, 0)
+
 	assert.NoError(t, db.DeleteFlavor(ctx, flavorSmall.Platform, flavorSmall.Name))
+
+	value, ok := <-ch
+	assert.True(t, ok)
+	assert.NotNil(t, value)
+	// Only one notification should be received, the channel should now be empty.
+	assert.Len(t, ch, 0)
 
 	jobs, err = db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)

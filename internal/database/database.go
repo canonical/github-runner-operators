@@ -32,9 +32,11 @@ import (
 )
 
 const (
-	DefaultLimit            = 100
-	pressureUpdateSql       = `NOTIFY pressure_update;`
-	updateAssignedFlavorSql = `
+	DefaultLimit              = 100
+	channelBufferSize         = 16
+	pressureChangeChannelName = `pressure_change`
+	pressureChangeSql         = `NOTIFY ` + pressureChangeChannelName + `;`
+	updateAssignedFlavorSql   = `
 	UPDATE job AS j
 	SET assigned_flavor = (SELECT f.name
 						   FROM flavor AS f
@@ -67,6 +69,11 @@ type ListJobOptions struct {
 	OnlyNotCompleted bool
 	CreatedAfter     time.Time
 	Limit            int
+}
+
+type DatabaseEventListener struct {
+	// pgx.Conn is used, since pgxpool.Pool.Conn does not support LISTEN/NOTIFY.
+	conn *pgx.Conn
 }
 
 // CreateAuthToken creates an authentication token for the given name.
@@ -164,7 +171,7 @@ func (d *Database) AddJob(ctx context.Context, job *Job) error {
 			"completed_at": job.CompletedAt,
 			"raw":          raw,
 		})
-	batch.Queue(pressureUpdateSql)
+	batch.Queue(pressureChangeSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -292,7 +299,7 @@ func (d *Database) UpdateJobCompleted(ctx context.Context, platform, id string, 
 			"completed_at": completedAt,
 			"raw":          raw,
 		})
-	batch.Queue(pressureUpdateSql)
+	batch.Queue(pressureChangeSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -333,7 +340,7 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 		"minimum_pressure": flavor.MinimumPressure,
 	})
 	batch.Queue(updateAssignedFlavorSql)
-	batch.Queue(pressureUpdateSql)
+	batch.Queue(pressureChangeSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -375,7 +382,7 @@ func (d *Database) setFlavorIsDisabled(ctx context.Context, platform, name strin
 		"is_disabled": isDisabled,
 	})
 	batch.Queue(updateAssignedFlavorSql)
-	batch.Queue(pressureUpdateSql)
+	batch.Queue(pressureChangeSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -441,7 +448,7 @@ func (d *Database) DeleteFlavor(ctx context.Context, platform, name string) erro
 		"name":     name,
 	})
 	batch.Queue(updateAssignedFlavorSql)
-	batch.Queue(pressureUpdateSql)
+	batch.Queue(pressureChangeSql)
 	result := d.conn.SendBatch(ctx, batch)
 	defer func() {
 		err := result.Close()
@@ -535,4 +542,42 @@ func New(ctx context.Context, uri string) (*Database, error) {
 		return nil, fmt.Errorf("failed to connect to the database: %v", err)
 	}
 	return &Database{conn: conn}, nil
+}
+
+// GetPressureUpdateEvents returns a channel that sends signal on pressure updates.
+func (d *DatabaseEventListener) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	_, err := d.conn.Exec(ctx, "LISTEN "+pressureChangeChannelName+";")
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen for pressure change events: %w", err)
+	}
+
+	ch := make(chan struct{}, channelBufferSize)
+	go d.waitForNotification(ctx, ch)
+	return ch, nil
+}
+
+func (d *DatabaseEventListener) waitForNotification(ctx context.Context, ch chan<- struct{}) {
+	defer d.conn.Close(ctx)
+	defer close(ch)
+
+	for {
+		_, err := d.conn.WaitForNotification(ctx)
+		if err != nil {
+			return
+		}
+		ch <- struct{}{}
+	}
+}
+
+func (d *DatabaseEventListener) Close(ctx context.Context) error {
+	return d.conn.Close(ctx)
+}
+
+// NewDatabaseEventListener creates a new DatabaseEventListener.
+func NewDatabaseEventListener(ctx context.Context, uri string) (*DatabaseEventListener, error) {
+	conn, err := pgx.Connect(ctx, uri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to the database for event listener: %w", err)
+	}
+	return &DatabaseEventListener{conn: conn}, nil
 }
