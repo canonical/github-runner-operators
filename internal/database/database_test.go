@@ -92,22 +92,13 @@ func setupDatabase(t *testing.T) *Database {
 	conn, err := globalTestDatabase.Acquire(ctx)
 	assert.NoError(t, err)
 
-	return &Database{conn: conn}
+	return &Database{uri: globalTestDatabase.uri, conn: conn}
 }
 
 func teardownDatabase(t *testing.T) {
 	if globalTestDatabase != nil {
 		assert.NoError(t, globalTestDatabase.Release(t.Context()))
 	}
-}
-
-func setupDatabaseEventListener(t *testing.T) *DatabaseEventListener {
-	if globalTestDatabase == nil {
-		t.Fatal("test database not configured")
-	}
-	listener, err := NewDatabaseEventListener(t.Context(), globalTestDatabase.uri)
-	assert.NoError(t, err)
-	return listener
 }
 
 func TestDatabase_CreateAuthToken(t *testing.T) {
@@ -172,8 +163,7 @@ func TestDatabase_AddJob(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
-	listener := setupDatabaseEventListener(t)
-	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	ch, err := db.SubscribeToPressureUpdate(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, ch, 0)
 
@@ -421,8 +411,7 @@ func TestDatabase_UpdateJobCompleted(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 
-	listener := setupDatabaseEventListener(t)
-	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	ch, err := db.SubscribeToPressureUpdate(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, ch, 0)
 
@@ -477,8 +466,7 @@ func TestDatabase_AddFlavor(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 
-	listener := setupDatabaseEventListener(t)
-	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	ch, err := db.SubscribeToPressureUpdate(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, ch, 0)
 
@@ -540,8 +528,7 @@ func TestDatabase_DisableFlavor(t *testing.T) {
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
 
-	listener := setupDatabaseEventListener(t)
-	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	ch, err := db.SubscribeToPressureUpdate(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, ch, 0)
 
@@ -615,8 +602,7 @@ func TestDatabase_DeleteFlavor(t *testing.T) {
 	assert.Equal(t, flavorSmall.Name, *jobs[0].AssignedFlavor)
 	assert.Equal(t, flavorSmall.Name, *jobs[1].AssignedFlavor)
 
-	listener := setupDatabaseEventListener(t)
-	ch, err := listener.SubscribeToPressureUpdate(ctx)
+	ch, err := db.SubscribeToPressureUpdate(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, ch, 0)
 

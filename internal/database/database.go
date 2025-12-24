@@ -61,6 +61,7 @@ var (
 )
 
 type Database struct {
+	uri  string
 	conn *pgxpool.Pool
 }
 
@@ -535,49 +536,30 @@ func (d *Database) GetPressures(ctx context.Context, platform string, flavors ..
 	return pressures, nil
 }
 
-// New creates a new Database instance
-func New(ctx context.Context, uri string) (*Database, error) {
-	conn, err := pgxpool.New(ctx, uri)
+func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	// pgxpool does not support LISTEN/NOTIFY, therefore a separate connection is created.
+	conn, err := pgx.Connect(ctx, d.uri)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to the database: %v", err)
+		return nil, fmt.Errorf("failed to connect to the database for pressure change event listener: %w", err)
 	}
-	return &Database{conn: conn}, nil
-}
 
-// GetPressureUpdateEvents returns a channel that sends signal on pressure updates.
-func (d *DatabaseEventListener) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
-	_, err := d.conn.Exec(ctx, "LISTEN "+pressureChangeChannelName+";")
+	_, err = conn.Exec(ctx, "LISTEN "+pressureChangeChannelName+";")
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen for pressure change events: %w", err)
 	}
 
 	ch := make(chan struct{}, channelBufferSize)
-	go d.waitForNotification(ctx, ch)
-	return ch, nil
-}
+	go func() {
+		defer conn.Close(ctx)
+		defer close(ch)
 
-func (d *DatabaseEventListener) waitForNotification(ctx context.Context, ch chan<- struct{}) {
-	defer d.conn.Close(ctx)
-	defer close(ch)
-
-	for {
-		_, err := d.conn.WaitForNotification(ctx)
-		if err != nil {
-			return
+		for {
+			_, err := conn.WaitForNotification(ctx)
+			if err != nil {
+				return
+			}
+			ch <- struct{}{}
 		}
-		ch <- struct{}{}
-	}
-}
-
-func (d *DatabaseEventListener) Close(ctx context.Context) error {
-	return d.conn.Close(ctx)
-}
-
-// NewDatabaseEventListener creates a new DatabaseEventListener.
-func NewDatabaseEventListener(ctx context.Context, uri string) (*DatabaseEventListener, error) {
-	conn, err := pgx.Connect(ctx, uri)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to the database for event listener: %w", err)
-	}
-	return &DatabaseEventListener{conn: conn}, nil
+	}()
+	return ch, nil
 }
