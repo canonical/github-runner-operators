@@ -85,6 +85,11 @@ func (ch *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) err
 	return nil
 }
 
+func (ch *MockAmqpChannel) Close() error {
+	ch.isclosed = true
+	return nil
+}
+
 type MockConfirmation struct {
 	done <-chan struct{}
 	ack  bool
@@ -119,6 +124,11 @@ func (m *MockAmqpConnection) Channel() (amqpChannel, error) {
 
 func (m *MockAmqpConnection) IsClosed() bool {
 	return m.isclosed
+}
+
+func (m *MockAmqpConnection) Close() error {
+	m.isclosed = true
+	return nil
 }
 
 func TestPush(t *testing.T) {
