@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -32,6 +34,7 @@ type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
+	SubscribeToPressureUpdate(ctx context.Context) (chan struct{}, error)
 }
 
 // Server holds dependencies for the planner HTTP handlers.
@@ -107,25 +110,65 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	var pressures = map[string]int{}
 	var err error
 
+	w.Header().Set("Cache-Control", "no-cache")
+
 	query := r.URL.Query()
-	if strings.ToLower(query.Get("stream")) != "true" {
-		flavorName := r.PathValue("name")
-		pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
+	flavorName := r.PathValue("name")
+	pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
 
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		if len(pressures) == 0 {
-			http.Error(w, "flavor not found", http.StatusNotFound)
-			return
-		}
-
-		respondWithJSON(w, http.StatusOK, pressures)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
+		return
 	}
 
-	http.Error(w, "streaming not implemented", http.StatusNotImplemented)
+	if len(pressures) == 0 {
+		http.Error(w, "flavor not found", http.StatusNotFound)
+		return
+	}
+
+	if strings.ToLower(query.Get("stream")) != "true" {
+		respondWithJSON(w, http.StatusOK, pressures)
+		return
+	}
+
+	// Handle streaming requests
+	if r.ProtoMajor < 2 {
+		http.Error(w, "streaming requires HTTP/2", http.StatusHTTPVersionNotSupported)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	ch, err := s.store.SubscribeToPressureUpdate(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	for {
+		_, ok := <-ch
+		if !ok {
+			slog.InfoContext(r.Context(), "pressure update channel closed")
+			return
+		}
+
+		flavorName := r.PathValue("name")
+		newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
+			continue
+		}
+		if !maps.Equal(pressures, newPressures) {
+			json.NewEncoder(w).Encode(newPressures)
+			flusher.Flush()
+		}
+		pressures = newPressures
+	}
 }
 
 func (s *Server) getPressures(ctx context.Context, platform string, flavorName string) (map[string]int, error) {
