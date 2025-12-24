@@ -563,3 +563,10 @@ func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct
 	}()
 	return ch, nil
 }
+
+// Close closes all database connections in the pool.
+func (d *Database) Close() {
+	if d.conn != nil {
+		d.conn.Close()
+	}
+}

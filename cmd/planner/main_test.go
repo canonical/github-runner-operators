@@ -15,6 +15,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -74,6 +75,19 @@ func TestMain_FlavorPressure(t *testing.T) {
 		press := ctx.getFlavorPressure(flavor)
 		return press[flavor] > pressure
 	}, 20*time.Minute, 500*time.Millisecond)
+
+	// Trigger graceful shutdown and verify services stop cleanly
+	ctx.shutdownMain()
+	ctx.waitForHTTPDown("http://localhost:"+ctx.port+"/health", 30*time.Second)
+
+	// Verify AMQP consumer is stopped by checking queue depth increases after publish
+	beforeDepth := ctx.getQueueDepth()
+	body2 := ctx.constructWebhookPayload(labels)
+	ctx.publishAndWaitAck(body2)
+
+	assert.Eventually(t, func() bool {
+		return ctx.getQueueDepth() >= beforeDepth+1
+	}, 10*time.Second, 200*time.Millisecond, "expected queue depth to increase after shutdown (consumer stopped)")
 }
 
 // constructWebhookPayload creates a webhook payload with the given labels.
@@ -153,6 +167,36 @@ func (ctx *testContext) publishAndWaitAck(body []byte) {
 	}
 }
 
+// getQueueDepth returns the current number of messages in the queue via passive declare.
+func (ctx *testContext) getQueueDepth() int {
+	ctx.t.Helper()
+
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(ctx.t, err, "open channel")
+	defer ch.Close()
+
+	q, err := ch.QueueDeclarePassive(
+		ctx.queueName,
+		true,  // durable
+		false, // auto-delete
+		false, // exclusive
+		false, // no-wait
+		nil,
+	)
+	require.NoError(ctx.t, err, "declare passive queue")
+	return q.Messages
+}
+
+// shutdownMain sends SIGTERM to trigger graceful shutdown in main().
+func (ctx *testContext) shutdownMain() {
+	ctx.t.Helper()
+	_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+}
+
 // createFlavor sends a create flavor request to the server
 func (ctx *testContext) createFlavor(flavor, platform string, labels []string, priority int) int {
 	ctx.t.Helper()
@@ -215,6 +259,23 @@ func (ctx *testContext) waitForHTTP(url string, timeout time.Duration) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	require.Fail(ctx.t, "server did not start responding", "server did not start responding at %s within %s", url, timeout)
+}
+
+// waitForHTTPDown waits until the server stops responding (connection errors).
+func (ctx *testContext) waitForHTTPDown(url string, timeout time.Duration) {
+	ctx.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err != nil {
+			return
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.Fail(ctx.t, "server did not stop", "server still responding at %s after %s", url, timeout)
 }
 
 // randString generates a random string of the given length.

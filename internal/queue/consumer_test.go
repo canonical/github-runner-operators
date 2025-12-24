@@ -104,6 +104,10 @@ func (c *fakeConn) Channel() (amqpChannel, error) {
 }
 
 func (c *fakeConn) IsClosed() bool { return c.closed }
+func (c *fakeConn) Close() error {
+	c.closed = true
+	return nil
+}
 
 type fakeChan struct {
 	closed          bool
@@ -139,6 +143,11 @@ func (ch *fakeChan) Consume(queue, consumer string, autoAck, exclusive, noLocal,
 }
 
 func (ch *fakeChan) Qos(prefetchCount, prefetchSize int, global bool) error {
+	return nil
+}
+
+func (ch *fakeChan) Close() error {
+	ch.closed = true
 	return nil
 }
 
