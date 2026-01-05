@@ -3,7 +3,6 @@ package queue
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -194,49 +193,13 @@ func TestAmqpConsumer_Table(t *testing.T) {
 				amqpChannel:    ch,
 				amqpConnection: conn,
 			},
-			db:     &fakeJobDB{},
-			logger: slog.Default(),
+			channel: make(<-chan amqp.Delivery),
 		}
 
 		err := cons.Close()
 		assert.NoError(t, err)
 		assert.Equal(t, 1, ch.closeCalls)
 		assert.Equal(t, 1, conn.closeCalls)
-	})
-
-	t.Run("Start exits on context cancellation", func(t *testing.T) {
-		t.Parallel()
-		/*
-			arrange: Setup consumer with cancelable context.
-			act: Start consumer and cancel context.
-			assert: Check consumer exits with context.Canceled error.
-		*/
-		msgs := make(chan amqp.Delivery)
-		ch := &fakeChannel{isClosedRet: false, consumeCh: msgs}
-		conn := &fakeConnection{isClosedRet: false}
-
-		cons := &AmqpConsumer{
-			queueName: "test-queue",
-			client: &Client{
-				amqpChannel:    ch,
-				amqpConnection: conn,
-			},
-			db:     &fakeJobDB{},
-			logger: slog.Default(),
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		errCh := make(chan error, 1)
-
-		go func() { errCh <- cons.Start(ctx) }()
-		cancel()
-
-		select {
-		case err := <-errCh:
-			assert.ErrorIs(t, err, context.Canceled)
-		case <-time.After(2 * time.Second):
-			t.Fatal("consumer did not exit on context cancellation")
-		}
 	})
 }
 

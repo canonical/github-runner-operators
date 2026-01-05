@@ -23,7 +23,6 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/planner"
-	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -70,7 +69,10 @@ func main() {
 		log.Fatalln("failed to connect to db:", err)
 	}
 
-	consumer := queue.NewAmqpConsumer(rabbitMQUri, queueName, db, nil)
+	metrics := planner.NewMetrics(db)
+
+	consumer := planner.NewJobConsumer(rabbitMQUri, queueName, db, metrics)
+
 	var consumerWg sync.WaitGroup
 	consumerWg.Add(1)
 	go func() {
@@ -80,7 +82,6 @@ func main() {
 		}
 	}()
 
-	metrics := planner.NewMetrics(db)
 	handler := planner.NewServer(db, metrics)
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -101,7 +102,7 @@ func main() {
 	log.Println("Graceful shutdown complete")
 }
 
-func shutdown(server *http.Server, consumer *queue.AmqpConsumer, consumerWg *sync.WaitGroup, db *database.Database) {
+func shutdown(server *http.Server, consumer *planner.JobConsumer, consumerWg *sync.WaitGroup, db *database.Database) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
