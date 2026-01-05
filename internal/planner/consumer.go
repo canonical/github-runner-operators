@@ -185,6 +185,10 @@ func (c *JobConsumer) Start(ctx context.Context) error {
 	}
 }
 
+func (c *JobConsumer) Close() error {
+	return c.consumer.Close()
+}
+
 func (c *JobConsumer) backoff(ctx context.Context) {
 	if c.currentBackoff == 0 {
 		c.currentBackoff = 1 * time.Second

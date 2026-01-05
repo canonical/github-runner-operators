@@ -157,4 +157,5 @@ func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) 
 
 type Consumer interface {
 	Pull(ctx context.Context) (amqp.Delivery, error)
+	Close() error
 }
