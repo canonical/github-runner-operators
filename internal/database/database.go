@@ -564,6 +564,15 @@ func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct
 	return ch, nil
 }
 
+// New creates a new Database instance
+func New(ctx context.Context, uri string) (*Database, error) {
+	conn, err := pgxpool.New(ctx, uri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to the database: %v", err)
+	}
+	return &Database{conn: conn}, nil
+}
+
 // Close closes all database connections in the pool.
 func (d *Database) Close() {
 	if d.conn != nil {
