@@ -5,7 +5,7 @@ go 1.24.6
 require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/go-github/v80 v80.0.0
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/stretchr/testify v1.11.1
