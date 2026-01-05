@@ -245,17 +245,24 @@ func TestGetFlavorPressureStream(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{pressureChange: make(chan struct{}, 10)}
+			store := &fakeStore{pressures: tt.pressuresStream[0], pressureChange: make(chan struct{}, 10)}
 			server := NewServer(store, NewMetrics(store))
 			token := makeToken()
 
-			req := newHTTP2Request(tt.method, tt.url, "", token)
+			ts := httptest.NewUnstartedServer(server)
+			ts.EnableHTTP2 = true
+			ts.StartTLS()
+			defer ts.Close()
+
+			req := newHTTP2Request(tt.method, ts.URL+tt.url, "", token)
 			ctx, cancel := context.WithCancel(req.Context())
 			req = req.WithContext(ctx)
-			w := httptest.NewRecorder()
-			go server.ServeHTTP(w, req)
 
-			for _, pressures := range tt.pressuresStream {
+			resp, err := ts.Client().Get(ts.URL + tt.url)
+			assert.NoError(t, err)
+			defer resp.Body.Close()
+
+			for _, pressures := range tt.pressuresStream[1:] {
 				// Simulate pressure update
 				store.pressures = pressures
 				// Notify the server about the pressure change
@@ -266,10 +273,10 @@ func TestGetFlavorPressureStream(t *testing.T) {
 			time.Sleep(5 * time.Second)
 			cancel()
 
-			var resp map[string]int
-			json.NewDecoder(w.Body).Decode(&resp)
+			var result map[string]int
+			json.NewDecoder(resp.Body).Decode(&result)
 
-			assert.Equal(t, tt.expectedStatus[0], w.Code)
+			assert.Equal(t, tt.expectedStatus[0], resp.StatusCode)
 			// assert for each pressure update
 		})
 	}
