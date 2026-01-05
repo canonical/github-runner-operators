@@ -82,6 +82,11 @@ func (m *MockAmqpConnectionConsumer) IsClosed() bool {
 	return m.isclosed
 }
 
+func (m *MockAmqpConnectionConsumer) Close() error {
+	m.isclosed = true
+	return nil
+}
+
 func TestPull(t *testing.T) {
 	/*
 		arrange: create a consumer with a fake amqp connection and a message in the channel

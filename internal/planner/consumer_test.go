@@ -111,6 +111,10 @@ func (c *fakeAmqpConsumer) Pull(ctx context.Context) (amqp.Delivery, error) {
 	}
 }
 
+func (c *fakeAmqpConsumer) Close() error {
+	return nil
+}
+
 func TestConsumer(t *testing.T) {
 	/*
 		arrange: setup test environment with fake database, consumer, and metrics
