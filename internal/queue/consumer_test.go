@@ -343,7 +343,7 @@ func TestPullQueueDeclare(t *testing.T) {
 	/*
 		arrange: create a consumer with no amqp channel
 		act: pull a message from the queue
-		assert: channel is established and queue is declared
+		assert: channel is established and exchange and queue is declared
 	*/
 	msgChannel := make(chan amqp.Delivery, 1)
 	msgChannel <- amqp.Delivery{Body: []byte("TestMessage")}
@@ -360,38 +360,50 @@ func TestPullQueueDeclare(t *testing.T) {
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		queueName: queueName,
+		exchangeName: exchangeName,
+		queueName:    queueName,
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
 
 	assert.NoError(t, err)
 	assert.True(t, mockAmqpChannelConsumer.confirmMode, "expected channel to be in confirm mode")
+	assert.Equal(t, exchangeName, mockAmqpChannelConsumer.exchangeName, "expected exchange name to be "+exchangeName)
 	assert.Equal(t, queueName, mockAmqpChannelConsumer.queueName, "expected queue name to be "+queueName)
 	assert.True(t, mockAmqpChannelConsumer.queueDurable, "expected queue to be durable")
 }
 
 func TestPullQueueDeclareFailure(t *testing.T) {
 	/*
-		arrange: create a consumer with no amqp channel where the queue declare fails
+		arrange: create a consumer with no amqp channel where a declaration fails
 		act: pull a message from the queue
 		assert: pull returns an error
 	*/
 	tests := []struct {
 		name               string
+		exchangeName       string
 		queueName          string
 		mockAmqpConnection *MockAmqpConnectionConsumer
 		errMsg             string
 	}{
 		{
+			name:               "exchange declare error",
+			exchangeName:       exchangeWithDeclareError,
+			queueName:          queueName,
+			mockAmqpConnection: &MockAmqpConnectionConsumer{},
+			errMsg:             "exchange declare error",
+		},
+		{
 			name:               "queue declare error",
+			exchangeName:       exchangeName,
 			queueName:          queueWithDeclareError,
 			mockAmqpConnection: &MockAmqpConnectionConsumer{},
 			errMsg:             "queue declare error",
 		},
 		{
-			name:      "confirm error",
-			queueName: queueName,
+			name:         "confirm error",
+			exchangeName: exchangeWithDeclareError,
+			queueName:    queueName,
 			mockAmqpConnection: &MockAmqpConnectionConsumer{
 				confirmModeError: true,
 			},
@@ -406,7 +418,8 @@ func TestPullQueueDeclareFailure(t *testing.T) {
 					amqpChannel:    nil,
 					amqpConnection: tt.mockAmqpConnection,
 				},
-				queueName: tt.queueName,
+				exchangeName: tt.exchangeName,
+				queueName:    tt.queueName,
 			}
 
 			_, err := amqpConsumer.Pull(context.Background())
@@ -477,11 +490,13 @@ func TestNewAmqpConsumer(t *testing.T) {
 		assert: consumer is properly initialized
 	*/
 	uri := "amqp://guest:guest@localhost:5672/"
+	exchangeName := "test-exchange"
 	queueName := "test-queue"
 
-	consumer := NewAmqpConsumer(uri, queueName)
+	consumer := NewAmqpConsumer(uri, exchangeName, queueName)
 
 	assert.NotNil(t, consumer)
+	assert.Equal(t, exchangeName, consumer.exchangeName)
 	assert.Equal(t, queueName, consumer.queueName)
 	assert.NotNil(t, consumer.client)
 	assert.Equal(t, uri, consumer.client.uri)

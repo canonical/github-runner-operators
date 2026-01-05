@@ -18,15 +18,17 @@ import (
 
 // AmqpConsumer is an AMQP consumer for workflow job events.
 type AmqpConsumer struct {
-	client    *Client
-	queueName string
-	channel   <-chan amqp.Delivery
+	client       *Client
+	exchangeName string
+	queueName    string
+	channel      <-chan amqp.Delivery
 }
 
 // NewAmqpConsumer creates a new AmqpConsumer with the given dependencies.
-func NewAmqpConsumer(uri, queueName string) *AmqpConsumer {
+func NewAmqpConsumer(uri, exchangeName string, queueName string) *AmqpConsumer {
 	return &AmqpConsumer{
-		queueName: queueName,
+		exchangeName: exchangeName,
+		queueName:    queueName,
 		client: &Client{
 			uri:         uri,
 			connectFunc: amqpConnect,
@@ -107,6 +109,11 @@ func (c *AmqpConsumer) ensureAmqpChannel() error {
 
 	if c.client.amqpChannel == nil || c.client.amqpChannel.IsClosed() {
 		err := c.client.resetChannel()
+		if err != nil {
+			return err
+		}
+
+		err = c.client.declareExchange(c.exchangeName)
 		if err != nil {
 			return err
 		}
