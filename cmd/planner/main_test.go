@@ -95,6 +95,9 @@ func (ctx *testContext) constructWebhookPayload(labels []string) []byte {
 	jobID := rand.Intn(1000)
 	payload := map[string]any{
 		"action": "queued",
+		"repository": map[string]any{
+			"full_name": "canonical/test",
+		},
 		"workflow_job": map[string]any{
 			"id":         jobID,
 			"labels":     labels,
