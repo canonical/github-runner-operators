@@ -14,25 +14,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const queueName = "test-queue"
-const queueWithPublishNoAck = "queue-with-publish-no-ack"
-const queueWithPublishError = "queue-with-publish-error"
-const queueWithPublishHangs = "queue-with-publish-hangs"
-const queueWithDeclareError = "queue-with-declare-error"
+const exchangeName = "test-exchange"
+const exchangeWithDeclareError = "exchange-with-declare-error"
 
+const exchangeWithPublishNoAck = "exchange-with-publish-no-ack"
+const exchangeWithPublishError = "exchange-with-publish-error"
+const exchangeWithPublishHangs = "exchange-with-publish-hangs"
+
+// TODO : Put this in a helper file because it is also used by consumer tests
 type MockAmqpChannel struct {
 	msgs             [][]byte
 	headers          []map[string]interface{}
 	isclosed         bool
 	confirmMode      bool
 	queueName        string
+	exchangeName     string
 	queueDurable     bool
 	confirmModeError bool
 }
 
 func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _ bool, msg amqp.Publishing) (confirmation, error) {
 
-	if key == queueWithPublishError {
+	if key == exchangeWithPublishError {
 		return nil, errors.New("publish error")
 	}
 	ch.msgs = append(ch.msgs, msg.Body)
@@ -40,11 +43,11 @@ func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _
 
 	done_ch := make(chan struct{}, 1)
 
-	if key != queueWithPublishHangs {
+	if key != exchangeWithPublishHangs {
 		done_ch <- struct{}{}
 	}
 
-	ack := key != queueWithPublishNoAck
+	ack := key != exchangeWithPublishNoAck
 	confirmation := &MockConfirmation{
 		done: done_ch,
 		ack:  ack,
@@ -61,6 +64,14 @@ func (ch *MockAmqpChannel) Confirm(_ bool) error {
 		return errors.New("confirm error")
 	}
 	ch.confirmMode = true
+	return nil
+}
+
+func (ch *MockAmqpChannel) ExchangeDeclare(name string, _ string, _, _, _, _ bool, _ amqp.Table) error {
+	if name == exchangeWithDeclareError {
+		return errors.New("exchange declare error")
+	}
+	ch.exchangeName = name
 	return nil
 }
 
@@ -145,7 +156,7 @@ func TestPush(t *testing.T) {
 				amqpChannel: mockAmqpChannel,
 			},
 		},
-		queueName: queueName,
+		exchangeName: exchangeName,
 	}
 
 	headers := map[string]interface{}{"header1": "value1"}
@@ -169,7 +180,7 @@ func TestPushFailure(t *testing.T) {
 	}{
 		{
 			name:      "message is not acked",
-			queueName: queueWithPublishNoAck,
+			queueName: exchangeWithPublishNoAck,
 			errMsg:    "confirmation not acknowledged",
 			context:   context.Background(),
 		},
@@ -180,12 +191,12 @@ func TestPushFailure(t *testing.T) {
 				cancel()
 				return ctx
 			}(),
-			queueName: queueWithPublishHangs,
+			queueName: exchangeWithPublishHangs,
 			errMsg:    "context canceled",
 		},
 		{
 			name:      "publish returns error",
-			queueName: queueWithPublishError,
+			queueName: exchangeWithPublishError,
 			errMsg:    "publish error",
 			context:   context.Background(),
 		},
@@ -201,7 +212,7 @@ func TestPushFailure(t *testing.T) {
 						amqpChannel: mockAmqpChannel,
 					},
 				},
-				queueName: tt.queueName,
+				exchangeName: tt.queueName,
 			}
 
 			err := amqpProducer.Push(tt.context, nil, []byte("TestMessage"))
@@ -335,11 +346,11 @@ func TestPushNoConnectionFailure(t *testing.T) {
 	assert.ErrorContains(t, err, "connection error")
 }
 
-func TestPushQueueDeclare(t *testing.T) {
+func TestPushExchangeDeclare(t *testing.T) {
 	/*
-		arrange: create a queue with no amqp channel
+		arrange: create a producer with no amqp channel
 		act: push a message to the queue
-		assert: channel with confirm mode is established and queue is declared
+		assert: channel with confirm mode is established and exchange is declared
 	*/
 	mockAmqpConnection := &MockAmqpConnection{}
 	amqpProducer := &AmqpProducer{
@@ -347,37 +358,36 @@ func TestPushQueueDeclare(t *testing.T) {
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		queueName: queueName,
+		exchangeName: exchangeName,
 	}
 
 	amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 
 	assert.Equal(t, mockAmqpConnection.amqpChannel.confirmMode, true, "expected channel to be in confirm mode")
-	assert.Equal(t, mockAmqpConnection.amqpChannel.queueName, queueName, "expected queue name to be "+queueName)
-	assert.Equal(t, mockAmqpConnection.amqpChannel.queueDurable, true, "expected queue to be durable")
+	assert.Equal(t, mockAmqpConnection.amqpChannel.exchangeName, exchangeName, "expected exchange name to be "+exchangeName)
 }
 
-func TestPushQueueDeclareFailure(t *testing.T) {
+func TestPushExchangeDeclareFailure(t *testing.T) {
 	/*
-		arrange: create a queue with no amqp channel where the queue declare fails
+		arrange: create a queue with no amqp channel where the exchange declare fails
 		act: push a message to the queue
 		assert: push returns an error
 	*/
 	tests := []struct {
 		name               string
-		queueName          string
+		exchangeName       string
 		mockAmqpConnection *MockAmqpConnection
 		errMsg             string
 	}{
 		{
-			name:               "queue declare error",
-			queueName:          queueWithDeclareError,
+			name:               "exchange declare error",
+			exchangeName:       exchangeWithDeclareError,
 			mockAmqpConnection: &MockAmqpConnection{},
-			errMsg:             "queue declare error",
+			errMsg:             "exchange declare error",
 		},
 		{
-			name:      "confirm error",
-			queueName: queueName,
+			name:         "confirm error",
+			exchangeName: exchangeName,
 			mockAmqpConnection: &MockAmqpConnection{
 				confirmModeError: true,
 			},
@@ -392,7 +402,7 @@ func TestPushQueueDeclareFailure(t *testing.T) {
 					amqpChannel:    nil,
 					amqpConnection: tt.mockAmqpConnection,
 				},
-				queueName: tt.queueName,
+				exchangeName: tt.exchangeName,
 			}
 
 			err := amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))

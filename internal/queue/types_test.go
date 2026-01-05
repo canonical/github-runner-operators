@@ -38,6 +38,10 @@ func (f *fakeChannel) Close() error {
 	return f.closeErr
 }
 func (f *fakeChannel) Confirm(noWait bool) error { return f.confirmErr }
+func (f *fakeChannel) ExchangeDeclare(name string, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error {
+	return nil
+}
+
 func (f *fakeChannel) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
 	return amqp.Queue{Name: name}, f.declareErr
 }

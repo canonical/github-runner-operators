@@ -14,6 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const queueName = "test-queue"
+
+const queueWithDeclareError = "queue-with-declare-error"
 const queueWithConsumeError = "queue-with-consume-error"
 const queueWithQosError = "queue-with-qos-error"
 

@@ -106,7 +106,12 @@ func (c *AmqpConsumer) ensureAmqpChannel() error {
 	}
 
 	if c.client.amqpChannel == nil || c.client.amqpChannel.IsClosed() {
-		err := c.client.resetChannel(c.queueName, false)
+		err := c.client.resetChannel()
+		if err != nil {
+			return err
+		}
+
+		err = c.client.declareQueue(c.queueName)
 		if err != nil {
 			return err
 		}
