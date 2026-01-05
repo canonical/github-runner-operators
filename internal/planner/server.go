@@ -34,7 +34,7 @@ type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
-	SubscribeToPressureUpdate(ctx context.Context) (chan struct{}, error)
+	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
 }
 
 // Server holds dependencies for the planner HTTP handlers.
@@ -143,6 +143,9 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
+
+	json.NewEncoder(w).Encode(pressures)
+	flusher.Flush()
 
 	ch, err := s.store.SubscribeToPressureUpdate(r.Context())
 	if err != nil {

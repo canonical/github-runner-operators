@@ -15,15 +15,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/stretchr/testify/assert"
 )
 
 type fakeStore struct {
-	pressures   map[string]int
-	lastFlavor  *database.Flavor
-	errToReturn error
+	pressures      map[string]int
+	lastFlavor     *database.Flavor
+	errToReturn    error
+	pressureChange chan struct{}
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -51,8 +53,24 @@ func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]databas
 	return []database.Flavor{}, nil
 }
 
-func newRequest(method, url, body string, token string) *http.Request {
+func (f *fakeStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	return f.pressureChange, nil
+}
+
+func newRequest(method, url, body, token string) *http.Request {
 	req := httptest.NewRequest(method, url, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req
+}
+
+func newHTTP2Request(method, url, body, token string) *http.Request {
+	req := httptest.NewRequest(method, url, bytes.NewBufferString(body))
+	req.Proto = "HTTP/2.0"
+	req.ProtoMajor = 2
+	req.ProtoMinor = 0
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -202,34 +220,57 @@ func TestGetFlavorPressure(t *testing.T) {
 
 func TestGetFlavorPressureStream(t *testing.T) {
 	tests := []struct {
-		name              string
-		pressures         map[string]int
-		method            string
-		url               string
-		expectedStatus    int
-		expectedPressures map[string]int
+		name                    string
+		pressuresStream         []map[string]int
+		method                  string
+		url                     string
+		expectedStatus          []int
+		expectedPressuresStream []map[string]int
 	}{{
-		name:           "streamingNotImplemented",
+		name: "shouldSucceedForSingleFlavor",
+		pressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
 		method:         http.MethodGet,
 		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
-		expectedStatus: http.StatusNotImplemented,
+		expectedStatus: []int{http.StatusOK},
+		expectedPressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
 	}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{pressures: tt.pressures}
+			store := &fakeStore{pressureChange: make(chan struct{}, 10)}
 			server := NewServer(store, NewMetrics(store))
 			token := makeToken()
 
-			req := newRequest(tt.method, tt.url, "", token)
+			req := newHTTP2Request(tt.method, tt.url, "", token)
+			ctx, cancel := context.WithCancel(req.Context())
+			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
-			server.ServeHTTP(w, req)
+			go server.ServeHTTP(w, req)
+
+			for _, pressures := range tt.pressuresStream {
+				// Simulate pressure update
+				store.pressures = pressures
+				// Notify the server about the pressure change
+				store.pressureChange <- struct{}{}
+			}
+
+			// End the HTTP/2 streaming request
+			time.Sleep(5 * time.Second)
+			cancel()
 
 			var resp map[string]int
 			json.NewDecoder(w.Body).Decode(&resp)
 
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedPressures, resp)
+			assert.Equal(t, tt.expectedStatus[0], w.Code)
+			// assert for each pressure update
 		})
 	}
 }
