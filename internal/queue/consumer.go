@@ -113,3 +113,8 @@ func (c *AmqpConsumer) ensureAmqpChannel() error {
 	}
 	return nil
 }
+
+// Close closes the AMQP consumer connection.
+func (c *AmqpConsumer) Close() error {
+	return c.client.Close()
+}

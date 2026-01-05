@@ -12,10 +12,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/planner"
@@ -30,24 +34,18 @@ const (
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 	queueName         = "webhook-queue"
+	shutdownTimeout   = 30 * time.Second
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	// Initialize telemetry
 	err := telemetry.Start(ctx, serviceName, version.String())
 	if err != nil {
 		log.Fatalf("failed to start telemetry: %v", err)
 	}
-	defer func() {
-		err := telemetry.Shutdown(ctx)
-		if err != nil {
-			slog.ErrorContext(ctx, "failed to shutdown telemetry", "error", err)
-		}
-	}()
 
-	// Load environment variables
 	uri, found := os.LookupEnv(dbURI)
 	if !found {
 		log.Fatalln(dbURI, "environment variable not set.")
@@ -63,7 +61,6 @@ func main() {
 		log.Fatalln(rabbitMQUriEnvVar, "environment variable not set.")
 	}
 
-	// Connect to database and create server
 	if err := database.Migrate(ctx, uri); err != nil {
 		log.Fatalln("migrate failed:", err)
 	}
@@ -76,15 +73,58 @@ func main() {
 
 	consumer := planner.NewJobConsumer(rabbitMQUri, queueName, db, metrics)
 	consumerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var consumerWg sync.WaitGroup
+	consumerWg.Add(1)
 	go func() {
-		if err := consumer.Start(consumerCtx); err != nil {
-			log.Fatalf("failed to start AMQP consumer: %v", err)
+		defer consumerWg.Done()
+		if err := consumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Fatalf("AMQP consumer error: %v", err)
 		}
 	}()
 
-	server := planner.NewServer(db, metrics)
+	metrics := planner.NewMetrics(db)
+	handler := planner.NewServer(db, metrics)
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
+	}
 
-	log.Println("Starting planner API server on port", port)
-	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(server, "planner-api", otelhttp.WithServerName("planner"))))
+	go func() {
+		log.Println("Starting planner API server on port", port)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("Shutdown signal received, starting graceful shutdown...")
+
+	shutdown(server, consumer, &consumerWg, db)
+	log.Println("Graceful shutdown complete")
+}
+
+func shutdown(server *http.Server, consumer *queue.AmqpConsumer, consumerWg *sync.WaitGroup, db *database.Database) {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
+
+	log.Println("Shutting down HTTP server...")
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+
+	log.Println("Waiting for AMQP consumer to stop...")
+	consumerWg.Wait()
+
+	log.Println("Closing AMQP connection...")
+	if err := consumer.Close(); err != nil {
+		log.Printf("failed to close AMQP consumer: %v", err)
+	}
+
+	log.Println("Closing database connection...")
+	db.Close()
+
+	log.Println("Shutting down telemetry...")
+	if err := telemetry.Shutdown(shutdownCtx); err != nil {
+		log.Printf("failed to shutdown telemetry: %v", err)
+	}
 }
