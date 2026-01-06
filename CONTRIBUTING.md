@@ -113,7 +113,7 @@ docker run -d --rm --name postgres -e POSTGRES_PASSWORD=password -p 5432:5432 po
 Run `webhook-gateway` integration tests using:
 
 ```shell
-APP_PORT=8080 APP_WEBHOOK_SECRET_VALUE=fake RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -cover -v  ./cmd/webhook-gateway -integration
+APP_WEBHOOK_SECRET_VALUE=fake APP_PORT=8080 RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -v -cover -tags=integration -race ./cmd/webhook-gateway/...
 ```
 
 It assumes you have access to a RabbitMQ server running reachable at $RABBITMQ_CONNECT_STRING.
@@ -126,11 +126,10 @@ docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-manag
 Run `planner` integration tests using:
 
 ```shell
-POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:postgres@localhost:5432/gh_runner_operators?sslmode=disable" APP_PORT=8080 go test ./cmd/planner -v -count=1
+APP_PORT=8080 POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -v -cover -tags=integration -race ./cmd/planner/..
 ```
 
-It assumes you are connected to a local PostgreSQL database "gh_runner_operators" as user "postgres" on host "localhost" at port "5432".
-
+It assumes you can reach postgres and rabbitmq servers as described above.
 
 ### Test design
 
