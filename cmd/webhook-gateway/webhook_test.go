@@ -102,21 +102,37 @@ func createSignature(message string, secret string) string {
 	return "sha256=" + hex.EncodeToString(h.Sum(nil))
 }
 
-func setupQueue(t *testing.T, amqpUri string) {
+// returns an AMQP channel and a cleanup function to close the connection and channel
+func setupAMQPChannel(t *testing.T, amqpUri string) (*amqp.Channel, func()) {
 	conn, err := amqp.Dial(amqpUri)
 	if err != nil {
 		t.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
-	defer conn.Close()
+
 	ch, err := conn.Channel()
 	if err != nil {
+		conn.Close()
 		t.Fatalf("Failed to open a channel: %v", err)
 	}
-	defer ch.Close()
+
+	cleanup := func() {
+		ch.Close()
+		conn.Close()
+	}
+
+	return ch, cleanup
+}
+
+// setupQueue declares the exchange, queue, and binding for the test
+// this is required because the webhook-gateway does not create the queue and
+// published messages could be discarded if the queue does not exist
+func setupQueue(t *testing.T, amqpUri string) {
+	ch, cleanup := setupAMQPChannel(t, amqpUri)
+	defer cleanup()
 
 	config := queue.DefaultQueueConfig()
 
-	err = ch.ExchangeDeclare(
+	err := ch.ExchangeDeclare(
 		config.ExchangeName, // name)
 		"direct",            // type
 		true,                // durable
@@ -156,16 +172,8 @@ func setupQueue(t *testing.T, amqpUri string) {
 }
 
 func consumeMessage(t *testing.T, amqpUri string) string {
-	conn, err := amqp.Dial(amqpUri)
-	if err != nil {
-		t.Fatalf("Failed to connect to RabbitMQ: %v", err)
-	}
-	defer conn.Close()
-	ch, err := conn.Channel()
-	if err != nil {
-		t.Fatalf("Failed to open a channel: %v", err)
-	}
-	defer ch.Close()
+	ch, cleanup := setupAMQPChannel(t, amqpUri)
+	defer cleanup()
 
 	config := queue.DefaultQueueConfig()
 
