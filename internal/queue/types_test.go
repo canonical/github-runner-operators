@@ -45,6 +45,9 @@ func (f *fakeChannel) ExchangeDeclare(name string, kind string, durable, autoDel
 func (f *fakeChannel) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
 	return amqp.Queue{Name: name}, f.declareErr
 }
+func (f *fakeChannel) QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error {
+	return nil
+}
 func (f *fakeChannel) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
 	return amqp.Queue{Name: name}, f.declarePassErr
 }

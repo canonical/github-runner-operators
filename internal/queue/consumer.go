@@ -118,7 +118,7 @@ func (c *AmqpConsumer) ensureAmqpChannel() error {
 			return err
 		}
 
-		err = c.client.declareQueue(c.queueName)
+		err = c.client.bindQueue(c.config.QueueName, c.config.RoutingKey, c.config.ExchangeName)
 		if err != nil {
 			return err
 		}

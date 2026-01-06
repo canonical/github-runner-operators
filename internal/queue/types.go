@@ -124,6 +124,7 @@ type amqpChannel interface {
 	ExchangeDeclare(name string, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	Qos(prefetchCount, prefetchSize int, global bool) error
 }
@@ -162,6 +163,10 @@ func (ch *amqpChannelWrapper) Consume(queue, consumer string, autoAck, exclusive
 
 func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) error {
 	return ch.Channel.Qos(prefetchCount, prefetchSize, global)
+}
+
+func (ch *amqpChannelWrapper) QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error {
+	return ch.Channel.QueueBind(name, key, exchange, noWait, args)
 }
 
 type Consumer interface {
