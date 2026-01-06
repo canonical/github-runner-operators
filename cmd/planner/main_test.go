@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/canonical/github-runner-operators/internal/queue"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,7 +75,7 @@ func TestMain_FlavorPressure(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		press := ctx.getFlavorPressure(flavor)
 		return press[flavor] > pressure
-	}, 20*time.Minute, 500*time.Millisecond)
+	}, 2*time.Minute, 100*time.Millisecond, "expected flavor pressure to increase after webhook processing")
 
 	// Trigger graceful shutdown and verify services stop cleanly
 	ctx.shutdownMain()
@@ -112,7 +113,7 @@ func (ctx *testContext) constructWebhookPayload(labels []string) []byte {
 	return body
 }
 
-// declareQueue declares a RabbitMQ queue for testing purposes.
+// declareQueue declares the exchange, queue, and binding for testing.
 func (ctx *testContext) declareQueue() {
 	ctx.t.Helper()
 
@@ -124,6 +125,21 @@ func (ctx *testContext) declareQueue() {
 	require.NoError(ctx.t, err, "open channel")
 	defer ch.Close()
 
+	config := queue.DefaultQueueConfig()
+
+	// Declare exchange
+	err = ch.ExchangeDeclare(
+		config.ExchangeName,
+		"direct", // type
+		true,     // durable
+		false,    // auto-delete
+		false,    // internal
+		false,    // no-wait
+		nil,
+	)
+	require.NoError(ctx.t, err, "declare exchange")
+
+	// Declare queue
 	_, err = ch.QueueDeclare(
 		ctx.queueName,
 		true,  // durable
@@ -133,9 +149,19 @@ func (ctx *testContext) declareQueue() {
 		nil,
 	)
 	require.NoError(ctx.t, err, "declare queue")
+
+	// Bind queue to exchange
+	err = ch.QueueBind(
+		ctx.queueName,
+		config.RoutingKey,
+		config.ExchangeName,
+		false, // no-wait
+		nil,
+	)
+	require.NoError(ctx.t, err, "bind queue")
 }
 
-// publishAndWaitAck publishes a message to the given RabbitMQ queue and waits for an ack.
+// publishAndWaitAck publishes a message to the exchange with routing key and waits for an ack.
 func (ctx *testContext) publishAndWaitAck(body []byte) {
 	ctx.t.Helper()
 
@@ -152,8 +178,11 @@ func (ctx *testContext) publishAndWaitAck(body []byte) {
 
 	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 
+	config := queue.DefaultQueueConfig()
 	err = ch.Publish(
-		"", ctx.queueName, false, false,
+		config.ExchangeName, // publish to exchange instead of directly to queue
+		config.RoutingKey,   // use routing key
+		false, false,
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        body,
