@@ -13,6 +13,8 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +28,8 @@ import (
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 const (
@@ -86,6 +90,14 @@ func main() {
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
+	}
+	if flag.Lookup("test.v") != nil {
+		fmt.Println("Running in test mode with http2 cleartext support")
+		h2s := &http2.Server{}
+		server = &http.Server{
+			Addr:    ":" + port,
+			Handler: h2c.NewHandler(otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")), h2s),
+		}
 	}
 
 	go func() {

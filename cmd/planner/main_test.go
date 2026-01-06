@@ -11,8 +11,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
+	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"syscall"
@@ -22,6 +25,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/http2"
 )
 
 // testContext holds test configuration and dependencies.
@@ -44,7 +48,7 @@ func newTestContext(t *testing.T) *testContext {
 func TestMain_FlavorPressure(t *testing.T) {
 	/*
 		arrange: server is listening on the configured port and prepare request payload
-		act: send create flavor request, get flavor pressure request and publish webhook message
+		act: send create flavor request, get flavor pressure request, streaming flavor pressure, and publish webhook message
 		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
 	ctx := newTestContext(t)
@@ -60,21 +64,33 @@ func TestMain_FlavorPressure(t *testing.T) {
 	pressure := 0
 
 	// Test create flavor
-	resp := ctx.createFlavor(flavor, platform, labels, priority)
-	require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
+	statusCode := ctx.createFlavor(flavor, platform, labels, priority)
+	require.Equal(t, http.StatusCreated, statusCode, "unexpected status creating flavor")
 
 	// Test get flavor pressure
 	pressures := ctx.getFlavorPressure(flavor)
 	ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
 
-	// Test consume webhook and reflect pressure
+	// Test streaming flavor pressure
+	stream := ctx.startFlavorPressureStream(flavor)
+	defer stream.Body.Close()
+
+	pressures = ctx.decodePressure(stream.Body)
+	ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
+
+	// Test consume webhook
 	body := ctx.constructWebhookPayload(labels)
 	ctx.publishAndWaitAck(body)
 
+	// Test flavor pressure updated
 	assert.Eventually(t, func() bool {
 		press := ctx.getFlavorPressure(flavor)
 		return press[flavor] > pressure
 	}, 20*time.Minute, 500*time.Millisecond)
+
+	// Test streaming flavor pressure updated
+	newPressures := ctx.decodePressure(stream.Body)
+	assert.True(t, newPressures[flavor] > pressure)
 
 	// Trigger graceful shutdown and verify services stop cleanly
 	ctx.shutdownMain()
@@ -237,6 +253,34 @@ func (ctx *testContext) getFlavorPressure(flavor string) map[string]int {
 	var pressures map[string]int
 	require.NoError(ctx.t, json.NewDecoder(resp.Body).Decode(&pressures), "decode response")
 
+	return pressures
+}
+
+// startFlavorPressureStream starts a streaming request for flavor pressure updates
+// Caller is responsible for closing the response body.
+func (ctx *testContext) startFlavorPressureStream(flavor string) *http.Response {
+	ctx.t.Helper()
+
+	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor + "/pressure?stream=true"
+
+	client := &http.Client{
+		Transport: &http2.Transport{
+			AllowHTTP: true,
+			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+				return net.Dial(network, addr)
+			},
+		},
+	}
+
+	resp, err := client.Get(url)
+	require.NoError(ctx.t, err, "get flavor pressure stream request")
+	return resp
+}
+
+// decodePressure decodes the pressure map.
+func (ctx *testContext) decodePressure(r io.Reader) map[string]int {
+	var pressures map[string]int
+	require.NoError(ctx.t, json.NewDecoder(r).Decode(&pressures), "decode pressure stream")
 	return pressures
 }
 

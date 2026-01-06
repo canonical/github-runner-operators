@@ -570,7 +570,7 @@ func New(ctx context.Context, uri string) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the database: %v", err)
 	}
-	return &Database{conn: conn}, nil
+	return &Database{uri: uri, conn: conn}, nil
 }
 
 // Close closes all database connections in the pool.
