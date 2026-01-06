@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Canonical Ltd.
+ * Copyright 2026 Canonical Ltd.
  * See LICENSE file for licensing details.
  */
 
@@ -14,12 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const queueName = "test-queue"
-
-const queueWithDeclareError = "queue-with-declare-error"
-const queueWithConsumeError = "queue-with-consume-error"
-const queueWithQosError = "queue-with-qos-error"
-
 type MockAmqpChannelConsumer struct {
 	MockAmqpChannel
 	msgChannel      chan amqp.Delivery
@@ -30,10 +24,12 @@ type MockAmqpChannelConsumer struct {
 	qosCalls        int
 	consumerTag     string
 	consumerAutoAck bool
+	consumeError    bool
+	qosError        bool
 }
 
 func (ch *MockAmqpChannelConsumer) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
-	if queue == queueWithConsumeError {
+	if ch.consumeError {
 		return nil, errors.New("consume error")
 	}
 	ch.consumeCalls++
@@ -46,7 +42,7 @@ func (ch *MockAmqpChannelConsumer) Consume(queue, consumer string, autoAck, excl
 }
 
 func (ch *MockAmqpChannelConsumer) Qos(prefetchCount, prefetchSize int, global bool) error {
-	if ch.queueName == queueWithQosError {
+	if ch.qosError {
 		return errors.New("qos error")
 	}
 	ch.qosCalls++
@@ -62,6 +58,9 @@ type MockAmqpConnectionConsumer struct {
 	isclosed             bool
 	errMode              bool
 	confirmModeError     bool
+	exchangeDeclareError bool
+	queueDeclareError    bool
+	bindError            bool
 	returnChannelOnSetup bool
 }
 
@@ -75,7 +74,10 @@ func (m *MockAmqpConnectionConsumer) Channel() (amqpChannel, error) {
 	}
 	m.amqpChannelConsumer = &MockAmqpChannelConsumer{
 		MockAmqpChannel: MockAmqpChannel{
-			confirmModeError: m.confirmModeError,
+			confirmModeError:     m.confirmModeError,
+			exchangeDeclareError: m.exchangeDeclareError,
+			queueDeclareError:    m.queueDeclareError,
+			bindError:            m.bindError,
 		},
 	}
 	return m.amqpChannelConsumer, nil
@@ -115,8 +117,8 @@ func TestPull(t *testing.T) {
 				amqpChannelConsumer: mockAmqpChannel,
 			},
 		},
-		queueName: queueName,
-		channel:   msgChannel,
+		config:  DefaultQueueConfig(),
+		channel: msgChannel,
 	}
 
 	msg, err := amqpConsumer.Pull(context.Background())
@@ -146,8 +148,8 @@ func TestPullContextCanceled(t *testing.T) {
 				amqpChannelConsumer: mockAmqpChannel,
 			},
 		},
-		queueName: queueName,
-		channel:   msgChannel,
+		config:  DefaultQueueConfig(),
+		channel: msgChannel,
 	}
 
 	_, err := amqpConsumer.Pull(ctx)
@@ -175,8 +177,8 @@ func TestPullChannelClosed(t *testing.T) {
 				amqpChannelConsumer: mockAmqpChannel,
 			},
 		},
-		queueName: queueName,
-		channel:   msgChannel,
+		config:  DefaultQueueConfig(),
+		channel: msgChannel,
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
@@ -225,7 +227,7 @@ func TestPullNoChannel(t *testing.T) {
 					amqpChannel:    tt.channel,
 					amqpConnection: mockAmqpConnection,
 				},
-				queueName: queueName,
+				config: DefaultQueueConfig(),
 			}
 
 			msg, err := amqpConsumer.Pull(context.Background())
@@ -255,7 +257,7 @@ func TestPullNoChannelFailure(t *testing.T) {
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		queueName: queueName,
+		config: DefaultQueueConfig(),
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
@@ -304,7 +306,7 @@ func TestPullNoConnection(t *testing.T) {
 						return mockAmqpConnection, nil
 					},
 				},
-				queueName: queueName,
+				config: DefaultQueueConfig(),
 			}
 
 			msg, err := amqpConsumer.Pull(context.Background())
@@ -330,7 +332,7 @@ func TestPullNoConnectionFailure(t *testing.T) {
 				return nil, errors.New("connection error")
 			},
 		},
-		queueName: queueName,
+		config: DefaultQueueConfig(),
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
@@ -339,11 +341,11 @@ func TestPullNoConnectionFailure(t *testing.T) {
 	assert.ErrorContains(t, err, "connection error")
 }
 
-func TestPullQueueDeclare(t *testing.T) {
+func TestPullQueueDeclareAndBind(t *testing.T) {
 	/*
 		arrange: create a consumer with no amqp channel
 		act: pull a message from the queue
-		assert: channel is established and exchange and queue is declared
+		assert: channel is established, exchange and queue declared, and queue bound
 	*/
 	msgChannel := make(chan amqp.Delivery, 1)
 	msgChannel <- amqp.Delivery{Body: []byte("TestMessage")}
@@ -355,25 +357,28 @@ func TestPullQueueDeclare(t *testing.T) {
 		amqpChannelConsumer:  mockAmqpChannelConsumer,
 		returnChannelOnSetup: true,
 	}
+	config := DefaultQueueConfig()
 	amqpConsumer := &AmqpConsumer{
 		client: &Client{
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		exchangeName: exchangeName,
-		queueName:    queueName,
+		config: config,
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
 
 	assert.NoError(t, err)
 	assert.True(t, mockAmqpChannelConsumer.confirmMode, "expected channel to be in confirm mode")
-	assert.Equal(t, exchangeName, mockAmqpChannelConsumer.exchangeName, "expected exchange name to be "+exchangeName)
-	assert.Equal(t, queueName, mockAmqpChannelConsumer.queueName, "expected queue name to be "+queueName)
+	assert.Equal(t, config.ExchangeName, mockAmqpChannelConsumer.exchangeName, "expected exchange name to be "+config.ExchangeName)
+	assert.Equal(t, config.QueueName, mockAmqpChannelConsumer.queueName, "expected queue name to be "+config.QueueName)
 	assert.True(t, mockAmqpChannelConsumer.queueDurable, "expected queue to be durable")
+	assert.Equal(t, config.QueueName, mockAmqpChannelConsumer.boundQueue, "expected queue to be bound")
+	assert.Equal(t, config.ExchangeName, mockAmqpChannelConsumer.boundExchange, "expected queue to be bound to exchange")
+	assert.Equal(t, config.RoutingKey, mockAmqpChannelConsumer.boundRoutingKey, "expected routing key to be "+config.RoutingKey)
 }
 
-func TestPullQueueDeclareFailure(t *testing.T) {
+func TestPullDeclarationFailure(t *testing.T) {
 	/*
 		arrange: create a consumer with no amqp channel where a declaration fails
 		act: pull a message from the queue
@@ -381,29 +386,26 @@ func TestPullQueueDeclareFailure(t *testing.T) {
 	*/
 	tests := []struct {
 		name               string
-		exchangeName       string
-		queueName          string
 		mockAmqpConnection *MockAmqpConnectionConsumer
 		errMsg             string
 	}{
 		{
 			name:               "exchange declare error",
-			exchangeName:       exchangeWithDeclareError,
-			queueName:          queueName,
-			mockAmqpConnection: &MockAmqpConnectionConsumer{},
+			mockAmqpConnection: &MockAmqpConnectionConsumer{exchangeDeclareError: true},
 			errMsg:             "exchange declare error",
 		},
 		{
 			name:               "queue declare error",
-			exchangeName:       exchangeName,
-			queueName:          queueWithDeclareError,
-			mockAmqpConnection: &MockAmqpConnectionConsumer{},
+			mockAmqpConnection: &MockAmqpConnectionConsumer{queueDeclareError: true},
 			errMsg:             "queue declare error",
 		},
 		{
-			name:         "confirm error",
-			exchangeName: exchangeWithDeclareError,
-			queueName:    queueName,
+			name:               "queue bind error",
+			mockAmqpConnection: &MockAmqpConnectionConsumer{bindError: true},
+			errMsg:             "bind error",
+		},
+		{
+			name: "confirm error",
 			mockAmqpConnection: &MockAmqpConnectionConsumer{
 				confirmModeError: true,
 			},
@@ -418,13 +420,12 @@ func TestPullQueueDeclareFailure(t *testing.T) {
 					amqpChannel:    nil,
 					amqpConnection: tt.mockAmqpConnection,
 				},
-				exchangeName: tt.exchangeName,
-				queueName:    tt.queueName,
+				config: DefaultQueueConfig(),
 			}
 
 			_, err := amqpConsumer.Pull(context.Background())
 
-			assert.Error(t, err, "expected error when queue declare fails")
+			assert.Error(t, err, "expected error when declaration fails")
 			assert.ErrorContains(t, err, tt.errMsg)
 		})
 	}
@@ -437,9 +438,7 @@ func TestPullQosFailure(t *testing.T) {
 		assert: pull returns an error
 	*/
 	mockAmqpChannelConsumer := &MockAmqpChannelConsumer{
-		MockAmqpChannel: MockAmqpChannel{
-			queueName: queueWithQosError,
-		},
+		qosError: true,
 	}
 	mockAmqpConnection := &MockAmqpConnectionConsumer{
 		amqpChannelConsumer:  mockAmqpChannelConsumer,
@@ -450,7 +449,7 @@ func TestPullQosFailure(t *testing.T) {
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		queueName: queueWithQosError,
+		config: DefaultQueueConfig(),
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
@@ -465,16 +464,19 @@ func TestPullConsumeFailure(t *testing.T) {
 		act: pull a message from the queue
 		assert: pull returns an error
 	*/
+	mockAmqpChannelConsumer := &MockAmqpChannelConsumer{
+		consumeError: true,
+	}
 	mockAmqpConnection := &MockAmqpConnectionConsumer{
 		returnChannelOnSetup: true,
-		amqpChannelConsumer:  &MockAmqpChannelConsumer{},
+		amqpChannelConsumer:  mockAmqpChannelConsumer,
 	}
 	amqpConsumer := &AmqpConsumer{
 		client: &Client{
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		queueName: queueWithConsumeError,
+		config: DefaultQueueConfig(),
 	}
 
 	_, err := amqpConsumer.Pull(context.Background())
@@ -490,15 +492,13 @@ func TestNewAmqpConsumer(t *testing.T) {
 		assert: consumer is properly initialized
 	*/
 	uri := "amqp://guest:guest@localhost:5672/"
-	exchangeName := "test-exchange"
-	queueName := "test-queue"
+	config := DefaultQueueConfig()
 
-	consumer := NewAmqpConsumer(uri, exchangeName, queueName)
+	consumer := NewAmqpConsumer(uri, config)
 
 	assert.NotNil(t, consumer)
-	assert.Equal(t, exchangeName, consumer.exchangeName)
-	assert.Equal(t, queueName, consumer.queueName)
 	assert.NotNil(t, consumer.client)
 	assert.Equal(t, uri, consumer.client.uri)
 	assert.NotNil(t, consumer.client.connectFunc)
+	assert.Equal(t, config, consumer.config)
 }

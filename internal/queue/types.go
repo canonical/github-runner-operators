@@ -85,6 +85,20 @@ func (c *Client) declareQueue(queueName string) error {
 	return nil
 }
 
+func (c *Client) bindQueue(queueName, routingKey, exchangeName string) error {
+	err := c.amqpChannel.QueueBind(
+		queueName,
+		routingKey,
+		exchangeName,
+		false, // no-wait
+		nil,   // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind AMQP queue: %w", err)
+	}
+	return nil
+}
+
 // Close gracefully closes the AMQP channel and connection.
 func (c *Client) Close() error {
 	c.mu.Lock()
@@ -108,8 +122,8 @@ func (c *Client) Close() error {
 }
 
 type AmqpProducer struct {
-	client       *Client
-	exchangeName string
+	client *Client
+	config QueueConfig
 }
 
 type Producer interface {

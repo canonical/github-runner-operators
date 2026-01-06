@@ -18,21 +18,19 @@ import (
 
 // AmqpConsumer is an AMQP consumer for workflow job events.
 type AmqpConsumer struct {
-	client       *Client
-	exchangeName string
-	queueName    string
-	channel      <-chan amqp.Delivery
+	client  *Client
+	config  QueueConfig
+	channel <-chan amqp.Delivery
 }
 
 // NewAmqpConsumer creates a new AmqpConsumer with the given dependencies.
-func NewAmqpConsumer(uri, exchangeName string, queueName string) *AmqpConsumer {
+func NewAmqpConsumer(uri string, config QueueConfig) *AmqpConsumer {
 	return &AmqpConsumer{
-		exchangeName: exchangeName,
-		queueName:    queueName,
 		client: &Client{
 			uri:         uri,
 			connectFunc: amqpConnect,
 		},
+		config: config,
 	}
 }
 
@@ -83,13 +81,13 @@ func (c *AmqpConsumer) ensureChannel() error {
 	}
 
 	channel, err := c.client.amqpChannel.Consume(
-		c.queueName, // queue
-		"",          // consumer tag, empty string means a unique random tag will be generated
-		false,       // whether rabbitmq auto-acknowledges messages
-		true,        // whether only this consumer can access the queue
-		false,       // no-local
-		false,       // false means wait for server confirmation that consumer is registered
-		nil,         // args
+		c.config.QueueName, // queue
+		"",                 // consumer tag, empty string means a unique random tag will be generated
+		false,              // whether rabbitmq auto-acknowledges messages
+		true,               // whether only this consumer can access the queue
+		false,              // no-local
+		false,              // false means wait for server confirmation that consumer is registered
+		nil,                // args
 	)
 	if err != nil {
 		return fmt.Errorf("cannot consume amqp messages: %w", err)
@@ -113,7 +111,12 @@ func (c *AmqpConsumer) ensureAmqpChannel() error {
 			return err
 		}
 
-		err = c.client.declareExchange(c.exchangeName)
+		err = c.client.declareExchange(c.config.ExchangeName)
+		if err != nil {
+			return err
+		}
+
+		err = c.client.declareQueue(c.config.QueueName)
 		if err != nil {
 			return err
 		}

@@ -195,7 +195,6 @@ func TestAmqpConsumer_Table(t *testing.T) {
 		conn := &fakeConnection{isClosedRet: false}
 
 		cons := &AmqpConsumer{
-			queueName: "q",
 			client: &Client{
 				amqpChannel:    ch,
 				amqpConnection: conn,

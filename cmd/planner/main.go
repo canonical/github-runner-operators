@@ -23,6 +23,7 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/planner"
+	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -33,7 +34,6 @@ const (
 	portEnvVar        = "APP_PORT"
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
-	queueName         = "webhook-queue"
 	shutdownTimeout   = 30 * time.Second
 )
 
@@ -71,7 +71,7 @@ func main() {
 
 	metrics := planner.NewMetrics(db)
 
-	consumer := planner.NewJobConsumer(rabbitMQUri, queueName, db, metrics)
+	consumer := planner.NewJobConsumer(rabbitMQUri, queue.DefaultQueueConfig(), db, metrics)
 
 	var consumerWg sync.WaitGroup
 	consumerWg.Add(1)
