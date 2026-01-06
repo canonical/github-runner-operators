@@ -19,19 +19,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/canonical/github-runner-operators/internal/queue"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHTTPRequestIsForwarded(t *testing.T) {
 	const payload = `{"message":"Hello, Bob!"}`
+	amqpUri := getAmqpUriFromEnv(t)
+
+	setupQueue(t, amqpUri)
 
 	go main()
 
 	secret := getSecretFromEnv(t)
 	sendPayloadToHTTPServer(t, payload, secret)
 
-	amqpUri := getAmqpUriFromEnv(t)
 	msg := consumeMessage(t, amqpUri)
 
 	assert.Equal(t, payload, msg, "expected message body to match")
@@ -98,6 +102,59 @@ func createSignature(message string, secret string) string {
 	return "sha256=" + hex.EncodeToString(h.Sum(nil))
 }
 
+func setupQueue(t *testing.T, amqpUri string) {
+	conn, err := amqp.Dial(amqpUri)
+	if err != nil {
+		t.Fatalf("Failed to connect to RabbitMQ: %v", err)
+	}
+	defer conn.Close()
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatalf("Failed to open a channel: %v", err)
+	}
+	defer ch.Close()
+
+	config := queue.DefaultQueueConfig()
+
+	err = ch.ExchangeDeclare(
+		config.ExchangeName, // name)
+		"direct",            // type
+		true,                // durable
+		false,               // auto-deleted
+		false,               // internal
+		false,               // no-wait
+		nil,                 // arguments
+	)
+
+	if err != nil {
+		t.Fatalf("Failed to declare an exchange: %v", err)
+	}
+	_, err = ch.QueueDeclare(
+		config.QueueName, // name
+		true,             // durable
+		false,            // delete when unused
+		false,            // exclusive
+		false,            // no-wait
+		nil,              // arguments
+	)
+
+	if err != nil {
+		t.Fatalf("Failed to declare a queue: %v", err)
+	}
+
+	err = ch.QueueBind(
+		config.QueueName,    // queue name
+		config.RoutingKey,   // routing key
+		config.ExchangeName, // exchange
+		false,
+		nil,
+	)
+
+	if err != nil {
+		t.Fatalf("Failed to bind a queue: %v", err)
+	}
+}
+
 func consumeMessage(t *testing.T, amqpUri string) string {
 	conn, err := amqp.Dial(amqpUri)
 	if err != nil {
@@ -110,20 +167,9 @@ func consumeMessage(t *testing.T, amqpUri string) string {
 	}
 	defer ch.Close()
 
-	_, err = ch.QueueDeclare(
-		"webhook-queue", // name
-		true,            // durable
-		false,           // delete when unused
-		false,           // exclusive
-		false,           // no-wait
-		nil,             // arguments
-	)
+	config := queue.DefaultQueueConfig()
 
-	if err != nil {
-		t.Fatalf("Failed to declare a queue: %v", err)
-	}
-
-	deliveryChan, err := ch.Consume("webhook-queue", "", true, false, false, false, nil)
+	deliveryChan, err := ch.Consume(config.QueueName, "", true, false, false, false, nil)
 
 	if err != nil {
 		t.Fatalf("Failed to register a consumer: %v", err)
