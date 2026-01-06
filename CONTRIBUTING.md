@@ -126,7 +126,7 @@ docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-manag
 Run `planner` integration tests using:
 
 ```shell
-APP_PORT=8080 POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -v -cover -tags=integration -race ./cmd/planner/..
+APP_PORT=8080 POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -v -cover -tags=integration -race ./cmd/planner/...
 ```
 
 It assumes you can reach postgres and rabbitmq servers as described above.
