@@ -127,7 +127,6 @@ func (ctx *testContext) declareQueue() {
 
 	config := queue.DefaultQueueConfig()
 
-	// Declare exchange
 	err = ch.ExchangeDeclare(
 		config.ExchangeName,
 		"direct", // type
@@ -139,7 +138,6 @@ func (ctx *testContext) declareQueue() {
 	)
 	require.NoError(ctx.t, err, "declare exchange")
 
-	// Declare queue
 	_, err = ch.QueueDeclare(
 		ctx.queueName,
 		true,  // durable
@@ -150,7 +148,6 @@ func (ctx *testContext) declareQueue() {
 	)
 	require.NoError(ctx.t, err, "declare queue")
 
-	// Bind queue to exchange
 	err = ch.QueueBind(
 		ctx.queueName,
 		config.RoutingKey,
