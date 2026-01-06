@@ -19,6 +19,7 @@ type MockAmqpChannel struct {
 
 	// State
 	isclosed    bool
+	isClosedRet bool
 	closeCalls  int
 	closeErr    error
 	confirmMode bool
@@ -43,6 +44,14 @@ type MockAmqpChannel struct {
 	exchangeDeclareError bool
 	queueDeclareError    bool
 	bindError            bool
+
+	// Consumer support
+	consumeCh  <-chan amqp.Delivery
+	consumeErr error
+	qosErr     error
+
+	// Additional error modes for types_test
+	queueDeclarePassiveErr error
 }
 
 func (ch *MockAmqpChannel) PublishWithDeferredConfirm(exchange string, key string, _, _ bool, msg amqp.Publishing) (confirmation, error) {
@@ -67,7 +76,7 @@ func (ch *MockAmqpChannel) PublishWithDeferredConfirm(exchange string, key strin
 }
 
 func (ch *MockAmqpChannel) IsClosed() bool {
-	return ch.isclosed
+	return ch.isclosed || ch.isClosedRet
 }
 
 func (ch *MockAmqpChannel) Confirm(_ bool) error {
@@ -96,7 +105,7 @@ func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ am
 }
 
 func (ch *MockAmqpChannel) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
-	return amqp.Queue{Name: name}, nil
+	return amqp.Queue{Name: name}, ch.queueDeclarePassiveErr
 }
 
 func (ch *MockAmqpChannel) QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error {
@@ -110,11 +119,11 @@ func (ch *MockAmqpChannel) QueueBind(name, key, exchange string, noWait bool, ar
 }
 
 func (ch *MockAmqpChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
-	return nil, nil
+	return ch.consumeCh, ch.consumeErr
 }
 
 func (ch *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
-	return nil
+	return ch.qosErr
 }
 
 func (ch *MockAmqpChannel) Close() error {
@@ -141,7 +150,10 @@ func (c *MockConfirmation) Acked() bool {
 type MockAmqpConnection struct {
 	channelCalls         int
 	amqpChannel          *MockAmqpChannel
+	channel              amqpChannel
+	channelErr           error
 	isclosed             bool
+	isClosedRet          bool
 	closeCalls           int
 	closeErr             error
 	errMode              bool
@@ -153,6 +165,12 @@ func (m *MockAmqpConnection) Channel() (amqpChannel, error) {
 	if m.errMode {
 		return nil, errors.New("failed to open channel")
 	}
+	if m.channelErr != nil {
+		return nil, m.channelErr
+	}
+	if m.channel != nil {
+		return m.channel, nil
+	}
 	m.channelCalls++
 	m.amqpChannel = &MockAmqpChannel{
 		confirmModeError:     m.confirmModeError,
@@ -162,7 +180,7 @@ func (m *MockAmqpConnection) Channel() (amqpChannel, error) {
 }
 
 func (m *MockAmqpConnection) IsClosed() bool {
-	return m.isclosed
+	return m.isclosed || m.isClosedRet
 }
 
 func (m *MockAmqpConnection) Close() error {
