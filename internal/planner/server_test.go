@@ -273,7 +273,7 @@ func TestGetFlavorPressureStream(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus[0], resp.StatusCode)
 			assert.Equal(t, tt.expectedPressuresStream[0], res)
-			for i := range len(tt.pressuresStream[1:]) - 1 {
+			for i := range len(tt.pressuresStream[1:]) {
 				store.pressures.Store(tt.pressuresStream[i+1])
 				store.pressureChange <- struct{}{}
 

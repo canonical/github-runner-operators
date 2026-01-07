@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -92,7 +91,7 @@ func main() {
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
 	}
 	if flag.Lookup("test.v") != nil {
-		fmt.Println("Running in test mode with http2 cleartext support")
+		log.Println("Running in test mode with http2 cleartext support")
 		h2s := &http2.Server{}
 		server = &http.Server{
 			Addr:    ":" + port,

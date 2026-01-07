@@ -550,14 +550,16 @@ func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct
 
 	ch := make(chan struct{}, channelBufferSize)
 	go func() {
-		defer conn.Close(ctx)
+		defer conn.Close(context.Background())
 		defer close(ch)
 
 		for {
 			_, err := conn.WaitForNotification(ctx)
 			if err != nil {
+				slog.ErrorContext(ctx, "Failed to receive pressure change event from database", "error", err)
 				return
 			}
+			slog.DebugContext(ctx, "Received a pressure change event from database")
 			ch <- struct{}{}
 		}
 	}()
