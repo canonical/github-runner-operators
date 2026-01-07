@@ -378,6 +378,56 @@ func TestPullQueueDeclareAndBind(t *testing.T) {
 	assert.Equal(t, config.RoutingKey, mockAmqpChannelConsumer.boundRoutingKey, "expected routing key to be "+config.RoutingKey)
 }
 
+func TestPullSetsUpDeadLetterQueue(t *testing.T) {
+	/*
+		arrange: create a consumer with no amqp channel
+		act: pull a message from the queue
+		assert: DLX exchange declared, DLQ queue declared, main queue has DLX argument
+	*/
+	msgChannel := make(chan amqp.Delivery, 1)
+	msgChannel <- amqp.Delivery{Body: []byte("TestMessage")}
+
+	mockAmqpChannelConsumer := &MockAmqpChannelConsumer{
+		msgChannel: msgChannel,
+	}
+	mockAmqpConnection := &MockAmqpConnectionConsumer{
+		amqpChannelConsumer:  mockAmqpChannelConsumer,
+		returnChannelOnSetup: true,
+	}
+	config := DefaultQueueConfig()
+	amqpConsumer := &AmqpConsumer{
+		client: &Client{
+			amqpChannel:    nil,
+			amqpConnection: mockAmqpConnection,
+		},
+		config: config,
+	}
+
+	_, err := amqpConsumer.Pull(context.Background())
+
+	assert.NoError(t, err)
+
+	// Verify DLX exchange is declared
+	assert.Contains(t, mockAmqpChannelConsumer.MockAmqpChannel.exchangeNames, config.DeadLetterExchange,
+		"expected DLX exchange to be declared")
+
+	// Verify DLQ queue is declared
+	assert.Contains(t, mockAmqpChannelConsumer.MockAmqpChannel.queueNames, config.DeadLetterQueue,
+		"expected DLQ queue to be declared")
+
+	// Verify main queue is declared with x-dead-letter-exchange argument
+	assert.Equal(t, config.DeadLetterExchange, mockAmqpChannelConsumer.MockAmqpChannel.queueArgs["x-dead-letter-exchange"],
+		"expected main queue to have x-dead-letter-exchange argument")
+
+	// Verify both exchanges are declared (DLX and main)
+	assert.Equal(t, 2, mockAmqpChannelConsumer.MockAmqpChannel.exchangeCount,
+		"expected 2 exchanges to be declared (DLX and main)")
+
+	// Verify both queues are declared (DLQ and main)
+	assert.Equal(t, 2, mockAmqpChannelConsumer.MockAmqpChannel.declareCount,
+		"expected 2 queues to be declared (DLQ and main)")
+}
+
 func TestPullDeclarationFailure(t *testing.T) {
 	/*
 		arrange: create a consumer with no amqp channel where a declaration fails

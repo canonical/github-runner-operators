@@ -25,9 +25,14 @@ type MockAmqpChannel struct {
 	confirmMode bool
 
 	// Declaration tracking
-	queueName    string
-	exchangeName string
-	queueDurable bool
+	queueName     string
+	exchangeName  string
+	queueDurable  bool
+	queueArgs     amqp.Table
+	declareCount  int
+	exchangeNames []string
+	queueNames    []string
+	exchangeCount int
 
 	// Binding tracking
 	boundQueue      string
@@ -92,15 +97,20 @@ func (ch *MockAmqpChannel) ExchangeDeclare(name string, _ string, _, _, _, _ boo
 		return errors.New("exchange declare error")
 	}
 	ch.exchangeName = name
+	ch.exchangeNames = append(ch.exchangeNames, name)
+	ch.exchangeCount++
 	return nil
 }
 
-func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ amqp.Table) (amqp.Queue, error) {
+func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, args amqp.Table) (amqp.Queue, error) {
 	if ch.queueDeclareError {
 		return amqp.Queue{}, errors.New("queue declare error")
 	}
 	ch.queueName = name
 	ch.queueDurable = durable
+	ch.queueArgs = args
+	ch.queueNames = append(ch.queueNames, name)
+	ch.declareCount++
 	return amqp.Queue{Name: name}, nil
 }
 
