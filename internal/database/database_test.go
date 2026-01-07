@@ -101,6 +101,23 @@ func teardownDatabase(t *testing.T) {
 	}
 }
 
+// setupPressureUpdateTest subscribes to pressure updates, asserts the channel is initially empty,
+// executes the given operation function, then asserts that exactly one notification was received.
+func setupPressureUpdateTest(t *testing.T, ctx context.Context, db *Database, operation func()) {
+	ch, err := db.SubscribeToPressureUpdate(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, ch, 0)
+
+	operation()
+
+	value, ok := <-ch
+	assert.True(t, ok)
+	assert.NotNil(t, value)
+	// Only one notification should be received, the channel should now be empty.
+	assert.Len(t, ch, 0)
+}
+
+
 func TestDatabase_CreateAuthToken(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
@@ -163,9 +180,6 @@ func TestDatabase_AddJob(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
-	ch, err := db.SubscribeToPressureUpdate(ctx)
-	assert.NoError(t, err)
-	assert.Len(t, ch, 0)
 
 	job := Job{
 		Platform:  "github",
@@ -174,13 +188,10 @@ func TestDatabase_AddJob(t *testing.T) {
 		CreatedAt: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local),
 		Raw:       map[string]interface{}{"queued": "queued"},
 	}
-	assert.NoError(t, db.AddJob(ctx, &job))
 
-	value, ok := <-ch
-	assert.True(t, ok)
-	assert.NotNil(t, value)
-	// Only one notification should be received, the channel should now be empty.
-	assert.Len(t, ch, 0)
+	setupPressureUpdateTest(t, ctx, db, func() {
+		assert.NoError(t, db.AddJob(ctx, &job))
+	})
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -411,17 +422,9 @@ func TestDatabase_UpdateJobCompleted(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 
-	ch, err := db.SubscribeToPressureUpdate(ctx)
-	assert.NoError(t, err)
-	assert.Len(t, ch, 0)
-
-	assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
-
-	value, ok := <-ch
-	assert.True(t, ok)
-	assert.NotNil(t, value)
-	// Only one notification should be received, the channel should now be empty.
-	assert.Len(t, ch, 0)
+	setupPressureUpdateTest(t, ctx, db, func() {
+		assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
+	})
 
 	job.CompletedAt = &completedAt
 	job.Raw["completed"] = "completed"
@@ -466,17 +469,9 @@ func TestDatabase_AddFlavor(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 
-	ch, err := db.SubscribeToPressureUpdate(ctx)
-	assert.NoError(t, err)
-	assert.Len(t, ch, 0)
-
-	assert.NoError(t, db.AddFlavor(ctx, &flavor))
-
-	value, ok := <-ch
-	assert.True(t, ok)
-	assert.NotNil(t, value)
-	// Only one notification should be received, the channel should now be empty.
-	assert.Len(t, ch, 0)
+	setupPressureUpdateTest(t, ctx, db, func() {
+		assert.NoError(t, db.AddFlavor(ctx, &flavor))
+	})
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -528,17 +523,9 @@ func TestDatabase_DisableFlavor(t *testing.T) {
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
 
-	ch, err := db.SubscribeToPressureUpdate(ctx)
-	assert.NoError(t, err)
-	assert.Len(t, ch, 0)
-
-	assert.NoError(t, db.DisableFlavor(ctx, flavor.Platform, flavor.Name))
-
-	value, ok := <-ch
-	assert.True(t, ok)
-	assert.NotNil(t, value)
-	// Only one notification should be received, the channel should now be empty.
-	assert.Len(t, ch, 0)
+	setupPressureUpdateTest(t, ctx, db, func() {
+		assert.NoError(t, db.DisableFlavor(ctx, flavor.Platform, flavor.Name))
+	})
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -602,17 +589,9 @@ func TestDatabase_DeleteFlavor(t *testing.T) {
 	assert.Equal(t, flavorSmall.Name, *jobs[0].AssignedFlavor)
 	assert.Equal(t, flavorSmall.Name, *jobs[1].AssignedFlavor)
 
-	ch, err := db.SubscribeToPressureUpdate(ctx)
-	assert.NoError(t, err)
-	assert.Len(t, ch, 0)
-
-	assert.NoError(t, db.DeleteFlavor(ctx, flavorSmall.Platform, flavorSmall.Name))
-
-	value, ok := <-ch
-	assert.True(t, ok)
-	assert.NotNil(t, value)
-	// Only one notification should be received, the channel should now be empty.
-	assert.Len(t, ch, 0)
+	setupPressureUpdateTest(t, ctx, db, func() {
+		assert.NoError(t, db.DeleteFlavor(ctx, flavorSmall.Platform, flavorSmall.Name))
+	})
 
 	jobs, err = db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
