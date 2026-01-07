@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const supportedEventType = "workflow_job"
+
 // testContext holds test configuration and dependencies.
 type testContext struct {
 	t         *testing.T
@@ -42,53 +44,98 @@ func newTestContext(t *testing.T) *testContext {
 	}
 }
 
-func TestMain_FlavorPressure(t *testing.T) {
+func TestMain_IntegrationScenarios(t *testing.T) {
 	/*
-		arrange: server is listening on the configured port and prepare request payload
-		act: send create flavor request, get flavor pressure request and publish webhook message
-		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
+	   arrange: server is listening with full AMQP setup including DLQ
+	   act: Test multiple scenarios in subtests
+	   assert: all scenarios work correctly
 	*/
 	ctx := newTestContext(t)
-	//ctx.declareQueue()
 
 	go main()
 	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
 
-	platform := "github"
-	labels := []string{"self-hosted", "s390x", "medium"}
-	priority := 100
-	flavor := randString(10)
-	pressure := 0
+	// Scenario 1: Flavor pressure updates
+	t.Run("flavor_pressure", func(t *testing.T) {
+		/*
+			act: send create flavor request, get flavor pressure request and publish webhook message
+			assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
+		*/
 
-	// Test create flavor
-	resp := ctx.createFlavor(flavor, platform, labels, priority)
-	require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
+		platform := "github"
+		labels := []string{"self-hosted", "s390x", "medium"}
+		priority := 100
+		flavor := randString(10)
+		pressure := 0
 
-	// Test get flavor pressure
-	pressures := ctx.getFlavorPressure(flavor)
-	ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
+		// Test create flavor
+		resp := ctx.createFlavor(flavor, platform, labels, priority)
+		require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
 
-	// Test consume webhook and reflect pressure
-	body := ctx.constructWebhookPayload(labels)
-	ctx.publishAndWaitAck(body)
+		// Test get flavor pressure
+		pressures := ctx.getFlavorPressure(flavor)
+		ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
 
-	assert.Eventually(t, func() bool {
-		press := ctx.getFlavorPressure(flavor)
-		return press[flavor] > pressure
-	}, 2*time.Minute, 100*time.Millisecond, "expected flavor pressure to increase after webhook processing")
+		// Test consume webhook and reflect pressure
+		body := ctx.constructWebhookPayload(labels)
+		ctx.publish(body, supportedEventType)
 
-	// Trigger graceful shutdown and verify services stop cleanly
-	ctx.shutdownMain()
-	ctx.waitForHTTPDown("http://localhost:"+ctx.port+"/health", 30*time.Second)
+		assert.Eventually(t, func() bool {
+			press := ctx.getFlavorPressure(flavor)
+			return press[flavor] > pressure
+		}, 2*time.Minute, 100*time.Millisecond, "expected flavor pressure to increase after webhook processing")
+	})
 
-	// Verify AMQP consumer is stopped by checking queue depth increases after publish
-	beforeDepth := ctx.getQueueDepth()
-	body2 := ctx.constructWebhookPayload(labels)
-	ctx.publishAndWaitAck(body2)
+	// Scenario 2: Dead letter queue behavior
+	t.Run("dead_letter_queue", func(t *testing.T) {
+		/*
+			act:
+				1. unsupported event
+				2. malformed message
+			assert:
+				1. unsupported event does not appear in DLQ
+				2. malformed message appears in DLQ
+		*/
+		config := queue.DefaultQueueConfig()
 
-	assert.Eventually(t, func() bool {
-		return ctx.getQueueDepth() >= beforeDepth+1
-	}, 10*time.Second, 200*time.Millisecond, "expected queue depth to increase after shutdown (consumer stopped)")
+		// Unsupported event should be ignored
+		unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
+		ctx.publish(unsupportedBody, "pull_request")
+		time.Sleep(2 * time.Second) // TODO replace with assert.Eventually
+
+		dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
+		assert.Equal(t, 0, dlqDepth)
+
+		// Malformed message should go to DLQ
+		malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999}}`)
+		ctx.publish(malformedBody, supportedEventType)
+
+		dlqMessage := ctx.consumeFromQueue(config.DeadLetterQueue, 10*time.Second)
+		assert.Equal(t, malformedBody, dlqMessage)
+	})
+
+	// Last scenario: Graceful shutdown
+	t.Run("graceful_shutdown", func(t *testing.T) {
+		/*
+			act: trigger graceful shutdown
+			assert: services stop cleanly and AMQP consumer stops processing messages
+		*/
+		config := queue.DefaultQueueConfig()
+
+		labels := []string{"self-hosted", "s390x", "medium"}
+
+		ctx.shutdownMain()
+		ctx.waitForHTTPDown("http://localhost:"+ctx.port+"/health", 30*time.Second)
+
+		// Verify AMQP consumer is stopped by checking queue depth increases after publish
+		beforeDepth := ctx.getQueueDepthByName(config.QueueName)
+		body2 := ctx.constructWebhookPayload(labels)
+		ctx.publish(body2, supportedEventType)
+
+		assert.Eventually(t, func() bool {
+			return ctx.getQueueDepthByName(config.QueueName) >= beforeDepth+1
+		}, 10*time.Second, 200*time.Millisecond, "expected queue depth to increase after shutdown (consumer stopped)")
+	})
 }
 
 // constructWebhookPayload creates a webhook payload with the given labels.
@@ -111,113 +158,6 @@ func (ctx *testContext) constructWebhookPayload(labels []string) []byte {
 		require.NoError(ctx.t, err, "marshal webhook payload")
 	}
 	return body
-}
-
-// declareQueue declares the exchange, queue, and binding for testing.
-func (ctx *testContext) declareQueue() {
-	ctx.t.Helper()
-
-	conn, err := amqp.Dial(ctx.rabbitURI)
-	require.NoError(ctx.t, err, "connect rabbitmq")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	require.NoError(ctx.t, err, "open channel")
-	defer ch.Close()
-
-	config := queue.DefaultQueueConfig()
-
-	err = ch.ExchangeDeclare(
-		config.ExchangeName,
-		"direct", // type
-		true,     // durable
-		false,    // auto-delete
-		false,    // internal
-		false,    // no-wait
-		nil,
-	)
-	require.NoError(ctx.t, err, "declare exchange")
-
-	_, err = ch.QueueDeclare(
-		ctx.queueName,
-		true,  // durable
-		false, // auto-delete
-		false, // exclusive
-		false, // no-wait
-		nil,
-	)
-	require.NoError(ctx.t, err, "declare queue")
-
-	err = ch.QueueBind(
-		ctx.queueName,
-		config.RoutingKey,
-		config.ExchangeName,
-		false, // no-wait
-		nil,
-	)
-	require.NoError(ctx.t, err, "bind queue")
-}
-
-// publishAndWaitAck publishes a message to the exchange with routing key and waits for an ack.
-func (ctx *testContext) publishAndWaitAck(body []byte) {
-	ctx.t.Helper()
-
-	conn, err := amqp.Dial(ctx.rabbitURI)
-	require.NoError(ctx.t, err, "connect rabbitmq")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	require.NoError(ctx.t, err, "open channel")
-	defer ch.Close()
-
-	err = ch.Confirm(false)
-	require.NoError(ctx.t, err, "enable confirms")
-
-	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-
-	config := queue.DefaultQueueConfig()
-	err = ch.Publish(
-		config.ExchangeName, // publish to exchange instead of directly to queue
-		config.RoutingKey,   // use routing key
-		false, false,
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        body,
-			Headers:     amqp.Table{"X-GitHub-Event": "workflow_job"},
-		},
-	)
-	require.NoError(ctx.t, err, "publish")
-
-	select {
-	case c := <-confirms:
-		require.True(ctx.t, c.Ack, "message not acked")
-	case <-time.After(10 * time.Second):
-		require.Fail(ctx.t, "timeout waiting for ack")
-	}
-}
-
-// getQueueDepth returns the current number of messages in the queue via passive declare.
-func (ctx *testContext) getQueueDepth() int {
-	ctx.t.Helper()
-
-	conn, err := amqp.Dial(ctx.rabbitURI)
-	require.NoError(ctx.t, err, "connect rabbitmq")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	require.NoError(ctx.t, err, "open channel")
-	defer ch.Close()
-
-	q, err := ch.QueueDeclarePassive(
-		ctx.queueName,
-		true,  // durable
-		false, // auto-delete
-		false, // exclusive
-		false, // no-wait
-		nil,
-	)
-	require.NoError(ctx.t, err, "declare passive queue")
-	return q.Messages
 }
 
 // shutdownMain sends SIGTERM to trigger graceful shutdown in main().
@@ -317,217 +257,9 @@ func randString(n int) string {
 	return string(b)
 }
 
-func TestMain_IntegrationScenarios(t *testing.T) {
-	/*
-	   arrange: server is listening with full AMQP setup including DLQ
-	   act: Test multiple scenarios in subtests
-	   assert: all scenarios work correctly
-	*/
-	ctx := newTestContext(t)
-
-	go main()
-	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
-
-	// Scenario 1: Flavor pressure updates
-	t.Run("flavor_pressure", func(t *testing.T) {
-		/*
-			act: send create flavor request, get flavor pressure request and publish webhook message
-			assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
-		*/
-
-		platform := "github"
-		labels := []string{"self-hosted", "s390x", "medium"}
-		priority := 100
-		flavor := randString(10)
-		pressure := 0
-
-		// Test create flavor
-		resp := ctx.createFlavor(flavor, platform, labels, priority)
-		require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
-
-		// Test get flavor pressure
-		pressures := ctx.getFlavorPressure(flavor)
-		ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
-
-		// Test consume webhook and reflect pressure
-		body := ctx.constructWebhookPayload(labels)
-		ctx.publishAndWaitAck(body)
-
-		assert.Eventually(t, func() bool {
-			press := ctx.getFlavorPressure(flavor)
-			return press[flavor] > pressure
-		}, 2*time.Minute, 100*time.Millisecond, "expected flavor pressure to increase after webhook processing")
-	})
-
-	// Scenario 2: Dead letter queue behavior
-	t.Run("dead_letter_queue", func(t *testing.T) {
-		/*
-			act:
-				1. unsupported event
-				2. malformed message
-			assert:
-				1. unsupported event does not appear in DLQ
-				2. malformed message appears in DLQ
-		*/
-		config := queue.DefaultQueueConfig()
-
-		// Unsupported event should be ignored
-		unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
-		ctx.publishWithHeader(unsupportedBody, "pull_request")
-		time.Sleep(2 * time.Second) // TODO replace with assert.Eventually
-
-		dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
-		assert.Equal(t, 0, dlqDepth)
-
-		// Malformed message should go to DLQ
-		malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999}}`)
-		ctx.publishWithoutHeader(malformedBody)
-
-		dlqMessage := ctx.consumeFromQueue(config.DeadLetterQueue, 10*time.Second)
-		assert.Equal(t, malformedBody, dlqMessage)
-	})
-
-	// Last scenario: Graceful shutdown
-	t.Run("graceful_shutdown", func(t *testing.T) {
-		/*
-			act: trigger graceful shutdown
-			assert: services stop cleanly and AMQP consumer stops processing messages
-		*/
-		labels := []string{"self-hosted", "s390x", "medium"}
-
-		ctx.shutdownMain()
-		ctx.waitForHTTPDown("http://localhost:"+ctx.port+"/health", 30*time.Second)
-
-		// Verify AMQP consumer is stopped by checking queue depth increases after publish
-		beforeDepth := ctx.getQueueDepth()
-		body2 := ctx.constructWebhookPayload(labels)
-		ctx.publishAndWaitAck(body2)
-
-		assert.Eventually(t, func() bool {
-			return ctx.getQueueDepth() >= beforeDepth+1
-		}, 10*time.Second, 200*time.Millisecond, "expected queue depth to increase after shutdown (consumer stopped)")
-	})
-}
-
-func TestMain_DeadLetterQueue(t *testing.T) {
-	/*
-		arrange: server is listening and DLQ is set up
-		act: publish malformed message and unsupported event
-		assert: malformed message appears in DLQ, unsupported event does not
-	*/
-	ctx := newTestContext(t)
-	//ctx.declareQueueWithDLQ()
-
-	go main()
-	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
-
-	config := queue.DefaultQueueConfig()
-
-	// First: publish unsupported event (pull_request) - should be ignored, not in DLQ
-	unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
-	ctx.publishWithHeader(unsupportedBody, "pull_request")
-
-	// Wait for message to be processed
-	time.Sleep(2 * time.Second)
-
-	// Verify DLQ is empty after unsupported event
-	dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
-	assert.Equal(t, 0, dlqDepth, "unsupported events should NOT appear in DLQ")
-
-	// Second: publish malformed message (missing X-GitHub-Event header) - should go to DLQ
-	malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999}}`)
-	ctx.publishWithoutHeader(malformedBody)
-
-	// Wait for message to be processed and appear in DLQ
-	dlqMessage := ctx.consumeFromQueue(config.DeadLetterQueue, 10*time.Second)
-	assert.Equal(t, malformedBody, dlqMessage, "malformed message should appear in DLQ")
-
-	ctx.shutdownMain()
-}
-
-// declareQueueWithDLQ declares the exchange, queue, DLQ and bindings for testing.
-func (ctx *testContext) declareQueueWithDLQ() {
-	ctx.t.Helper()
-
-	conn, err := amqp.Dial(ctx.rabbitURI)
-	require.NoError(ctx.t, err, "connect rabbitmq")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	require.NoError(ctx.t, err, "open channel")
-	defer ch.Close()
-
-	config := queue.DefaultQueueConfig()
-
-	// Declare DLX exchange
-	err = ch.ExchangeDeclare(
-		config.DeadLetterExchange,
-		"direct",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	require.NoError(ctx.t, err, "declare DLX exchange")
-
-	// Declare DLQ
-	_, err = ch.QueueDeclare(
-		config.DeadLetterQueue,
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	require.NoError(ctx.t, err, "declare DLQ")
-
-	// Bind DLQ to DLX
-	err = ch.QueueBind(
-		config.DeadLetterQueue,
-		config.RoutingKey,
-		config.DeadLetterExchange,
-		false,
-		nil,
-	)
-	require.NoError(ctx.t, err, "bind DLQ")
-
-	// Declare main exchange
-	err = ch.ExchangeDeclare(
-		config.ExchangeName,
-		"direct",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	require.NoError(ctx.t, err, "declare exchange")
-
-	// Declare main queue with DLX argument
-	_, err = ch.QueueDeclare(
-		ctx.queueName,
-		true,
-		false,
-		false,
-		false,
-		amqp.Table{"x-dead-letter-exchange": config.DeadLetterExchange},
-	)
-	require.NoError(ctx.t, err, "declare queue with DLX")
-
-	// Bind main queue
-	err = ch.QueueBind(
-		ctx.queueName,
-		config.RoutingKey,
-		config.ExchangeName,
-		false,
-		nil,
-	)
-	require.NoError(ctx.t, err, "bind queue")
-}
-
-// publishWithoutHeader publishes a message without X-GitHub-Event header.
-func (ctx *testContext) publishWithoutHeader(body []byte) {
+// publish a message to the exchange with body and eventType header
+// To omit the header, please pass an empty string as eventType.
+func (ctx *testContext) publish(body []byte, eventType string) {
 	ctx.t.Helper()
 
 	conn, err := amqp.Dial(ctx.rabbitURI)
@@ -540,58 +272,18 @@ func (ctx *testContext) publishWithoutHeader(body []byte) {
 
 	err = ch.Confirm(false)
 	require.NoError(ctx.t, err, "enable confirms")
-
 	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 
 	config := queue.DefaultQueueConfig()
-	err = ch.Publish(
-		config.ExchangeName,
-		config.RoutingKey,
-		false, false,
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        body,
-			// No X-GitHub-Event header - this makes it malformed
-		},
-	)
-	require.NoError(ctx.t, err, "publish")
-
-	select {
-	case c := <-confirms:
-		require.True(ctx.t, c.Ack, "message not acked")
-	case <-time.After(10 * time.Second):
-		require.Fail(ctx.t, "timeout waiting for ack")
+	publishing := amqp.Publishing{
+		ContentType: "application/json",
+		Body:        body,
 	}
-}
+	if eventType != "" {
+		publishing.Headers = amqp.Table{"X-GitHub-Event": eventType}
+	}
 
-// publishWithHeader publishes a message with the specified X-GitHub-Event header.
-func (ctx *testContext) publishWithHeader(body []byte, eventType string) {
-	ctx.t.Helper()
-
-	conn, err := amqp.Dial(ctx.rabbitURI)
-	require.NoError(ctx.t, err, "connect rabbitmq")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	require.NoError(ctx.t, err, "open channel")
-	defer ch.Close()
-
-	err = ch.Confirm(false)
-	require.NoError(ctx.t, err, "enable confirms")
-
-	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-
-	config := queue.DefaultQueueConfig()
-	err = ch.Publish(
-		config.ExchangeName,
-		config.RoutingKey,
-		false, false,
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        body,
-			Headers:     amqp.Table{"X-GitHub-Event": eventType},
-		},
-	)
+	err = ch.Publish(config.ExchangeName, config.RoutingKey, false, false, publishing)
 	require.NoError(ctx.t, err, "publish")
 
 	select {
