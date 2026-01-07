@@ -101,7 +101,6 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		// Unsupported event should be ignored
 		unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
 		ctx.publish(unsupportedBody, "pull_request")
-		time.Sleep(2 * time.Second) // TODO replace with assert.Eventually
 
 		dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
 		assert.Equal(t, 0, dlqDepth)
@@ -258,6 +257,7 @@ func randString(n int) string {
 }
 
 // publish a message to the exchange with body and eventType header
+// publish waits for confirmation that the message was accepted by RabbitMQ.
 // To omit the header, please pass an empty string as eventType.
 func (ctx *testContext) publish(body []byte, eventType string) {
 	ctx.t.Helper()
