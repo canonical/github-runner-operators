@@ -138,7 +138,6 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Keep-Alive", "timeout=300")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Unable to setup HTTP/2 streaming", http.StatusInternalServerError)
