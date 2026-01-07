@@ -32,9 +32,9 @@ const (
 	maxBackoff           = 5 * time.Minute
 )
 
-func NewJobConsumer(amqpUri string, queueConfig queue.QueueConfig, db JobDatabase, metrics *Metrics) *JobConsumer {
+func NewJobConsumer(consumer queue.Consumer, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
-		consumer: queue.NewAmqpConsumer(amqpUri, queueConfig),
+		consumer: consumer,
 		db:       db,
 		metrics:  metrics,
 	}
