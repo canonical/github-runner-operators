@@ -117,7 +117,6 @@ func setupPressureUpdateTest(t *testing.T, ctx context.Context, db *Database, op
 	assert.Len(t, ch, 0)
 }
 
-
 func TestDatabase_CreateAuthToken(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
