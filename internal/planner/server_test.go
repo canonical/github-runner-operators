@@ -214,6 +214,11 @@ func TestGetFlavorPressure(t *testing.T) {
 }
 
 func TestGetFlavorPressureStream(t *testing.T) {
+	/*
+		arrange: enable server to receive HTTP/2 requests.
+		act: send streaming requests and update pressures in the store.
+		assert: verify the received pressures match expected values, and the HTTP status codes are as expected.
+	*/
 	tests := []struct {
 		name                    string
 		pressuresStream         []map[string]int
