@@ -316,3 +316,244 @@ func randString(n int) string {
 	}
 	return string(b)
 }
+
+func TestMain_DeadLetterQueue(t *testing.T) {
+	/*
+		arrange: server is listening and DLQ is set up
+		act: publish malformed message and unsupported event
+		assert: malformed message appears in DLQ, unsupported event does not
+	*/
+	ctx := newTestContext(t)
+	ctx.declareQueueWithDLQ()
+
+	go main()
+	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
+
+	config := queue.DefaultQueueConfig()
+
+	// First: publish unsupported event (pull_request) - should be ignored, not in DLQ
+	unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
+	ctx.publishWithHeader(unsupportedBody, "pull_request")
+
+	// Wait for message to be processed
+	time.Sleep(2 * time.Second)
+
+	// Verify DLQ is empty after unsupported event
+	dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
+	assert.Equal(t, 0, dlqDepth, "unsupported events should NOT appear in DLQ")
+
+	// Second: publish malformed message (missing X-GitHub-Event header) - should go to DLQ
+	malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999}}`)
+	ctx.publishWithoutHeader(malformedBody)
+
+	// Wait for message to be processed and appear in DLQ
+	dlqMessage := ctx.consumeFromQueue(config.DeadLetterQueue, 10*time.Second)
+	assert.Equal(t, malformedBody, dlqMessage, "malformed message should appear in DLQ")
+
+	ctx.shutdownMain()
+}
+
+// declareQueueWithDLQ declares the exchange, queue, DLQ and bindings for testing.
+func (ctx *testContext) declareQueueWithDLQ() {
+	ctx.t.Helper()
+
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(ctx.t, err, "open channel")
+	defer ch.Close()
+
+	config := queue.DefaultQueueConfig()
+
+	// Declare DLX exchange
+	err = ch.ExchangeDeclare(
+		config.DeadLetterExchange,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	require.NoError(ctx.t, err, "declare DLX exchange")
+
+	// Declare DLQ
+	_, err = ch.QueueDeclare(
+		config.DeadLetterQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	require.NoError(ctx.t, err, "declare DLQ")
+
+	// Bind DLQ to DLX
+	err = ch.QueueBind(
+		config.DeadLetterQueue,
+		config.RoutingKey,
+		config.DeadLetterExchange,
+		false,
+		nil,
+	)
+	require.NoError(ctx.t, err, "bind DLQ")
+
+	// Declare main exchange
+	err = ch.ExchangeDeclare(
+		config.ExchangeName,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	require.NoError(ctx.t, err, "declare exchange")
+
+	// Declare main queue with DLX argument
+	_, err = ch.QueueDeclare(
+		ctx.queueName,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{"x-dead-letter-exchange": config.DeadLetterExchange},
+	)
+	require.NoError(ctx.t, err, "declare queue with DLX")
+
+	// Bind main queue
+	err = ch.QueueBind(
+		ctx.queueName,
+		config.RoutingKey,
+		config.ExchangeName,
+		false,
+		nil,
+	)
+	require.NoError(ctx.t, err, "bind queue")
+}
+
+// publishWithoutHeader publishes a message without X-GitHub-Event header.
+func (ctx *testContext) publishWithoutHeader(body []byte) {
+	ctx.t.Helper()
+
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(ctx.t, err, "open channel")
+	defer ch.Close()
+
+	err = ch.Confirm(false)
+	require.NoError(ctx.t, err, "enable confirms")
+
+	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+
+	config := queue.DefaultQueueConfig()
+	err = ch.Publish(
+		config.ExchangeName,
+		config.RoutingKey,
+		false, false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+			// No X-GitHub-Event header - this makes it malformed
+		},
+	)
+	require.NoError(ctx.t, err, "publish")
+
+	select {
+	case c := <-confirms:
+		require.True(ctx.t, c.Ack, "message not acked")
+	case <-time.After(10 * time.Second):
+		require.Fail(ctx.t, "timeout waiting for ack")
+	}
+}
+
+// publishWithHeader publishes a message with the specified X-GitHub-Event header.
+func (ctx *testContext) publishWithHeader(body []byte, eventType string) {
+	ctx.t.Helper()
+
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(ctx.t, err, "open channel")
+	defer ch.Close()
+
+	err = ch.Confirm(false)
+	require.NoError(ctx.t, err, "enable confirms")
+
+	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+
+	config := queue.DefaultQueueConfig()
+	err = ch.Publish(
+		config.ExchangeName,
+		config.RoutingKey,
+		false, false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+			Headers:     amqp.Table{"X-GitHub-Event": eventType},
+		},
+	)
+	require.NoError(ctx.t, err, "publish")
+
+	select {
+	case c := <-confirms:
+		require.True(ctx.t, c.Ack, "message not acked")
+	case <-time.After(10 * time.Second):
+		require.Fail(ctx.t, "timeout waiting for ack")
+	}
+}
+
+// consumeFromQueue consumes a single message from the specified queue.
+func (ctx *testContext) consumeFromQueue(queueName string, timeout time.Duration) []byte {
+	ctx.t.Helper()
+
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(ctx.t, err, "open channel")
+	defer ch.Close()
+
+	deliveryChan, err := ch.Consume(queueName, "", true, false, false, false, nil)
+	require.NoError(ctx.t, err, "consume from queue")
+
+	select {
+	case msg := <-deliveryChan:
+		return msg.Body
+	case <-time.After(timeout):
+		require.Fail(ctx.t, "timeout waiting for message in "+queueName)
+		return nil
+	}
+}
+
+// getQueueDepthByName returns the current number of messages in the specified queue.
+func (ctx *testContext) getQueueDepthByName(queueName string) int {
+	ctx.t.Helper()
+
+	conn, err := amqp.Dial(ctx.rabbitURI)
+	require.NoError(ctx.t, err, "connect rabbitmq")
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	require.NoError(ctx.t, err, "open channel")
+	defer ch.Close()
+
+	q, err := ch.QueueDeclarePassive(
+		queueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	require.NoError(ctx.t, err, "declare passive queue")
+	return q.Messages
+}
