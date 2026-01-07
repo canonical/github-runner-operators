@@ -38,7 +38,7 @@ func newTestContext(t *testing.T) *testContext {
 		t:         t,
 		port:      os.Getenv("APP_PORT"),
 		rabbitURI: os.Getenv("RABBITMQ_CONNECT_STRING"),
-		queueName: "webhook-queue",
+		queueName: queue.DefaultQueueConfig().QueueName,
 	}
 }
 
@@ -49,7 +49,7 @@ func TestMain_FlavorPressure(t *testing.T) {
 		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
 	ctx := newTestContext(t)
-	ctx.declareQueue()
+	//ctx.declareQueue()
 
 	go main()
 	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
@@ -317,6 +317,98 @@ func randString(n int) string {
 	return string(b)
 }
 
+func TestMain_IntegrationScenarios(t *testing.T) {
+	/*
+	   arrange: server is listening with full AMQP setup including DLQ
+	   act: Test multiple scenarios in subtests
+	   assert: all scenarios work correctly
+	*/
+	ctx := newTestContext(t)
+
+	go main()
+	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
+
+	// Scenario 1: Flavor pressure updates
+	t.Run("flavor_pressure", func(t *testing.T) {
+		/*
+			act: send create flavor request, get flavor pressure request and publish webhook message
+			assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
+		*/
+
+		platform := "github"
+		labels := []string{"self-hosted", "s390x", "medium"}
+		priority := 100
+		flavor := randString(10)
+		pressure := 0
+
+		// Test create flavor
+		resp := ctx.createFlavor(flavor, platform, labels, priority)
+		require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
+
+		// Test get flavor pressure
+		pressures := ctx.getFlavorPressure(flavor)
+		ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
+
+		// Test consume webhook and reflect pressure
+		body := ctx.constructWebhookPayload(labels)
+		ctx.publishAndWaitAck(body)
+
+		assert.Eventually(t, func() bool {
+			press := ctx.getFlavorPressure(flavor)
+			return press[flavor] > pressure
+		}, 2*time.Minute, 100*time.Millisecond, "expected flavor pressure to increase after webhook processing")
+	})
+
+	// Scenario 2: Dead letter queue behavior
+	t.Run("dead_letter_queue", func(t *testing.T) {
+		/*
+			act:
+				1. unsupported event
+				2. malformed message
+			assert:
+				1. unsupported event does not appear in DLQ
+				2. malformed message appears in DLQ
+		*/
+		config := queue.DefaultQueueConfig()
+
+		// Unsupported event should be ignored
+		unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
+		ctx.publishWithHeader(unsupportedBody, "pull_request")
+		time.Sleep(2 * time.Second) // TODO replace with assert.Eventually
+
+		dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
+		assert.Equal(t, 0, dlqDepth)
+
+		// Malformed message should go to DLQ
+		malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999}}`)
+		ctx.publishWithoutHeader(malformedBody)
+
+		dlqMessage := ctx.consumeFromQueue(config.DeadLetterQueue, 10*time.Second)
+		assert.Equal(t, malformedBody, dlqMessage)
+	})
+
+	// Last scenario: Graceful shutdown
+	t.Run("graceful_shutdown", func(t *testing.T) {
+		/*
+			act: trigger graceful shutdown
+			assert: services stop cleanly and AMQP consumer stops processing messages
+		*/
+		labels := []string{"self-hosted", "s390x", "medium"}
+
+		ctx.shutdownMain()
+		ctx.waitForHTTPDown("http://localhost:"+ctx.port+"/health", 30*time.Second)
+
+		// Verify AMQP consumer is stopped by checking queue depth increases after publish
+		beforeDepth := ctx.getQueueDepth()
+		body2 := ctx.constructWebhookPayload(labels)
+		ctx.publishAndWaitAck(body2)
+
+		assert.Eventually(t, func() bool {
+			return ctx.getQueueDepth() >= beforeDepth+1
+		}, 10*time.Second, 200*time.Millisecond, "expected queue depth to increase after shutdown (consumer stopped)")
+	})
+}
+
 func TestMain_DeadLetterQueue(t *testing.T) {
 	/*
 		arrange: server is listening and DLQ is set up
@@ -324,7 +416,7 @@ func TestMain_DeadLetterQueue(t *testing.T) {
 		assert: malformed message appears in DLQ, unsupported event does not
 	*/
 	ctx := newTestContext(t)
-	ctx.declareQueueWithDLQ()
+	//ctx.declareQueueWithDLQ()
 
 	go main()
 	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
