@@ -138,13 +138,18 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Keep-Alive", "timeout=300")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Unable to setup HTTP/2 streaming", http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(pressures)
+	if err := json.NewEncoder(w).Encode(pressures); err != nil {
+		slog.ErrorContext(r.Context(), "failed to encode initial pressures", "error", err)
+		http.Error(w, "failed to encode pressures", http.StatusInternalServerError)
+		return
+	}
 	flusher.Flush()
 
 	ch, err := s.store.SubscribeToPressureUpdate(r.Context())
@@ -154,23 +159,31 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for {
-		_, ok := <-ch
-		if !ok {
-			slog.InfoContext(r.Context(), "pressure update channel closed")
+		select {
+		case <-r.Context().Done():
+			slog.InfoContext(r.Context(), "client connection terminated")
 			return
-		}
+		case _, ok := <-ch:
+			if !ok {
+				slog.InfoContext(r.Context(), "pressure update channel closed")
+				return
+			}
 
-		flavorName := r.PathValue("name")
-		newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
-			continue
+			flavorName := r.PathValue("name")
+			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
+				continue
+			}
+			if !maps.Equal(pressures, newPressures) {
+				if err := json.NewEncoder(w).Encode(newPressures); err != nil {
+					slog.ErrorContext(r.Context(), "failed to encode pressure update", "error", err)
+					return
+				}
+				flusher.Flush()
+			}
+			pressures = newPressures
 		}
-		if !maps.Equal(pressures, newPressures) {
-			json.NewEncoder(w).Encode(newPressures)
-			flusher.Flush()
-		}
-		pressures = newPressures
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -39,12 +40,17 @@ func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors .
 		return map[string]int{}, nil
 	}
 
+	pressureMap, ok := pressures.(map[string]int)
+	if !ok {
+		return nil, fmt.Errorf("invalid pressure data type")
+	}
+
 	if len(flavors) == 0 {
-		return pressures.(map[string]int), nil
+		return pressureMap, nil
 	}
 	res := make(map[string]int)
 	for _, flavor := range flavors {
-		if pressure, ok := pressures.(map[string]int)[flavor]; ok {
+		if pressure, ok := pressureMap[flavor]; ok {
 			res[flavor] = pressure
 		}
 	}
