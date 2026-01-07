@@ -13,7 +13,7 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/queue"
-	"github.com/google/go-github/v80/github"
+	"github.com/google/go-github/v81/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
