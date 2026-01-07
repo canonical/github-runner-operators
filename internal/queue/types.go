@@ -85,6 +85,24 @@ func (c *Client) declareQueue(queueName string) error {
 	return nil
 }
 
+func (c *Client) declareQueueWithDeadLetter(queueName, dlxName string) error {
+	args := amqp.Table{
+		"x-dead-letter-exchange": dlxName,
+	}
+	_, err := c.amqpChannel.QueueDeclare(
+		queueName,
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		args,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare AMQP queue with dead-letter: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) bindQueue(queueName, routingKey, exchangeName string) error {
 	err := c.amqpChannel.QueueBind(
 		queueName,

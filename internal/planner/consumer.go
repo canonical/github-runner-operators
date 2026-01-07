@@ -32,6 +32,9 @@ const (
 	maxBackoff           = 5 * time.Minute
 )
 
+// ErrUnsupportedEvent indicates a valid but unsupported webhook event that should be ignored.
+var ErrUnsupportedEvent = errors.New("unsupported event")
+
 func NewJobConsumer(amqpUri string, queueConfig queue.QueueConfig, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
 		consumer: queue.NewAmqpConsumer(amqpUri, queueConfig),
@@ -83,14 +86,15 @@ func parseGithubWebhookPayload(ctx context.Context, headers map[string]interface
 	// Check if it's a workflow_job event
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
-		logger.InfoContext(ctx, "event is not a workflow_job, discarding", "event_type", eventType)
-		return githubWebhookJob{}, fmt.Errorf("unsupported webhook event: %s", eventType)
+		logger.InfoContext(ctx, "event is not a workflow_job, ignoring", "event_type", eventType)
+		return githubWebhookJob{}, fmt.Errorf("%w: %s", ErrUnsupportedEvent, eventType)
 	}
 
 	// Process the workflow job event based on action
 	action := jobEvent.GetAction()
 	if !slices.Contains([]string{"queued", "in_progress", "completed", "waiting"}, action) {
-		return githubWebhookJob{}, fmt.Errorf("unknown webhook event action: %s", action)
+		logger.InfoContext(ctx, "unknown webhook event action, ignoring", "action", action)
+		return githubWebhookJob{}, fmt.Errorf("%w: unknown action %s", ErrUnsupportedEvent, action)
 	}
 
 	job := jobEvent.GetWorkflowJob()
@@ -226,6 +230,11 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 
 	job, err := parseGithubWebhookPayload(ctx, msg.Headers, msg.Body)
 	if err != nil {
+		if errors.Is(err, ErrUnsupportedEvent) {
+			c.metrics.ObserveDiscardedWebhook(ctx, platform)
+			c.ignoreMessage(ctx, &msg)
+			return nil
+		}
 		logger.ErrorContext(ctx, "cannot parse webhook payload", "error", err)
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
@@ -236,14 +245,14 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	if !slices.Contains([]string{"queued", "in_progress", "completed"}, job.action) {
 		logger.InfoContext(ctx, "ignore other action types for GitHub webhook job", "action", job.action)
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
-		c.discardMessage(ctx, &msg)
+		c.ignoreMessage(ctx, &msg)
 		return nil
 	}
 
 	if !isSelfHosted(&job) {
 		logger.InfoContext(ctx, "ignore non self-hosted job", "repo", job.repo, "labels", strings.Join(job.labels, ","))
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
-		c.discardMessage(ctx, &msg)
+		c.ignoreMessage(ctx, &msg)
 		return nil
 	}
 
@@ -269,7 +278,15 @@ func (c *JobConsumer) discardMessage(ctx context.Context, delivery *amqp.Deliver
 		oteltrace.SpanFromContext(ctx).RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 	}
-	return
+}
+
+func (c *JobConsumer) ignoreMessage(ctx context.Context, delivery *amqp.Delivery) {
+	err := delivery.Ack(false)
+	if err != nil {
+		logger.ErrorContext(ctx, "cannot ignore queue message", "error", err)
+		oteltrace.SpanFromContext(ctx).RecordError(err)
+		c.metrics.ObserveWebhookError(ctx, platform)
+	}
 }
 
 func (c *JobConsumer) consumedMessage(ctx context.Context, delivery *amqp.Delivery) {

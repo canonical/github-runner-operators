@@ -323,16 +323,15 @@ func TestConsumer(t *testing.T) {
 				},
 			}),
 		},
-		expectErr: true,
+		expectErr: false,
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Nil(t, db.jobs["github:16"], "job should not be inserted")
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from processing error, 1 from nack failure
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName)) // ack failure
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "requeues when AddJob fails with other error",
@@ -482,7 +481,7 @@ func TestConsumer(t *testing.T) {
 			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
-		name:    "discards non-workflow_job events",
+		name:    "ignores non-workflow_job events",
 		setupDB: func(db *fakeDB) {},
 		delivery: amqp.Delivery{
 			Headers: amqp.Table{"X-GitHub-Event": "pull_request"},
@@ -493,16 +492,15 @@ func TestConsumer(t *testing.T) {
 				},
 			}),
 		},
-		expectErr: true,
+		expectErr: false,
 		checkDB: func(t *testing.T, db *fakeDB) {
 			assert.Empty(t, db.jobs, "no jobs should be inserted for non-workflow_job events")
 		},
 		checkMetrics: func(t *testing.T, mr *telemetry.TestMetricReader) {
 			m := mr.Collect(t)
-			// 2 errors: 1 from processing error, 1 from nack failure
-			assert.Equal(t, 2.0, m.Counter(t, webhookErrorsMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, webhookErrorsMetricName)) // ack failure
 			assert.Equal(t, 0.0, m.Counter(t, consumedWebhooksMetricName))
-			assert.Equal(t, 0.0, m.Counter(t, discardedWebhooksMetricName))
+			assert.Equal(t, 1.0, m.Counter(t, discardedWebhooksMetricName))
 		},
 	}, {
 		name:    "discards non-self-hosted jobs",
@@ -673,7 +671,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "unsupported webhook event",
+		expectErrMsg: "unsupported event",
 	}, {
 		name: "unknown action",
 		headers: map[string]interface{}{
@@ -691,7 +689,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "unknown webhook event action",
+		expectErrMsg: "unsupported event: unknown action",
 	}, {
 		name: "missing workflow_job field",
 		headers: map[string]interface{}{
