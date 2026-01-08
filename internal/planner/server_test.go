@@ -10,6 +10,7 @@ package planner
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -240,9 +241,10 @@ func TestAuthTokenEndpoints(t *testing.T) {
 	admin := "planner_v0_thisIsAValidAdminToken___________1234"
 	t.Run("create token success", func(t *testing.T) {
 		store := &fakeStore{}
-		for i := 0; i < 32; i++ {
-			store.nextToken[i] = byte(255 - i)
-		}
+		token := [32]byte{}
+		sha := sha256.New()
+		sha.Write(token[:])
+		store.nextToken = token
 		server := NewServer(store, store, NewMetrics(store), admin)
 
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
