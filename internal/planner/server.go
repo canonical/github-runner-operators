@@ -36,7 +36,7 @@ type FlavorStore interface {
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
 }
 
-// AuthStore provides methods to manage general authentication tokens in the DB.
+// AuthStore is an interface that provides authorization token management.
 type AuthStore interface {
 	CreateAuthToken(ctx context.Context, name string) ([32]byte, error)
 	DeleteAuthToken(ctx context.Context, name string) error
@@ -44,11 +44,10 @@ type AuthStore interface {
 
 // Server holds dependencies for the planner HTTP handlers.
 type Server struct {
-	metrics *Metrics
-	mux     *http.ServeMux
-	store   FlavorStore
-	auth    AuthStore
-	// adminToken is the bootstrap token used to manage general tokens. It is not stored in DB.
+	metrics    *Metrics
+	mux        *http.ServeMux
+	store      FlavorStore
+	auth       AuthStore
 	adminToken string
 }
 
@@ -146,7 +145,6 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// adminProtected enforces admin token authentication for sensitive routes.
 func (s *Server) adminProtected(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authz := r.Header.Get("Authorization")
@@ -182,10 +180,7 @@ func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := s.auth.CreateAuthToken(r.Context(), name)
 	if err == nil {
-		// Return token as a base64url (no padding) string
-		// Avoid logging or persisting plaintext token beyond this response.
-		enc := base64RawURLEncode(token[:])
-		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: enc})
+		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: string(token[:])})
 		return
 	}
 	if errors.Is(err, database.ErrExist) {
@@ -218,11 +213,4 @@ func respondWithJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(payload)
-}
-
-// base64RawURLEncode encodes bytes using RawURLEncoding without padding.
-func base64RawURLEncode(b []byte) string {
-	// Use a local wrapper to avoid importing encoding/base64 at top-level without name collision.
-	// This function keeps import list tidy when reading diffs.
-	return base64RawURLEncodeImpl(b)
 }
