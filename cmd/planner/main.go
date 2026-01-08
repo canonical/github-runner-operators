@@ -98,6 +98,10 @@ func main() {
 			Handler: h2c.NewHandler(otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")), h2s),
 		}
 	}
+	http2.ConfigureServer(server, &http2.Server{
+		ReadIdleTimeout: 60 * time.Second,
+		PingTimeout:     10 * time.Second,
+	})
 
 	go func() {
 		log.Println("Starting planner API server on port", port)
