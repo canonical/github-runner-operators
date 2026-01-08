@@ -98,8 +98,9 @@ func main() {
 			Handler: h2c.NewHandler(otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")), h2s),
 		}
 	}
+	// Enable HTTP/2 server-side PINGs as a keep-alive mechanism, and health check of whether the client is responsive.
 	http2.ConfigureServer(server, &http2.Server{
-		ReadIdleTimeout: 60 * time.Second,
+		ReadIdleTimeout: 30 * time.Second,
 		PingTimeout:     10 * time.Second,
 	})
 
