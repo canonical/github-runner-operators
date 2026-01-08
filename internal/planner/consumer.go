@@ -86,14 +86,12 @@ func parseGithubWebhookPayload(ctx context.Context, headers map[string]interface
 	// Check if it's a workflow_job event
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
-		logger.InfoContext(ctx, "event is not a workflow_job, ignoring", "event_type", eventType)
 		return githubWebhookJob{}, fmt.Errorf("%w: %s", ErrUnsupportedEvent, eventType)
 	}
 
 	// Process the workflow job event based on action
 	action := jobEvent.GetAction()
 	if !slices.Contains([]string{"queued", "in_progress", "completed", "waiting"}, action) {
-		logger.InfoContext(ctx, "unknown webhook event action, ignoring", "action", action)
 		return githubWebhookJob{}, fmt.Errorf("%w: unknown action %s", ErrUnsupportedEvent, action)
 	}
 
@@ -231,6 +229,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	job, err := parseGithubWebhookPayload(ctx, msg.Headers, msg.Body)
 	if err != nil {
 		if errors.Is(err, ErrUnsupportedEvent) {
+			logger.DebugContext(ctx, "ignoring unsupported event", "error", err)
 			c.metrics.ObserveDiscardedWebhook(ctx, platform)
 			c.ignoreMessage(ctx, &msg)
 			return nil
@@ -243,14 +242,14 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	}
 
 	if !slices.Contains([]string{"queued", "in_progress", "completed"}, job.action) {
-		logger.InfoContext(ctx, "ignore other action types for GitHub webhook job", "action", job.action)
+		logger.DebugContext(ctx, "ignore other action types for GitHub webhook job", "action", job.action)
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
 	}
 
 	if !isSelfHosted(&job) {
-		logger.InfoContext(ctx, "ignore non self-hosted job", "repo", job.repo, "labels", strings.Join(job.labels, ","))
+		logger.DebugContext(ctx, "ignore non self-hosted job", "repo", job.repo, "labels", strings.Join(job.labels, ","))
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
