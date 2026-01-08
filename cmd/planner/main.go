@@ -71,7 +71,8 @@ func main() {
 
 	metrics := planner.NewMetrics(db)
 
-	consumer := planner.NewJobConsumer(rabbitMQUri, queue.DefaultQueueConfig(), db, metrics)
+	amqpConsumer := queue.NewAmqpConsumer(rabbitMQUri, queue.DefaultQueueConfig())
+	consumer := planner.NewJobConsumer(amqpConsumer, db, metrics)
 
 	var consumerWg sync.WaitGroup
 	consumerWg.Add(1)

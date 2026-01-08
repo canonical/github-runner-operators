@@ -13,7 +13,7 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/queue"
-	"github.com/google/go-github/v80/github"
+	"github.com/google/go-github/v81/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -35,9 +35,9 @@ const (
 // ErrUnsupportedEvent indicates a valid but unsupported webhook event that should be ignored.
 var ErrUnsupportedEvent = errors.New("unsupported event")
 
-func NewJobConsumer(amqpUri string, queueConfig queue.QueueConfig, db JobDatabase, metrics *Metrics) *JobConsumer {
+func NewJobConsumer(consumer queue.Consumer, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
-		consumer: queue.NewAmqpConsumer(amqpUri, queueConfig),
+		consumer: consumer,
 		db:       db,
 		metrics:  metrics,
 	}
