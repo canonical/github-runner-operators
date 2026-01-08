@@ -245,7 +245,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 		}
 		server := NewServer(store, store, NewMetrics(store), admin)
 
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner/0", "", admin)
+		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
 
@@ -269,7 +269,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 	t.Run("create token unauthorized", func(t *testing.T) {
 		store := &fakeStore{}
 		server := NewServer(store, store, NewMetrics(store), admin)
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "")
+		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "invalid-token")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -287,7 +287,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 	t.Run("delete token unauthorized", func(t *testing.T) {
 		store := &fakeStore{}
 		server := NewServer(store, store, NewMetrics(store), admin)
-		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "")
+		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "invalid-token")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
