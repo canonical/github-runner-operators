@@ -254,7 +254,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 		assert.Equal(t, http.StatusCreated, w.Code)
 		var resp map[string]string
 		json.NewDecoder(w.Body).Decode(&resp)
-		assert.Equal(t, "github-runner/0", resp["name"])
+		assert.Equal(t, "github-runner", resp["name"])
 		expected := base64.RawURLEncoding.EncodeToString(store.nextToken[:])
 		assert.Equal(t, expected, resp["token"])
 	})
