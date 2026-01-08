@@ -11,63 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// fakeChannel implements amqpChannel for unit testing without external deps.
-type fakeChannel struct {
-	closed      bool
-	closeCalls  int
-	closeErr    error
-	isClosedRet bool
-
-	publishErr     error
-	confirmErr     error
-	qosErr         error
-	consumeErr     error
-	declareErr     error
-	declarePassErr error
-
-	consumeCh <-chan amqp.Delivery
-}
-
-func (f *fakeChannel) PublishWithDeferredConfirm(exchange string, key string, mandatory, immediate bool, msg amqp.Publishing) (confirmation, error) {
-	return nil, f.publishErr
-}
-func (f *fakeChannel) IsClosed() bool { return f.closed || f.isClosedRet }
-func (f *fakeChannel) Close() error {
-	f.closeCalls++
-	f.closed = true
-	return f.closeErr
-}
-func (f *fakeChannel) Confirm(noWait bool) error { return f.confirmErr }
-func (f *fakeChannel) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
-	return amqp.Queue{Name: name}, f.declareErr
-}
-func (f *fakeChannel) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
-	return amqp.Queue{Name: name}, f.declarePassErr
-}
-func (f *fakeChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
-	return f.consumeCh, f.consumeErr
-}
-func (f *fakeChannel) Qos(prefetchCount, prefetchSize int, global bool) error { return f.qosErr }
-
-// fakeConnection implements amqpConnection for unit testing.
-type fakeConnection struct {
-	closed      bool
-	closeCalls  int
-	closeErr    error
-	isClosedRet bool
-
-	channel amqpChannel
-	chErr   error
-}
-
-func (f *fakeConnection) Channel() (amqpChannel, error) { return f.channel, f.chErr }
-func (f *fakeConnection) IsClosed() bool                { return f.closed || f.isClosedRet }
-func (f *fakeConnection) Close() error {
-	f.closeCalls++
-	f.closed = true
-	return f.closeErr
-}
-
 // fakeJobDB implements JobDatabase with no-op methods for consumer tests.
 type fakeJobDB struct{}
 
@@ -100,8 +43,8 @@ func TestClient_Close_Table(t *testing.T) {
 		{
 			name: "both open ok",
 			client: &Client{
-				amqpChannel:    &fakeChannel{isClosedRet: false},
-				amqpConnection: &fakeConnection{isClosedRet: false},
+				amqpChannel:    &MockAmqpChannel{isClosedRet: false},
+				amqpConnection: &MockAmqpConnection{isClosedRet: false},
 			},
 			expectErr:       nil,
 			expectChCalls:   1,
@@ -112,8 +55,8 @@ func TestClient_Close_Table(t *testing.T) {
 		{
 			name: "channel error first",
 			client: &Client{
-				amqpChannel:    &fakeChannel{isClosedRet: false, closeErr: chErr},
-				amqpConnection: &fakeConnection{isClosedRet: false, closeErr: connErr},
+				amqpChannel:    &MockAmqpChannel{isClosedRet: false, closeErr: chErr},
+				amqpConnection: &MockAmqpConnection{isClosedRet: false, closeErr: connErr},
 			},
 			expectErr:       chErr,
 			expectChCalls:   1,
@@ -122,8 +65,8 @@ func TestClient_Close_Table(t *testing.T) {
 		{
 			name: "connection error only",
 			client: &Client{
-				amqpChannel:    &fakeChannel{isClosedRet: false},
-				amqpConnection: &fakeConnection{isClosedRet: false, closeErr: connErr},
+				amqpChannel:    &MockAmqpChannel{isClosedRet: false},
+				amqpConnection: &MockAmqpConnection{isClosedRet: false, closeErr: connErr},
 			},
 			expectErr:       connErr,
 			expectChCalls:   1,
@@ -141,8 +84,8 @@ func TestClient_Close_Table(t *testing.T) {
 		{
 			name: "already closed resources",
 			client: &Client{
-				amqpChannel:    &fakeChannel{isClosedRet: true},
-				amqpConnection: &fakeConnection{isClosedRet: true},
+				amqpChannel:    &MockAmqpChannel{isClosedRet: true},
+				amqpConnection: &MockAmqpConnection{isClosedRet: true},
 			},
 			expectErr:       nil,
 			expectChCalls:   0,
@@ -160,16 +103,16 @@ func TestClient_Close_Table(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			if fc, ok := tt.client.amqpChannel.(*fakeChannel); ok {
+			if fc, ok := tt.client.amqpChannel.(*MockAmqpChannel); ok {
 				assert.Equal(t, tt.expectChCalls, fc.closeCalls)
 				if tt.expectChClosed {
-					assert.True(t, fc.closed)
+					assert.True(t, fc.isclosed)
 				}
 			}
-			if fconn, ok := tt.client.amqpConnection.(*fakeConnection); ok {
+			if fconn, ok := tt.client.amqpConnection.(*MockAmqpConnection); ok {
 				assert.Equal(t, tt.expectConnCalls, fconn.closeCalls)
 				if tt.expectConnClose {
-					assert.True(t, fconn.closed)
+					assert.True(t, fconn.isclosed)
 				}
 			}
 		})
@@ -184,11 +127,10 @@ func TestAmqpConsumer_Table(t *testing.T) {
 			act: Close the consumer.
 			assert: Check no error and verify close calls.
 		*/
-		ch := &fakeChannel{isClosedRet: false}
-		conn := &fakeConnection{isClosedRet: false}
+		ch := &MockAmqpChannel{isClosedRet: false}
+		conn := &MockAmqpConnection{isClosedRet: false}
 
 		cons := &AmqpConsumer{
-			queueName: "q",
 			client: &Client{
 				amqpChannel:    ch,
 				amqpConnection: conn,
@@ -209,8 +151,8 @@ func TestClient_Close_Idempotent(t *testing.T) {
 		act: Close the client twice.
 		assert: First close should close both, second close should be a no-op.
 	*/
-	ch := &fakeChannel{isClosedRet: false}
-	conn := &fakeConnection{isClosedRet: false}
+	ch := &MockAmqpChannel{isClosedRet: false}
+	conn := &MockAmqpConnection{isClosedRet: false}
 
 	c := &Client{
 		amqpChannel:    ch,

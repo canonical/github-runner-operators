@@ -40,7 +40,12 @@ func (p *AmqpProducer) resetConnectionOrChannelIfNecessary() error {
 	}
 
 	if p.client.amqpChannel == nil || p.client.amqpChannel.IsClosed() {
-		err := p.client.resetChannel(p.queueName, false)
+		err := p.client.resetChannel()
+		if err != nil {
+			return err
+		}
+
+		err = p.client.declareExchange(p.config.ExchangeName)
 		if err != nil {
 			return err
 		}
@@ -63,10 +68,10 @@ func waitForMsgConfirmation(ctx context.Context, confirmation confirmation) erro
 
 func (p *AmqpProducer) publishMsg(msg []byte, headers map[string]interface{}) (confirmation, error) {
 	confirmation, err := p.client.amqpChannel.PublishWithDeferredConfirm(
-		"",          // exchange
-		p.queueName, // routing key
-		false,       // mandatory
-		false,       // immediate
+		p.config.ExchangeName, // exchange
+		p.config.RoutingKey,   // routing key
+		false,                 // mandatory
+		false,                 // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        msg,
@@ -80,13 +85,13 @@ func (p *AmqpProducer) publishMsg(msg []byte, headers map[string]interface{}) (c
 	return confirmation, nil
 }
 
-func NewAmqpProducer(uri string, queueName string) *AmqpProducer {
+func NewAmqpProducer(uri string, config QueueConfig) *AmqpProducer {
 	return &AmqpProducer{
 		client: &Client{
 			uri:         uri,
 			connectFunc: amqpConnect,
 		},
-		queueName: queueName,
+		config: config,
 	}
 }
 
