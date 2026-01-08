@@ -58,7 +58,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v3.1.2
       - name: Generate admin token (ephemeral)
         run: |
-          python3 - <<EOS' >> "$GITHUB_ENV"
+          python3 - <<EOS >> "$GITHUB_ENV"
           import secrets, string
           alphabet = string.ascii_letters + string.digits + "_-"
           token = "planner_v0_" + "".join(secrets.choice(alphabet) for _ in range(20))
