@@ -195,6 +195,10 @@ func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.auth.DeleteAuthToken(r.Context(), name); err != nil {
+		if errors.Is(err, database.ErrNotExist) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		http.Error(w, fmt.Sprintf("failed to delete token: %v", err), http.StatusInternalServerError)
 		return
 	}
