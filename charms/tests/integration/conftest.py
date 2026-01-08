@@ -1,11 +1,12 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 import logging
+import secrets
+import string
 from typing import Iterator
 
 import jubilant
 import pytest
-
 from tests.conftest import (
     CHARM_FILE_PARAM,
     PLANNER_IMAGE_PARAM,
@@ -61,9 +62,30 @@ def juju(keep_models: bool) -> Iterator[jubilant.Juju]:
         yield juju
 
 
+def _generate_admin_token() -> str:
+    alphabet = string.ascii_letters + string.digits + "_-"
+    suffix = "".join(secrets.choice(alphabet) for _ in range(20))
+    return f"planner_v0_{suffix}"
+
+
+@pytest.fixture(scope="module", name="planner_admin_token_uri")
+def create_planner_admin_token_uri_fixture(juju: jubilant.Juju) -> str:
+    """Create a Juju secret for the planner admin token and return its URI.
+
+    Secret is created before the app is deployed so it can be referenced in config.
+    Granting to the app is done after deploy in the planner_app fixture.
+    """
+    token = _generate_admin_token()
+    secret_uri = juju.add_secret(name="planner-admin-token", content={"token": token})
+    return secret_uri
+
+
 @pytest.fixture(scope="module", name="planner_app")
 def deploy_planner_app_fixture(
-    juju: jubilant.Juju, planner_charm_file: str, planner_app_image: str
+    juju: jubilant.Juju,
+    planner_charm_file: str,
+    planner_app_image: str,
+    planner_admin_token_uri: str,
 ) -> str:
     app_name = "github-runner-planner"
 
@@ -76,7 +98,10 @@ def deploy_planner_app_fixture(
         timeout=6 * 60,
         delay=10,
     )
-    juju.config(app_name, values={"metrics-port": 9464})
+    juju.grant_secret(planner_admin_token_uri, app_name)
+    juju.config(
+        app_name, values={"metrics-port": 9464, "admin-token": planner_admin_token_uri}
+    )
     return app_name
 
 
