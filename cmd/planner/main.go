@@ -70,7 +70,7 @@ func main() {
 	// Validate admin token format: planner_v0_<exactly-20 chars from [A-Za-z0-9_-]>
 	re := regexp.MustCompile(`^planner_v0_[A-Za-z0-9_-]{20}$`)
 	if !re.MatchString(adminToken) {
-		log.Fatalln("APP_ADMIN_TOKEN has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]")
+		log.Fatalln("APP_ADMIN_TOKEN_VALUE has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]")
 	}
 
 	if err := database.Migrate(ctx, uri); err != nil {
