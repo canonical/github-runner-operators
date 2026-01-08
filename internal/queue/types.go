@@ -28,7 +28,7 @@ func (c *Client) resetConnection() error {
 	}
 	conn, err := c.connectFunc(c.uri)
 	if err != nil {
-		return fmt.Errorf("failed to connect to AMQP server: %w", err)
+		return fmt.Errorf("cannot connect to AMQP server: %w", err)
 	}
 	c.amqpConnection = conn
 	return nil
@@ -42,13 +42,13 @@ func (c *Client) resetChannel() error {
 
 	ch, err := c.amqpConnection.Channel()
 	if err != nil {
-		return fmt.Errorf("failed to open AMQP channel: %w", err)
+		return fmt.Errorf("cannot open AMQP channel: %w", err)
 	}
 	c.amqpChannel = ch
 
 	err = ch.Confirm(false)
 	if err != nil {
-		return fmt.Errorf("failed to put channel in confirm mode: %w", err)
+		return fmt.Errorf("cannot put channel in confirm mode: %w", err)
 	}
 
 	return nil
@@ -65,7 +65,7 @@ func (c *Client) declareExchange(exchangeName string) error {
 		nil,      // no additional arguments
 	)
 	if err != nil {
-		return fmt.Errorf("failed to declare AMQP exchange: %w", err)
+		return fmt.Errorf("cannot declare AMQP exchange: %w", err)
 	}
 	return nil
 }
@@ -80,7 +80,7 @@ func (c *Client) declareQueue(queueName string) error {
 		nil,   // arguments
 	)
 	if err != nil {
-		return fmt.Errorf("failed to declare AMQP queue: %w", err)
+		return fmt.Errorf("cannot declare AMQP queue: %w", err)
 	}
 	return nil
 }
@@ -98,7 +98,7 @@ func (c *Client) declareQueueWithDeadLetter(queueName, dlxName string) error {
 		args,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to declare AMQP queue with dead-letter: %w", err)
+		return fmt.Errorf("cannot declare AMQP queue with dead-letter: %w", err)
 	}
 	return nil
 }
@@ -112,7 +112,7 @@ func (c *Client) bindQueue(queueName, routingKey, exchangeName string) error {
 		nil,   // arguments
 	)
 	if err != nil {
-		return fmt.Errorf("failed to bind AMQP queue: %w", err)
+		return fmt.Errorf("cannot bind AMQP queue: %w", err)
 	}
 	return nil
 }

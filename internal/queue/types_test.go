@@ -199,5 +199,5 @@ func TestDeclareQueueWithDeadLetterError(t *testing.T) {
 	err := client.declareQueueWithDeadLetter("test-queue", "test-dlx")
 
 	assert.Error(t, err)
-	assert.ErrorContains(t, err, "failed to declare AMQP queue with dead-letter")
+	assert.ErrorContains(t, err, "cannot declare AMQP queue with dead-letter")
 }
