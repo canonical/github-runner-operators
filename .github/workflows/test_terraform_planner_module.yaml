@@ -56,6 +56,14 @@ jobs:
           } >> "$GITHUB_ENV"
       - run: juju add-model stg-deploy-planner
       - uses: hashicorp/setup-terraform@v3.1.2
+      - name: Generate admin token (ephemeral)
+        run: |
+          python3 - <<EOS' >> "$GITHUB_ENV"
+          import secrets, string
+          alphabet = string.ascii_letters + string.digits + "_-"
+          token = "planner_v0_" + "".join(secrets.choice(alphabet) for _ in range(20))
+          print(f"TF_VAR_admin_token_value={token}")
+          EOS
       - run: terraform init
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform validate
