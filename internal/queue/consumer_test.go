@@ -407,23 +407,18 @@ func TestPullSetsUpDeadLetterQueue(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	// Verify DLX exchange is declared
 	assert.Contains(t, mockAmqpChannelConsumer.MockAmqpChannel.exchangeNames, config.DeadLetterExchange,
 		"expected DLX exchange to be declared")
 
-	// Verify DLQ queue is declared
 	assert.Contains(t, mockAmqpChannelConsumer.MockAmqpChannel.queueNames, config.DeadLetterQueue,
 		"expected DLQ queue to be declared")
 
-	// Verify main queue is declared with x-dead-letter-exchange argument
 	assert.Equal(t, config.DeadLetterExchange, mockAmqpChannelConsumer.MockAmqpChannel.queueArgs["x-dead-letter-exchange"],
 		"expected main queue to have x-dead-letter-exchange argument")
 
-	// Verify both exchanges are declared (DLX and main)
 	assert.Equal(t, 2, mockAmqpChannelConsumer.MockAmqpChannel.exchangeCount,
 		"expected 2 exchanges to be declared (DLX and main)")
 
-	// Verify both queues are declared (DLQ and main)
 	assert.Equal(t, 2, mockAmqpChannelConsumer.MockAmqpChannel.declareCount,
 		"expected 2 queues to be declared (DLQ and main)")
 }
