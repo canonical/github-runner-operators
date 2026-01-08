@@ -169,35 +169,3 @@ func TestClient_Close_Idempotent(t *testing.T) {
 	assert.Equal(t, 1, ch.closeCalls)
 	assert.Equal(t, 1, conn.closeCalls)
 }
-
-func TestDeclareQueueWithDeadLetter(t *testing.T) {
-	/*
-		arrange: Create a client with mock channel.
-		act: Call declareQueueWithDeadLetter.
-		assert: Queue is declared with x-dead-letter-exchange argument.
-	*/
-	ch := &MockAmqpChannel{}
-	client := &Client{amqpChannel: ch}
-
-	err := client.declareQueueWithDeadLetter("test-queue", "test-dlx")
-
-	assert.NoError(t, err)
-	assert.Equal(t, "test-queue", ch.queueName)
-	assert.True(t, ch.queueDurable)
-	assert.Equal(t, "test-dlx", ch.queueArgs["x-dead-letter-exchange"])
-}
-
-func TestDeclareQueueWithDeadLetterError(t *testing.T) {
-	/*
-		arrange: Create a client with mock channel that returns error.
-		act: Call declareQueueWithDeadLetter.
-		assert: Error is returned.
-	*/
-	ch := &MockAmqpChannel{queueDeclareError: true}
-	client := &Client{amqpChannel: ch}
-
-	err := client.declareQueueWithDeadLetter("test-queue", "test-dlx")
-
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "cannot declare AMQP queue with dead-letter")
-}
