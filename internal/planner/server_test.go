@@ -27,9 +27,9 @@ type fakeStore struct {
 	errToReturn error
 
 	// Auth token controls
-	nextToken     [32]byte
-	createTokErr  error
-	deleteTokErr  error
+	nextToken    [32]byte
+	createTokErr error
+	deleteTokErr error
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
