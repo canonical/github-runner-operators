@@ -141,7 +141,7 @@ func TestCreateFlavor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{errToReturn: tt.storeErr}
-			server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
+			server := NewServer(store, store, NewMetrics(store), "planner_v0_test_admin_token__01")
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, tt.body, token)
@@ -203,7 +203,7 @@ func TestGetFlavorPressure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{pressures: tt.pressures}
-			server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
+			server := NewServer(store, store, NewMetrics(store), "planner_v0_test_admin_token__01")
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, "", token)
@@ -221,7 +221,7 @@ func TestGetFlavorPressure(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	store := &fakeStore{}
-	server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
+	server := NewServer(store, store, NewMetrics(store), "planner_v0_test_admin_token__01")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -238,7 +238,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestAuthTokenEndpoints(t *testing.T) {
-	admin := "planner_v0_thisIsAValidAdminToken___________1234"
+	admin := "planner_v0_12345678901234567890"
 	t.Run("create token success", func(t *testing.T) {
 		store := &fakeStore{}
 		token := [32]byte{}

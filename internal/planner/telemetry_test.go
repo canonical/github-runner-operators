@@ -123,7 +123,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	store := &mockStore{}
-	server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
+	server := NewServer(store, store, NewMetrics(store), "planner_v0_test_admin_token__01")
 	token := makeToken()
 
 	body := `{"platform":"github","labels":["self-hosted","amd64"],"priority":300}`
