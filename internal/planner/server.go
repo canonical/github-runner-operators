@@ -9,6 +9,7 @@ package planner
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -180,7 +181,7 @@ func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := s.auth.CreateAuthToken(r.Context(), name)
 	if err == nil {
-		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: string(token[:])})
+		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: base64.RawURLEncoding.EncodeToString(token[:])})
 		return
 	}
 	if errors.Is(err, database.ErrExist) {
