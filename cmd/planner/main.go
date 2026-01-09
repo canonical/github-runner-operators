@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,8 @@ import (
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 const (
@@ -88,6 +91,19 @@ func main() {
 		Addr:    ":" + port,
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
 	}
+	if flag.Lookup("test.v") != nil {
+		log.Println("Running in test mode with http2 cleartext support")
+		h2s := &http2.Server{}
+		server = &http.Server{
+			Addr:    ":" + port,
+			Handler: h2c.NewHandler(otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")), h2s),
+		}
+	}
+	// Enable HTTP/2 server-side PINGs as a keep-alive mechanism, and health check of whether the client is responsive.
+	http2.ConfigureServer(server, &http2.Server{
+		ReadIdleTimeout: 30 * time.Second,
+		PingTimeout:     10 * time.Second,
+	})
 
 	go func() {
 		log.Println("Starting planner API server on port", port)

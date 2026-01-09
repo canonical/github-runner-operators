@@ -12,8 +12,10 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/canonical/github-runner-operators/internal/database"
@@ -21,9 +23,10 @@ import (
 )
 
 type fakeStore struct {
-	pressures   map[string]int
-	lastFlavor  *database.Flavor
-	errToReturn error
+	pressures      atomic.Value
+	lastFlavor     *database.Flavor
+	errToReturn    error
+	pressureChange chan struct{}
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -32,12 +35,22 @@ func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) erro
 }
 
 func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
+	pressures := f.pressures.Load()
+	if pressures == nil {
+		return map[string]int{}, nil
+	}
+
+	pressureMap, ok := pressures.(map[string]int)
+	if !ok {
+		return nil, fmt.Errorf("invalid pressure data type")
+	}
+
 	if len(flavors) == 0 {
-		return f.pressures, nil
+		return pressureMap, nil
 	}
 	res := make(map[string]int)
 	for _, flavor := range flavors {
-		if pressure, ok := f.pressures[flavor]; ok {
+		if pressure, ok := pressureMap[flavor]; ok {
 			res[flavor] = pressure
 		}
 	}
@@ -51,7 +64,11 @@ func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]databas
 	return []database.Flavor{}, nil
 }
 
-func newRequest(method, url, body string, token string) *http.Request {
+func (f *fakeStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	return f.pressureChange, nil
+}
+
+func newRequest(method, url, body, token string) *http.Request {
 	req := httptest.NewRequest(method, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
@@ -183,7 +200,9 @@ func TestGetFlavorPressure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{pressures: tt.pressures}
+			pressures := atomic.Value{}
+			pressures.Store(tt.pressures)
+			store := &fakeStore{pressures: pressures}
 			server := NewServer(store, NewMetrics(store))
 			token := makeToken()
 
@@ -196,6 +215,119 @@ func TestGetFlavorPressure(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 			assert.Equal(t, tt.expectedPressures, resp)
+		})
+	}
+}
+
+func TestGetFlavorPressureStream(t *testing.T) {
+	/*
+		arrange: enable server to receive HTTP/2 requests.
+		act: send streaming requests and update pressures in the store.
+		assert: verify the received pressures match expected values, and the HTTP status codes are as expected.
+	*/
+	tests := []struct {
+		name                    string
+		http2Enabled            bool
+		pressuresStream         []map[string]int
+		method                  string
+		url                     string
+		expectedStatus          []int
+		expectedPressuresStream []map[string]int
+	}{{
+		name:         "shouldSucceedForSingleFlavorWithHTTP2",
+		http2Enabled: true,
+		pressuresStream: []map[string]int{
+			{"runner-small": 1, "runner-large": 2},
+			{"runner-small": 2, "runner-large": 3},
+			{"runner-small": 3, "runner-large": 1},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus: []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
+	}, {
+		name:                    "shouldSucceedForAllFlavorsWithHTTP2",
+		http2Enabled:            true,
+		pressuresStream:         []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/_/pressure?stream=true",
+		expectedStatus:          []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+	}, {
+		name:                    "shouldFailWhenFlavorNotExistWithHTTP2",
+		http2Enabled:            true,
+		pressuresStream:         []map[string]int{{"runner-medium": 2, "runner-large": 1}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus:          []int{http.StatusNotFound},
+		expectedPressuresStream: []map[string]int{nil},
+	}, {
+		name:         "shouldSucceedForSingleFlavor",
+		http2Enabled: false,
+		pressuresStream: []map[string]int{
+			{"runner-small": 1, "runner-large": 2},
+			{"runner-small": 2, "runner-large": 3},
+			{"runner-small": 3, "runner-large": 1},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus: []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
+	}, {
+		name:                    "shouldSucceedForAllFlavors",
+		http2Enabled:            false,
+		pressuresStream:         []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/_/pressure?stream=true",
+		expectedStatus:          []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+	}, {
+		name:                    "shouldFailWhenFlavorNotExist",
+		http2Enabled:            false,
+		pressuresStream:         []map[string]int{{"runner-medium": 2, "runner-large": 1}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus:          []int{http.StatusNotFound},
+		expectedPressuresStream: []map[string]int{nil},
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pressures := atomic.Value{}
+			pressures.Store(tt.pressuresStream[0])
+			store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
+			server := NewServer(store, NewMetrics(store))
+
+			ts := httptest.NewUnstartedServer(server)
+			ts.EnableHTTP2 = tt.http2Enabled
+			ts.StartTLS()
+			defer ts.Close()
+
+			resp, err := ts.Client().Get(ts.URL + tt.url)
+			assert.NoError(t, err)
+			defer resp.Body.Close()
+
+			var res map[string]int
+			json.NewDecoder(resp.Body).Decode(&res)
+
+			assert.Equal(t, tt.expectedStatus[0], resp.StatusCode)
+			assert.Equal(t, tt.expectedPressuresStream[0], res)
+			for i := range len(tt.pressuresStream[1:]) {
+				store.pressures.Store(tt.pressuresStream[i+1])
+				store.pressureChange <- struct{}{}
+
+				json.NewDecoder(resp.Body).Decode(&res)
+				assert.Equal(t, tt.expectedStatus[i+1], resp.StatusCode)
+				assert.Equal(t, tt.expectedPressuresStream[i+1], res)
+			}
 		})
 	}
 }

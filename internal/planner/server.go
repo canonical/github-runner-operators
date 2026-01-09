@@ -12,7 +12,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"net/http"
+	"strings"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -31,6 +34,7 @@ type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
+	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
 }
 
 // Server holds dependencies for the planner HTTP handlers.
@@ -106,13 +110,11 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	var pressures = map[string]int{}
 	var err error
 
+	w.Header().Set("Cache-Control", "no-cache")
+
+	query := r.URL.Query()
 	flavorName := r.PathValue("name")
-	switch flavorName {
-	case allFlavorName:
-		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform)
-	default:
-		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform, flavorName)
-	}
+	pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
 
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
@@ -124,7 +126,69 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, pressures)
+	if strings.ToLower(query.Get("stream")) != "true" {
+		respondWithJSON(w, http.StatusOK, pressures)
+		return
+	}
+
+	// Handle streaming requests
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Unable to setup HTTP streaming", http.StatusInternalServerError)
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(pressures); err != nil {
+		slog.ErrorContext(r.Context(), "failed to encode initial pressures", "error", err)
+		http.Error(w, "failed to encode pressures", http.StatusInternalServerError)
+		return
+	}
+	flusher.Flush()
+
+	ch, err := s.store.SubscribeToPressureUpdate(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			slog.InfoContext(r.Context(), "client connection terminated")
+			return
+		case _, ok := <-ch:
+			if !ok {
+				slog.InfoContext(r.Context(), "pressure update channel closed")
+				return
+			}
+
+			flavorName := r.PathValue("name")
+			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
+				return
+			}
+			if !maps.Equal(pressures, newPressures) {
+				if err := json.NewEncoder(w).Encode(newPressures); err != nil {
+					slog.ErrorContext(r.Context(), "failed to encode pressure update", "error", err)
+					return
+				}
+				flusher.Flush()
+			}
+			pressures = newPressures
+		}
+	}
+}
+
+func (s *Server) getPressures(ctx context.Context, platform string, flavorName string) (map[string]int, error) {
+	switch flavorName {
+	case allFlavorName:
+		return s.store.GetPressures(ctx, flavorPlatform)
+	default:
+		return s.store.GetPressures(ctx, flavorPlatform, flavorName)
+	}
 }
 
 // health handles health check requests.
