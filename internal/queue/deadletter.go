@@ -10,12 +10,12 @@ import "fmt"
 // setupDeadLetterQueue declares the dead-letter exchange and queue, and binds them together.
 // This encapsulates the RabbitMQ-specific dead-letter configuration.
 func (c *Client) setupDeadLetterQueue(dlxName, dlqName, routingKey string) error {
-	err := c.declareExchange(dlxName)
+	err := c.ensureExchange(dlxName)
 	if err != nil {
 		return fmt.Errorf("cannot declare dead-letter exchange: %w", err)
 	}
 
-	err = c.declareQueue(dlqName)
+	err = c.ensureQueue(dlqName)
 	if err != nil {
 		return fmt.Errorf("cannot declare dead-letter queue: %w", err)
 	}

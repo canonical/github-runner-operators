@@ -116,12 +116,12 @@ func (c *AmqpConsumer) ensureAmqpChannel() error {
 			return err
 		}
 
-		err = c.client.declareExchange(c.config.ExchangeName)
+		err = c.client.ensureExchange(c.config.ExchangeName)
 		if err != nil {
 			return err
 		}
 
-		err = c.client.declareQueueWithDeadLetter(c.config.QueueName, c.config.DeadLetterExchange)
+		err = c.client.ensureQueueWithDeadLetter(c.config.QueueName, c.config.DeadLetterExchange)
 		if err != nil {
 			return err
 		}

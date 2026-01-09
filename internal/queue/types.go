@@ -54,7 +54,8 @@ func (c *Client) resetChannel() error {
 	return nil
 }
 
-func (c *Client) declareExchange(exchangeName string) error {
+// ensureExchange  declares an exchange with given name - this is an idempotent operation
+func (c *Client) ensureExchange(exchangeName string) error {
 	err := c.amqpChannel.ExchangeDeclare(
 		exchangeName,
 		"direct", // use direct exchange
@@ -70,7 +71,8 @@ func (c *Client) declareExchange(exchangeName string) error {
 	return nil
 }
 
-func (c *Client) declareQueue(queueName string) error {
+// ensureQueue declares a queue with given name - this is an idempotent operation
+func (c *Client) ensureQueue(queueName string) error {
 	_, err := c.amqpChannel.QueueDeclare(
 		queueName,
 		true,  // durable
@@ -85,7 +87,8 @@ func (c *Client) declareQueue(queueName string) error {
 	return nil
 }
 
-func (c *Client) declareQueueWithDeadLetter(queueName, dlxName string) error {
+// ensureQueueWithDeadLetter declares a queue with given name and dead-letter exchange specified - this is an idempotent operation
+func (c *Client) ensureQueueWithDeadLetter(queueName, dlxName string) error {
 	args := amqp.Table{
 		"x-dead-letter-exchange": dlxName,
 	}
