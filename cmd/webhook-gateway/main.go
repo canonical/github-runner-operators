@@ -19,7 +19,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const queueName = "webhook-queue"
 const webhookPath = "/webhook"
 const portEnvVar = "APP_PORT"
 const rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
@@ -51,7 +50,7 @@ func main() {
 		log.Fatalln(webhookSecretEnvVar + " environment variable not set")
 	}
 
-	p := queue.NewAmqpProducer(uri, queueName)
+	p := queue.NewAmqpProducer(uri, queue.DefaultQueueConfig())
 	handler := &webhook.Handler{
 		WebhookSecret: webhookSecret,
 		Producer:      p,

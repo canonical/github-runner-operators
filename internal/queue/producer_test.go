@@ -10,130 +10,12 @@ import (
 	"errors"
 	"testing"
 
-	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
 
-const queueName = "test-queue"
-const queueWithPublishNoAck = "queue-with-publish-no-ack"
-const queueWithPublishError = "queue-with-publish-error"
-const queueWithPublishHangs = "queue-with-publish-hangs"
-const queueWithDeclareError = "queue-with-declare-error"
-
-type MockAmqpChannel struct {
-	msgs             [][]byte
-	headers          []map[string]interface{}
-	isclosed         bool
-	confirmMode      bool
-	queueName        string
-	queueDurable     bool
-	confirmModeError bool
-}
-
-func (ch *MockAmqpChannel) PublishWithDeferredConfirm(_ string, key string, _, _ bool, msg amqp.Publishing) (confirmation, error) {
-
-	if key == queueWithPublishError {
-		return nil, errors.New("publish error")
-	}
-	ch.msgs = append(ch.msgs, msg.Body)
-	ch.headers = append(ch.headers, msg.Headers)
-
-	done_ch := make(chan struct{}, 1)
-
-	if key != queueWithPublishHangs {
-		done_ch <- struct{}{}
-	}
-
-	ack := key != queueWithPublishNoAck
-	confirmation := &MockConfirmation{
-		done: done_ch,
-		ack:  ack,
-	}
-	return confirmation, nil
-}
-
-func (ch *MockAmqpChannel) IsClosed() bool {
-	return ch.isclosed
-}
-
-func (ch *MockAmqpChannel) Confirm(_ bool) error {
-	if ch.confirmModeError {
-		return errors.New("confirm error")
-	}
-	ch.confirmMode = true
-	return nil
-}
-
-func (ch *MockAmqpChannel) QueueDeclare(name string, durable, _, _, _ bool, _ amqp.Table) (amqp.Queue, error) {
-	if name == queueWithDeclareError {
-		return amqp.Queue{}, errors.New("queue declare error")
-	}
-	ch.queueName = name
-	ch.queueDurable = durable
-	return amqp.Queue{}, nil
-}
-
-func (ch *MockAmqpChannel) QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
-	return amqp.Queue{}, nil
-}
-
-func (ch *MockAmqpChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
-	return nil, nil
-}
-
-func (ch *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
-	return nil
-}
-
-func (ch *MockAmqpChannel) Close() error {
-	ch.isclosed = true
-	return nil
-}
-
-type MockConfirmation struct {
-	done <-chan struct{}
-	ack  bool
-}
-
-func (c *MockConfirmation) Done() <-chan struct{} {
-	return c.done
-}
-
-func (c *MockConfirmation) Acked() bool {
-	return c.ack
-}
-
-type MockAmqpConnection struct {
-	channelCalls     int
-	amqpChannel      *MockAmqpChannel
-	isclosed         bool
-	errMode          bool
-	confirmModeError bool
-}
-
-func (m *MockAmqpConnection) Channel() (amqpChannel, error) {
-	if m.errMode {
-		return nil, errors.New("failed to open channel")
-	}
-	m.channelCalls++
-	m.amqpChannel = &MockAmqpChannel{
-		confirmModeError: m.confirmModeError,
-	}
-	return m.amqpChannel, nil
-}
-
-func (m *MockAmqpConnection) IsClosed() bool {
-	return m.isclosed
-}
-
-func (m *MockAmqpConnection) Close() error {
-	m.isclosed = true
-	return nil
-}
-
 func TestPush(t *testing.T) {
 	/*
-		arrange: create a queue with a fake amqp connection
+		arrange: create a producer with a fake amqp connection
 		act: push a message to the queue
 		assert: message was published to the amqp channel
 	*/
@@ -145,7 +27,7 @@ func TestPush(t *testing.T) {
 				amqpChannel: mockAmqpChannel,
 			},
 		},
-		queueName: queueName,
+		config: DefaultQueueConfig(),
 	}
 
 	headers := map[string]interface{}{"header1": "value1"}
@@ -157,21 +39,21 @@ func TestPush(t *testing.T) {
 
 func TestPushFailure(t *testing.T) {
 	/*
-		arrange: create a queue with a fake confirm handler that always fails
+		arrange: create a producer with a fake confirm handler that always fails
 		act: push a message to the queue that will fail to publish
 		assert: the push return an error
 	*/
 	tests := []struct {
-		name      string
-		queueName string
-		context   context.Context
-		errMsg    string
+		name        string
+		mockChannel *MockAmqpChannel
+		context     context.Context
+		errMsg      string
 	}{
 		{
-			name:      "message is not acked",
-			queueName: queueWithPublishNoAck,
-			errMsg:    "confirmation not acknowledged",
-			context:   context.Background(),
+			name:        "message is not acked",
+			mockChannel: &MockAmqpChannel{publishNoAck: true},
+			errMsg:      "confirmation not acknowledged",
+			context:     context.Background(),
 		},
 		{
 			name: "context is done",
@@ -180,28 +62,27 @@ func TestPushFailure(t *testing.T) {
 				cancel()
 				return ctx
 			}(),
-			queueName: queueWithPublishHangs,
-			errMsg:    "context canceled",
+			mockChannel: &MockAmqpChannel{publishHangs: true},
+			errMsg:      "context canceled",
 		},
 		{
-			name:      "publish returns error",
-			queueName: queueWithPublishError,
-			errMsg:    "publish error",
-			context:   context.Background(),
+			name:        "publish returns error",
+			mockChannel: &MockAmqpChannel{publishError: true},
+			errMsg:      "publish error",
+			context:     context.Background(),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockAmqpChannel := &MockAmqpChannel{}
 			amqpProducer := &AmqpProducer{
 				client: &Client{
-					amqpChannel: mockAmqpChannel,
+					amqpChannel: tt.mockChannel,
 					amqpConnection: &MockAmqpConnection{
-						amqpChannel: mockAmqpChannel,
+						amqpChannel: tt.mockChannel,
 					},
 				},
-				queueName: tt.queueName,
+				config: DefaultQueueConfig(),
 			}
 
 			err := amqpProducer.Push(tt.context, nil, []byte("TestMessage"))
@@ -241,6 +122,7 @@ func TestPushNoChannel(t *testing.T) {
 					amqpChannel:    tt.channel,
 					amqpConnection: mockAmqpConnection,
 				},
+				config: DefaultQueueConfig(),
 			}
 
 			amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
@@ -265,6 +147,7 @@ func TestPushNoChannelFailure(t *testing.T) {
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
+		config: DefaultQueueConfig(),
 	}
 	err := amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 	assert.Error(t, err, "expected error when channel fails to open")
@@ -305,6 +188,7 @@ func TestPushNoConnection(t *testing.T) {
 						return mockAmqpConnection, nil
 					},
 				},
+				config: DefaultQueueConfig(),
 			}
 
 			amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
@@ -328,6 +212,7 @@ func TestPushNoConnectionFailure(t *testing.T) {
 				return nil, errors.New("connection error")
 			},
 		},
+		config: DefaultQueueConfig(),
 	}
 
 	err := amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
@@ -335,49 +220,46 @@ func TestPushNoConnectionFailure(t *testing.T) {
 	assert.ErrorContains(t, err, "connection error")
 }
 
-func TestPushQueueDeclare(t *testing.T) {
+func TestPushExchangeDeclare(t *testing.T) {
 	/*
-		arrange: create a queue with no amqp channel
+		arrange: create a producer with no amqp channel
 		act: push a message to the queue
-		assert: channel with confirm mode is established and queue is declared
+		assert: channel with confirm mode is established and exchange is declared with config name
 	*/
 	mockAmqpConnection := &MockAmqpConnection{}
+	config := DefaultQueueConfig()
 	amqpProducer := &AmqpProducer{
 		client: &Client{
 			amqpChannel:    nil,
 			amqpConnection: mockAmqpConnection,
 		},
-		queueName: queueName,
+		config: config,
 	}
 
 	amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 
-	assert.Equal(t, mockAmqpConnection.amqpChannel.confirmMode, true, "expected channel to be in confirm mode")
-	assert.Equal(t, mockAmqpConnection.amqpChannel.queueName, queueName, "expected queue name to be "+queueName)
-	assert.Equal(t, mockAmqpConnection.amqpChannel.queueDurable, true, "expected queue to be durable")
+	assert.True(t, mockAmqpConnection.amqpChannel.confirmMode, "expected channel to be in confirm mode")
+	assert.Equal(t, config.ExchangeName, mockAmqpConnection.amqpChannel.exchangeName, "expected exchange name to be "+config.ExchangeName)
 }
 
-func TestPushQueueDeclareFailure(t *testing.T) {
+func TestPushExchangeDeclareFailure(t *testing.T) {
 	/*
-		arrange: create a queue with no amqp channel where the queue declare fails
+		arrange: create a producer with no amqp channel where the exchange declare fails
 		act: push a message to the queue
 		assert: push returns an error
 	*/
 	tests := []struct {
 		name               string
-		queueName          string
 		mockAmqpConnection *MockAmqpConnection
 		errMsg             string
 	}{
 		{
-			name:               "queue declare error",
-			queueName:          queueWithDeclareError,
-			mockAmqpConnection: &MockAmqpConnection{},
-			errMsg:             "queue declare error",
+			name:               "exchange declare error",
+			mockAmqpConnection: &MockAmqpConnection{exchangeDeclareError: true},
+			errMsg:             "exchange declare error",
 		},
 		{
-			name:      "confirm error",
-			queueName: queueName,
+			name: "confirm error",
 			mockAmqpConnection: &MockAmqpConnection{
 				confirmModeError: true,
 			},
@@ -392,12 +274,12 @@ func TestPushQueueDeclareFailure(t *testing.T) {
 					amqpChannel:    nil,
 					amqpConnection: tt.mockAmqpConnection,
 				},
-				queueName: tt.queueName,
+				config: DefaultQueueConfig(),
 			}
 
 			err := amqpProducer.Push(context.Background(), nil, []byte("TestMessage"))
 
-			assert.Error(t, err, "expected error when queue declare fails")
+			assert.Error(t, err, "expected error when exchange declare fails")
 			assert.ErrorContains(t, err, tt.errMsg)
 		})
 	}

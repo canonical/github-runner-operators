@@ -34,8 +34,8 @@ func (c *Client) resetConnection() error {
 	return nil
 }
 
-// resetChannel opens a new AMQP channel and declares the queue.
-func (c *Client) resetChannel(queue string, passive bool) error {
+// resetChannel opens a new AMQP channel
+func (c *Client) resetChannel() error {
 	if c.amqpChannel != nil && !c.amqpChannel.IsClosed() {
 		return nil
 	}
@@ -51,29 +51,51 @@ func (c *Client) resetChannel(queue string, passive bool) error {
 		return fmt.Errorf("failed to put channel in confirm mode: %w", err)
 	}
 
-	if passive {
-		_, err = ch.QueueDeclarePassive(
-			queue, // queueName
-			true,  // durable
-			false, // delete when unused
-			false, // exclusive
-			false, // no-wait
-			nil,   // arguments
-		)
-	} else {
-		_, err = ch.QueueDeclare(
-			queue, // queueName
-			true,  // durable
-			false, // delete when unused
-			false, // exclusive
-			false, // no-wait
-			nil,   // arguments
-		)
+	return nil
+}
+
+func (c *Client) declareExchange(exchangeName string) error {
+	err := c.amqpChannel.ExchangeDeclare(
+		exchangeName,
+		"direct", // use direct exchange
+		true,     // durable - don't delete on broker restart
+		false,    // autoDelete - don't delete when no longer in use
+		false,    // internal set to false - be suitable for publishing
+		false,    // wait for confirmation
+		nil,      // no additional arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare AMQP exchange: %w", err)
 	}
+	return nil
+}
+
+func (c *Client) declareQueue(queueName string) error {
+	_, err := c.amqpChannel.QueueDeclare(
+		queueName,
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
 	if err != nil {
 		return fmt.Errorf("failed to declare AMQP queue: %w", err)
 	}
+	return nil
+}
 
+func (c *Client) bindQueue(queueName, routingKey, exchangeName string) error {
+	err := c.amqpChannel.QueueBind(
+		queueName,
+		routingKey,
+		exchangeName,
+		false, // no-wait
+		nil,   // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind AMQP queue: %w", err)
+	}
 	return nil
 }
 
@@ -100,8 +122,8 @@ func (c *Client) Close() error {
 }
 
 type AmqpProducer struct {
-	client    *Client
-	queueName string
+	client *Client
+	config QueueConfig
 }
 
 type Producer interface {
@@ -113,8 +135,10 @@ type amqpChannel interface {
 	IsClosed() bool
 	Close() error
 	Confirm(noWait bool) error
+	ExchangeDeclare(name string, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	QueueDeclarePassive(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	Qos(prefetchCount, prefetchSize int, global bool) error
 }
@@ -153,6 +177,10 @@ func (ch *amqpChannelWrapper) Consume(queue, consumer string, autoAck, exclusive
 
 func (ch *amqpChannelWrapper) Qos(prefetchCount, prefetchSize int, global bool) error {
 	return ch.Channel.Qos(prefetchCount, prefetchSize, global)
+}
+
+func (ch *amqpChannelWrapper) QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error {
+	return ch.Channel.QueueBind(name, key, exchange, noWait, args)
 }
 
 type Consumer interface {
