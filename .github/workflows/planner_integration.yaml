@@ -93,3 +93,7 @@ jobs:
 
           echo "Integration test passed or was skipped appropriately"
           exit 0
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: canonical/action-tmate@main
