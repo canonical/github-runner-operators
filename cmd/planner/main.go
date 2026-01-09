@@ -73,7 +73,7 @@ func main() {
 		log.Fatalln(adminTokenEnvVar, "environment variable not set.")
 	}
 	if !adminTokenPattern.MatchString(adminToken) {
-		log.Fatalln("APP_ADMIN_TOKEN has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]")
+		log.Fatalf("%s has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]\n", adminTokenEnvVar)
 	}
 
 	if err := database.Migrate(ctx, uri); err != nil {
