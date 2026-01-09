@@ -602,11 +602,11 @@ func TestConsumer(t *testing.T) {
 	}
 }
 
-func TestParseGithubWebhookPayload(t *testing.T) {
+func TestGetWorkflowJob(t *testing.T) {
 	/*
 		arrange: setup context for parsing webhook payload
-		act: parse the GitHub webhook payload with provided headers and body
-		assert: check for expected errors and validate parsed job data
+		act: extract workflow job from GitHub webhook payload
+		assert: check for expected errors, nil returns, and validate parsed job data
 	*/
 	mk := func(m map[string]any) []byte { b, _ := json.Marshal(m); return b }
 
@@ -616,7 +616,8 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 		body         []byte
 		expectErr    bool
 		expectErrMsg string
-		validateJob  func(*testing.T, githubWebhookJob)
+		expectNil    bool
+		validateJob  func(*testing.T, *githubWebhookJob)
 	}{{
 		name: "successful parsing of queued event",
 		headers: map[string]interface{}{
@@ -634,8 +635,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 				"created_at": "2025-01-01T10:00:00Z",
 			},
 		}),
-		expectErr: false,
-		validateJob: func(t *testing.T, job githubWebhookJob) {
+		validateJob: func(t *testing.T, job *githubWebhookJob) {
 			assert.Equal(t, "100", job.id)
 			assert.Equal(t, "canonical/test-repo", job.repo)
 			assert.Equal(t, "queued", job.action)
@@ -670,8 +670,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 				"id": 1,
 			},
 		}),
-		expectErr:    true,
-		expectErrMsg: "unsupported event",
+		expectNil: true,
 	}, {
 		name: "unknown action",
 		headers: map[string]interface{}{
@@ -688,8 +687,24 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 				"created_at": "2025-01-01T10:00:00Z",
 			},
 		}),
-		expectErr:    true,
-		expectErrMsg: "unsupported event: unknown action",
+		expectNil: true,
+	}, {
+		name: "non-self-hosted job",
+		headers: map[string]interface{}{
+			"X-GitHub-Event": "workflow_job",
+		},
+		body: mk(map[string]any{
+			"action": "queued",
+			"repository": map[string]any{
+				"full_name": "canonical/test",
+			},
+			"workflow_job": map[string]any{
+				"id":         250,
+				"labels":     []string{"ubuntu-latest"}, // Not self-hosted
+				"created_at": "2025-01-01T10:00:00Z",
+			},
+		}),
+		expectNil: true,
 	}, {
 		name: "missing workflow_job field",
 		headers: map[string]interface{}{
@@ -798,7 +813,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 		expectErr:    true,
 		expectErrMsg: "missing repo full name",
 	}, {
-		name: "waiting action is accepted",
+		name: "waiting action is ignored",
 		headers: map[string]interface{}{
 			"X-GitHub-Event": "workflow_job",
 		},
@@ -813,11 +828,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 				"created_at": "2025-01-01T10:00:00Z",
 			},
 		}),
-		expectErr: false,
-		validateJob: func(t *testing.T, job githubWebhookJob) {
-			assert.Equal(t, "700", job.id)
-			assert.Equal(t, "waiting", job.action)
-		},
+		expectNil: true,
 	}, {
 		name: "in_progress with all fields",
 		headers: map[string]interface{}{
@@ -836,8 +847,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 				"started_at": "2025-01-01T10:05:00Z",
 			},
 		}),
-		expectErr: false,
-		validateJob: func(t *testing.T, job githubWebhookJob) {
+		validateJob: func(t *testing.T, job *githubWebhookJob) {
 			assert.Equal(t, "800", job.id)
 			assert.Equal(t, "in_progress", job.action)
 			assert.NotNil(t, job.job.StartedAt)
@@ -862,8 +872,7 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 				"completed_at": "2025-01-01T10:15:00Z",
 			},
 		}),
-		expectErr: false,
-		validateJob: func(t *testing.T, job githubWebhookJob) {
+		validateJob: func(t *testing.T, job *githubWebhookJob) {
 			assert.Equal(t, "900", job.id)
 			assert.Equal(t, "completed", job.action)
 			assert.NotNil(t, job.job.CompletedAt)
@@ -882,15 +891,20 @@ func TestParseGithubWebhookPayload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			job, err := parseGithubWebhookPayload(ctx, tt.headers, tt.body)
+			job, err := getWorkflowJob(ctx, tt.headers, tt.body)
 
 			if tt.expectErr {
 				assert.Error(t, err)
 				if tt.expectErrMsg != "" {
 					assert.Contains(t, err.Error(), tt.expectErrMsg)
 				}
+				assert.Nil(t, job)
+			} else if tt.expectNil {
+				assert.NoError(t, err)
+				assert.Nil(t, job)
 			} else {
 				assert.NoError(t, err)
+				assert.NotNil(t, job)
 				if tt.validateJob != nil {
 					tt.validateJob(t, job)
 				}
