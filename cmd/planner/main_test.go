@@ -105,8 +105,8 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		dlqDepth := ctx.getNumMessagesInQueue(config.DeadLetterQueue)
 		assert.Equal(t, 0, dlqDepth)
 
-		// Malformed message should go to DLQ
-		malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999}}`)
+		// Malformed message should go to DLQ (must have self-hosted label to pass filter)
+		malformedBody := []byte(`{"action": "queued", "workflow_job": {"id": 999, "labels": ["self-hosted"]}}`)
 		ctx.publish(malformedBody, supportedEventType)
 
 		dlqMessage := ctx.consumeFromQueue(config.DeadLetterQueue, 10*time.Second)
