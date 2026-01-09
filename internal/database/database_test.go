@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testDatabase struct {
@@ -101,20 +102,25 @@ func teardownDatabase(t *testing.T) {
 	}
 }
 
-// setupPressureUpdateTest subscribes to pressure updates, asserts the channel is initially empty,
-// executes the given operation function, then asserts that exactly one notification was received.
-func setupPressureUpdateTest(t *testing.T, ctx context.Context, db *Database, operation func()) {
+// subscribeToPressureUpdateTest sets up a subscription to pressure updates.
+func subscribeToPressureUpdates(t *testing.T, ctx context.Context, db *Database) <-chan struct{} {
+	t.Helper()
 	ch, err := db.SubscribeToPressureUpdate(ctx)
-	assert.NoError(t, err)
-	assert.Len(t, ch, 0)
+	require.NoError(t, err)
+	require.Len(t, ch, 0)
+	return ch
+}
 
-	operation()
-
-	value, ok := <-ch
-	assert.True(t, ok)
-	assert.NotNil(t, value)
-	// Only one notification should be received, the channel should now be empty.
-	assert.Len(t, ch, 0)
+// assertSingleNotificationReceived asserts that a single notification is received on the channel.
+func assertSingleNotificationReceived(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case _, ok := <-ch:
+		require.True(t, ok, "channel closed unexpectedly")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for notification")
+	}
+	assert.Empty(t, ch, "expected only a single notification")
 }
 
 func TestDatabase_CreateAuthToken(t *testing.T) {
@@ -188,9 +194,9 @@ func TestDatabase_AddJob(t *testing.T) {
 		Raw:       map[string]interface{}{"queued": "queued"},
 	}
 
-	setupPressureUpdateTest(t, ctx, db, func() {
-		assert.NoError(t, db.AddJob(ctx, &job))
-	})
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
+	assert.NoError(t, db.AddJob(ctx, &job))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -421,9 +427,9 @@ func TestDatabase_UpdateJobCompleted(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 
-	setupPressureUpdateTest(t, ctx, db, func() {
-		assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
-	})
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
+	assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	job.CompletedAt = &completedAt
 	job.Raw["completed"] = "completed"
@@ -468,9 +474,9 @@ func TestDatabase_AddFlavor(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 
-	setupPressureUpdateTest(t, ctx, db, func() {
-		assert.NoError(t, db.AddFlavor(ctx, &flavor))
-	})
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
+	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -522,9 +528,9 @@ func TestDatabase_DisableFlavor(t *testing.T) {
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
 
-	setupPressureUpdateTest(t, ctx, db, func() {
-		assert.NoError(t, db.DisableFlavor(ctx, flavor.Platform, flavor.Name))
-	})
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
+	assert.NoError(t, db.DisableFlavor(ctx, flavor.Platform, flavor.Name))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -588,9 +594,9 @@ func TestDatabase_DeleteFlavor(t *testing.T) {
 	assert.Equal(t, flavorSmall.Name, *jobs[0].AssignedFlavor)
 	assert.Equal(t, flavorSmall.Name, *jobs[1].AssignedFlavor)
 
-	setupPressureUpdateTest(t, ctx, db, func() {
-		assert.NoError(t, db.DeleteFlavor(ctx, flavorSmall.Platform, flavorSmall.Name))
-	})
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
+	assert.NoError(t, db.DeleteFlavor(ctx, flavorSmall.Platform, flavorSmall.Name))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err = db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
