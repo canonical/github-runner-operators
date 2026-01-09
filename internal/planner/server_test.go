@@ -227,13 +227,47 @@ func TestGetFlavorPressureStream(t *testing.T) {
 	*/
 	tests := []struct {
 		name                    string
+		http2Enabled            bool
 		pressuresStream         []map[string]int
 		method                  string
 		url                     string
 		expectedStatus          []int
 		expectedPressuresStream []map[string]int
 	}{{
-		name: "shouldSucceedForSingleFlavor",
+		name:         "shouldSucceedForSingleFlavorWithHTTP2",
+		http2Enabled: true,
+		pressuresStream: []map[string]int{
+			{"runner-small": 1, "runner-large": 2},
+			{"runner-small": 2, "runner-large": 3},
+			{"runner-small": 3, "runner-large": 1},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus: []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
+	}, {
+		name:                    "shouldSucceedForAllFlavorsWithHTTP2",
+		http2Enabled:            true,
+		pressuresStream:         []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/_/pressure?stream=true",
+		expectedStatus:          []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+	}, {
+		name:                    "shouldFailWhenFlavorNotExistWithHTTP2",
+		http2Enabled:            true,
+		pressuresStream:         []map[string]int{{"runner-medium": 2, "runner-large": 1}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus:          []int{http.StatusNotFound},
+		expectedPressuresStream: []map[string]int{nil},
+	}, {
+		name:         "shouldSucceedForSingleFlavor",
+		http2Enabled: false,
 		pressuresStream: []map[string]int{
 			{"runner-small": 1, "runner-large": 2},
 			{"runner-small": 2, "runner-large": 3},
@@ -249,6 +283,7 @@ func TestGetFlavorPressureStream(t *testing.T) {
 		},
 	}, {
 		name:                    "shouldSucceedForAllFlavors",
+		http2Enabled:            false,
 		pressuresStream:         []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
 		method:                  http.MethodGet,
 		url:                     "/api/v1/flavors/_/pressure?stream=true",
@@ -256,6 +291,7 @@ func TestGetFlavorPressureStream(t *testing.T) {
 		expectedPressuresStream: []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
 	}, {
 		name:                    "shouldFailWhenFlavorNotExist",
+		http2Enabled:            false,
 		pressuresStream:         []map[string]int{{"runner-medium": 2, "runner-large": 1}},
 		method:                  http.MethodGet,
 		url:                     "/api/v1/flavors/runner-small/pressure?stream=true",
@@ -271,7 +307,7 @@ func TestGetFlavorPressureStream(t *testing.T) {
 			server := NewServer(store, NewMetrics(store))
 
 			ts := httptest.NewUnstartedServer(server)
-			ts.EnableHTTP2 = true
+			ts.EnableHTTP2 = tt.http2Enabled
 			ts.StartTLS()
 			defer ts.Close()
 

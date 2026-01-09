@@ -132,15 +132,11 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle streaming requests
-	if r.ProtoMajor < 2 {
-		http.Error(w, "streaming requires HTTP/2", http.StatusHTTPVersionNotSupported)
-		return
-	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Connection", "keep-alive")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Unable to setup HTTP/2 streaming", http.StatusInternalServerError)
+		http.Error(w, "Unable to setup HTTP streaming", http.StatusInternalServerError)
 		return
 	}
 
