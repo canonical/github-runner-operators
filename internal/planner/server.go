@@ -148,8 +148,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminProtected(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authz := r.Header.Get("Authorization")
-		parts := strings.SplitN(authz, " ", 2)
+		authorization_header := r.Header.Get("Authorization")
+		parts := strings.SplitN(authorization_header, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			http.Error(w, "invalid authorization header", http.StatusBadRequest)
 			return
