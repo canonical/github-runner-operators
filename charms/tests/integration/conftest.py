@@ -76,7 +76,7 @@ def create_planner_admin_token_uri_fixture(juju: jubilant.Juju) -> str:
     Granting to the app is done after deploy in the planner_app fixture.
     """
     token = _generate_admin_token()
-    secret_uri = juju.add_secret(name="planner-admin-token", content={"token": token})
+    secret_uri = juju.add_secret(name="planner-admin-token", content={"value": token})
     return secret_uri
 
 
