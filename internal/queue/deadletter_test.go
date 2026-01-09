@@ -11,16 +11,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSetupDeadLetterQueue(t *testing.T) {
+func TestEnsureDeadLetterQueue(t *testing.T) {
 	/*
 		arrange: Create a client with mock channel.
-		act: Call setupDeadLetterQueue.
+		act: Call ensureDeadLetterQueue.
 		assert: DLX exchange declared, DLQ queue declared, and queue bound to exchange.
 	*/
 	ch := &MockAmqpChannel{}
 	client := &Client{amqpChannel: ch}
 
-	err := client.setupDeadLetterQueue("test-dlx", "test-dlq", "test-routing-key")
+	err := client.ensureDeadLetterQueue("test-dlx", "test-dlq", "test-routing-key")
 
 	assert.NoError(t, err)
 	assert.Contains(t, ch.exchangeNames, "test-dlx", "DLX exchange should be declared")
@@ -30,10 +30,10 @@ func TestSetupDeadLetterQueue(t *testing.T) {
 	assert.Equal(t, "test-routing-key", ch.boundRoutingKey)
 }
 
-func TestSetupDeadLetterQueueErrors(t *testing.T) {
+func TestEnsureDeadLetterQueueErrors(t *testing.T) {
 	/*
 		arrange: Create a client with mock channel configured for each error scenario.
-		act: Call setupDeadLetterQueue.
+		act: Call ensureDeadLetterQueue.
 		assert: Appropriate error returned.
 	*/
 	tests := []struct {
@@ -69,7 +69,7 @@ func TestSetupDeadLetterQueueErrors(t *testing.T) {
 			}
 			client := &Client{amqpChannel: ch}
 
-			err := client.setupDeadLetterQueue("test-dlx", "test-dlq", "test-routing-key")
+			err := client.ensureDeadLetterQueue("test-dlx", "test-dlq", "test-routing-key")
 
 			assert.Error(t, err)
 			assert.ErrorContains(t, err, tt.expectErrContains)

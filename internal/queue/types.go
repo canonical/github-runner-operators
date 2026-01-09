@@ -106,7 +106,8 @@ func (c *Client) ensureQueueWithDeadLetter(queueName, dlxName string) error {
 	return nil
 }
 
-func (c *Client) bindQueue(queueName, routingKey, exchangeName string) error {
+// ensureQueueBinding binds a queue to an exchange with the given routing key - this is an idempotent operation.
+func (c *Client) ensureQueueBinding(queueName, routingKey, exchangeName string) error {
 	err := c.amqpChannel.QueueBind(
 		queueName,
 		routingKey,
