@@ -81,7 +81,11 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
-		logger.DebugContext(ctx, "ignoring non-workflow_job event", "event_type", eventType)
+		if eventType == "workflow_job" {
+			logger.WarnContext(ctx, "workflow_job event did not parse to expected type", "event_type", eventType)
+		} else {
+			logger.DebugContext(ctx, "ignoring non-workflow_job event", "event_type", eventType)
+		}
 		return nil, nil
 	}
 
