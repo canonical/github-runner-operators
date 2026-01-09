@@ -61,7 +61,6 @@ var (
 )
 
 type Database struct {
-	uri  string
 	conn *pgxpool.Pool
 }
 
@@ -537,11 +536,11 @@ func (d *Database) GetPressures(ctx context.Context, platform string, flavors ..
 }
 
 func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
-	// pgxpool does not support LISTEN/NOTIFY, therefore a separate connection is created.
-	conn, err := pgx.Connect(ctx, d.uri)
+	pConn, err := d.conn.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the database for pressure change event listener: %w", err)
 	}
+	conn := pConn.Hijack()
 
 	_, err = conn.Exec(ctx, "LISTEN "+pressureChangeChannelName+";")
 	if err != nil {
@@ -572,7 +571,7 @@ func New(ctx context.Context, uri string) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the database: %v", err)
 	}
-	return &Database{uri: uri, conn: conn}, nil
+	return &Database{conn: conn}, nil
 }
 
 // Close closes all database connections in the pool.

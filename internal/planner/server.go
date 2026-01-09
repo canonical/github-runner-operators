@@ -136,7 +136,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming requires HTTP/2", http.StatusHTTPVersionNotSupported)
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Connection", "keep-alive")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -172,7 +172,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
 			if err != nil {
 				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
-				continue
+				return
 			}
 			if !maps.Equal(pressures, newPressures) {
 				if err := json.NewEncoder(w).Encode(newPressures); err != nil {

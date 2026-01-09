@@ -93,7 +93,7 @@ func setupDatabase(t *testing.T) *Database {
 	conn, err := globalTestDatabase.Acquire(ctx)
 	assert.NoError(t, err)
 
-	return &Database{uri: globalTestDatabase.uri, conn: conn}
+	return &Database{conn: conn}
 }
 
 func teardownDatabase(t *testing.T) {
