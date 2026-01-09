@@ -102,7 +102,7 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		unsupportedBody := []byte(`{"action": "opened", "pull_request": {"id": 123}}`)
 		ctx.publish(unsupportedBody, "pull_request")
 
-		dlqDepth := ctx.getQueueDepthByName(config.DeadLetterQueue)
+		dlqDepth := ctx.getNumMessagesInQueue(config.DeadLetterQueue)
 		assert.Equal(t, 0, dlqDepth)
 
 		// Malformed message should go to DLQ
@@ -127,12 +127,12 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		ctx.waitForHTTPDown("http://localhost:"+ctx.port+"/health", 30*time.Second)
 
 		// Verify AMQP consumer is stopped by checking queue depth increases after publish
-		beforeDepth := ctx.getQueueDepthByName(config.QueueName)
+		beforeDepth := ctx.getNumMessagesInQueue(config.QueueName)
 		body2 := ctx.constructWebhookPayload(labels)
 		ctx.publish(body2, supportedEventType)
 
 		assert.Eventually(t, func() bool {
-			return ctx.getQueueDepthByName(config.QueueName) >= beforeDepth+1
+			return ctx.getNumMessagesInQueue(config.QueueName) >= beforeDepth+1
 		}, 10*time.Second, 200*time.Millisecond, "expected queue depth to increase after shutdown (consumer stopped)")
 	})
 }
@@ -318,8 +318,8 @@ func (ctx *testContext) consumeFromQueue(queueName string, timeout time.Duration
 	}
 }
 
-// getQueueDepthByName returns the current number of messages in the specified queue.
-func (ctx *testContext) getQueueDepthByName(queueName string) int {
+// getNumMessagesInQueue returns the current number of messages in the specified queue.
+func (ctx *testContext) getNumMessagesInQueue(queueName string) int {
 	ctx.t.Helper()
 
 	conn, err := amqp.Dial(ctx.rabbitURI)
