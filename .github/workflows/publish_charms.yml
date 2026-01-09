@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  # We also run on pull_request to ensure build process is working, but the final publish will be skipped for pull_request
   pull_request:
 
 env:
@@ -18,7 +19,7 @@ jobs:
         charm:
           - planner
           - webhook-gateway
-    name: Publish Charm (${{ matrix.charm }})
+    name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.1
