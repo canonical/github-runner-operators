@@ -45,7 +45,7 @@ func (p *AmqpProducer) resetConnectionOrChannelIfNecessary() error {
 			return err
 		}
 
-		err = p.client.declareExchange(p.config.ExchangeName)
+		err = p.client.ensureExchange(p.config.ExchangeName)
 		if err != nil {
 			return err
 		}
