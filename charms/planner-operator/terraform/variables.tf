@@ -54,3 +54,13 @@ variable "units" {
   type        = number
   default     = 1
 }
+
+variable "admin_token_value" {
+  description = "Planner admin token value. Must match planner_v0_[A-Za-z0-9_-]{20}."
+  type        = string
+  sensitive   = true
+  validation {
+    condition     = can(regex("^planner_v0_[A-Za-z0-9_-]{20}$", var.admin_token_value))
+    error_message = "admin_token_value must match planner_v0_[A-Za-z0-9_-]{20}."
+  }
+}

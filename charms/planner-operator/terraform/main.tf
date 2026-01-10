@@ -17,3 +17,12 @@ resource "juju_application" "github_runner_planner" {
   units              = var.units
   storage_directives = var.storage
 }
+
+resource "juju_secret" "planner_admin_token" {
+  model_uuid = var.model_uuid
+  name       = "planner_admin_token"
+  value = {
+    token = var.admin_token_value
+  }
+  info = "Planner admin token secret"
+}

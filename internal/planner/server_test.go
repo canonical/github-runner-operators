@@ -10,6 +10,8 @@ package planner
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -24,6 +26,11 @@ type fakeStore struct {
 	pressures   map[string]int
 	lastFlavor  *database.Flavor
 	errToReturn error
+
+	// Auth token controls
+	nextToken    [32]byte
+	createTokErr error
+	deleteTokErr error
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -49,6 +56,18 @@ func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]databas
 		return []database.Flavor{*f.lastFlavor}, nil
 	}
 	return []database.Flavor{}, nil
+}
+
+// AuthStore methods
+func (f *fakeStore) CreateAuthToken(ctx context.Context, name string) ([32]byte, error) {
+	if f.createTokErr != nil {
+		return [32]byte{}, f.createTokErr
+	}
+	return f.nextToken, nil
+}
+
+func (f *fakeStore) DeleteAuthToken(ctx context.Context, name string) error {
+	return f.deleteTokErr
 }
 
 func newRequest(method, url, body string, token string) *http.Request {
@@ -122,7 +141,7 @@ func TestCreateFlavor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{errToReturn: tt.storeErr}
-			server := NewServer(store, NewMetrics(store))
+			server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, tt.body, token)
@@ -184,7 +203,7 @@ func TestGetFlavorPressure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{pressures: tt.pressures}
-			server := NewServer(store, NewMetrics(store))
+			server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, "", token)
@@ -202,7 +221,7 @@ func TestGetFlavorPressure(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
+	server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -216,4 +235,63 @@ func TestHealth(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	assert.NoError(t, err)
 	assert.Equal(t, "ok", resp["status"])
+}
+
+func TestAuthTokenEndpoints(t *testing.T) {
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
+	t.Run("create token success", func(t *testing.T) {
+		store := &fakeStore{}
+		token := [32]byte{}
+		sha := sha256.New()
+		sha.Write(token[:])
+		store.nextToken = token
+		server := NewServer(store, store, NewMetrics(store), admin)
+
+		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		var resp map[string]string
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, "github-runner", resp["name"])
+		expected := base64.RawURLEncoding.EncodeToString(store.nextToken[:])
+		assert.Equal(t, expected, resp["token"])
+	})
+
+	t.Run("create token conflict", func(t *testing.T) {
+		store := &fakeStore{createTokErr: database.ErrExist}
+		server := NewServer(store, store, NewMetrics(store), admin)
+		req := newRequest(http.MethodPost, "/api/v1/auth/token/existing", "", admin)
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusConflict, w.Code)
+	})
+
+	t.Run("create token unauthorized", func(t *testing.T) {
+		store := &fakeStore{}
+		server := NewServer(store, store, NewMetrics(store), admin)
+		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "invalid-token")
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("delete token success", func(t *testing.T) {
+		store := &fakeStore{}
+		server := NewServer(store, store, NewMetrics(store), admin)
+		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", admin)
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+
+	t.Run("delete token unauthorized", func(t *testing.T) {
+		store := &fakeStore{}
+		server := NewServer(store, store, NewMetrics(store), admin)
+		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "invalid-token")
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
 }

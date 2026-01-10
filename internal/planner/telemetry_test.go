@@ -56,6 +56,14 @@ func (m *mockStore) GetPressures(ctx context.Context, platform string, flavors .
 	return res, nil
 }
 
+func (m *mockStore) CreateAuthToken(ctx context.Context, name string) ([32]byte, error) {
+	return [32]byte{}, nil
+}
+
+func (m *mockStore) DeleteAuthToken(ctx context.Context, name string) error {
+	return nil
+}
+
 // assertMetricObservedWithLabels asserts the gauge has a datapoint matching flavor + platform + value.
 func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
 	t.Helper()
@@ -115,7 +123,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	store := &mockStore{}
-	server := NewServer(store, NewMetrics(store))
+	server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
 	token := makeToken()
 
 	body := `{"platform":"github","labels":["self-hosted","amd64"],"priority":300}`
