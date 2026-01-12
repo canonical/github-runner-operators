@@ -82,7 +82,7 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
 		if eventType == "workflow_job" {
-			logger.WarnContext(ctx, "workflow_job event did not parse to expected type", "event_type", eventType)
+			logger.WarnContext(ctx, "received workflow_job in \"X-GitHub-Event\" header but payload did not parse to expected type; possible GitHub API change or library issue")
 		} else {
 			logger.DebugContext(ctx, "ignoring non-workflow_job event", "event_type", eventType)
 		}
