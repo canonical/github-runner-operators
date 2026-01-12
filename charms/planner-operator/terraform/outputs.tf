@@ -12,3 +12,9 @@ output "endpoints" {
     postgresql = "postgresql"
   }
 }
+
+output "admin_token_secret_id" {
+  description = "ID of the created Juju secret that stores the planner admin token."
+  value       = juju_secret.planner_admin_token.id
+  sensitive   = true
+}
