@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
@@ -55,6 +54,14 @@ func (m *mockStore) GetPressures(ctx context.Context, platform string, flavors .
 		res[f] = 1
 	}
 	return res, nil
+}
+
+func (m *mockStore) CreateAuthToken(ctx context.Context, name string) ([32]byte, error) {
+	return [32]byte{}, nil
+}
+
+func (m *mockStore) DeleteAuthToken(ctx context.Context, name string) error {
+	return nil
 }
 
 func (m *mockStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
@@ -120,7 +127,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	store := &mockStore{}
-	server := NewServer(store, NewMetrics(store), time.NewTicker(30*time.Second).C)
+	server := NewServer(store, NewMetrics(store))
 	token := makeToken()
 
 	body := `{"platform":"github","labels":["self-hosted","amd64"],"priority":300}`

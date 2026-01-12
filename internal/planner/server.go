@@ -9,6 +9,7 @@ package planner
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,8 @@ const (
 	pressureChangeHeartbeatInterval = 30 * time.Second
 	createFlavorPattern             = "/api/v1/flavors/{name}"
 	getFlavorPressurePattern        = "/api/v1/flavors/{name}/pressure"
+	createAuthTokenPattern          = "/api/v1/auth/token/{name}"
+	deleteAuthTokenPattern          = "/api/v1/auth/token/{name}"
 	healthPattern                   = "/health"
 	allFlavorName                   = "_"
 	flavorPlatform                  = "github" // Currently only github is supported
@@ -39,21 +42,31 @@ type FlavorStore interface {
 	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
 }
 
+// AuthStore is an interface that provides authorization token management.
+type AuthStore interface {
+	CreateAuthToken(ctx context.Context, name string) ([32]byte, error)
+	DeleteAuthToken(ctx context.Context, name string) error
+}
+
 // Server holds dependencies for the planner HTTP handlers.
 type Server struct {
-	metrics *Metrics
-	mux     *http.ServeMux
-	store   FlavorStore
-	ticker  <-chan time.Time
+	metrics    *Metrics
+	mux        *http.ServeMux
+	store      FlavorStore
+	auth       AuthStore
+	adminToken string
+	ticker     <-chan time.Time
 }
 
 // NewServer creates a new Server with the given dependencies.
-func NewServer(store FlavorStore, metrics *Metrics, ticker <-chan time.Time) *Server {
-	s := &Server{store: store, mux: http.NewServeMux(), metrics: metrics, ticker: ticker}
+func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken string, ticker <-chan time.Time) *Server {
+	s := &Server{store: store, auth: auth, adminToken: adminToken, mux: http.NewServeMux(), metrics: metrics, ticker: ticker}
 
 	// Register routes
 	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, http.HandlerFunc(s.createFlavor)))
 	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, http.HandlerFunc(s.getFlavorPressure)))
+	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
+	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
 
 	return s
@@ -213,6 +226,65 @@ func (s *Server) getPressures(ctx context.Context, platform string, flavorName s
 // health handles health check requests.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) adminProtected(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization_header := r.Header.Get("Authorization")
+		parts := strings.SplitN(authorization_header, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			http.Error(w, "invalid authorization header", http.StatusBadRequest)
+			return
+		}
+		if parts[1] != s.adminToken {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type tokenResponse struct {
+	Name  string `json:"name"`
+	Token string `json:"token"`
+}
+
+// createAuthToken handles creation of a general authentication token (admin-protected).
+func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "missing token name", http.StatusBadRequest)
+		return
+	}
+	token, err := s.auth.CreateAuthToken(r.Context(), name)
+	if err == nil {
+		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: base64.RawURLEncoding.EncodeToString(token[:])})
+		return
+	}
+	if errors.Is(err, database.ErrExist) {
+		http.Error(w, "token already exists", http.StatusConflict)
+		return
+	}
+	http.Error(w, fmt.Sprintf("failed to create token: %v", err), http.StatusInternalServerError)
+}
+
+// deleteAuthToken handles deletion of a general authentication token (admin-protected).
+func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "missing token name", http.StatusBadRequest)
+		return
+	}
+	if err := s.auth.DeleteAuthToken(r.Context(), name); err != nil {
+		if errors.Is(err, database.ErrNotExist) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to delete token: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // respondWithJSON sends a JSON response with the given status code and payload.

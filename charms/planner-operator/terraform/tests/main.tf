@@ -19,6 +19,12 @@ variable "revision" {
   default     = null
 }
 
+variable "admin_token_value" {
+  description = "Planner admin token value for tests."
+  type        = string
+  sensitive   = true
+}
+
 terraform {
   required_version = ">= 1.6.6"
   required_providers {
@@ -87,11 +93,12 @@ resource "juju_integration" "planner_postgresql" {
 provider "juju" {}
 
 module "github_runner_planner" {
-  source     = "./.."
-  app_name   = local.planner_app_name
-  channel    = var.channel
-  model_uuid = data.juju_model.planner.uuid
-  revision   = var.revision
+  source            = "./.."
+  app_name          = local.planner_app_name
+  channel           = var.channel
+  model_uuid        = data.juju_model.planner.uuid
+  revision          = var.revision
+  admin_token_value = var.admin_token_value
   config = {
     metrics-port = local.planner_metrics_port
   }

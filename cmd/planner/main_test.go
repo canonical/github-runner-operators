@@ -49,6 +49,7 @@ func TestMain_FlavorPressure(t *testing.T) {
 		act: send create flavor request, get flavor pressure request, streaming flavor pressure, and publish webhook message
 		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
+	t.Setenv("APP_ADMIN_TOKEN_VALUE", "planner_v0_12345678901234567890")
 	ctx := newTestContext(t)
 	ctx.declareQueue()
 
