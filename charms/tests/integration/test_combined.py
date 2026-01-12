@@ -12,7 +12,7 @@ APP_PORT = 8080
 
 
 def create_flavor(
-    juju: jubilant.Juju, planner_app: str, flavor_name: str
+    juju: jubilant.Juju, planner_app: str, flavor_name: str, user_token: str
 ) -> requests.Response:
     """Create a flavor in the planner app."""
     status = juju.status()
@@ -28,19 +28,21 @@ def create_flavor(
         },
         headers={
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {user_token}",
         },
     )
 
 
 def get_flavor_pressure(
-    juju: jubilant.Juju, planner_app: str, flavor_name: str
+    juju: jubilant.Juju, planner_app: str, flavor_name: str, user_token: str
 ) -> dict:
     """Get the current pressure for a flavor."""
     status = juju.status()
     planner_ip = status.apps[planner_app].units[planner_app + "/0"].address
 
     response = requests.get(
-        f"http://{planner_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}/pressure"
+        f"http://{planner_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}/pressure",
+        headers={"Authorization": f"Bearer {user_token}"},
     )
     response.raise_for_status()
     return response.json()
@@ -111,6 +113,7 @@ def test_webhook_gateway_and_planner_integration(
     juju: jubilant.Juju,
     planner_with_integrations: str,
     webhook_gateway_with_rabbitmq: str,
+    user_token: str,
 ):
     """
     arrange: Both planner and webhook gateway deployed with postgresql and rabbitmq.
@@ -122,11 +125,11 @@ def test_webhook_gateway_and_planner_integration(
     flavor_name = "test-flavor"
 
     # Create a flavor in planner
-    create_flavor_response = create_flavor(juju, planner_app, flavor_name)
+    create_flavor_response = create_flavor(juju, planner_app, flavor_name, user_token)
     assert create_flavor_response.status_code == requests.status_codes.codes.CREATED
 
     # Verify initial pressure is 0
-    initial_pressure = get_flavor_pressure(juju, planner_app, flavor_name)
+    initial_pressure = get_flavor_pressure(juju, planner_app, flavor_name, user_token)
     assert initial_pressure[flavor_name] == 0
 
     # Prepare and send webhook
@@ -139,7 +142,7 @@ def test_webhook_gateway_and_planner_integration(
     elapsed = 0
 
     while elapsed < max_wait_seconds:
-        final_pressure = get_flavor_pressure(juju, planner_app, flavor_name)
+        final_pressure = get_flavor_pressure(juju, planner_app, flavor_name, user_token)
         if final_pressure[flavor_name] >= 1:
             break
         time.sleep(check_interval_seconds)

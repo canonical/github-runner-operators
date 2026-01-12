@@ -12,6 +12,7 @@ METRICS_PORT = 9464
 def test_planner_postgresql_integration(
     juju: jubilant.Juju,
     planner_app: str,
+    user_token: str,
 ):
     """
     arrange: The planner app and postgresql deployed and integrated with each other.
@@ -31,6 +32,7 @@ def test_planner_postgresql_integration(
         },
         headers={
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {user_token}",
         },
     )
 
