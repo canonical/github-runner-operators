@@ -27,18 +27,21 @@ import (
 
 // testContext holds test configuration and dependencies.
 type testContext struct {
-	t         *testing.T
-	port      string
-	rabbitURI string
-	queueName string
+	t          *testing.T
+	port       string
+	rabbitURI  string
+	queueName  string
+	adminToken string
+	userToken  string
 }
 
-func newTestContext(t *testing.T) *testContext {
+func newTestContext(t *testing.T, adminToken string) *testContext {
 	return &testContext{
-		t:         t,
-		port:      os.Getenv("APP_PORT"),
-		rabbitURI: os.Getenv("RABBITMQ_CONNECT_STRING"),
-		queueName: "webhook-queue",
+		t:          t,
+		port:       os.Getenv("APP_PORT"),
+		rabbitURI:  os.Getenv("RABBITMQ_CONNECT_STRING"),
+		queueName:  "webhook-queue",
+		adminToken: adminToken,
 	}
 }
 
@@ -48,8 +51,9 @@ func TestMain_FlavorPressure(t *testing.T) {
 		act: send create flavor request, get flavor pressure request and publish webhook message
 		assert: 201 Created and 200 OK with expected pressure value updated after webhook processing
 	*/
-	t.Setenv("APP_ADMIN_TOKEN_VALUE", "planner_v0_12345678901234567890")
-	ctx := newTestContext(t)
+	admin := "planner_v0_12345678901234567890"
+	t.Setenv("APP_ADMIN_TOKEN_VALUE", admin)
+	ctx := newTestContext(t, admin)
 	ctx.declareQueue()
 
 	go main()
@@ -61,11 +65,14 @@ func TestMain_FlavorPressure(t *testing.T) {
 	flavor := randString(10)
 	pressure := 0
 
-	// Test create flavor
+	// Create a regular token using admin token
+	ctx.userToken = ctx.createAuthToken("github-runner")
+
+	// Test create flavor using regular token
 	resp := ctx.createFlavor(flavor, platform, labels, priority)
 	require.Equal(t, http.StatusCreated, resp, "unexpected status creating flavor")
 
-	// Test get flavor pressure
+	// Test get flavor pressure using regular token
 	pressures := ctx.getFlavorPressure(flavor)
 	ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
 
@@ -241,8 +248,12 @@ func (ctx *testContext) createFlavor(flavor, platform string, labels []string, p
 	require.NoError(ctx.t, err, "marshal payload")
 
 	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor
-
-	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	require.NoError(ctx.t, err, "build create flavor request")
+	req.Header.Set("Content-Type", "application/json")
+	require.NotEmpty(ctx.t, ctx.userToken, "user token must be initialized before calling createFlavor")
+	req.Header.Set("Authorization", "Bearer "+ctx.userToken)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(ctx.t, err, "create flavor request")
 	defer resp.Body.Close()
 
@@ -254,8 +265,12 @@ func (ctx *testContext) getFlavorPressure(flavor string) map[string]int {
 	ctx.t.Helper()
 
 	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor + "/pressure"
-
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(ctx.t, err, "build get flavor pressure request")
+	// Always use user token (must be set by test)
+	require.NotEmpty(ctx.t, ctx.userToken, "user token must be initialized before calling getFlavorPressure")
+	req.Header.Set("Authorization", "Bearer "+ctx.userToken)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(ctx.t, err, "get flavor pressure request")
 	defer resp.Body.Close()
 
@@ -265,6 +280,26 @@ func (ctx *testContext) getFlavorPressure(flavor string) map[string]int {
 	require.NoError(ctx.t, json.NewDecoder(resp.Body).Decode(&pressures), "decode response")
 
 	return pressures
+}
+
+// createAuthToken requests creation of a regular token using the admin token
+// and stores it in the test context.
+func (ctx *testContext) createAuthToken(name string) string {
+	ctx.t.Helper()
+	url := "http://localhost:" + ctx.port + "/api/v1/auth/token/" + name
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	require.NoError(ctx.t, err, "build create token request")
+	req.Header.Set("Authorization", "Bearer "+ctx.adminToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(ctx.t, err, "create token request")
+	defer resp.Body.Close()
+	require.Equal(ctx.t, http.StatusCreated, resp.StatusCode, "unexpected status creating token")
+	var out map[string]string
+	require.NoError(ctx.t, json.NewDecoder(resp.Body).Decode(&out), "decode token response")
+	tok := out["token"]
+	require.NotEmpty(ctx.t, tok, "empty token returned")
+	ctx.userToken = tok
+	return tok
 }
 
 // assertFlavorPressureEquals checks that the pressures map contains the expected pressure for the given flavor
