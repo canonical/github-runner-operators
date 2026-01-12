@@ -326,7 +326,7 @@ func TestCreateFlavor_Unauthorized(t *testing.T) {
 	server := NewServer(store, store, NewMetrics(store), admin)
 
 	body := `{"platform":"github","labels":["x64"],"priority":1}`
-	req := newRequest(http.MethodPost, "/api/v1/flavors/unauth", body, "")
+	req := newRequest(http.MethodPost, "/api/v1/flavors/unauth", body, "invalid-token")
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, req)
 
@@ -338,7 +338,7 @@ func TestGetFlavorPressure_Unauthorized(t *testing.T) {
 	admin := "planner_v0_valid_admin_token________________________________"
 	server := NewServer(store, store, NewMetrics(store), admin)
 
-	req := newRequest(http.MethodGet, "/api/v1/flavors/_/pressure", "", "")
+	req := newRequest(http.MethodGet, "/api/v1/flavors/_/pressure", "", "invalid-token")
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, req)
 
