@@ -34,3 +34,12 @@ requires:
     interface: postgresql_client
     optional: false
     limit: 1
+
+config:
+  options:
+    admin-token:
+      type: secret
+      description: |
+        Planner admin token used to create/delete general auth tokens.
+        It must start with 'planner_v0_' followed by exactly 20 characters that can be letters,
+        numbers, hyphens (-), or underscores (_). To generate the token, you can run `echo "planner_v0_$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]' | head -c 20)"`

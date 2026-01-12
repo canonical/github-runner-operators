@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -32,9 +33,15 @@ import (
 const (
 	dbURI             = "POSTGRESQL_DB_CONNECT_STRING"
 	portEnvVar        = "APP_PORT"
+	adminTokenEnvVar  = "APP_ADMIN_TOKEN_VALUE"
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 	shutdownTimeout   = 30 * time.Second
+)
+
+var (
+	// adminTokenPattern validates admin token format: planner_v0_<exactly-20 chars from [A-Za-z0-9_-]>
+	adminTokenPattern = regexp.MustCompile(`^planner_v0_[A-Za-z0-9_-]{20}$`)
 )
 
 func main() {
@@ -61,6 +68,14 @@ func main() {
 		log.Fatalln(rabbitMQUriEnvVar, "environment variable not set.")
 	}
 
+	adminToken, found := os.LookupEnv(adminTokenEnvVar)
+	if !found {
+		log.Fatalln(adminTokenEnvVar, "environment variable not set.")
+	}
+	if !adminTokenPattern.MatchString(adminToken) {
+		log.Fatalf("%s has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]\n", adminTokenEnvVar)
+	}
+
 	if err := database.Migrate(ctx, uri); err != nil {
 		log.Fatalln("migrate failed:", err)
 	}
@@ -83,7 +98,7 @@ func main() {
 		}
 	}()
 
-	handler := planner.NewServer(db, metrics)
+	handler := planner.NewServer(db, db, metrics, adminToken)
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),

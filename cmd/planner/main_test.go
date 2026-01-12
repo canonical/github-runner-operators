@@ -50,6 +50,7 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 	   act: Test multiple scenarios in subtests
 	   assert: all scenarios work correctly
 	*/
+	t.Setenv("APP_ADMIN_TOKEN_VALUE", "planner_v0_12345678901234567890")
 	ctx := newTestContext(t)
 
 	go main()
