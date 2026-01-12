@@ -16,17 +16,19 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
-	createFlavorPattern      = "/api/v1/flavors/{name}"
-	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
-	healthPattern            = "/health"
-	allFlavorName            = "_"
-	flavorPlatform           = "github" // Currently only github is supported
+	pressureChangeHeartbeatInterval = 30 * time.Second
+	createFlavorPattern             = "/api/v1/flavors/{name}"
+	getFlavorPressurePattern        = "/api/v1/flavors/{name}/pressure"
+	healthPattern                   = "/health"
+	allFlavorName                   = "_"
+	flavorPlatform                  = "github" // Currently only github is supported
 )
 
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
@@ -42,11 +44,12 @@ type Server struct {
 	metrics *Metrics
 	mux     *http.ServeMux
 	store   FlavorStore
+	ticker  <-chan time.Time
 }
 
 // NewServer creates a new Server with the given dependencies.
-func NewServer(store FlavorStore, metrics *Metrics) *Server {
-	s := &Server{store: store, mux: http.NewServeMux(), metrics: metrics}
+func NewServer(store FlavorStore, metrics *Metrics, ticker <-chan time.Time) *Server {
+	s := &Server{store: store, mux: http.NewServeMux(), metrics: metrics, ticker: ticker}
 
 	// Register routes
 	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, http.HandlerFunc(s.createFlavor)))
@@ -114,6 +117,16 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	flavorName := r.PathValue("name")
+	stream := strings.ToLower(query.Get("stream")) == "true"
+	var ch <-chan struct{}
+	if stream {
+		ch, err = s.store.SubscribeToPressureUpdate(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
 
 	if err != nil {
@@ -126,7 +139,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.ToLower(query.Get("stream")) != "true" {
+	if !stream {
 		respondWithJSON(w, http.StatusOK, pressures)
 		return
 	}
@@ -147,24 +160,30 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
-	ch, err := s.store.SubscribeToPressureUpdate(r.Context())
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	for {
 		select {
 		case <-r.Context().Done():
 			slog.InfoContext(r.Context(), "client connection terminated")
 			return
+		// Sending pressure as periodic heartbeats to keep the connection alive
+		case <-s.ticker:
+			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
+				return
+			}
+			if err := json.NewEncoder(w).Encode(newPressures); err != nil {
+				slog.ErrorContext(r.Context(), "failed to encode pressure update", "error", err)
+				return
+			}
+			flusher.Flush()
+			pressures = newPressures
 		case _, ok := <-ch:
 			if !ok {
 				slog.InfoContext(r.Context(), "pressure update channel closed")
 				return
 			}
 
-			flavorName := r.PathValue("name")
 			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
 			if err != nil {
 				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)

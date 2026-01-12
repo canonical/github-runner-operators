@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/stretchr/testify/assert"
@@ -139,7 +140,7 @@ func TestCreateFlavor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{errToReturn: tt.storeErr}
-			server := NewServer(store, NewMetrics(store))
+			server := NewServer(store, NewMetrics(store), time.Tick(30*time.Second))
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, tt.body, token)
@@ -203,7 +204,7 @@ func TestGetFlavorPressure(t *testing.T) {
 			pressures := atomic.Value{}
 			pressures.Store(tt.pressures)
 			store := &fakeStore{pressures: pressures}
-			server := NewServer(store, NewMetrics(store))
+			server := NewServer(store, NewMetrics(store), time.Tick(30*time.Second))
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, "", token)
@@ -219,9 +220,42 @@ func TestGetFlavorPressure(t *testing.T) {
 	}
 }
 
+func TestGetFlavorPressureStreamHeartbeat(t *testing.T) {
+	/*
+		arrange: Setup the server with timer control to simulate heartbeat intervals.
+		act: Wait for heartbeats in the pressure stream.
+		assert: verify that heartbeats are received at expected intervals.
+	*/
+	ch := make(chan time.Time)
+	pressures := atomic.Value{}
+	pressures.Store(map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1})
+	store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
+	server := NewServer(store, NewMetrics(store), ch)
+
+	ts := httptest.NewUnstartedServer(server)
+	ts.StartTLS()
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/flavors/runner-small/pressure?stream=true")
+	assert.NoError(t, err)
+	defer resp.Body.Close()
+
+	var res map[string]int
+	json.NewDecoder(resp.Body).Decode(&res)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, map[string]int{"runner-small": 1}, res)
+
+	for _ = range 10 {
+		ch <- time.Now()
+		json.NewDecoder(resp.Body).Decode(&res)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, map[string]int{"runner-small": 1}, res)
+	}
+}
+
 func TestGetFlavorPressureStream(t *testing.T) {
 	/*
-		arrange: enable server to receive HTTP/2 requests.
+		arrange: Setup the server.
 		act: send streaming requests and update pressures in the store.
 		assert: verify the received pressures match expected values, and the HTTP status codes are as expected.
 	*/
@@ -304,7 +338,7 @@ func TestGetFlavorPressureStream(t *testing.T) {
 			pressures := atomic.Value{}
 			pressures.Store(tt.pressuresStream[0])
 			store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
-			server := NewServer(store, NewMetrics(store))
+			server := NewServer(store, NewMetrics(store), time.Tick(30*time.Second))
 
 			ts := httptest.NewUnstartedServer(server)
 			ts.EnableHTTP2 = tt.http2Enabled
@@ -334,7 +368,7 @@ func TestGetFlavorPressureStream(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
+	server := NewServer(store, NewMetrics(store), time.Tick(30*time.Second))
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()

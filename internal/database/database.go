@@ -555,7 +555,7 @@ func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct
 		for {
 			_, err := conn.WaitForNotification(ctx)
 			if err != nil {
-				slog.ErrorContext(ctx, "Failed to receive pressure change event from database", "error", err)
+				slog.DebugContext(ctx, "Failed to receive pressure change event from database", "error", err)
 				return
 			}
 			slog.DebugContext(ctx, "Received a pressure change event from database")

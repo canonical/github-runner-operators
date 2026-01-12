@@ -11,11 +11,9 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"syscall"
@@ -26,7 +24,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/net/http2"
 )
 
 // testContext holds test configuration and dependencies.
@@ -289,16 +286,7 @@ func (ctx *testContext) startFlavorPressureStream(flavor string) *http.Response 
 
 	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor + "/pressure?stream=true"
 
-	client := &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return net.Dial(network, addr)
-			},
-		},
-	}
-
-	resp, err := client.Get(url)
+	resp, err := http.Get(url)
 	require.NoError(ctx.t, err, "get flavor pressure stream request")
 	return resp
 }
