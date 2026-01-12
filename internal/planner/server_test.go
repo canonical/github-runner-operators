@@ -12,7 +12,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,9 +27,10 @@ type fakeStore struct {
 	errToReturn error
 
 	// Auth token controls
-	nextToken    [32]byte
 	createTokErr error
 	deleteTokErr error
+
+	nameToToken map[string][32]byte
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -63,11 +63,46 @@ func (f *fakeStore) CreateAuthToken(ctx context.Context, name string) ([32]byte,
 	if f.createTokErr != nil {
 		return [32]byte{}, f.createTokErr
 	}
-	return f.nextToken, nil
+	// Initialize maps on first use
+	if f.nameToToken == nil {
+		f.nameToToken = make(map[string][32]byte)
+	}
+	// Return preloaded token if present; else create a zero token entry
+	if tok, ok := f.nameToToken[name]; ok {
+		return tok, nil
+	}
+	var tok [32]byte
+	sha := sha256.New()
+	sha.Write(tok[:])
+	f.nameToToken[name] = tok
+	return tok, nil
 }
 
 func (f *fakeStore) DeleteAuthToken(ctx context.Context, name string) error {
-	return f.deleteTokErr
+	if f.deleteTokErr != nil {
+		return f.deleteTokErr
+	}
+	if f.nameToToken == nil {
+		return database.ErrNotExist
+	}
+	_, ok := f.nameToToken[name]
+	if !ok {
+		return database.ErrNotExist
+	}
+	delete(f.nameToToken, name)
+	return nil
+}
+
+func (f *fakeStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
+	if f.nameToToken == nil {
+		return "", database.ErrNotExist
+	}
+	for name, tok := range f.nameToToken {
+		if tok == token {
+			return name, nil
+		}
+	}
+	return "", database.ErrNotExist
 }
 
 func newRequest(method, url, body string, token string) *http.Request {
@@ -77,14 +112,6 @@ func newRequest(method, url, body string, token string) *http.Request {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return req
-}
-
-func makeToken() string {
-	b := make([]byte, 32)
-	for i := range b {
-		b[i] = byte(i)
-	}
-	return hex.EncodeToString(b)
 }
 
 func TestCreateFlavor(t *testing.T) {
@@ -141,10 +168,10 @@ func TestCreateFlavor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{errToReturn: tt.storeErr}
-			server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
-			token := makeToken()
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken)
 
-			req := newRequest(tt.method, tt.url, tt.body, token)
+			req := newRequest(tt.method, tt.url, tt.body, adminToken)
 			w := httptest.NewRecorder()
 
 			server.ServeHTTP(w, req)
@@ -203,10 +230,10 @@ func TestGetFlavorPressure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{pressures: tt.pressures}
-			server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
-			token := makeToken()
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken)
 
-			req := newRequest(tt.method, tt.url, "", token)
+			req := newRequest(tt.method, tt.url, "", adminToken)
 			w := httptest.NewRecorder()
 			server.ServeHTTP(w, req)
 
@@ -240,11 +267,8 @@ func TestHealth(t *testing.T) {
 func TestAuthTokenEndpoints(t *testing.T) {
 	admin := "planner_v0_thisIsAValidAdminToken___________1234"
 	t.Run("create token success", func(t *testing.T) {
-		store := &fakeStore{}
-		token := [32]byte{}
-		sha := sha256.New()
-		sha.Write(token[:])
-		store.nextToken = token
+		token := sha256.Sum256([]byte(admin))
+		store := &fakeStore{nameToToken: map[string][32]byte{"github-runner": token}}
 		server := NewServer(store, store, NewMetrics(store), admin)
 
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
@@ -255,7 +279,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 		var resp map[string]string
 		json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, "github-runner", resp["name"])
-		expected := base64.RawURLEncoding.EncodeToString(store.nextToken[:])
+		expected := base64.RawURLEncoding.EncodeToString(token[:])
 		assert.Equal(t, expected, resp["token"])
 	})
 
@@ -294,4 +318,29 @@ func TestAuthTokenEndpoints(t *testing.T) {
 		server.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
+}
+
+func TestCreateFlavor_Unauthorized(t *testing.T) {
+	store := &fakeStore{}
+	admin := "planner_v0_valid_admin_token________________________________"
+	server := NewServer(store, store, NewMetrics(store), admin)
+
+	body := `{"platform":"github","labels":["x64"],"priority":1}`
+	req := newRequest(http.MethodPost, "/api/v1/flavors/unauth", body, "")
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestGetFlavorPressure_Unauthorized(t *testing.T) {
+	store := &fakeStore{pressures: map[string]int{"runner-small": 1}}
+	admin := "planner_v0_valid_admin_token________________________________"
+	server := NewServer(store, store, NewMetrics(store), admin)
+
+	req := newRequest(http.MethodGet, "/api/v1/flavors/_/pressure", "", "")
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
