@@ -55,6 +55,7 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 
 	go main()
 	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
+	ctx.waitForQueue(queue.DefaultQueueConfig().QueueName, 10*time.Second)
 
 	// Scenario 1: Flavor pressure updates
 	t.Run("flavor_pressure", func(t *testing.T) {
@@ -317,6 +318,33 @@ func (ctx *testContext) consumeFromQueue(queueName string, timeout time.Duration
 		require.Fail(ctx.t, "timeout waiting for message in "+queueName)
 		return nil
 	}
+}
+
+// waitForQueue waits until the specified queue exists in RabbitMQ.
+func (ctx *testContext) waitForQueue(queueName string, timeout time.Duration) {
+	ctx.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := amqp.Dial(ctx.rabbitURI)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		ch, err := conn.Channel()
+		if err != nil {
+			conn.Close()
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		_, err = ch.QueueDeclarePassive(queueName, true, false, false, false, nil)
+		ch.Close()
+		conn.Close()
+		if err == nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.Fail(ctx.t, "queue did not appear", "queue %s did not exist within %s", queueName, timeout)
 }
 
 // getNumMessagesInQueue returns the current number of messages in the specified queue.
