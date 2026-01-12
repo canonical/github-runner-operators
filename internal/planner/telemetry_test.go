@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
@@ -127,7 +128,8 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	store := &mockStore{}
-	server := NewServer(store, NewMetrics(store))
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
+	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 	token := makeToken()
 
 	body := `{"platform":"github","labels":["self-hosted","amd64"],"priority":300}`

@@ -156,10 +156,11 @@ func TestCreateFlavor(t *testing.T) {
 		expectedStatus: http.StatusMethodNotAllowed,
 	}}
 
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{errToReturn: tt.storeErr}
-			server := NewServer(store, NewMetrics(store))
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, tt.body, token)
@@ -218,10 +219,13 @@ func TestGetFlavorPressure(t *testing.T) {
 		expectedStatus: http.StatusMethodNotAllowed,
 	}}
 
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{pressures: tt.pressures}
-			server := NewServer(store, NewMetrics(store))
+			pressures := atomic.Value{}
+			pressures.Store(tt.pressures)
+			store := &fakeStore{pressures: pressures}
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 			token := makeToken()
 
 			req := newRequest(tt.method, tt.url, "", token)
@@ -247,7 +251,8 @@ func TestGetFlavorPressureStreamHeartbeat(t *testing.T) {
 	pressures := atomic.Value{}
 	pressures.Store(map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1})
 	store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
-	server := NewServer(store, NewMetrics(store), ch)
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
+	server := NewServer(store, store, NewMetrics(store), admin, ch)
 
 	ts := httptest.NewUnstartedServer(server)
 	ts.StartTLS()
@@ -350,12 +355,13 @@ func TestGetFlavorPressureStream(t *testing.T) {
 		expectedPressuresStream: []map[string]int{nil},
 	}}
 
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pressures := atomic.Value{}
 			pressures.Store(tt.pressuresStream[0])
 			store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
-			server := NewServer(store, NewMetrics(store), time.Tick(30*time.Second))
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
 			ts := httptest.NewUnstartedServer(server)
 			ts.EnableHTTP2 = tt.http2Enabled
@@ -385,7 +391,8 @@ func TestGetFlavorPressureStream(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	store := &fakeStore{}
-	server := NewServer(store, NewMetrics(store))
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
+	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -409,7 +416,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 		sha := sha256.New()
 		sha.Write(token[:])
 		store.nextToken = token
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
 		w := httptest.NewRecorder()
@@ -425,7 +432,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("create token conflict", func(t *testing.T) {
 		store := &fakeStore{createTokErr: database.ErrExist}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/existing", "", admin)
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -434,7 +441,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("create token unauthorized", func(t *testing.T) {
 		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "invalid-token")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -443,7 +450,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("delete token success", func(t *testing.T) {
 		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", admin)
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -452,7 +459,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("delete token unauthorized", func(t *testing.T) {
 		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "invalid-token")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
