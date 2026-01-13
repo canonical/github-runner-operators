@@ -81,6 +81,8 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		// Test streaming flavor pressure
 		stream := ctx.startFlavorPressureStream(flavor)
 		defer stream.Body.Close()
+		pressures = ctx.decodePressure(stream.Body)
+		ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
 
 		// Test consume webhook
 		body := ctx.constructWebhookPayload(labels)
