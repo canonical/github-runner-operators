@@ -162,6 +162,14 @@ in order to be able to have fast iterations during development.
 We require at least 85% code coverage for all internal packages. New code that lowers the current coverage
 should be avoided and discouraged during code reviews.
 
+### Cyclomatic complexity
+
+We recommend keeping cyclomatic complexity of functions/methods below 10.
+Higher complexity often indicates a function is doing too much and should be simplified.
+There are exceptions where higher complexity is justified (e.g., validation, initialization),
+but those should require explicit justification via nolint directives.
+
+
 
 ### Charm development
 
