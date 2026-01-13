@@ -102,7 +102,7 @@ func teardownDatabase(t *testing.T) {
 	}
 }
 
-// subscribeToPressureUpdateTest sets up a subscription to pressure updates.
+// subscribeToPressureUpdates sets up a subscription to pressure updates.
 func subscribeToPressureUpdates(t *testing.T, ctx context.Context, db *Database) <-chan struct{} {
 	t.Helper()
 	ch, err := db.SubscribeToPressureUpdate(ctx)

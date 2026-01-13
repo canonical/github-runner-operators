@@ -293,7 +293,7 @@ func TestGetFlavorPressureStreamHeartbeat(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, map[string]int{"runner-small": 1}, res)
 
-	for _ = range 10 {
+	for i := 0; i < 10; i++ {
 		ch <- time.Now()
 		json.NewDecoder(resp.Body).Decode(&res)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)

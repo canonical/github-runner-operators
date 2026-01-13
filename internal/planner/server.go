@@ -185,7 +185,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
 				return
 			}
-			json.NewEncoder(w).Encode(pressures)
+			json.NewEncoder(w).Encode(newPressures)
 			flusher.Flush()
 			pressures = newPressures
 		case _, ok := <-ch:
