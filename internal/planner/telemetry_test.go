@@ -69,6 +69,16 @@ func (m *mockStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struc
 	return make(<-chan struct{}), nil
 }
 
+func (m *mockStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
+	// Accept any non-zero token for telemetry tests
+	for _, b := range token {
+		if b != 0 {
+			return "test", nil
+		}
+	}
+	return "", database.ErrNotExist
+}
+
 // assertMetricObservedWithLabels asserts the gauge has a datapoint matching flavor + platform + value.
 func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
 	t.Helper()
@@ -128,12 +138,11 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	store := &mockStore{}
-	admin := "planner_v0_thisIsAValidAdminToken___________1234"
-	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-	token := makeToken()
+	adminToken := "planner_v0_valid_admin_token________________________________"
+	server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 	body := `{"platform":"github","labels":["self-hosted","amd64"],"priority":300}`
-	req := newRequest(http.MethodPost, "/api/v1/flavors/test-flavor", body, token)
+	req := newRequest(http.MethodPost, "/api/v1/flavors/test-flavor", body, adminToken)
 	w := httptest.NewRecorder()
 
 	server.ServeHTTP(w, req)

@@ -7,6 +7,7 @@ from typing import Iterator
 
 import jubilant
 import pytest
+import requests
 from tests.conftest import (
     CHARM_FILE_PARAM,
     PLANNER_IMAGE_PARAM,
@@ -58,6 +59,12 @@ def keep_models_fixture(pytestconfig: pytest.Config) -> bool:
 
 @pytest.fixture(scope="module")
 def juju(keep_models: bool) -> Iterator[jubilant.Juju]:
+    """Provide a temporary Juju model for the duration of the module.
+
+    Creates a temporary model (optionally kept based on --keep-models) and yields a
+    `jubilant.Juju` handle for deployments, relations, and config operations.
+    The model is cleaned up automatically at the end of the module unless kept.
+    """
     with jubilant.temp_model(keep=keep_models) as juju:
         yield juju
 
@@ -68,15 +75,22 @@ def _generate_admin_token() -> str:
     return f"planner_v0_{suffix}"
 
 
+@pytest.fixture(scope="module", name="planner_admin_token_value")
+def planner_admin_token_value_fixture() -> str:
+    """Generate and return the planner admin token value for this test module."""
+    return _generate_admin_token()
+
+
 @pytest.fixture(scope="module", name="planner_admin_token_uri")
-def create_planner_admin_token_uri_fixture(juju: jubilant.Juju) -> str:
+def create_planner_admin_token_uri_fixture(juju: jubilant.Juju, planner_admin_token_value: str) -> str:
     """Create a Juju secret for the planner admin token and return its URI.
 
     Secret is created before the app is deployed so it can be referenced in config.
     Granting to the app is done after deploy in the planner_app fixture.
     """
-    token = _generate_admin_token()
-    secret_uri = juju.add_secret(name="planner-admin-token", content={"value": token})
+    secret_uri = juju.add_secret(
+        name="planner-admin-token", content={"value": planner_admin_token_value}
+    )
     return secret_uri
 
 
@@ -87,6 +101,15 @@ def deploy_planner_app_fixture(
     planner_app_image: str,
     planner_admin_token_uri: str,
 ) -> str:
+    """Deploy the planner application with its OCI image and admin token secret.
+
+    - Deploys the planner charm with the provided image resource.
+    - Waits for the application to block pending configuration.
+    - Grants the pre-created admin token secret to the application.
+    - Sets required configuration including the secret reference and metrics port.
+
+    Returns the application name once initial configuration is applied.
+    """
     app_name = "github-runner-planner"
 
     resources = {
@@ -105,10 +128,39 @@ def deploy_planner_app_fixture(
     return app_name
 
 
+@pytest.fixture(scope="module", name="user_token")
+def user_token_fixture(
+    juju: jubilant.Juju,
+    planner_app: str,
+    planner_admin_token_value: str,
+) -> str:
+    """Create a regular user token from the planner app using the admin token and return it."""
+    status = juju.status()
+    unit = f"{planner_app}/0"
+    planner_ip = status.apps[planner_app].units[unit].address
+    url = f"http://{planner_ip}:8080/api/v1/auth/token/github-runner"
+    headers = {"Authorization": f"Bearer {planner_admin_token_value}"}
+    resp = requests.post(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    token = data.get("token", "")
+    assert token, "expected non-empty user token from planner"
+    return token
+
+
 @pytest.fixture(scope="module", name="webhook_gateway_app")
 def deploy_webhook_gateway_app_fixture(
     juju: jubilant.Juju, webhook_gateway_charm_file: str, webhook_gateway_app_image: str
 ) -> str:
+    """Deploy the webhook gateway application with its OCI image and secret.
+
+    - Deploys the webhook gateway charm with the provided image resource.
+    - Waits for the application to block pending configuration.
+    - Creates and grants a placeholder webhook secret to the application.
+    - Configures the application with the secret and metrics port.
+
+    Returns the application name once initial configuration is applied.
+    """
     app_name = "github-runner-webhook-gateway"
 
     resources = {
