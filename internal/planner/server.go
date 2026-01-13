@@ -198,7 +198,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !maps.Equal(pressures, newPressures) {
-				json.NewEncoder(w).Encode(pressures)
+				json.NewEncoder(w).Encode(newPressures)
 				flusher.Flush()
 			}
 			pressures = newPressures

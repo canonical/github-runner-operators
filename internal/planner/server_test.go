@@ -373,17 +373,13 @@ func TestGetFlavorPressureStream(t *testing.T) {
 			defer resp.Body.Close()
 
 			var res map[string]int
-			json.NewDecoder(resp.Body).Decode(&res)
-
-			assert.Equal(t, tt.expectedStatus[0], resp.StatusCode)
-			assert.Equal(t, tt.expectedPressuresStream[0], res)
-			for i := range len(tt.pressuresStream[1:]) {
-				store.pressures.Store(tt.pressuresStream[i+1])
+			for i := range len(tt.pressuresStream) {
+				store.pressures.Store(tt.pressuresStream[i])
 				store.pressureChange <- struct{}{}
 
 				json.NewDecoder(resp.Body).Decode(&res)
-				assert.Equal(t, tt.expectedStatus[i+1], resp.StatusCode)
-				assert.Equal(t, tt.expectedPressuresStream[i+1], res)
+				assert.Equal(t, tt.expectedStatus[i], resp.StatusCode)
+				assert.Equal(t, tt.expectedPressuresStream[i], res)
 			}
 		})
 	}
