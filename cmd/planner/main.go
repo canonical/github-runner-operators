@@ -44,7 +44,13 @@ var (
 	adminTokenPattern = regexp.MustCompile(`^planner_v0_[A-Za-z0-9_-]{20}$`)
 )
 
-//nolint:cyclop // to be addressed in follow-up PR
+type config struct {
+	dbURI       string
+	port        string
+	rabbitMQURI string
+	adminToken  string
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -54,40 +60,19 @@ func main() {
 		log.Fatalf("failed to start telemetry: %v", err)
 	}
 
-	uri, found := os.LookupEnv(dbURI)
-	if !found {
-		log.Fatalln(dbURI, "environment variable not set.")
-	}
+	cfg := loadConfig()
 
-	port, found := os.LookupEnv(portEnvVar)
-	if !found {
-		log.Fatalln(portEnvVar, "environment variable not set.")
-	}
-
-	rabbitMQUri, found := os.LookupEnv(rabbitMQUriEnvVar)
-	if !found {
-		log.Fatalln(rabbitMQUriEnvVar, "environment variable not set.")
-	}
-
-	adminToken, found := os.LookupEnv(adminTokenEnvVar)
-	if !found {
-		log.Fatalln(adminTokenEnvVar, "environment variable not set.")
-	}
-	if !adminTokenPattern.MatchString(adminToken) {
-		log.Fatalf("%s has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]\n", adminTokenEnvVar)
-	}
-
-	if err := database.Migrate(ctx, uri); err != nil {
+	if err := database.Migrate(ctx, cfg.dbURI); err != nil {
 		log.Fatalln("migrate failed:", err)
 	}
-	db, err := database.New(ctx, uri)
+	db, err := database.New(ctx, cfg.dbURI)
 	if err != nil {
 		log.Fatalln("failed to connect to db:", err)
 	}
 
 	metrics := planner.NewMetrics(db)
 
-	amqpConsumer := queue.NewAmqpConsumer(rabbitMQUri, queue.DefaultQueueConfig())
+	amqpConsumer := queue.NewAmqpConsumer(cfg.rabbitMQURI, queue.DefaultQueueConfig())
 	consumer := planner.NewJobConsumer(amqpConsumer, db, metrics)
 
 	var consumerWg sync.WaitGroup
@@ -99,14 +84,14 @@ func main() {
 		}
 	}()
 
-	handler := planner.NewServer(db, db, metrics, adminToken)
+	handler := planner.NewServer(db, db, metrics, cfg.adminToken)
 	server := &http.Server{
-		Addr:    ":" + port,
+		Addr:    ":" + cfg.port,
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
 	}
 
 	go func() {
-		log.Println("Starting planner API server on port", port)
+		log.Println("Starting planner API server on port", cfg.port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("HTTP server error: %v", err)
 		}
@@ -117,6 +102,36 @@ func main() {
 
 	shutdown(server, consumer, &consumerWg, db)
 	log.Println("Graceful shutdown complete")
+}
+
+func loadConfig() config {
+	cfg := config{}
+	var found bool
+
+	cfg.dbURI, found = os.LookupEnv(dbURI)
+	if !found {
+		log.Fatalln(dbURI, "environment variable not set.")
+	}
+
+	cfg.port, found = os.LookupEnv(portEnvVar)
+	if !found {
+		log.Fatalln(portEnvVar, "environment variable not set.")
+	}
+
+	cfg.rabbitMQURI, found = os.LookupEnv(rabbitMQUriEnvVar)
+	if !found {
+		log.Fatalln(rabbitMQUriEnvVar, "environment variable not set.")
+	}
+
+	cfg.adminToken, found = os.LookupEnv(adminTokenEnvVar)
+	if !found {
+		log.Fatalln(adminTokenEnvVar, "environment variable not set.")
+	}
+	if !adminTokenPattern.MatchString(cfg.adminToken) {
+		log.Fatalf("%s has invalid format; expected 'planner_v0_' + exactly 20 characters from [A-Za-z0-9_-]\n", adminTokenEnvVar)
+	}
+
+	return cfg
 }
 
 func shutdown(server *http.Server, consumer *planner.JobConsumer, consumerWg *sync.WaitGroup, db *database.Database) {
