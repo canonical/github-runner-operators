@@ -214,6 +214,7 @@ func startPrometheusServer() (*http.Server, error) {
 	return srv, nil
 }
 
+//nolint:cyclop // to be addressed in follow-up PR
 func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.MeterProvider, func(ctx context.Context) error, error) {
 	kind := strings.ToLower(strings.TrimSpace(envOrDefault("OTEL_METRICS_EXPORTER", "memory")))
 	protocol := pickProtocol("METRICS")
@@ -305,6 +306,8 @@ func newResource(ctx context.Context, service, version string) (*resource.Resour
 // https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
 //
 // This function should be called only once at the beginning of the program.
+//
+//nolint:cyclop // to be addressed in follow-up PR
 func Start(ctx context.Context, service, version string) error {
 	mu.Lock()
 	defer mu.Unlock()
