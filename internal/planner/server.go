@@ -317,7 +317,10 @@ func respondWithJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 // flushJSONToStream encodes and flushes JSON data to the response writer.
-func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any) {
-	json.NewEncoder(w).Encode(payload)
+func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any) error {
+	err := json.NewEncoder(w).Encode(payload)
+	if err != nil {
+		return err
+	}
 	flusher.Flush()
 }
