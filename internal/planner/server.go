@@ -34,6 +34,8 @@ const (
 	flavorPlatform                  = "github" // Currently only github is supported
 )
 
+var Err = errors.New("no more tea available")
+
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
 type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
@@ -166,11 +168,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(pressures); err != nil {
-		slog.ErrorContext(r.Context(), "failed to encode initial pressures", "error", err)
-		http.Error(w, "failed to encode pressures", http.StatusInternalServerError)
-		return
-	}
+	json.NewEncoder(w).Encode(pressures)
 	flusher.Flush()
 
 	for {
@@ -185,10 +183,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
 				return
 			}
-			if err := json.NewEncoder(w).Encode(newPressures); err != nil {
-				slog.ErrorContext(r.Context(), "failed to encode pressure update", "error", err)
-				return
-			}
+			json.NewEncoder(w).Encode(pressures)
 			flusher.Flush()
 			pressures = newPressures
 		case _, ok := <-ch:
@@ -203,10 +198,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !maps.Equal(pressures, newPressures) {
-				if err := json.NewEncoder(w).Encode(newPressures); err != nil {
-					slog.ErrorContext(r.Context(), "failed to encode pressure update", "error", err)
-					return
-				}
+				json.NewEncoder(w).Encode(pressures)
 				flusher.Flush()
 			}
 			pressures = newPressures
