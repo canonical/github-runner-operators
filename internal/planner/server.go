@@ -41,6 +41,7 @@ type FlavorStore interface {
 type AuthStore interface {
 	CreateAuthToken(ctx context.Context, name string) ([32]byte, error)
 	DeleteAuthToken(ctx context.Context, name string) error
+	VerifyAuthToken(ctx context.Context, token [32]byte) (string, error)
 }
 
 // Server holds dependencies for the planner HTTP handlers.
@@ -57,8 +58,9 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 	s := &Server{store: store, auth: auth, adminToken: adminToken, mux: http.NewServeMux(), metrics: metrics}
 
 	// Register routes
-	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, http.HandlerFunc(s.createFlavor)))
-	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, http.HandlerFunc(s.getFlavorPressure)))
+	// General endpoints require either a valid general token or the admin token
+	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, s.tokenProtected(http.HandlerFunc(s.createFlavor))))
+	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
 	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
 	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
@@ -146,17 +148,51 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// respondUnauthorized sends a 401 response with proper WWW-Authenticate header.
+func respondUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
 func (s *Server) adminProtected(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorization_header := r.Header.Get("Authorization")
-		parts := strings.SplitN(authorization_header, " ", 2)
+		authorizationHeader := r.Header.Get("Authorization")
+		parts := strings.SplitN(authorizationHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			http.Error(w, "invalid authorization header", http.StatusBadRequest)
 			return
 		}
 		if parts[1] != s.adminToken {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			respondUnauthorized(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// tokenProtected allows either the admin token or a valid general token from the DB.
+func (s *Server) tokenProtected(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorizationHeader := r.Header.Get("Authorization")
+		parts := strings.SplitN(authorizationHeader, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			http.Error(w, "invalid authorization header", http.StatusBadRequest)
+			return
+		}
+		tokenStr := parts[1]
+		if tokenStr == s.adminToken {
+			next.ServeHTTP(w, r)
+			return
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(tokenStr)
+		if err != nil || len(raw) != 32 {
+			respondUnauthorized(w)
+			return
+		}
+		var tok [32]byte
+		copy(tok[:], raw)
+		if _, err := s.auth.VerifyAuthToken(r.Context(), tok); err != nil {
+			respondUnauthorized(w)
 			return
 		}
 		next.ServeHTTP(w, r)
