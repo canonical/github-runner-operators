@@ -97,6 +97,7 @@ func (c *AmqpConsumer) ensureChannel() error {
 	return nil
 }
 
+//nolint:cyclop // to be addressed in follow-up PR
 func (c *AmqpConsumer) ensureAmqpChannel() error {
 	if c.client.amqpConnection == nil || c.client.amqpConnection.IsClosed() {
 		err := c.client.resetConnection()
