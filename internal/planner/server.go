@@ -24,17 +24,14 @@ import (
 )
 
 const (
-	pressureChangeHeartbeatInterval = 30 * time.Second
-	createFlavorPattern             = "/api/v1/flavors/{name}"
-	getFlavorPressurePattern        = "/api/v1/flavors/{name}/pressure"
-	createAuthTokenPattern          = "/api/v1/auth/token/{name}"
-	deleteAuthTokenPattern          = "/api/v1/auth/token/{name}"
-	healthPattern                   = "/health"
-	allFlavorName                   = "_"
-	flavorPlatform                  = "github" // Currently only github is supported
+	createFlavorPattern      = "/api/v1/flavors/{name}"
+	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
+	createAuthTokenPattern   = "/api/v1/auth/token/{name}"
+	deleteAuthTokenPattern   = "/api/v1/auth/token/{name}"
+	healthPattern            = "/health"
+	allFlavorName            = "_"
+	flavorPlatform           = "github" // Currently only github is supported
 )
-
-var Err = errors.New("no more tea available")
 
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
 type FlavorStore interface {
@@ -170,8 +167,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(pressures)
-	flusher.Flush()
+	flushJSONToStream(w, flusher, pressures)
 
 	for {
 		select {
@@ -185,8 +181,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
 				return
 			}
-			json.NewEncoder(w).Encode(newPressures)
-			flusher.Flush()
+			flushJSONToStream(w, flusher, newPressures)
 			pressures = newPressures
 		case _, ok := <-ch:
 			if !ok {
@@ -200,8 +195,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !maps.Equal(pressures, newPressures) {
-				json.NewEncoder(w).Encode(newPressures)
-				flusher.Flush()
+				flushJSONToStream(w, flusher, newPressures)
 			}
 			pressures = newPressures
 		}
@@ -320,4 +314,10 @@ func respondWithJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(payload)
+}
+
+// flushJSONToStream encodes and flushes JSON data to the response writer.
+func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any) {
+	json.NewEncoder(w).Encode(payload)
+	flusher.Flush()
 }
