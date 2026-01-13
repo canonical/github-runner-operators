@@ -72,8 +72,6 @@ func (f *fakeStore) CreateAuthToken(ctx context.Context, name string) ([32]byte,
 		return tok, nil
 	}
 	var tok [32]byte
-	sha := sha256.New()
-	sha.Write(tok[:])
 	f.nameToToken[name] = tok
 	return tok, nil
 }
@@ -321,25 +319,35 @@ func TestAuthTokenEndpoints(t *testing.T) {
 }
 
 func TestCreateFlavor_Unauthorized(t *testing.T) {
+	/*
+		arrange: empty store, server with admin token, request uses invalid token
+		act: POST /api/v1/flavors/unauth
+		assert: returns 401 Unauthorized
+	*/
 	store := &fakeStore{}
 	admin := "planner_v0_valid_admin_token________________________________"
 	server := NewServer(store, store, NewMetrics(store), admin)
-
 	body := `{"platform":"github","labels":["x64"],"priority":1}`
 	req := newRequest(http.MethodPost, "/api/v1/flavors/unauth", body, "invalid-token")
 	w := httptest.NewRecorder()
+
 	server.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestGetFlavorPressure_Unauthorized(t *testing.T) {
+	/*
+		arrange: store with preset pressures, server with admin token, request uses invalid token
+		act: GET /api/v1/flavors/_/pressure
+		assert: returns 401 Unauthorized
+	*/
 	store := &fakeStore{pressures: map[string]int{"runner-small": 1}}
 	admin := "planner_v0_valid_admin_token________________________________"
 	server := NewServer(store, store, NewMetrics(store), admin)
-
 	req := newRequest(http.MethodGet, "/api/v1/flavors/_/pressure", "", "invalid-token")
 	w := httptest.NewRecorder()
+
 	server.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)

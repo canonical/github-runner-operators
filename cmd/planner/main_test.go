@@ -39,10 +39,10 @@ type testContext struct {
 func newTestContext(t *testing.T) *testContext {
 	return &testContext{
 		t:          t,
-		port:       t.Getenv("APP_PORT"),
-		rabbitURI:  t.Getenv("RABBITMQ_CONNECT_STRING"),
+		port:       os.Getenv("APP_PORT"),
+		rabbitURI:  os.Getenv("RABBITMQ_CONNECT_STRING"),
 		queueName:  queue.DefaultQueueConfig().QueueName,
-		adminToken: t.Getenv("APP_ADMIN_TOKEN_VALUE"),
+		adminToken: os.Getenv("APP_ADMIN_TOKEN_VALUE"),
 	}
 }
 

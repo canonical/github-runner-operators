@@ -148,17 +148,22 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// respondUnauthorized sends a 401 response with proper WWW-Authenticate header.
+func respondUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
 func (s *Server) adminProtected(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorization_header := r.Header.Get("Authorization")
-		parts := strings.SplitN(authorization_header, " ", 2)
+		authorizationHeader := r.Header.Get("Authorization")
+		parts := strings.SplitN(authorizationHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			http.Error(w, "invalid authorization header", http.StatusBadRequest)
 			return
 		}
 		if parts[1] != s.adminToken {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			respondUnauthorized(w)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -168,8 +173,8 @@ func (s *Server) adminProtected(next http.Handler) http.Handler {
 // tokenProtected allows either the admin token or a valid general token from the DB.
 func (s *Server) tokenProtected(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorization_header := r.Header.Get("Authorization")
-		parts := strings.SplitN(authorization_header, " ", 2)
+		authorizationHeader := r.Header.Get("Authorization")
+		parts := strings.SplitN(authorizationHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			http.Error(w, "invalid authorization header", http.StatusBadRequest)
 			return
@@ -181,15 +186,13 @@ func (s *Server) tokenProtected(next http.Handler) http.Handler {
 		}
 		raw, err := base64.RawURLEncoding.DecodeString(tokenStr)
 		if err != nil || len(raw) != 32 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			respondUnauthorized(w)
 			return
 		}
 		var tok [32]byte
 		copy(tok[:], raw)
 		if _, err := s.auth.VerifyAuthToken(r.Context(), tok); err != nil {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			respondUnauthorized(w)
 			return
 		}
 		next.ServeHTTP(w, r)
