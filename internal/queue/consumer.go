@@ -97,7 +97,7 @@ func (c *AmqpConsumer) ensureChannel() error {
 	return nil
 }
 
-//nolint:cyclop // to be addressed in follow-up PR
+//nolint:cyclop // Sequential AMQP setup with error handling; extraction would not reduce complexity but rather introduce shallow helpers
 func (c *AmqpConsumer) ensureAmqpChannel() error {
 	if c.client.amqpConnection == nil || c.client.amqpConnection.IsClosed() {
 		err := c.client.resetConnection()

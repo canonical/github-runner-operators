@@ -32,6 +32,8 @@ const (
 	maxBackoff           = 5 * time.Minute
 )
 
+var supportedActions = []string{"queued", "in_progress", "completed"}
+
 func NewJobConsumer(consumer queue.Consumer, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
 		consumer: consumer,
@@ -63,9 +65,41 @@ func parseOptionalGitHubTime(ts *github.Timestamp) *time.Time {
 // getWorkflowJob extracts and validates a workflow job from a webhook message.
 // Returns nil for events that should be ignored (non-workflow_job, unsupported actions, non-self-hosted).
 // Returns an error only for malformed data that cannot be processed.
-//
-//nolint:cyclop // to be addressed in follow-up PR
 func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []byte) (*githubWebhookJob, error) {
+	// Parse webhook event from headers and body
+	jobEvent, err := parseWebhookEvent(ctx, headers, body)
+	if err != nil {
+		return nil, err
+	}
+	if jobEvent == nil {
+		return nil, nil // Event should be ignored
+	}
+
+	// Apply business rules to filter jobs
+	shouldProcess, err := shouldProcessJob(ctx, jobEvent)
+	if err != nil {
+		return nil, err
+	}
+	if !shouldProcess {
+		return nil, nil // Job should be ignored
+	}
+
+	// Validate required fields are present
+	job := jobEvent.GetWorkflowJob()
+	action := jobEvent.GetAction()
+	if err := validateJobFields(job, action); err != nil {
+		return nil, err
+	}
+
+	// Build final webhook job structure
+	return buildWebhookJob(jobEvent, body)
+}
+
+// parseWebhookEvent extracts the event type from headers and parses the webhook body.
+// Returns (nil, nil) for non-workflow_job events (should be ignored).
+// Returns error only for malformed webhooks.
+func parseWebhookEvent(ctx context.Context, headers map[string]interface{}, body []byte) (*github.WorkflowJobEvent, error) {
+	// Extract and validate X-GitHub-Event header
 	eventTypeHeader, ok := headers[githubEventHeaderKey]
 	if !ok {
 		return nil, fmt.Errorf("missing X-GitHub-Event header")
@@ -76,11 +110,13 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 		return nil, fmt.Errorf("X-GitHub-Event must be string")
 	}
 
+	// Parse webhook payload
 	event, err := github.ParseWebHook(eventType, body)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse webhook: %w", err)
 	}
 
+	// Type assert to WorkflowJobEvent
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
 		if eventType == "workflow_job" {
@@ -88,59 +124,82 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 		} else {
 			logger.DebugContext(ctx, "ignoring non-workflow_job event", "event_type", eventType)
 		}
-		return nil, nil
+		return nil, nil // Not an error, just ignore
 	}
 
+	return jobEvent, nil
+}
+
+// shouldProcessJob checks if the job should be processed based on action and labels.
+// Returns (false, nil) if job should be ignored.
+// Returns (false, error) if validation fails.
+func shouldProcessJob(ctx context.Context, jobEvent *github.WorkflowJobEvent) (bool, error) {
 	action := jobEvent.GetAction()
 
-	if !slices.Contains([]string{"queued", "in_progress", "completed"}, action) {
+	// Check if action is supported
+	if !slices.Contains(supportedActions, action) {
 		logger.DebugContext(ctx, "ignoring workflow_job action", "action", action)
-		return nil, nil
+		return false, nil
 	}
 
 	job := jobEvent.GetWorkflowJob()
 	if job == nil {
-		return nil, fmt.Errorf("missing workflow_job field in event webhook")
+		return false, fmt.Errorf("missing workflow_job field in event webhook")
 	}
 
+	// Check if self-hosted
 	if !isSelfHosted(job.Labels) {
 		repo := jobEvent.GetRepo().GetFullName()
 		logger.DebugContext(ctx, "ignoring non self-hosted job", "repo", repo, "labels", strings.Join(job.Labels, ","))
-		return nil, nil
+		return false, nil
 	}
 
-	createdAt := job.GetCreatedAt()
-	if createdAt.IsZero() {
-		return nil, fmt.Errorf("missing created_at in queued event webhook")
+	return true, nil
+}
+
+// validateJobFields ensures all required fields are present for the job action.
+func validateJobFields(job *github.WorkflowJob, action string) error {
+	// Always required
+	if job.GetCreatedAt().IsZero() {
+		return fmt.Errorf("missing created_at in event webhook")
 	}
 
-	startedAt := job.GetStartedAt()
-	if startedAt.IsZero() && action == "in_progress" {
-		return nil, fmt.Errorf("missing started_at in in_progress event webhook")
+	if job.GetID() == 0 {
+		return fmt.Errorf("missing job id in event webhook")
 	}
 
-	completedAt := job.GetCompletedAt()
-	if completedAt.IsZero() && action == "completed" {
-		return nil, fmt.Errorf("missing completed_at in completed event webhook")
+	// Action-specific validations
+	if action == "in_progress" && job.GetStartedAt().IsZero() {
+		return fmt.Errorf("missing started_at in in_progress event webhook")
 	}
 
-	id := strconv.FormatInt(job.GetID(), 10)
-	if id == "0" {
-		return nil, fmt.Errorf("missing job id in event webhook")
+	if action == "completed" && job.GetCompletedAt().IsZero() {
+		return fmt.Errorf("missing completed_at in completed event webhook")
 	}
 
+	return nil
+}
+
+// buildWebhookJob constructs a githubWebhookJob from validated GitHub event data.
+func buildWebhookJob(jobEvent *github.WorkflowJobEvent, body []byte) (*githubWebhookJob, error) {
+	job := jobEvent.GetWorkflowJob()
+	action := jobEvent.GetAction()
+
+	// Parse raw JSON for storage
 	var rawJson map[string]interface{}
-	err = json.Unmarshal(body, &rawJson)
-	if err != nil {
+	if err := json.Unmarshal(body, &rawJson); err != nil {
 		return nil, fmt.Errorf("invalid github webhook: %v", err)
 	}
 
+	// Extract required fields
 	repo := jobEvent.GetRepo().GetFullName()
 	if repo == "" {
 		return nil, fmt.Errorf("missing repo full name in webhook payload")
 	}
 
-	webhookJob := &githubWebhookJob{
+	id := strconv.FormatInt(job.GetID(), 10)
+
+	return &githubWebhookJob{
 		id:      id,
 		repo:    repo,
 		labels:  job.Labels,
@@ -150,14 +209,12 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 			ID:          id,
 			Platform:    platform,
 			Labels:      job.Labels,
-			CreatedAt:   createdAt.Time,
+			CreatedAt:   job.GetCreatedAt().Time,
 			StartedAt:   parseOptionalGitHubTime(job.StartedAt),
 			CompletedAt: parseOptionalGitHubTime(job.CompletedAt),
 			Raw:         map[string]interface{}{action: rawJson},
 		},
-	}
-
-	return webhookJob, nil
+	}, nil
 }
 
 // isSelfHosted checks if the job labels indicate it's for self-hosted runners.

@@ -214,74 +214,104 @@ func startPrometheusServer() (*http.Server, error) {
 	return srv, nil
 }
 
-//nolint:cyclop // to be addressed in follow-up PR
 func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.MeterProvider, func(ctx context.Context) error, error) {
 	kind := strings.ToLower(strings.TrimSpace(envOrDefault("OTEL_METRICS_EXPORTER", "memory")))
 	protocol := pickProtocol("METRICS")
 	logger.DebugContext(ctx, "initialize meter provider", "metrics_exporter", kind)
 
-	var r sdkmetric.Reader
-	var err error
-	var shutdown func(ctx context.Context) error
-
-	if kind == "memory" || kind == "none" || kind == "" {
-		ManualReader = sdkmetric.NewManualReader()
-		r = ManualReader
-	} else if kind == "prometheus" {
-		r, err = prometheus.New(prometheus.WithoutScopeInfo())
-		if err == nil {
-			server, serverErr := startPrometheusServer()
-			if serverErr != nil {
-				err = serverErr
-			} else {
-				shutdown = server.Shutdown
-			}
-		}
-	} else if kind == "otlp" && protocol == "grpc" {
-		var exp *otlpmetricgrpc.Exporter
-		exp, err = otlpmetricgrpc.New(ctx)
-		if err == nil {
-			r = sdkmetric.NewPeriodicReader(exp)
-		}
-	} else if kind == "otlp" && strings.HasPrefix(protocol, "http") {
-		var exp *otlpmetrichttp.Exporter
-		exp, err = otlpmetrichttp.New(ctx)
-		if err == nil {
-			r = sdkmetric.NewPeriodicReader(exp)
-		}
-	} else {
-		err = fmt.Errorf("unsupported meter exporter type or protocol: %s, %s", kind, protocol)
-	}
+	// Create reader with optional custom shutdown
+	r, customShutdown, err := createMetricReader(ctx, kind, protocol)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// Build meter provider
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(r),
 	)
-	if shutdown == nil {
-		shutdown = mp.Shutdown
-	} else {
-		prevShutdown := shutdown
-		shutdown = func(ctx context.Context) error {
-			var firstErr error
-			if err := prevShutdown(ctx); err != nil {
-				logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			}
-			if err := mp.Shutdown(ctx); err != nil {
-				logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
-				if firstErr == nil {
-					firstErr = err
-				}
-			}
-			return firstErr
-		}
-	}
+
+	// Compose shutdown handlers
+	shutdown := composeMeterShutdown(mp, customShutdown)
+
 	return mp, shutdown, nil
+}
+
+func createMemoryReader() (sdkmetric.Reader, func(context.Context) error, error) {
+	ManualReader = sdkmetric.NewManualReader()
+	return ManualReader, nil, nil
+}
+
+func createPrometheusReader() (sdkmetric.Reader, func(context.Context) error, error) {
+	r, err := prometheus.New(prometheus.WithoutScopeInfo())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	server, err := startPrometheusServer()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return r, server.Shutdown, nil
+}
+
+func createOTLPGrpcReader(ctx context.Context) (sdkmetric.Reader, func(context.Context) error, error) {
+	exp, err := otlpmetricgrpc.New(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sdkmetric.NewPeriodicReader(exp), nil, nil
+}
+
+func createOTLPHttpReader(ctx context.Context) (sdkmetric.Reader, func(context.Context) error, error) {
+	exp, err := otlpmetrichttp.New(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sdkmetric.NewPeriodicReader(exp), nil, nil
+}
+
+// createMetricReader creates a metric reader based on exporter type and protocol.
+// Returns (reader, optional-shutdown-fn, error).
+func createMetricReader(ctx context.Context, kind, protocol string) (sdkmetric.Reader, func(context.Context) error, error) {
+	switch {
+	case kind == "memory" || kind == "none" || kind == "":
+		return createMemoryReader()
+	case kind == "prometheus":
+		return createPrometheusReader()
+	case kind == "otlp" && protocol == "grpc":
+		return createOTLPGrpcReader(ctx)
+	case kind == "otlp" && strings.HasPrefix(protocol, "http"):
+		return createOTLPHttpReader(ctx)
+	default:
+		return nil, nil, fmt.Errorf("unsupported meter exporter type or protocol: %s, %s", kind, protocol)
+	}
+}
+
+// composeMeterShutdown creates a shutdown function that calls both custom and provider shutdown.
+func composeMeterShutdown(mp *sdkmetric.MeterProvider, customShutdown func(context.Context) error) func(context.Context) error {
+	if customShutdown == nil {
+		return mp.Shutdown
+	}
+
+	return func(ctx context.Context) error {
+		var firstErr error
+
+		if err := customShutdown(ctx); err != nil {
+			logger.ErrorContext(ctx, "failed to shutdown custom handler", "err", err)
+			firstErr = err
+		}
+
+		if err := mp.Shutdown(ctx); err != nil {
+			logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+
+		return firstErr
+	}
 }
 
 func newResource(ctx context.Context, service, version string) (*resource.Resource, error) {
