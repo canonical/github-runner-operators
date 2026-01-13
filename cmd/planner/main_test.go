@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net/http"
-	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -60,6 +59,16 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 	ctx.waitForHTTP("http://localhost:"+ctx.port+"/health", 10*time.Second)
 	ctx.waitForQueue(queue.DefaultQueueConfig().QueueName, 10*time.Second)
 
+	// Scenario 0: Create a non-admin auth token
+	t.Run("auth_token", func(t *testing.T) {
+		/*
+			act: send create token request
+			assert: user token is created
+		*/
+		tok := ctx.createAuthToken("github-runner")
+		require.NotEmpty(t, tok, "expected non-empty token")
+	})
+
 	// Scenario 1: Flavor pressure updates
 	t.Run("flavor_pressure", func(t *testing.T) {
 		/*
@@ -71,9 +80,6 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		priority := 100
 		flavor := randString(10)
 		pressure := 0
-
-	// Create a regular token using admin token
-	ctx.createAuthToken("github-runner")
 
 		// Test create flavor
 		resp := ctx.createFlavor(flavor, platform, labels, priority)
