@@ -85,7 +85,7 @@ func main() {
 		}
 	}()
 
-	handler := planner.NewServer(db, db, metrics, cfg.adminToken)
+	handler := planner.NewServer(db, db, metrics, cfg.adminToken, time.Tick(heartbeatInterval))
 	server := &http.Server{
 		Addr:    ":" + cfg.port,
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),
