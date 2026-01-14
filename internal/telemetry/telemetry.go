@@ -379,40 +379,19 @@ func Start(ctx context.Context, service, version string) error {
 
 	var cleanups shutdownStack
 
-	if err := initLoggerProvider(ctx, res, &cleanups); err != nil {
-		return err
-	}
-
-	if err := initTracerProvider(ctx, res, &cleanups); err != nil {
-		cleanups.runAll(ctx)
-		return err
-	}
-
-	if err := initMeterProvider(ctx, res, &cleanups); err != nil {
-		cleanups.runAll(ctx)
-		return err
-	}
-
-	shutdown = cleanups.runAll
-	started = true
-	return nil
-}
-
-func initLoggerProvider(ctx context.Context, res *resource.Resource, cleanups *shutdownStack) error {
+	// Initialize logger provider
 	lp, lpShutdown, err := newLoggerProvider(ctx, res)
 	if err != nil {
 		return fmt.Errorf("failed to create logger provider: %w", err)
 	}
 	logglobal.SetLoggerProvider(lp)
 	cleanups.push("logger provider", lpShutdown)
-
 	logger = NewLogger("github.com/canonical/mayfly/internal/telemetry")
-	return nil
-}
 
-func initTracerProvider(ctx context.Context, res *resource.Resource, cleanups *shutdownStack) error {
+	// Initialize tracer provider
 	tp, tpShutdown, err := newTracerProvider(ctx, res)
 	if err != nil {
+		cleanups.runAll(ctx)
 		return fmt.Errorf("failed to create tracer provider: %w", err)
 	}
 	otel.SetTracerProvider(tp)
@@ -420,16 +399,18 @@ func initTracerProvider(ctx context.Context, res *resource.Resource, cleanups *s
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
 	cleanups.push("tracer provider", tpShutdown)
-	return nil
-}
 
-func initMeterProvider(ctx context.Context, res *resource.Resource, cleanups *shutdownStack) error {
+	// Initialize meter provider
 	mp, mpShutdown, err := newMeterProvider(ctx, res)
 	if err != nil {
+		cleanups.runAll(ctx)
 		return fmt.Errorf("failed to create meter provider: %w", err)
 	}
 	otel.SetMeterProvider(mp)
 	cleanups.push("meter provider", mpShutdown)
+
+	shutdown = cleanups.runAll
+	started = true
 	return nil
 }
 
