@@ -314,6 +314,35 @@ func composeMeterShutdown(mp *sdkmetric.MeterProvider, customShutdown func(conte
 	}
 }
 
+// shutdownStack accumulates shutdown functions and executes them in order.
+type shutdownStack struct {
+	funcs []struct {
+		name string
+		fn   func(context.Context) error
+	}
+}
+
+func (s *shutdownStack) push(name string, fn func(context.Context) error) {
+	s.funcs = append(s.funcs, struct {
+		name string
+		fn   func(context.Context) error
+	}{name, fn})
+}
+
+// runAll executes all shutdown functions in order, logging errors and returning the first error encountered.
+func (s *shutdownStack) runAll(ctx context.Context) error {
+	var firstErr error
+	for _, f := range s.funcs {
+		if err := f.fn(ctx); err != nil {
+			logger.ErrorContext(ctx, "failed to shutdown "+f.name, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
 func newResource(ctx context.Context, service, version string) (*resource.Resource, error) {
 	r, err := resource.New(ctx,
 		resource.WithAttributes(
@@ -336,74 +365,71 @@ func newResource(ctx context.Context, service, version string) (*resource.Resour
 // https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
 //
 // This function should be called only once at the beginning of the program.
-//
-//nolint:cyclop // to be addressed in follow-up PR
 func Start(ctx context.Context, service, version string) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if started {
 		return errors.New("telemetry already started")
 	}
+
 	res, err := newResource(ctx, service, version)
 	if err != nil {
 		return fmt.Errorf("build resource: %w", err)
 	}
 
-	lp, loggerShutdown, err := newLoggerProvider(ctx, res)
+	var cleanups shutdownStack
+
+	if err := initLoggerProvider(ctx, res, &cleanups); err != nil {
+		return err
+	}
+
+	if err := initTracerProvider(ctx, res, &cleanups); err != nil {
+		cleanups.runAll(ctx)
+		return err
+	}
+
+	if err := initMeterProvider(ctx, res, &cleanups); err != nil {
+		cleanups.runAll(ctx)
+		return err
+	}
+
+	shutdown = cleanups.runAll
+	started = true
+	return nil
+}
+
+func initLoggerProvider(ctx context.Context, res *resource.Resource, cleanups *shutdownStack) error {
+	lp, lpShutdown, err := newLoggerProvider(ctx, res)
 	if err != nil {
 		return fmt.Errorf("failed to create logger provider: %w", err)
 	}
 	logglobal.SetLoggerProvider(lp)
+	cleanups.push("logger provider", lpShutdown)
 
 	logger = NewLogger("github.com/canonical/mayfly/internal/telemetry")
+	return nil
+}
 
-	tp, tracerShutdown, err := newTracerProvider(ctx, res)
+func initTracerProvider(ctx context.Context, res *resource.Resource, cleanups *shutdownStack) error {
+	tp, tpShutdown, err := newTracerProvider(ctx, res)
 	if err != nil {
-		if err := loggerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown logger provider", "error", err)
-		}
-		return fmt.Errorf("failed to create trace provider: %w", err)
+		return fmt.Errorf("failed to create tracer provider: %w", err)
 	}
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
+	cleanups.push("tracer provider", tpShutdown)
+	return nil
+}
 
-	mp, meterShutdown, err := newMeterProvider(ctx, res)
+func initMeterProvider(ctx context.Context, res *resource.Resource, cleanups *shutdownStack) error {
+	mp, mpShutdown, err := newMeterProvider(ctx, res)
 	if err != nil {
-		if err := loggerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown logger provider", "error", err)
-		}
-		if err := tracerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown tracer provider", "error", err)
-		}
-		return fmt.Errorf("failed to create metric provider: %w", err)
+		return fmt.Errorf("failed to create meter provider: %w", err)
 	}
 	otel.SetMeterProvider(mp)
-
-	shutdown = func(ctx context.Context) error {
-		var firstErr error
-		if err := loggerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown logger provider", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		if err := meterShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown meter provider", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		if err := tracerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown tracer provider", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		return firstErr
-	}
-	started = true
+	cleanups.push("meter provider", mpShutdown)
 	return nil
 }
 
