@@ -219,19 +219,16 @@ func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.Meter
 	protocol := pickProtocol("METRICS")
 	logger.DebugContext(ctx, "initialize meter provider", "metrics_exporter", kind)
 
-	// Create reader with optional custom shutdown
 	r, customShutdown, err := createMetricReader(ctx, kind, protocol)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Build meter provider
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(r),
 	)
 
-	// Compose shutdown handlers
 	shutdown := composeMeterShutdown(mp, customShutdown)
 
 	return mp, shutdown, nil
