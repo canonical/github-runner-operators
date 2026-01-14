@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
@@ -62,6 +63,10 @@ func (m *mockStore) CreateAuthToken(ctx context.Context, name string) ([32]byte,
 
 func (m *mockStore) DeleteAuthToken(ctx context.Context, name string) error {
 	return nil
+}
+
+func (m *mockStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	return make(<-chan struct{}), nil
 }
 
 func (m *mockStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
@@ -134,7 +139,7 @@ func TestCreateFlavorUpdatesMetric_shouldRecordMetric(t *testing.T) {
 
 	store := &mockStore{}
 	adminToken := "planner_v0_valid_admin_token________________________________"
-	server := NewServer(store, store, NewMetrics(store), adminToken)
+	server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 	body := `{"platform":"github","labels":["self-hosted","amd64"],"priority":300}`
 	req := newRequest(http.MethodPost, "/api/v1/flavors/test-flavor", body, adminToken)

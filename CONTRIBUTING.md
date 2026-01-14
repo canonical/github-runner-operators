@@ -165,9 +165,9 @@ should be avoided and discouraged during code reviews.
 ### Cyclomatic complexity
 
 We recommend keeping cyclomatic complexity of functions/methods below 10.
-Higher complexity often indicates a function is doing too much and should be simplified.
+Higher complexity leads to code that is harder to read, understand, test and maintain.
 There are exceptions where higher complexity is justified (e.g., validation, initialization),
-but those should require explicit justification via nolint directives.
+but those should require explicit justification using `nolint` directives.
 
 
 

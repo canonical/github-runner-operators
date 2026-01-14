@@ -37,6 +37,7 @@ const (
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 	shutdownTimeout   = 30 * time.Second
+	heartbeatInterval = 30 * time.Second
 )
 
 var (

@@ -214,6 +214,7 @@ func startPrometheusServer() (*http.Server, error) {
 	return srv, nil
 }
 
+//nolint:cyclop // to be addressed in follow-up PR
 func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.MeterProvider, func(ctx context.Context) error, error) {
 	kind := strings.ToLower(strings.TrimSpace(envOrDefault("OTEL_METRICS_EXPORTER", "memory")))
 	protocol := pickProtocol("METRICS")

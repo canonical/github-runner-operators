@@ -65,6 +65,8 @@ func parseOptionalGitHubTime(ts *github.Timestamp) *time.Time {
 // getWorkflowJob extracts and validates a workflow job from a webhook message.
 // Returns nil for events that should be ignored (non-workflow_job, unsupported actions, non-self-hosted).
 // Returns an error only for malformed data that cannot be processed.
+//
+//nolint:cyclop // to be addressed in follow-up PR
 func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []byte) (*githubWebhookJob, error) {
 	// Parse webhook event from headers and body
 	jobEvent, err := parseWebhookEvent(ctx, headers, body)
