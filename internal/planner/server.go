@@ -132,9 +132,9 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	flavorName := r.PathValue("name")
 	stream := strings.ToLower(query.Get("stream")) == "true"
-	var ch <-chan struct{}
+	var pressureChange <-chan struct{}
 	if stream {
-		ch, err = s.store.SubscribeToPressureUpdate(r.Context())
+		pressureChange, err = s.store.SubscribeToPressureUpdate(r.Context())
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
 			return
@@ -168,7 +168,10 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	}
 
 	flushJSONToStream(w, flusher, pressures)
+	s.streamFlavorPressureUpdates(w, r, flavorName, flusher, pressures, pressureChange)
+}
 
+func (s *Server) streamFlavorPressureUpdates(w http.ResponseWriter, r *http.Request, flavorName string, flusher http.Flusher, pressures map[string]int, pressureChange <-chan struct{}) {
 	for {
 		select {
 		case <-r.Context().Done():
@@ -183,7 +186,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 			}
 			flushJSONToStream(w, flusher, newPressures)
 			pressures = newPressures
-		case _, ok := <-ch:
+		case _, ok := <-pressureChange:
 			if !ok {
 				slog.InfoContext(r.Context(), "pressure update channel closed")
 				return
@@ -323,4 +326,5 @@ func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any)
 		return err
 	}
 	flusher.Flush()
+	return nil
 }
