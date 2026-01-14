@@ -28,6 +28,11 @@ jobs:
           go fmt ./...
           git diff --exit-code
 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64
+
       - name: Run Unit and Integration Test of internal packages
         env:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres

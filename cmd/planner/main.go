@@ -45,6 +45,7 @@ var (
 	adminTokenPattern = regexp.MustCompile(`^planner_v0_[A-Za-z0-9_-]{20}$`)
 )
 
+//nolint:cyclop // to be addressed in follow-up PR
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
