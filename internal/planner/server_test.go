@@ -13,18 +13,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/stretchr/testify/assert"
 )
 
 type fakeStore struct {
-	pressures   map[string]int
-	lastFlavor  *database.Flavor
-	errToReturn error
+	pressures      atomic.Value
+	lastFlavor     *database.Flavor
+	errToReturn    error
+	pressureChange chan struct{}
 
 	// Auth token controls
 	createTokErr error
@@ -39,12 +43,22 @@ func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) erro
 }
 
 func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
+	pressures := f.pressures.Load()
+	if pressures == nil {
+		return map[string]int{}, nil
+	}
+
+	pressureMap, ok := pressures.(map[string]int)
+	if !ok {
+		return nil, fmt.Errorf("invalid pressure data type")
+	}
+
 	if len(flavors) == 0 {
-		return f.pressures, nil
+		return pressureMap, nil
 	}
 	res := make(map[string]int)
 	for _, flavor := range flavors {
-		if pressure, ok := f.pressures[flavor]; ok {
+		if pressure, ok := pressureMap[flavor]; ok {
 			res[flavor] = pressure
 		}
 	}
@@ -103,7 +117,11 @@ func (f *fakeStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string
 	return "", database.ErrNotExist
 }
 
-func newRequest(method, url, body string, token string) *http.Request {
+func (f *fakeStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	return f.pressureChange, nil
+}
+
+func newRequest(method, url, body, token string) *http.Request {
 	req := httptest.NewRequest(method, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
@@ -167,7 +185,7 @@ func TestCreateFlavor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeStore{errToReturn: tt.storeErr}
 			adminToken := "planner_v0_valid_admin_token________________________________"
-			server := NewServer(store, store, NewMetrics(store), adminToken)
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 			req := newRequest(tt.method, tt.url, tt.body, adminToken)
 			w := httptest.NewRecorder()
@@ -227,9 +245,11 @@ func TestGetFlavorPressure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{pressures: tt.pressures}
+			pressures := atomic.Value{}
+			pressures.Store(tt.pressures)
+			store := &fakeStore{pressures: pressures}
 			adminToken := "planner_v0_valid_admin_token________________________________"
-			server := NewServer(store, store, NewMetrics(store), adminToken)
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 			req := newRequest(tt.method, tt.url, "", adminToken)
 			w := httptest.NewRecorder()
@@ -244,9 +264,160 @@ func TestGetFlavorPressure(t *testing.T) {
 	}
 }
 
+func TestGetFlavorPressureStreamHeartbeat(t *testing.T) {
+	/*
+		arrange: Setup the server with timer control to simulate heartbeat intervals.
+		act: Wait for heartbeats in the pressure stream.
+		assert: verify that heartbeats are received at expected intervals.
+	*/
+	ch := make(chan time.Time)
+	pressures := atomic.Value{}
+	pressures.Store(map[string]int{"runner-small": 1, "runner-medium": 1, "runner-large": 1})
+	store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
+	adminToken := "planner_v0_valid_admin_token________________________________"
+	server := NewServer(store, store, NewMetrics(store), adminToken, ch)
+
+	ts := httptest.NewUnstartedServer(server)
+	ts.StartTLS()
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/flavors/runner-small/pressure?stream=true", nil)
+	assert.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err := ts.Client().Do(req)
+	assert.NoError(t, err)
+	defer resp.Body.Close()
+
+	var res map[string]int
+	json.NewDecoder(resp.Body).Decode(&res)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, map[string]int{"runner-small": 1}, res)
+
+	for i := 0; i < 10; i++ {
+		ch <- time.Now()
+		json.NewDecoder(resp.Body).Decode(&res)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, map[string]int{"runner-small": 1}, res)
+	}
+}
+
+func TestGetFlavorPressureStream(t *testing.T) {
+	/*
+		arrange: Setup the server.
+		act: send streaming requests and update pressures in the store.
+		assert: verify the received pressures match expected values, and the HTTP status codes are as expected.
+	*/
+	tests := []struct {
+		name                    string
+		http2Enabled            bool
+		pressuresStream         []map[string]int
+		method                  string
+		url                     string
+		expectedStatus          []int
+		expectedPressuresStream []map[string]int
+	}{{
+		name:         "shouldSucceedForSingleFlavorWithHTTP2",
+		http2Enabled: true,
+		pressuresStream: []map[string]int{
+			{"runner-small": 1, "runner-large": 2},
+			{"runner-small": 2, "runner-large": 3},
+			{"runner-small": 3, "runner-large": 1},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus: []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
+	}, {
+		name:                    "shouldSucceedForAllFlavorsWithHTTP2",
+		http2Enabled:            true,
+		pressuresStream:         []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/_/pressure?stream=true",
+		expectedStatus:          []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+	}, {
+		name:                    "shouldFailWhenFlavorNotExistWithHTTP2",
+		http2Enabled:            true,
+		pressuresStream:         []map[string]int{{"runner-medium": 2, "runner-large": 1}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus:          []int{http.StatusNotFound},
+		expectedPressuresStream: []map[string]int{nil},
+	}, {
+		name:         "shouldSucceedForSingleFlavor",
+		http2Enabled: false,
+		pressuresStream: []map[string]int{
+			{"runner-small": 1, "runner-large": 2},
+			{"runner-small": 2, "runner-large": 3},
+			{"runner-small": 3, "runner-large": 1},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus: []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{
+			{"runner-small": 1},
+			{"runner-small": 2},
+			{"runner-small": 3},
+		},
+	}, {
+		name:                    "shouldSucceedForAllFlavors",
+		http2Enabled:            false,
+		pressuresStream:         []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/_/pressure?stream=true",
+		expectedStatus:          []int{http.StatusOK, http.StatusOK, http.StatusOK},
+		expectedPressuresStream: []map[string]int{{"runner-small": 1, "runner-large": 2}, {"runner-small": 3, "runner-large": 4}, {"runner-small": 5, "runner-large": 6}},
+	}, {
+		name:                    "shouldFailWhenFlavorNotExist",
+		http2Enabled:            false,
+		pressuresStream:         []map[string]int{{"runner-medium": 2, "runner-large": 1}},
+		method:                  http.MethodGet,
+		url:                     "/api/v1/flavors/runner-small/pressure?stream=true",
+		expectedStatus:          []int{http.StatusNotFound},
+		expectedPressuresStream: []map[string]int{nil},
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pressures := atomic.Value{}
+			pressures.Store(tt.pressuresStream[0])
+			store := &fakeStore{pressures: pressures, pressureChange: make(chan struct{}, 10)}
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+			ts := httptest.NewUnstartedServer(server)
+			ts.EnableHTTP2 = tt.http2Enabled
+			ts.StartTLS()
+			defer ts.Close()
+
+			req, err := http.NewRequest(http.MethodGet, ts.URL+tt.url, nil)
+			assert.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer "+adminToken)
+			resp, err := ts.Client().Do(req)
+			assert.NoError(t, err)
+			defer resp.Body.Close()
+
+			var res map[string]int
+			for i := range len(tt.pressuresStream) {
+				store.pressures.Store(tt.pressuresStream[i])
+				store.pressureChange <- struct{}{}
+
+				json.NewDecoder(resp.Body).Decode(&res)
+				assert.Equal(t, tt.expectedStatus[i], resp.StatusCode)
+				assert.Equal(t, tt.expectedPressuresStream[i], res)
+			}
+		})
+	}
+}
+
 func TestHealth(t *testing.T) {
 	store := &fakeStore{}
-	server := NewServer(store, store, NewMetrics(store), "planner_v0_valid_admin_token________________________________")
+	adminToken := "planner_v0_valid_admin_token________________________________"
+	server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -267,7 +438,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 	t.Run("create token success", func(t *testing.T) {
 		token := sha256.Sum256([]byte(admin))
 		store := &fakeStore{nameToToken: map[string][32]byte{"github-runner": token}}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
 		w := httptest.NewRecorder()
@@ -283,7 +454,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("create token conflict", func(t *testing.T) {
 		store := &fakeStore{createTokErr: database.ErrExist}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/existing", "", admin)
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -292,7 +463,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("create token unauthorized", func(t *testing.T) {
 		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "invalid-token")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -301,7 +472,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("delete token success", func(t *testing.T) {
 		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", admin)
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -310,7 +481,7 @@ func TestAuthTokenEndpoints(t *testing.T) {
 
 	t.Run("delete token unauthorized", func(t *testing.T) {
 		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin)
+		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "invalid-token")
 		w := httptest.NewRecorder()
 		server.ServeHTTP(w, req)
@@ -326,7 +497,7 @@ func TestCreateFlavor_Unauthorized(t *testing.T) {
 	*/
 	store := &fakeStore{}
 	admin := "planner_v0_valid_admin_token________________________________"
-	server := NewServer(store, store, NewMetrics(store), admin)
+	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 	body := `{"platform":"github","labels":["x64"],"priority":1}`
 	req := newRequest(http.MethodPost, "/api/v1/flavors/unauth", body, "invalid-token")
 	w := httptest.NewRecorder()
@@ -342,9 +513,11 @@ func TestGetFlavorPressure_Unauthorized(t *testing.T) {
 		act: GET /api/v1/flavors/_/pressure
 		assert: returns 401 Unauthorized
 	*/
-	store := &fakeStore{pressures: map[string]int{"runner-small": 1}}
+	pressures := atomic.Value{}
+	pressures.Store(map[string]int{"runner-small": 1})
+	store := &fakeStore{pressures: pressures}
 	admin := "planner_v0_valid_admin_token________________________________"
-	server := NewServer(store, store, NewMetrics(store), admin)
+	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 	req := newRequest(http.MethodGet, "/api/v1/flavors/_/pressure", "", "invalid-token")
 	w := httptest.NewRecorder()
 

@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
@@ -90,14 +91,25 @@ func TestMain_IntegrationScenarios(t *testing.T) {
 		pressures := ctx.getFlavorPressure(flavor)
 		ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
 
-		// Test consume webhook and reflect pressure
+		// Test streaming flavor pressure
+		stream := ctx.startFlavorPressureStream(flavor)
+		defer stream.Body.Close()
+		pressures = ctx.decodePressure(stream.Body)
+		ctx.assertFlavorPressureEquals(pressures, flavor, pressure)
+
+		// Test consume webhook
 		body := ctx.constructWebhookPayload(labels)
 		ctx.publish(body, supportedEventType)
 
+		// Test get flavor pressure updated
 		assert.Eventually(t, func() bool {
 			press := ctx.getFlavorPressure(flavor)
 			return press[flavor] > pressure
 		}, 2*time.Minute, 100*time.Millisecond, "expected flavor pressure to increase after webhook processing")
+
+		// Test streaming flavor pressure updated
+		newPressures := ctx.decodePressure(stream.Body)
+		assert.True(t, newPressures[flavor] > pressure)
 	})
 
 	// Scenario 2: Dead letter queue behavior
@@ -224,6 +236,29 @@ func (ctx *testContext) getFlavorPressure(flavor string) map[string]int {
 	var pressures map[string]int
 	require.NoError(ctx.t, json.NewDecoder(resp.Body).Decode(&pressures), "decode response")
 
+	return pressures
+}
+
+// startFlavorPressureStream starts a streaming request for flavor pressure updates
+// Caller is responsible for closing the response body.
+func (ctx *testContext) startFlavorPressureStream(flavor string) *http.Response {
+	ctx.t.Helper()
+
+	url := "http://localhost:" + ctx.port + "/api/v1/flavors/" + flavor + "/pressure?stream=true"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(ctx.t, err, "build get flavor pressure stream request")
+	require.NotEmpty(ctx.t, ctx.userToken, "user token must be initialized before calling getFlavorPressure")
+	req.Header.Set("Authorization", "Bearer "+ctx.userToken)
+	resp, err := http.DefaultClient.Do(req)
+
+	require.NoError(ctx.t, err, "get flavor pressure stream request")
+	return resp
+}
+
+// decodePressure decodes the pressure map.
+func (ctx *testContext) decodePressure(r io.Reader) map[string]int {
+	var pressures map[string]int
+	require.NoError(ctx.t, json.NewDecoder(r).Decode(&pressures), "decode pressure stream")
 	return pressures
 }
 

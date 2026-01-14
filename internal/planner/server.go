@@ -13,8 +13,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -35,6 +38,7 @@ type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
+	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
 }
 
 // AuthStore is an interface that provides authorization token management.
@@ -51,11 +55,12 @@ type Server struct {
 	store      FlavorStore
 	auth       AuthStore
 	adminToken string
+	ticker     <-chan time.Time
 }
 
 // NewServer creates a new Server with the given dependencies.
-func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken string) *Server {
-	s := &Server{store: store, auth: auth, adminToken: adminToken, mux: http.NewServeMux(), metrics: metrics}
+func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken string, ticker <-chan time.Time) *Server {
+	s := &Server{store: store, auth: auth, adminToken: adminToken, mux: http.NewServeMux(), metrics: metrics, ticker: ticker}
 
 	// Register routes
 	// General endpoints require either a valid general token or the admin token
@@ -122,13 +127,21 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	var pressures = map[string]int{}
 	var err error
 
+	w.Header().Set("Cache-Control", "no-cache")
+
+	query := r.URL.Query()
 	flavorName := r.PathValue("name")
-	switch flavorName {
-	case allFlavorName:
-		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform)
-	default:
-		pressures, err = s.store.GetPressures(r.Context(), flavorPlatform, flavorName)
+	stream := strings.ToLower(query.Get("stream")) == "true"
+	var pressureChange <-chan struct{}
+	if stream {
+		pressureChange, err = s.store.SubscribeToPressureUpdate(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
+
+	pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
 
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
@@ -140,7 +153,65 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, pressures)
+	if !stream {
+		respondWithJSON(w, http.StatusOK, pressures)
+		return
+	}
+
+	// Handle streaming requests
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Unable to setup HTTP streaming", http.StatusInternalServerError)
+		return
+	}
+
+	flushJSONToStream(w, flusher, pressures)
+	s.streamFlavorPressureUpdates(w, r, flavorName, flusher, pressures, pressureChange)
+}
+
+func (s *Server) streamFlavorPressureUpdates(w http.ResponseWriter, r *http.Request, flavorName string, flusher http.Flusher, pressures map[string]int, pressureChange <-chan struct{}) {
+	for {
+		select {
+		case <-r.Context().Done():
+			slog.InfoContext(r.Context(), "client connection terminated")
+			return
+		// Sending pressure as periodic heartbeats to keep the connection alive
+		case <-s.ticker:
+			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
+				return
+			}
+			flushJSONToStream(w, flusher, newPressures)
+			pressures = newPressures
+		case _, ok := <-pressureChange:
+			if !ok {
+				slog.InfoContext(r.Context(), "pressure update channel closed")
+				return
+			}
+
+			newPressures, err := s.getPressures(r.Context(), flavorPlatform, flavorName)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "failed to get flavor pressure for streaming", "error", err)
+				return
+			}
+			if !maps.Equal(pressures, newPressures) {
+				flushJSONToStream(w, flusher, newPressures)
+			}
+			pressures = newPressures
+		}
+	}
+}
+
+func (s *Server) getPressures(ctx context.Context, platform string, flavorName string) (map[string]int, error) {
+	switch flavorName {
+	case allFlavorName:
+		return s.store.GetPressures(ctx, flavorPlatform)
+	default:
+		return s.store.GetPressures(ctx, flavorPlatform, flavorName)
+	}
 }
 
 // health handles health check requests.
@@ -246,4 +317,14 @@ func respondWithJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(payload)
+}
+
+// flushJSONToStream encodes and flushes JSON data to the response writer.
+func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any) error {
+	err := json.NewEncoder(w).Encode(payload)
+	if err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
