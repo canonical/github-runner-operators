@@ -37,6 +37,7 @@ const (
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 	shutdownTimeout   = 30 * time.Second
+	heartbeatInterval = 30 * time.Second
 )
 
 var (
@@ -44,6 +45,7 @@ var (
 	adminTokenPattern = regexp.MustCompile(`^planner_v0_[A-Za-z0-9_-]{20}$`)
 )
 
+//nolint:cyclop // to be addressed in follow-up PR
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -98,7 +100,7 @@ func main() {
 		}
 	}()
 
-	handler := planner.NewServer(db, db, metrics, adminToken)
+	handler := planner.NewServer(db, db, metrics, adminToken, time.Tick(heartbeatInterval))
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: otelhttp.NewHandler(handler, "planner-api", otelhttp.WithServerName("planner")),

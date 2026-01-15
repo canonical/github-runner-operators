@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testDatabase struct {
@@ -101,6 +102,27 @@ func teardownDatabase(t *testing.T) {
 	}
 }
 
+// subscribeToPressureUpdates sets up a subscription to pressure updates.
+func subscribeToPressureUpdates(t *testing.T, ctx context.Context, db *Database) <-chan struct{} {
+	t.Helper()
+	ch, err := db.SubscribeToPressureUpdate(ctx)
+	require.NoError(t, err)
+	require.Len(t, ch, 0)
+	return ch
+}
+
+// assertSingleNotificationReceived asserts that a single notification is received on the channel.
+func assertSingleNotificationReceived(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case _, ok := <-ch:
+		require.True(t, ok, "channel closed unexpectedly")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for notification")
+	}
+	assert.Empty(t, ch, "expected only a single notification")
+}
+
 func TestDatabase_CreateAuthToken(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
@@ -171,7 +193,10 @@ func TestDatabase_AddJob(t *testing.T) {
 		CreatedAt: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.Local),
 		Raw:       map[string]interface{}{"queued": "queued"},
 	}
+
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
 	assert.NoError(t, db.AddJob(ctx, &job))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -401,7 +426,10 @@ func TestDatabase_UpdateJobCompleted(t *testing.T) {
 	completedAt := time.Date(2025, time.January, 1, 2, 0, 0, 0, time.Local)
 
 	assert.NoError(t, db.AddJob(ctx, &job))
+
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
 	assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	job.CompletedAt = &completedAt
 	job.Raw["completed"] = "completed"
@@ -445,7 +473,10 @@ func TestDatabase_AddFlavor(t *testing.T) {
 	}
 
 	assert.NoError(t, db.AddJob(ctx, &job))
+
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -496,7 +527,10 @@ func TestDatabase_DisableFlavor(t *testing.T) {
 
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
 	assert.NoError(t, db.DisableFlavor(ctx, flavor.Platform, flavor.Name))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
@@ -560,7 +594,9 @@ func TestDatabase_DeleteFlavor(t *testing.T) {
 	assert.Equal(t, flavorSmall.Name, *jobs[0].AssignedFlavor)
 	assert.Equal(t, flavorSmall.Name, *jobs[1].AssignedFlavor)
 
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
 	assert.NoError(t, db.DeleteFlavor(ctx, flavorSmall.Platform, flavorSmall.Name))
+	assertSingleNotificationReceived(t, pressureUpdates)
 
 	jobs, err = db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
