@@ -52,7 +52,6 @@ func NewValidationError(field, message string) *ValidationError {
 	return &ValidationError{Field: field, Message: message}
 }
 
-
 func NewJobConsumer(consumer queue.Consumer, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
 		consumer: consumer,
