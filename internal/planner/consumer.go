@@ -34,24 +34,6 @@ const (
 
 var supportedActions = []string{"queued", "in_progress", "completed"}
 
-// validationError represents an error during webhook validation.
-type validationError struct {
-	field   string
-	message string
-}
-
-func (e *validationError) Error() string {
-	if e.field != "" {
-		return fmt.Sprintf("validation error: %s: %s", e.field, e.message)
-	}
-	return fmt.Sprintf("validation error: %s", e.message)
-}
-
-// newValidationError creates a new validationError.
-func newValidationError(field, message string) *validationError {
-	return &validationError{field: field, message: message}
-}
-
 func NewJobConsumer(consumer queue.Consumer, db JobDatabase, metrics *Metrics) *JobConsumer {
 	return &JobConsumer{
 		consumer: consumer,
@@ -114,12 +96,12 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 func parseWorkflowJobEvent(ctx context.Context, headers map[string]interface{}, body []byte) (*github.WorkflowJobEvent, error) {
 	eventTypeHeader, ok := headers[githubEventHeaderKey]
 	if !ok {
-		return nil, newValidationError("X-GitHub-Event", "header missing")
+		return nil, fmt.Errorf("missing X-GitHub-Event header")
 	}
 
 	eventType, ok := eventTypeHeader.(string)
 	if !ok {
-		return nil, newValidationError("X-GitHub-Event", "must be string")
+		return nil, fmt.Errorf("X-GitHub-Event must be string")
 	}
 
 	event, err := github.ParseWebHook(eventType, body)
@@ -152,7 +134,7 @@ func isJobEligibleForProcessing(ctx context.Context, jobEvent *github.WorkflowJo
 
 	job := jobEvent.GetWorkflowJob()
 	if job == nil {
-		return false, newValidationError("workflow_job", "field missing in event webhook")
+		return false, fmt.Errorf("missing workflow_job field in event webhook")
 	}
 
 	if !isSelfHosted(job.Labels) {
@@ -166,19 +148,19 @@ func isJobEligibleForProcessing(ctx context.Context, jobEvent *github.WorkflowJo
 
 func validateJobFields(job *github.WorkflowJob, action string) error {
 	if job.GetCreatedAt().IsZero() {
-		return newValidationError("created_at", "missing in event webhook")
+		return fmt.Errorf("missing created_at in event webhook")
 	}
 
 	if job.GetID() == 0 {
-		return newValidationError("id", "missing in event webhook")
+		return fmt.Errorf("missing job id in event webhook")
 	}
 
 	if action == "in_progress" && job.GetStartedAt().IsZero() {
-		return newValidationError("started_at", "missing in in_progress event webhook")
+		return fmt.Errorf("missing started_at in in_progress event webhook")
 	}
 
 	if action == "completed" && job.GetCompletedAt().IsZero() {
-		return newValidationError("completed_at", "missing in completed event webhook")
+		return fmt.Errorf("missing completed_at in completed event webhook")
 	}
 
 	return nil
@@ -190,12 +172,12 @@ func buildWebhookJob(jobEvent *github.WorkflowJobEvent, body []byte) (*githubWeb
 
 	var rawJson map[string]interface{}
 	if err := json.Unmarshal(body, &rawJson); err != nil {
-		return nil, newValidationError("webhook", fmt.Sprintf("invalid JSON: %v", err))
+		return nil, fmt.Errorf("invalid github webhook: %v", err)
 	}
 
 	repo := jobEvent.GetRepo().GetFullName()
 	if repo == "" {
-		return nil, newValidationError("repository.full_name", "missing in webhook payload")
+		return nil, fmt.Errorf("missing repo full name in webhook payload")
 	}
 
 	id := strconv.FormatInt(job.GetID(), 10)

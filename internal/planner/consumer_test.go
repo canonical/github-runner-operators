@@ -650,7 +650,7 @@ func TestGetWorkflowJob(t *testing.T) {
 		},
 		body:         mk(map[string]any{"action": "queued"}),
 		expectErr:    true,
-		expectErrMsg: "validation error: X-GitHub-Event: header missing",
+		expectErrMsg: "missing X-GitHub-Event header",
 	}, {
 		name: "X-GitHub-Event header is not a string",
 		headers: map[string]interface{}{
@@ -658,7 +658,7 @@ func TestGetWorkflowJob(t *testing.T) {
 		},
 		body:         mk(map[string]any{"action": "queued"}),
 		expectErr:    true,
-		expectErrMsg: "validation error: X-GitHub-Event: must be string",
+		expectErrMsg: "X-GitHub-Event must be string",
 	}, {
 		name: "unsupported event type",
 		headers: map[string]interface{}{
@@ -718,7 +718,7 @@ func TestGetWorkflowJob(t *testing.T) {
 			// Missing workflow_job
 		}),
 		expectErr:    true,
-		expectErrMsg: "validation error: workflow_job: field missing in event webhook",
+		expectErrMsg: "missing workflow_job field",
 	}, {
 		name: "missing created_at",
 		headers: map[string]interface{}{
@@ -736,7 +736,7 @@ func TestGetWorkflowJob(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "validation error: created_at: missing in event webhook",
+		expectErrMsg: "missing created_at",
 	}, {
 		name: "missing started_at for in_progress action",
 		headers: map[string]interface{}{
@@ -755,7 +755,7 @@ func TestGetWorkflowJob(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "validation error: started_at: missing in in_progress event webhook",
+		expectErrMsg: "missing started_at",
 	}, {
 		name: "missing completed_at for completed action",
 		headers: map[string]interface{}{
@@ -775,7 +775,7 @@ func TestGetWorkflowJob(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "validation error: completed_at: missing in completed event webhook",
+		expectErrMsg: "missing completed_at",
 	}, {
 		name: "missing job id",
 		headers: map[string]interface{}{
@@ -793,7 +793,7 @@ func TestGetWorkflowJob(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "validation error: id: missing in event webhook",
+		expectErrMsg: "missing job id",
 	}, {
 		name: "missing repository full name",
 		headers: map[string]interface{}{
@@ -811,7 +811,7 @@ func TestGetWorkflowJob(t *testing.T) {
 			},
 		}),
 		expectErr:    true,
-		expectErrMsg: "validation error: repository.full_name: missing in webhook payload",
+		expectErrMsg: "missing repo full name",
 	}, {
 		name: "waiting action is ignored",
 		headers: map[string]interface{}{
