@@ -214,44 +214,12 @@ func startPrometheusServer() (*http.Server, error) {
 	return srv, nil
 }
 
-//nolint:cyclop // to be addressed in follow-up PR
 func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.MeterProvider, func(ctx context.Context) error, error) {
 	kind := strings.ToLower(strings.TrimSpace(envOrDefault("OTEL_METRICS_EXPORTER", "memory")))
 	protocol := pickProtocol("METRICS")
 	logger.DebugContext(ctx, "initialize meter provider", "metrics_exporter", kind)
 
-	var r sdkmetric.Reader
-	var err error
-	var shutdown func(ctx context.Context) error
-
-	if kind == "memory" || kind == "none" || kind == "" {
-		ManualReader = sdkmetric.NewManualReader()
-		r = ManualReader
-	} else if kind == "prometheus" {
-		r, err = prometheus.New(prometheus.WithoutScopeInfo())
-		if err == nil {
-			server, serverErr := startPrometheusServer()
-			if serverErr != nil {
-				err = serverErr
-			} else {
-				shutdown = server.Shutdown
-			}
-		}
-	} else if kind == "otlp" && protocol == "grpc" {
-		var exp *otlpmetricgrpc.Exporter
-		exp, err = otlpmetricgrpc.New(ctx)
-		if err == nil {
-			r = sdkmetric.NewPeriodicReader(exp)
-		}
-	} else if kind == "otlp" && strings.HasPrefix(protocol, "http") {
-		var exp *otlpmetrichttp.Exporter
-		exp, err = otlpmetrichttp.New(ctx)
-		if err == nil {
-			r = sdkmetric.NewPeriodicReader(exp)
-		}
-	} else {
-		err = fmt.Errorf("unsupported meter exporter type or protocol: %s, %s", kind, protocol)
-	}
+	r, customShutdown, err := createMetricReader(ctx, kind, protocol)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -260,28 +228,116 @@ func newMeterProvider(ctx context.Context, res *resource.Resource) (metric.Meter
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(r),
 	)
-	if shutdown == nil {
-		shutdown = mp.Shutdown
-	} else {
-		prevShutdown := shutdown
-		shutdown = func(ctx context.Context) error {
-			var firstErr error
-			if err := prevShutdown(ctx); err != nil {
-				logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
-				if firstErr == nil {
-					firstErr = err
-				}
+
+	shutdown := composeMeterShutdown(mp, customShutdown)
+
+	return mp, shutdown, nil
+}
+
+func createMemoryReader() (sdkmetric.Reader, func(context.Context) error, error) {
+	ManualReader = sdkmetric.NewManualReader()
+	return ManualReader, nil, nil
+}
+
+func createPrometheusReader() (sdkmetric.Reader, func(context.Context) error, error) {
+	r, err := prometheus.New(prometheus.WithoutScopeInfo())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	server, err := startPrometheusServer()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return r, server.Shutdown, nil
+}
+
+func createOTLPGrpcReader(ctx context.Context) (sdkmetric.Reader, func(context.Context) error, error) {
+	exp, err := otlpmetricgrpc.New(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sdkmetric.NewPeriodicReader(exp), nil, nil
+}
+
+func createOTLPHttpReader(ctx context.Context) (sdkmetric.Reader, func(context.Context) error, error) {
+	exp, err := otlpmetrichttp.New(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sdkmetric.NewPeriodicReader(exp), nil, nil
+}
+
+// createMetricReader creates a metric reader based on exporter type and protocol.
+// Returns (reader, optional-shutdown-fn, error).
+func createMetricReader(ctx context.Context, kind, protocol string) (sdkmetric.Reader, func(context.Context) error, error) {
+	switch {
+	case kind == "memory" || kind == "none" || kind == "":
+		return createMemoryReader()
+	case kind == "prometheus":
+		return createPrometheusReader()
+	case kind == "otlp" && protocol == "grpc":
+		return createOTLPGrpcReader(ctx)
+	case kind == "otlp" && strings.HasPrefix(protocol, "http"):
+		return createOTLPHttpReader(ctx)
+	default:
+		return nil, nil, fmt.Errorf("unsupported meter exporter type or protocol: %s, %s", kind, protocol)
+	}
+}
+
+// composeMeterShutdown creates a shutdown function that calls both custom and provider shutdown.
+func composeMeterShutdown(mp *sdkmetric.MeterProvider, customShutdown func(context.Context) error) func(context.Context) error {
+	if customShutdown == nil {
+		return mp.Shutdown
+	}
+
+	return func(ctx context.Context) error {
+		var firstErr error
+
+		if err := customShutdown(ctx); err != nil {
+			logger.ErrorContext(ctx, "failed to shutdown custom handler", "err", err)
+			firstErr = err
+		}
+
+		if err := mp.Shutdown(ctx); err != nil {
+			logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
+			if firstErr == nil {
+				firstErr = err
 			}
-			if err := mp.Shutdown(ctx); err != nil {
-				logger.ErrorContext(ctx, "failed to shutdown meter provider", "err", err)
-				if firstErr == nil {
-					firstErr = err
-				}
+		}
+
+		return firstErr
+	}
+}
+
+// shutdownStack accumulates shutdown functions and executes them in order.
+type shutdownStack struct {
+	funcs []struct {
+		name string
+		fn   func(context.Context) error
+	}
+}
+
+func (s *shutdownStack) push(name string, fn func(context.Context) error) {
+	s.funcs = append(s.funcs, struct {
+		name string
+		fn   func(context.Context) error
+	}{name, fn})
+}
+
+// runAll executes all shutdown functions in order, logging errors and returning the first error encountered.
+func (s *shutdownStack) runAll(ctx context.Context) error {
+	var firstErr error
+	for _, f := range s.funcs {
+		if err := f.fn(ctx); err != nil {
+			logger.ErrorContext(ctx, "failed to shutdown "+f.name, "error", err)
+			if firstErr == nil {
+				firstErr = err
 			}
-			return firstErr
 		}
 	}
-	return mp, shutdown, nil
+	return firstErr
 }
 
 func newResource(ctx context.Context, service, version string) (*resource.Resource, error) {
@@ -306,73 +362,51 @@ func newResource(ctx context.Context, service, version string) (*resource.Resour
 // https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
 //
 // This function should be called only once at the beginning of the program.
-//
-//nolint:cyclop // to be addressed in follow-up PR
 func Start(ctx context.Context, service, version string) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if started {
 		return errors.New("telemetry already started")
 	}
+
 	res, err := newResource(ctx, service, version)
 	if err != nil {
 		return fmt.Errorf("build resource: %w", err)
 	}
 
-	lp, loggerShutdown, err := newLoggerProvider(ctx, res)
+	var cleanups shutdownStack
+
+	// Initialize logger provider
+	lp, lpShutdown, err := newLoggerProvider(ctx, res)
 	if err != nil {
 		return fmt.Errorf("failed to create logger provider: %w", err)
 	}
 	logglobal.SetLoggerProvider(lp)
-
+	cleanups.push("logger provider", lpShutdown)
 	logger = NewLogger("github.com/canonical/mayfly/internal/telemetry")
 
-	tp, tracerShutdown, err := newTracerProvider(ctx, res)
+	// Initialize tracer provider
+	tp, tpShutdown, err := newTracerProvider(ctx, res)
 	if err != nil {
-		if err := loggerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown logger provider", "error", err)
-		}
-		return fmt.Errorf("failed to create trace provider: %w", err)
+		cleanups.runAll(ctx)
+		return fmt.Errorf("failed to create tracer provider: %w", err)
 	}
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
+	cleanups.push("tracer provider", tpShutdown)
 
-	mp, meterShutdown, err := newMeterProvider(ctx, res)
+	// Initialize meter provider
+	mp, mpShutdown, err := newMeterProvider(ctx, res)
 	if err != nil {
-		if err := loggerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown logger provider", "error", err)
-		}
-		if err := tracerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown tracer provider", "error", err)
-		}
-		return fmt.Errorf("failed to create metric provider: %w", err)
+		cleanups.runAll(ctx)
+		return fmt.Errorf("failed to create meter provider: %w", err)
 	}
 	otel.SetMeterProvider(mp)
+	cleanups.push("meter provider", mpShutdown)
 
-	shutdown = func(ctx context.Context) error {
-		var firstErr error
-		if err := loggerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown logger provider", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		if err := meterShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown meter provider", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		if err := tracerShutdown(ctx); err != nil {
-			logger.ErrorContext(ctx, "failed to shutdown tracer provider", "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		return firstErr
-	}
+	shutdown = cleanups.runAll
 	started = true
 	return nil
 }
