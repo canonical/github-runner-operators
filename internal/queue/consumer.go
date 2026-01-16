@@ -97,42 +97,35 @@ func (c *AmqpConsumer) ensureChannel() error {
 	return nil
 }
 
-//nolint:cyclop // to be addressed in follow-up PR
 func (c *AmqpConsumer) ensureAmqpChannel() error {
 	if c.client.amqpConnection == nil || c.client.amqpConnection.IsClosed() {
-		err := c.client.resetConnection()
-		if err != nil {
+		if err := c.client.resetConnection(); err != nil {
 			return err
 		}
 	}
 
 	if c.client.amqpChannel == nil || c.client.amqpChannel.IsClosed() {
-		err := c.client.resetChannel()
-		if err != nil {
+		if err := c.client.resetChannel(); err != nil {
 			return err
 		}
-
-		err = c.client.ensureDeadLetterQueue(c.config.DeadLetterExchange, c.config.DeadLetterQueue, c.config.RoutingKey)
-		if err != nil {
-			return err
-		}
-
-		err = c.client.ensureExchange(c.config.ExchangeName)
-		if err != nil {
-			return err
-		}
-
-		err = c.client.ensureQueueWithDeadLetter(c.config.QueueName, c.config.DeadLetterExchange)
-		if err != nil {
-			return err
-		}
-
-		err = c.client.ensureQueueBinding(c.config.QueueName, c.config.RoutingKey, c.config.ExchangeName)
-		if err != nil {
+		if err := c.ensureQueueTopology(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c *AmqpConsumer) ensureQueueTopology() error {
+	if err := c.client.ensureDeadLetterQueue(c.config.DeadLetterExchange, c.config.DeadLetterQueue, c.config.RoutingKey); err != nil {
+		return err
+	}
+	if err := c.client.ensureExchange(c.config.ExchangeName); err != nil {
+		return err
+	}
+	if err := c.client.ensureQueueWithDeadLetter(c.config.QueueName, c.config.DeadLetterExchange); err != nil {
+		return err
+	}
+	return c.client.ensureQueueBinding(c.config.QueueName, c.config.RoutingKey, c.config.ExchangeName)
 }
 
 // Close closes the AMQP consumer connection.
