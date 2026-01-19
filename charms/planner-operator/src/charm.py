@@ -5,6 +5,7 @@
 """Go Charm entrypoint."""
 
 import logging
+import pathlib
 import typing
 
 import ops
@@ -24,6 +25,14 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
+
+    def get_cos_dir(self) -> str:
+        """Get the COS directory for this charm.
+
+        Returns:
+            The COS directory.
+        """
+        return str((pathlib.Path(__file__).parent / "cos").absolute())
 
     def _create_app(self):
         """Patch _create_app to add OpenTelemetry environment variables."""
