@@ -1,12 +1,13 @@
-# Copyright 2025 Ubuntu
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Unit tests for GithubRunnerPlannerCharm.is_ready().
+"""Unit tests for GithubRunnerPlannerCharm.
 
-Note: These tests use mocking rather than pure ops-scenario state-transition testing
-because the charm extends paas_charm.go.Charm, which has complex initialization
-dependencies on the go-framework extension (peer relations, containers, config options).
-The extension metadata is only available at charm pack time, not during unit tests.
+Note: These tests use mocking rather than ops-scenario because:
+1. The go-framework extension metadata (peers, containers, config) is injected at
+   charmcraft pack time and would need to be manually defined for ops-scenario
+2. Testing only the is_ready() override requires mocking super().is_ready() either way
+3. For this focused validation logic, direct mocking is pragmatic
 """
 
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -98,7 +99,7 @@ def test_invalid_token_blocks(
 
     assert result is False
     assert isinstance(mock_unit_instance.status, BlockedStatus)
-    assert "invalid admin-token format" in str(mock_unit_instance.status.message)
+    assert "invalid admin-token format" in mock_unit_instance.status.message
     mock_super_is_ready.assert_not_called()
 
 
