@@ -183,10 +183,6 @@ func (s *Server) deleteFlavor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.store.DeleteFlavor(r.Context(), flavorPlatform, flavorName)
-	if err == database.ErrNotExist {
-		http.Error(w, "flavor does not exist", http.StatusNotFound)
-		return
-	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to delete flavor: %v", err), http.StatusInternalServerError)
 		return

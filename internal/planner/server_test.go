@@ -368,11 +368,6 @@ func TestDeleteFlavor(t *testing.T) {
 		expectedStatus: http.StatusOK,
 		flavorToAssert: "runner-small",
 	}, {
-		name:           "shouldFailWhenFlavorMissing",
-		storeErr:       database.ErrNotExist,
-		url:            "/api/v1/flavors/not-exist",
-		expectedStatus: http.StatusNotFound,
-	}, {
 		name: "shouldFailWhenNameIsAllFlavors",
 		storeFlavor: &database.Flavor{
 			Platform:        "github",
