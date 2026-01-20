@@ -504,6 +504,11 @@ func TestDatabase_AddFlavor_Exists(t *testing.T) {
 }
 
 func TestDatabase_GetFlavor(t *testing.T) {
+	/*
+	   arrange: set up database with a flavor
+	   act: retrieve the flavor by name
+	   assert: the retrieved flavor matches the one in setup
+	*/
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
@@ -525,6 +530,11 @@ func TestDatabase_GetFlavor(t *testing.T) {
 }
 
 func TestDatabase_GetFlavor_NotExists(t *testing.T) {
+	/*
+	   arrange: set up an empty database
+	   act: retrieve a non-existent flavor
+	   assert: error is raised
+	*/
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
@@ -535,6 +545,11 @@ func TestDatabase_GetFlavor_NotExists(t *testing.T) {
 }
 
 func TestDatabase_UpdateFlavor(t *testing.T) {
+	/*
+	   arrange: set up database with a flavor
+	   act: update the flavor
+	   assert: flavor in database is updated
+	*/
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()
@@ -570,6 +585,11 @@ func TestDatabase_UpdateFlavor(t *testing.T) {
 }
 
 func TestDatabase_UpdateFlavor_NotExists(t *testing.T) {
+	/*
+	   arrange: set up an empty database
+	   act: update a non-existent flavor
+	   assert: error is raised
+	*/
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
 	ctx := t.Context()

@@ -126,8 +126,16 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 }
 
 // getFlavor handles retrieving a flavor.
+// If the flavor name is allFlavorName, returns status code 400.
+// If the flavor is not found, returns status code 404.
+// If getting the flavor fails, returns status code 500.
+// If successful, returns status code 200 with the flavor JSON.
 func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
 	flavorName := r.PathValue("name")
+	if flavorName == allFlavorName {
+		http.Error(w, "Get all flavors is not supported", http.StatusBadRequest)
+		return
+	}
 	flavor, err := s.store.GetFlavor(r.Context(), flavorName)
 	if err == database.ErrNotExist {
 		http.Error(w, "flavor does not exist", http.StatusNotFound)
@@ -142,6 +150,10 @@ func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateFlavor handles updating an existing flavor.
+// If the flavor name is allFlavorName, returns status code 400.
+// If the flavor is not found, returns status code 404.
+// If updating the flavor fails, returns status code 500.
+// If successful, returns status code 200.
 func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFlavorInRequestBody(r)
 	if err != nil {
@@ -176,6 +188,9 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteFlavor handles deleting an existing flavor.
+// If the flavor name is allFlavorName, returns status code 400.
+// If deleting the flavor fails, returns status code 500.
+// If successful, returns status code 200.
 func (s *Server) deleteFlavor(w http.ResponseWriter, r *http.Request) {
 	flavorName := r.PathValue("name")
 	if flavorName == allFlavorName {

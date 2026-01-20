@@ -363,6 +363,7 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 }
 
 // GetFlavor retrieves a flavor by name.
+// If the flavor doesn't exist, it will return ErrNotExist.
 func (d *Database) GetFlavor(ctx context.Context, name string) (*Flavor, error) {
 	sql := `
 	SELECT 
@@ -384,6 +385,7 @@ func (d *Database) GetFlavor(ctx context.Context, name string) (*Flavor, error) 
 }
 
 // UpdateFlavor updates an existing flavor.
+// If the flavor doesn't exist, it will return ErrNotExist.
 func (d *Database) UpdateFlavor(ctx context.Context, flavor *Flavor) error {
 	batch := &pgx.Batch{}
 	batch.Queue(`

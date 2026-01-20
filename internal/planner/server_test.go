@@ -210,6 +210,11 @@ func TestCreateFlavor(t *testing.T) {
 }
 
 func TestGetFlavor(t *testing.T) {
+	/*
+		arrange: Setup the server.
+		act: Make get flavor requests.
+		assert: Verify the flavors returned are correct, and/or the HTTP status codes are as expected.
+	*/
 	tests := []struct {
 		name           string
 		storeFlavor    *database.Flavor
@@ -239,7 +244,7 @@ func TestGetFlavor(t *testing.T) {
 		name:           "shouldFailWhenNameIsAllFlavors",
 		storeErr:       database.ErrNotExist,
 		url:            "/api/v1/flavors/_",
-		expectedStatus: http.StatusNotFound,
+		expectedStatus: http.StatusBadRequest,
 	}}
 
 	for _, tt := range tests {
@@ -266,6 +271,11 @@ func TestGetFlavor(t *testing.T) {
 }
 
 func TestUpdateFlavor(t *testing.T) {
+	/*
+		arrange: Setup the server.
+		act: Make update flavor requests.
+		assert: Verify the flavors are updated, and/or the HTTP status codes are as expected.
+	*/
 	tests := []struct {
 		name           string
 		storeFlavor    *database.Flavor
@@ -347,6 +357,11 @@ func TestUpdateFlavor(t *testing.T) {
 }
 
 func TestDeleteFlavor(t *testing.T) {
+	/*
+		arrange: Setup the server.
+		act: Make delete flavor requests.
+		assert: Verify the flavors are deleted, and/or the HTTP status codes are as expected.
+	*/
 	tests := []struct {
 		name           string
 		storeFlavor    *database.Flavor
