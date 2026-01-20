@@ -372,14 +372,14 @@ func (d *Database) GetFlavor(ctx context.Context, name string) (*Flavor, error) 
     WHERE name = @name`
 	row, err := d.conn.Query(ctx, sql, pgx.NamedArgs{"name": name})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get flavor: %w", err)
+		return nil, fmt.Errorf("cannot get flavor: %w", err)
 	}
 	flavor, err := pgx.CollectExactlyOneRow[Flavor](row, pgx.RowToStructByName)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotExist
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get flavor: %w", err)
+		return nil, fmt.Errorf("cannot get flavor: %w", err)
 	}
 	return &flavor, nil
 }
@@ -411,14 +411,14 @@ func (d *Database) UpdateFlavor(ctx context.Context, flavor *Flavor) error {
 	defer func() {
 		err := result.Close()
 		if err != nil {
-			slog.ErrorContext(ctx, "failed to close batch execution for updating flavors", "error", err)
+			slog.ErrorContext(ctx, "cannot close batch execution for updating flavors", "error", err)
 		}
 	}()
 
 	for i := range batch.Len() {
 		tag, err := result.Exec()
 		if err != nil {
-			return fmt.Errorf("failed to update flavor: %w", err)
+			return fmt.Errorf("cannot to update flavor: %w", err)
 		}
 		if i == 0 && tag.RowsAffected() == 0 {
 			return ErrNotExist

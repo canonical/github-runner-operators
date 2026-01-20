@@ -540,7 +540,7 @@ func TestDatabase_GetFlavor_NotExists(t *testing.T) {
 	ctx := t.Context()
 
 	flavor, err := db.GetFlavor(ctx, "not-exist-flavor")
-	assert.ErrorIs(t, ErrNotExist, err)
+	assert.ErrorIs(t, err, ErrNotExist)
 	assert.Nil(t, flavor)
 }
 
@@ -602,7 +602,7 @@ func TestDatabase_UpdateFlavor_NotExists(t *testing.T) {
 		IsDisabled:      false,
 		MinimumPressure: 0,
 	}
-	assert.ErrorIs(t, ErrNotExist, db.UpdateFlavor(ctx, &notExistingFlavor))
+	assert.ErrorIs(t, db.UpdateFlavor(ctx, &notExistingFlavor), ErrNotExist)
 }
 
 func TestDatabase_DisableFlavor(t *testing.T) {
