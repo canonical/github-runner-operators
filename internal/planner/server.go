@@ -28,6 +28,8 @@ const (
 	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
 	createAuthTokenPattern   = "/api/v1/auth/token/{name}"
 	deleteAuthTokenPattern   = "/api/v1/auth/token/{name}"
+	jobPattern               = "/api/v1/jobs/{platform}/{id}"
+	jobsPattern              = "/api/v1/jobs/{platform}"
 	healthPattern            = "/health"
 	allFlavorName            = "_"
 	flavorPlatform           = "github" // Currently only github is supported
@@ -39,6 +41,9 @@ type FlavorStore interface {
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
 	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
+	ListJobs(ctx context.Context, platform string, option ...database.ListJobOptions) ([]database.Job, error)
+	UpdateJobStarted(ctx context.Context, platform, id string, startedAt time.Time, raw map[string]interface{}) error
+	UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]interface{}) error
 }
 
 // AuthStore is an interface that provides authorization token management.
@@ -68,6 +73,9 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
 	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
 	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
+	s.mux.Handle("GET "+jobsPattern, otelhttp.WithRouteTag(jobsPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
+	s.mux.Handle("GET "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
+	s.mux.Handle("PATCH "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.updateJob))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
 
 	return s
@@ -310,6 +318,86 @@ func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// getJob handles retrieving a job by platform and optional ID.
+// If ID is not provided, all jobs for the platform are returned.
+func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	id := r.PathValue("id")
+
+	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{WithId: id})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(jobs) == 0 {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, jobs)
+}
+
+type updateJobRequest struct {
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// updateJob handles updating a job's started_at and/or completed_at fields.
+// It validates that these fields are only set if they were previously NULL.
+func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	id := r.PathValue("id")
+
+	job, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{WithId: id})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(job) == 0 {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	req := updateJobRequest{}
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.applyJobUpdates(r.Context(), req, job[0], platform, id); err != nil {
+		http.Error(w, fmt.Sprintf("cannot update job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// applyJobUpdates applies the updates from the request to the job.
+func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job database.Job, platform, id string) error {
+	if req.StartedAt != nil {
+		if job.StartedAt != nil {
+			return fmt.Errorf("cannot update started_at: field is not NULL")
+		}
+		if err := s.store.UpdateJobStarted(ctx, platform, id, *req.StartedAt, nil); err != nil {
+			return fmt.Errorf("cannot update job started_at: %w", err)
+		}
+	}
+
+	// Validate and update completed_at if provided
+	if req.CompletedAt != nil {
+		if job.CompletedAt != nil {
+			return fmt.Errorf("cannot update completed_at: field is not NULL")
+		}
+		if err := s.store.UpdateJobCompleted(ctx, platform, id, *req.CompletedAt, nil); err != nil {
+			return fmt.Errorf("cannot update job completed_at: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // respondWithJSON sends a JSON response with the given status code and payload.
