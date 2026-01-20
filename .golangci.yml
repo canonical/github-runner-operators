@@ -1,14 +1,30 @@
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
     - cyclop
-
-linters-settings:
-  cyclop:
-    max-complexity: 10
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - cyclop
+  settings:
+    cyclop:
+      max-complexity: 10
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - cyclop
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
