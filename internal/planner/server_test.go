@@ -307,7 +307,7 @@ func TestUpdateFlavor(t *testing.T) {
 		},
 		url:            "/api/v1/flavors/_",
 		body:           `{"platform":"github","name":"not-exist","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
-		expectedStatus: http.StatusNotFound,
+		expectedStatus: http.StatusBadRequest,
 	}, {
 		name: "shouldFailOnInvalidJSON",
 		storeFlavor: &database.Flavor{
@@ -383,7 +383,7 @@ func TestDeleteFlavor(t *testing.T) {
 			MinimumPressure: 5,
 		},
 		url:            "/api/v1/flavors/_",
-		expectedStatus: http.StatusNotFound,
+		expectedStatus: http.StatusBadRequest,
 	}}
 
 	for _, tt := range tests {

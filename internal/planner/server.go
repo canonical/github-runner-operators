@@ -151,7 +151,7 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 
 	flavorName := r.PathValue("name")
 	if flavorName == allFlavorName {
-		http.Error(w, "flavor does not exist", http.StatusNotFound)
+		http.Error(w, "Update all flavors is not supported", http.StatusBadRequest)
 		return
 	}
 	flavor := &database.Flavor{
@@ -164,8 +164,12 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = s.store.UpdateFlavor(r.Context(), flavor)
-	if err != nil {
+	if err == database.ErrNotExist {
 		http.Error(w, "flavor does not exist", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update flavor: %v", err), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -175,12 +179,16 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteFlavor(w http.ResponseWriter, r *http.Request) {
 	flavorName := r.PathValue("name")
 	if flavorName == allFlavorName {
-		http.Error(w, "flavor does not exist", http.StatusNotFound)
+		http.Error(w, "Delete all flavors is not supported", http.StatusBadRequest)
 		return
 	}
 	err := s.store.DeleteFlavor(r.Context(), flavorPlatform, flavorName)
-	if err != nil {
+	if err == database.ErrNotExist {
 		http.Error(w, "flavor does not exist", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete flavor: %v", err), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
