@@ -387,7 +387,6 @@ func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job 
 		}
 	}
 
-	// Validate and update completed_at if provided
 	if req.CompletedAt != nil {
 		if job.CompletedAt != nil {
 			return fmt.Errorf("cannot update completed_at: field is not NULL")
