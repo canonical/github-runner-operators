@@ -824,12 +824,10 @@ func TestEndpoints_Unauthorized(t *testing.T) {
 func TestGetJob(t *testing.T) {
 	/*
 		arrange: setup fake store with jobs, server with admin token
-		act: send requests to get specific job and list jobs for platform
-		assert: verify responses match expected status codes and job counts
+		act: send requests to get specific job
+		assert: verify responses match expected status codes and return single job object
 	*/
 	createdAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
-	startedAt := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
-	completedAt := time.Date(2026, 1, 1, 10, 10, 0, 0, time.UTC)
 
 	tests := []struct {
 		name           string
@@ -838,7 +836,6 @@ func TestGetJob(t *testing.T) {
 		method         string
 		url            string
 		expectedStatus int
-		expectedCount  int
 	}{{
 		name: "shouldSucceedGettingSpecificJob",
 		jobs: map[string]*database.Job{
@@ -855,31 +852,6 @@ func TestGetJob(t *testing.T) {
 		method:         http.MethodGet,
 		url:            "/api/v1/jobs/github/job-123",
 		expectedStatus: http.StatusOK,
-		expectedCount:  1,
-	}, {
-		name: "shouldSucceedListingAllJobsForPlatform",
-		jobs: map[string]*database.Job{
-			"github:job-1": {
-				Platform:    "github",
-				ID:          "job-1",
-				Labels:      []string{"x64"},
-				CreatedAt:   createdAt,
-				StartedAt:   &startedAt,
-				CompletedAt: nil,
-			},
-			"github:job-2": {
-				Platform:    "github",
-				ID:          "job-2",
-				Labels:      []string{"arm64"},
-				CreatedAt:   createdAt,
-				StartedAt:   nil,
-				CompletedAt: &completedAt,
-			},
-		},
-		method:         http.MethodGet,
-		url:            "/api/v1/jobs/github",
-		expectedStatus: http.StatusOK,
-		expectedCount:  2,
 	}, {
 		name: "shouldFailWhenJobNotFound",
 		jobs: map[string]*database.Job{
@@ -930,12 +902,113 @@ func TestGetJob(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
-			if tt.expectedCount > 0 {
+			if tt.expectedStatus == http.StatusOK {
+				var job database.Job
+				err := json.NewDecoder(w.Body).Decode(&job)
+				assert.NoError(t, err)
+				key := job.Platform + ":" + job.ID
+				expectedJob, exists := tt.jobs[key]
+				assert.True(t, exists, "Unexpected job returned: %s", key)
+				if exists {
+					assert.Equal(t, expectedJob.Platform, job.Platform)
+					assert.Equal(t, expectedJob.ID, job.ID)
+					assert.Equal(t, expectedJob.Labels, job.Labels)
+					assert.Equal(t, expectedJob.CreatedAt, job.CreatedAt)
+					assert.Equal(t, expectedJob.StartedAt, job.StartedAt)
+					assert.Equal(t, expectedJob.CompletedAt, job.CompletedAt)
+					assert.Equal(t, expectedJob.Raw, job.Raw)
+				}
+			}
+		})
+	}
+}
+
+func TestListJobs(t *testing.T) {
+	/*
+		arrange: setup fake store with jobs, server with admin token
+		act: send requests to list jobs for platform
+		assert: verify responses match expected status codes and job counts
+	*/
+	createdAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	startedAt := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	completedAt := time.Date(2026, 1, 1, 10, 10, 0, 0, time.UTC)
+
+	tests := []struct {
+		name           string
+		jobs           map[string]*database.Job
+		listJobsErr    error
+		method         string
+		url            string
+		expectedStatus int
+		expectedCount  int
+	}{{
+		name: "shouldSucceedListingAllJobsForPlatform",
+		jobs: map[string]*database.Job{
+			"github:job-1": {
+				Platform:    "github",
+				ID:          "job-1",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   &startedAt,
+				CompletedAt: nil,
+			},
+			"github:job-2": {
+				Platform:    "github",
+				ID:          "job-2",
+				Labels:      []string{"arm64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: &completedAt,
+			},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusOK,
+		expectedCount:  2,
+	}, {
+		name:           "shouldSucceedWithEmptyListWhenNoJobs",
+		jobs:           map[string]*database.Job{},
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusOK,
+		expectedCount:  0,
+	}, {
+		name:           "shouldFailOnDatabaseError",
+		listJobsErr:    errors.New("database error"),
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailForNonGetMethod",
+		method:         http.MethodPost,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusMethodNotAllowed,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				jobs:        tt.jobs,
+				listJobsErr: tt.listJobsErr,
+			}
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+			req := newRequest(tt.method, tt.url, "", adminToken)
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if tt.expectedStatus == http.StatusOK {
 				var jobs []database.Job
 				err := json.NewDecoder(w.Body).Decode(&jobs)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedCount, len(jobs))
-				assertJobsMatch(t, tt.jobs, jobs)
+				if tt.expectedCount > 0 {
+					assertJobsMatch(t, tt.jobs, jobs)
+				}
 			}
 		})
 	}
@@ -1045,7 +1118,7 @@ func TestUpdateJob(t *testing.T) {
 		method:         http.MethodPatch,
 		url:            "/api/v1/jobs/github/job-4",
 		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
-		expectedStatus: http.StatusInternalServerError,
+		expectedStatus: http.StatusBadRequest,
 	}, {
 		name: "shouldFailWhenCompletedAtNotNull",
 		jobs: map[string]*database.Job{
@@ -1061,7 +1134,7 @@ func TestUpdateJob(t *testing.T) {
 		method:         http.MethodPatch,
 		url:            "/api/v1/jobs/github/job-5",
 		body:           fmt.Sprintf(`{"completed_at":"%s"}`, newCompletedAt.Format(time.RFC3339Nano)),
-		expectedStatus: http.StatusInternalServerError,
+		expectedStatus: http.StatusBadRequest,
 	}, {
 		name: "shouldSucceedUpdatingStartedAtEvenWhenCompletedAtNotNull",
 		jobs: map[string]*database.Job{

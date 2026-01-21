@@ -35,6 +35,11 @@ const (
 	flavorPlatform           = "github" // Currently only github is supported
 )
 
+var (
+	// ErrFieldAlreadySet is returned when attempting to update a field that is already set.
+	ErrFieldAlreadySet = errors.New("field is already set")
+)
+
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
 type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
@@ -79,7 +84,7 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
 	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
 	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
-	s.mux.Handle("GET "+jobsPattern, otelhttp.WithRouteTag(jobsPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
+	s.mux.Handle("GET "+jobsPattern, otelhttp.WithRouteTag(jobsPattern, s.tokenProtected(http.HandlerFunc(s.listJobs))))
 	s.mux.Handle("GET "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
 	s.mux.Handle("PATCH "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.updateJob))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
@@ -403,8 +408,20 @@ func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getJob handles retrieving a job by platform and optional ID.
-// If ID is not provided, all jobs for the platform are returned.
+// listJobs handles retrieving jobs by platform.
+func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+
+	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, jobs)
+}
+
+// getJob handles retrieving a single job by platform and ID.
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 	platform := r.PathValue("platform")
 	id := r.PathValue("id")
@@ -418,7 +435,8 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
-	respondWithJSON(w, http.StatusOK, jobs)
+
+	respondWithJSON(w, http.StatusOK, jobs[0])
 }
 
 type updateJobRequest struct {
@@ -452,6 +470,10 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.applyJobUpdates(r.Context(), req, job[0], platform, id); err != nil {
+		if errors.Is(err, ErrFieldAlreadySet) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, fmt.Sprintf("cannot update job: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -460,10 +482,11 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyJobUpdates applies the updates from the request to the job.
+// This is a non-atomic operation. If two requests for the same job come in parallel, there could be a race condition.
 func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job database.Job, platform, id string) error {
 	if req.StartedAt != nil {
 		if job.StartedAt != nil {
-			return fmt.Errorf("cannot update started_at: field is not NULL")
+			return fmt.Errorf("%w: cannot update started_at", ErrFieldAlreadySet)
 		}
 		if err := s.store.UpdateJobStarted(ctx, platform, id, *req.StartedAt, nil); err != nil {
 			return fmt.Errorf("cannot update job started_at: %w", err)
@@ -472,7 +495,7 @@ func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job 
 
 	if req.CompletedAt != nil {
 		if job.CompletedAt != nil {
-			return fmt.Errorf("cannot update completed_at: field is not NULL")
+			return fmt.Errorf("%w: cannot update completed_at", ErrFieldAlreadySet)
 		}
 		if err := s.store.UpdateJobCompleted(ctx, platform, id, *req.CompletedAt, nil); err != nil {
 			return fmt.Errorf("cannot update job completed_at: %w", err)
