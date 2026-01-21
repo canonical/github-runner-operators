@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	createFlavorPattern      = "/api/v1/flavors/{name}"
+	flavorPattern            = "/api/v1/flavors/{name}"
 	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
 	createAuthTokenPattern   = "/api/v1/auth/token/{name}"
 	deleteAuthTokenPattern   = "/api/v1/auth/token/{name}"
@@ -37,6 +37,9 @@ const (
 type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
+	UpdateFlavor(ctx context.Context, flavor *database.Flavor) error
+	GetFlavor(ctx context.Context, name string) (*database.Flavor, error)
+	DeleteFlavor(ctx context.Context, platform string, name string) error
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
 	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
 }
@@ -64,7 +67,10 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 
 	// Register routes
 	// General endpoints require either a valid general token or the admin token
-	s.mux.Handle("POST "+createFlavorPattern, otelhttp.WithRouteTag(createFlavorPattern, s.tokenProtected(http.HandlerFunc(s.createFlavor))))
+	s.mux.Handle("POST "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.createFlavor))))
+	s.mux.Handle("GET "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.getFlavor))))
+	s.mux.Handle("PATCH "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.updateFlavor))))
+	s.mux.Handle("DELETE "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.deleteFlavor))))
 	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
 	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
 	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
@@ -89,11 +95,8 @@ type flavorRequest struct {
 
 // createFlavor handles the creation of a new flavor.
 func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-
-	req := flavorRequest{}
-	if err := decoder.Decode(&req); err != nil {
+	req, err := decodeFlavorInRequestBody(r)
+	if err != nil {
 		http.Error(w, fmt.Sprintf("invalid payload: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -108,7 +111,7 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 		MinimumPressure: req.MinimumPressure,
 	}
 
-	err := s.store.AddFlavor(r.Context(), flavor)
+	err = s.store.AddFlavor(r.Context(), flavor)
 	if err == nil {
 		w.WriteHeader(http.StatusCreated)
 		return
@@ -120,6 +123,86 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
+}
+
+// getFlavor handles retrieving a flavor.
+// If the flavor name is allFlavorName, returns status code 400.
+// If the flavor is not found, returns status code 404.
+// If getting the flavor fails, returns status code 500.
+// If successful, returns status code 200 with the flavor JSON.
+func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
+	flavorName := r.PathValue("name")
+	if flavorName == allFlavorName {
+		http.Error(w, "get all flavors is not supported", http.StatusBadRequest)
+		return
+	}
+	flavor, err := s.store.GetFlavor(r.Context(), flavorName)
+	if errors.Is(err, database.ErrNotExist) {
+		http.Error(w, "cannot get flavor", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot get flavor %v: %v", flavorName, err), http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, flavor)
+}
+
+// updateFlavor handles updating an existing flavor.
+// If the flavor name is allFlavorName, returns status code 400.
+// If the flavor is not found, returns status code 404.
+// If updating the flavor fails, returns status code 500.
+// If successful, returns status code 200.
+func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
+	req, err := decodeFlavorInRequestBody(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	flavorName := r.PathValue("name")
+	if flavorName == allFlavorName {
+		http.Error(w, "update all flavors is not supported", http.StatusBadRequest)
+		return
+	}
+	flavor := &database.Flavor{
+		Name:            flavorName,
+		Platform:        req.Platform,
+		Labels:          req.Labels,
+		Priority:        req.Priority,
+		IsDisabled:      req.IsDisabled,
+		MinimumPressure: req.MinimumPressure,
+	}
+
+	err = s.store.UpdateFlavor(r.Context(), flavor)
+	if errors.Is(err, database.ErrNotExist) {
+		http.Error(w, "cannot find flavor to update", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot update flavor: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// deleteFlavor handles deleting an existing flavor.
+// If the flavor name is allFlavorName, returns status code 400.
+// If deleting the flavor fails, returns status code 500.
+// If successful, returns status code 200.
+func (s *Server) deleteFlavor(w http.ResponseWriter, r *http.Request) {
+	flavorName := r.PathValue("name")
+	if flavorName == allFlavorName {
+		http.Error(w, "delete all flavors is not supported", http.StatusBadRequest)
+		return
+	}
+	err := s.store.DeleteFlavor(r.Context(), flavorPlatform, flavorName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot delete flavor: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // getFlavorPressure handles retrieving the pressure for a specific or all flavors.
@@ -327,4 +410,15 @@ func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any)
 	}
 	flusher.Flush()
 	return nil
+}
+
+func decodeFlavorInRequestBody(r *http.Request) (*flavorRequest, error) {
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	req := &flavorRequest{}
+	if err := decoder.Decode(req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+	return req, nil
 }
