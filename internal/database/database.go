@@ -362,6 +362,72 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 	return nil
 }
 
+// GetFlavor retrieves a flavor by name.
+// If the flavor doesn't exist, it will return ErrNotExist.
+func (d *Database) GetFlavor(ctx context.Context, name string) (*Flavor, error) {
+	sql := `
+	SELECT 
+      platform, name, labels, priority, is_disabled, minimum_pressure
+    FROM flavor
+    WHERE name = @name`
+	row, err := d.conn.Query(ctx, sql, pgx.NamedArgs{"name": name})
+	if err != nil {
+		return nil, fmt.Errorf("cannot get flavor: %w", err)
+	}
+	flavor, err := pgx.CollectExactlyOneRow[Flavor](row, pgx.RowToStructByName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotExist
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot get flavor: %w", err)
+	}
+	return &flavor, nil
+}
+
+// UpdateFlavor updates an existing flavor.
+// If the flavor doesn't exist, it will return ErrNotExist.
+func (d *Database) UpdateFlavor(ctx context.Context, flavor *Flavor) error {
+	batch := &pgx.Batch{}
+	batch.Queue(`
+		UPDATE flavor
+		SET 
+			platform = @platform,
+			labels = @labels,
+			priority = @priority,
+			is_disabled = @is_disabled,
+			minimum_pressure = @minimum_pressure
+		WHERE name = @name
+	`, pgx.NamedArgs{
+		"platform":         flavor.Platform,
+		"name":             flavor.Name,
+		"labels":           flavor.Labels,
+		"priority":         flavor.Priority,
+		"is_disabled":      flavor.IsDisabled,
+		"minimum_pressure": flavor.MinimumPressure,
+	})
+	batch.Queue(updateAssignedFlavorSql)
+	batch.Queue(pressureChangeSql)
+	result := d.conn.SendBatch(ctx, batch)
+	defer func() {
+		err := result.Close()
+		if err != nil {
+			slog.ErrorContext(ctx, "cannot close batch execution for updating flavors", "error", err)
+		}
+	}()
+
+	for i := range batch.Len() {
+		tag, err := result.Exec()
+		if err != nil {
+			return fmt.Errorf("cannot update flavor: %w", err)
+		}
+		if i == 0 && tag.RowsAffected() == 0 {
+			return ErrNotExist
+		}
+	}
+
+	return nil
+}
+
 func (d *Database) setFlavorIsDisabled(ctx context.Context, platform, name string, isDisabled bool) error {
 	batch := &pgx.Batch{}
 	if isDisabled {

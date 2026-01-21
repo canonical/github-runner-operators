@@ -503,6 +503,108 @@ func TestDatabase_AddFlavor_Exists(t *testing.T) {
 	assert.ErrorIs(t, ErrExist, db.AddFlavor(ctx, &flavor))
 }
 
+func TestDatabase_GetFlavor(t *testing.T) {
+	/*
+	   arrange: set up database with a flavor
+	   act: retrieve the flavor by name
+	   assert: the retrieved flavor matches the one in setup
+	*/
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	flavor := Flavor{
+		Platform:        "github",
+		Name:            "amd64-large",
+		Labels:          []string{"self-hosted", "amd64", "large"},
+		Priority:        0,
+		IsDisabled:      false,
+		MinimumPressure: 0,
+	}
+	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+
+	res, err := db.GetFlavor(ctx, flavor.Name)
+	assert.NoError(t, err)
+
+	assert.Equal(t, flavor, *res)
+}
+
+func TestDatabase_GetFlavor_NotExists(t *testing.T) {
+	/*
+	   arrange: set up an empty database
+	   act: retrieve a non-existent flavor
+	   assert: error is raised
+	*/
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	flavor, err := db.GetFlavor(ctx, "not-exist-flavor")
+	assert.ErrorIs(t, err, ErrNotExist)
+	assert.Nil(t, flavor)
+}
+
+func TestDatabase_UpdateFlavor(t *testing.T) {
+	/*
+	   arrange: set up database with a flavor
+	   act: update the flavor
+	   assert: flavor in database is updated
+	*/
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	flavor := Flavor{
+		Platform:        "github",
+		Name:            "amd64-large",
+		Labels:          []string{"self-hosted", "amd64", "large"},
+		Priority:        0,
+		IsDisabled:      false,
+		MinimumPressure: 0,
+	}
+	updatedFlavor := Flavor{
+		Platform:        "github",
+		Name:            "amd64-large",
+		Labels:          []string{"self-hosted", "amd64", "large"},
+		Priority:        10,
+		IsDisabled:      true,
+		MinimumPressure: 5,
+	}
+
+	assert.NoError(t, db.AddFlavor(ctx, &flavor))
+
+	pressureUpdates := subscribeToPressureUpdates(t, ctx, db)
+	assert.NoError(t, db.UpdateFlavor(ctx, &updatedFlavor))
+	assertSingleNotificationReceived(t, pressureUpdates)
+
+	flavors, err := db.ListFlavors(ctx, flavor.Platform)
+	assert.NoError(t, err)
+
+	assert.Len(t, flavors, 1)
+	assert.Equal(t, updatedFlavor, flavors[0])
+}
+
+func TestDatabase_UpdateFlavor_NotExists(t *testing.T) {
+	/*
+	   arrange: set up an empty database
+	   act: update a non-existent flavor
+	   assert: error is raised
+	*/
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	notExistingFlavor := Flavor{
+		Platform:        "github",
+		Name:            "amd64-large",
+		Labels:          []string{"self-hosted", "amd64", "large"},
+		Priority:        0,
+		IsDisabled:      false,
+		MinimumPressure: 0,
+	}
+	assert.ErrorIs(t, db.UpdateFlavor(ctx, &notExistingFlavor), ErrNotExist)
+}
+
 func TestDatabase_DisableFlavor(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
