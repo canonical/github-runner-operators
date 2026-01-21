@@ -36,8 +36,8 @@ const (
 )
 
 var (
-	// ErrFieldAlreadySet is returned when attempting to update a field that is already set.
-	ErrFieldAlreadySet = errors.New("field is already set")
+	// errFieldAlreadySet is returned when attempting to update a field that is already set.
+	errFieldAlreadySet = errors.New("field is already set")
 )
 
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
@@ -414,7 +414,7 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 
 	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("cannot list jobs: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -446,6 +446,8 @@ type updateJobRequest struct {
 
 // updateJob handles updating a job's started_at and/or completed_at fields.
 // It validates that these fields are only set if they were previously NULL.
+// Note: This operation is not atomic. Concurrent updates to the same job may race.                                                                                                                                                                                             
+// This is acceptable as the endpoint is intended for occasional debug use.
 func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 	platform := r.PathValue("platform")
 	id := r.PathValue("id")
@@ -482,7 +484,6 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyJobUpdates applies the updates from the request to the job.
-// This is a non-atomic operation. If two requests for the same job come in parallel, there could be a race condition.
 func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job database.Job, platform, id string) error {
 	if req.StartedAt != nil {
 		if job.StartedAt != nil {
