@@ -444,8 +444,7 @@ type updateJobRequest struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
-// updateJob handles updating a job's started_at and/or completed_at fields.
-// It validates that these fields are only set if they were previously NULL.
+// updateJob handles updating a job's started_at and/or completed_at fields that are not yet set.
 // Note: This operation is not atomic. Concurrent updates to the same job may race.
 // This is acceptable as the endpoint is intended for occasional debug use.
 func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
