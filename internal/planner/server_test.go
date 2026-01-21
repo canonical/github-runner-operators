@@ -455,6 +455,19 @@ func TestDeleteFlavor(t *testing.T) {
 		expectedStatus: http.StatusOK,
 		flavorToAssert: "runner-small",
 	}, {
+		name: "shouldFailWhenDatabaseError",
+		storeFlavor: &database.Flavor{
+			Platform:        "github",
+			Name:            "runner-small",
+			Labels:          []string{"x64"},
+			Priority:        10,
+			IsDisabled:      false,
+			MinimumPressure: 5,
+		},
+		storeErr:       errors.New("database error"),
+		url:            "/api/v1/flavors/runner-small",
+		expectedStatus: http.StatusInternalServerError,
+	}, {
 		name: "shouldFailWhenNameIsAllFlavors",
 		storeFlavor: &database.Flavor{
 			Platform:        "github",
@@ -721,59 +734,198 @@ func TestHealth(t *testing.T) {
 }
 
 func TestAuthTokenEndpoints(t *testing.T) {
-	admin := "planner_v0_thisIsAValidAdminToken___________1234"
-	t.Run("create token success", func(t *testing.T) {
-		token := sha256.Sum256([]byte(admin))
-		store := &fakeStore{nameToToken: map[string][32]byte{"github-runner": token}}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
+	admin := "planner_v0_valid_admin_token________________________________"
 
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
+	tests := []struct {
+		name             string
+		method           string
+		url              string
+		authHeader       string
+		createTokErr     error
+		deleteTokErr     error
+		nameToToken      map[string][32]byte
+		expectedStatus   int
+		validateResponse func(t *testing.T, w *httptest.ResponseRecorder)
+	}{{
+		name:           "shouldSucceedCreatingToken",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/github-runner",
+		authHeader:     "Bearer " + admin,
+		nameToToken:    map[string][32]byte{"github-runner": sha256.Sum256([]byte(admin))},
+		expectedStatus: http.StatusCreated,
+	}, {
+		name:           "shouldFailCreatingTokenWhenConflict",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/existing",
+		authHeader:     "Bearer " + admin,
+		createTokErr:   database.ErrExist,
+		expectedStatus: http.StatusConflict,
+	}, {
+		name:           "shouldFailCreatingTokenWhenUnauthorized",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailCreatingTokenWithInvalidAuthHeader",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailCreatingTokenWithoutBearerPrefix",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     admin,
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailCreatingTokenWithEmptyAuthHeader",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailCreatingTokenOnDatabaseError",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer " + admin,
+		createTokErr:   errors.New("database error"),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailCreatingTokenWithEmptyName",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name:           "shouldSucceedDeletingToken",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name:           "shouldSucceedDeletingTokenWhenNotFound",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/nonexistent",
+		authHeader:     "Bearer " + admin,
+		deleteTokErr:   database.ErrNotExist,
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name:           "shouldFailDeletingTokenWhenUnauthorized",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailDeletingTokenWithInvalidAuthHeader",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailDeletingTokenOnDatabaseError",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer " + admin,
+		deleteTokErr:   errors.New("database error"),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailDeletingTokenWithEmptyName",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusNotFound,
+	}}
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		var resp map[string]string
-		json.NewDecoder(w.Body).Decode(&resp)
-		assert.Equal(t, "github-runner", resp["name"])
-		expected := base64.RawURLEncoding.EncodeToString(token[:])
-		assert.Equal(t, expected, resp["token"])
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				createTokErr: tt.createTokErr,
+				deleteTokErr: tt.deleteTokErr,
+				nameToToken:  tt.nameToToken,
+			}
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
-	t.Run("create token conflict", func(t *testing.T) {
-		store := &fakeStore{createTokErr: database.ErrExist}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/existing", "", admin)
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusConflict, w.Code)
-	})
+			req := httptest.NewRequest(tt.method, tt.url, nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			w := httptest.NewRecorder()
 
-	t.Run("create token unauthorized", func(t *testing.T) {
-		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "invalid-token")
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-	})
+			server.ServeHTTP(w, req)
 
-	t.Run("delete token success", func(t *testing.T) {
-		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", admin)
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code)
-	})
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.expectedStatus == http.StatusCreated {
+				var resp map[string]string
+				require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+				assert.Equal(t, "github-runner", resp["name"])
+				assert.NotEmpty(t, resp["token"])
+			}
+		})
+	}
+}
 
-	t.Run("delete token unauthorized", func(t *testing.T) {
-		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "invalid-token")
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-	})
+func TestTokenProtected(t *testing.T) {
+	admin := "planner_v0_valid_admin_token________________________________"
+	validGeneralToken := sha256.Sum256([]byte("valid-general-token"))
+	validGeneralTokenEncoded := base64.RawURLEncoding.EncodeToString(validGeneralToken[:])
+
+	tests := []struct {
+		name           string
+		authHeader     string
+		nameToToken    map[string][32]byte
+		expectedStatus int
+	}{{
+		name:           "shouldSucceedWithValidAdminToken",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusOK,
+	}, {
+		name:           "shouldSucceedWithValidGeneralToken",
+		authHeader:     "Bearer " + validGeneralTokenEncoded,
+		nameToToken:    map[string][32]byte{"test": validGeneralToken},
+		expectedStatus: http.StatusOK,
+	}, {
+		name:           "shouldFailWithInvalidToken",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithInvalidBase64Token",
+		authHeader:     "Bearer !!!invalid-base64!!!",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithWrongLengthToken",
+		authHeader:     "Bearer " + base64.RawURLEncoding.EncodeToString([]byte("short")),
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithoutBearerPrefix",
+		authHeader:     admin,
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailWithEmptyAuthHeader",
+		authHeader:     "",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailWithInvalidAuthFormat",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{nameToToken: tt.nameToToken}
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/flavors/test", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
 }
 
 func TestEndpoints_Unauthorized(t *testing.T) {

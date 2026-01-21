@@ -374,10 +374,6 @@ type tokenResponse struct {
 // createAuthToken handles creation of a general authentication token (admin-protected).
 func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if name == "" {
-		http.Error(w, "missing token name", http.StatusBadRequest)
-		return
-	}
 	token, err := s.auth.CreateAuthToken(r.Context(), name)
 	if err == nil {
 		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: base64.RawURLEncoding.EncodeToString(token[:])})
@@ -393,10 +389,6 @@ func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 // deleteAuthToken handles deletion of a general authentication token (admin-protected).
 func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if name == "" {
-		http.Error(w, "missing token name", http.StatusBadRequest)
-		return
-	}
 	if err := s.auth.DeleteAuthToken(r.Context(), name); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			w.WriteHeader(http.StatusNoContent)
