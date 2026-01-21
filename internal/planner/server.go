@@ -445,8 +445,7 @@ type updateJobRequest struct {
 }
 
 // updateJob handles updating a job's started_at and/or completed_at fields that are not yet set.
-// This operation is not atomic. Concurrent updates to the same job may race.
-// This is acceptable as the endpoint is intended for occasional debug use.
+// Non-atomic operation: concurrent updates may race, but is acceptable for debug use.
 func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 	platform := r.PathValue("platform")
 	id := r.PathValue("id")
