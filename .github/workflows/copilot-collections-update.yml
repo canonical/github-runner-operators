@@ -1,0 +1,12 @@
+name: Auto-Update Copilot Instructions
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Weekly on Monday at 9am
+  workflow_dispatch:
+
+jobs:
+  check-update:
+    uses: canonical/copilot-collections/.github/workflows/auto_update_collections.yaml@main
+    with:
+      config_file: ".copilot-collections.yaml"
+    secrets: inherit
