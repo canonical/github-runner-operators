@@ -418,7 +418,7 @@ func (d *Database) UpdateFlavor(ctx context.Context, flavor *Flavor) error {
 	for i := range batch.Len() {
 		tag, err := result.Exec()
 		if err != nil {
-			return fmt.Errorf("cannot to update flavor: %w", err)
+			return fmt.Errorf("cannot update flavor: %w", err)
 		}
 		if i == 0 && tag.RowsAffected() == 0 {
 			return ErrNotExist
