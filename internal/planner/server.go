@@ -374,6 +374,7 @@ type tokenResponse struct {
 // createAuthToken handles creation of a general authentication token (admin-protected).
 func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+
 	token, err := s.auth.CreateAuthToken(r.Context(), name)
 	if err == nil {
 		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: base64.RawURLEncoding.EncodeToString(token[:])})
