@@ -37,6 +37,8 @@ jobs:
         env:
           POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
         run: |
+          # Clear test cache to ensure coverage is calculated fresh
+          go clean -testcache
           # We exclude packages from coverage analysis as they are highly uncovered at the moment
           EXCLUDE_PKGS="internal/telemetry"
           COVER_PKG=$(go list ./internal/... | grep -Ev "$EXCLUDE_PKGS" | tr '\n' ',')
