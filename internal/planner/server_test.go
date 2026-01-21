@@ -226,6 +226,14 @@ func TestCreateFlavor(t *testing.T) {
 		expectedFlavorName: "existing-flavor",
 		expectedPlatform:   "github",
 	}, {
+		name:               "shouldFailWhenDatabaseError",
+		storeErr:           errors.New("database error"),
+		url:                "/api/v1/flavors/runner-small",
+		body:               `{"platform":"github"}`,
+		expectedStatus:     http.StatusInternalServerError,
+		expectedFlavorName: "runner-small",
+		expectedPlatform:   "github",
+	}, {
 		name:           "shouldFailOnInvalidJSON",
 		storeErr:       nil,
 		url:            "/api/v1/flavors/test",
@@ -293,6 +301,11 @@ func TestGetFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/non-existent-flavor",
 		expectedStatus: http.StatusNotFound,
 	}, {
+		name:           "shouldFailWhenDatabaseError",
+		storeErr:       errors.New("database error"),
+		url:            "/api/v1/flavors/runner-small",
+		expectedStatus: http.StatusInternalServerError,
+	}, {
 		name:           "shouldFailWhenNameIsAllFlavors",
 		storeErr:       database.ErrNotExist,
 		url:            "/api/v1/flavors/_",
@@ -356,6 +369,13 @@ func TestUpdateFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/not-exist",
 		body:           `{"platform":"github","name":"not-exist","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
 		expectedStatus: http.StatusNotFound,
+		assertFlavor:   false,
+	}, {
+		name:           "shouldFailWhenDatabaseError",
+		storeErr:       errors.New("database error"),
+		url:            "/api/v1/flavors/runner-small",
+		body:           `{"platform":"github","name":"runner-small","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
+		expectedStatus: http.StatusInternalServerError,
 		assertFlavor:   false,
 	}, {
 		name: "shouldFailWhenNameIsAllFlavors",
