@@ -446,7 +446,7 @@ type updateJobRequest struct {
 
 // updateJob handles updating a job's started_at and/or completed_at fields.
 // It validates that these fields are only set if they were previously NULL.
-// Note: This operation is not atomic. Concurrent updates to the same job may race.                                                                                                                                                                                             
+// Note: This operation is not atomic. Concurrent updates to the same job may race.
 // This is acceptable as the endpoint is intended for occasional debug use.
 func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 	platform := r.PathValue("platform")
@@ -472,7 +472,7 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.applyJobUpdates(r.Context(), req, job[0], platform, id); err != nil {
-		if errors.Is(err, ErrFieldAlreadySet) {
+		if errors.Is(err, errFieldAlreadySet) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -487,7 +487,7 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job database.Job, platform, id string) error {
 	if req.StartedAt != nil {
 		if job.StartedAt != nil {
-			return fmt.Errorf("%w: cannot update started_at", ErrFieldAlreadySet)
+			return fmt.Errorf("%w: cannot update started_at", errFieldAlreadySet)
 		}
 		if err := s.store.UpdateJobStarted(ctx, platform, id, *req.StartedAt, nil); err != nil {
 			return fmt.Errorf("cannot update job started_at: %w", err)
@@ -496,7 +496,7 @@ func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job 
 
 	if req.CompletedAt != nil {
 		if job.CompletedAt != nil {
-			return fmt.Errorf("%w: cannot update completed_at", ErrFieldAlreadySet)
+			return fmt.Errorf("%w: cannot update completed_at", errFieldAlreadySet)
 		}
 		if err := s.store.UpdateJobCompleted(ctx, platform, id, *req.CompletedAt, nil); err != nil {
 			return fmt.Errorf("cannot update job completed_at: %w", err)
