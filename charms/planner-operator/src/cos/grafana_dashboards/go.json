@@ -792,32 +792,7 @@
           },
           "unit": "req/s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "/api/v1/flavors/{name}"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -847,7 +822,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum by (http_route) (\n  rate(http_server_request_duration_seconds_count{juju_charm=\"github-runner-planner\"}[5m])\n)",
+          "expr": "sum by (http_route) (\n  rate(http_server_request_duration_seconds_count{\n    juju_charm=\"github-runner-planner\",\n    http_route!=\"\"\n  }[5m])\n)\nor\nsum by (http_route) (\n  label_replace(\n    rate(http_server_request_duration_seconds_count{\n      juju_charm=\"github-runner-planner\",\n      http_route=\"\"\n    }[5m]),\n    \"http_route\",\n    \"unknown\",\n    \"\",\n    \"\"\n  )\n)\n",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -916,32 +891,7 @@
           },
           "unit": "s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "/api/v1/flavors/{name}"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -971,7 +921,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(\n  0.95,\n  sum by (le, http_route) (\n    rate(http_server_request_duration_seconds_bucket{\n      juju_charm=\"github-runner-planner\",\n      http_route!=\"/api/v1/flavors/{name}/pressure\"\n    }[5m])\n  )\n)\n\n",
+          "expr": "histogram_quantile(\n  0.95,\n  sum by (le, http_route) (\n    rate(http_server_request_duration_seconds_bucket{\n      juju_charm=\"github-runner-planner\",\n      http_route!=\"\",\n      http_route!=\"/api/v1/flavors/{name}/pressure\"\n    }[5m])\n  )\n)\nor\nhistogram_quantile(\n  0.95,\n  sum by (le, http_route) (\n    label_replace(\n      rate(http_server_request_duration_seconds_bucket{\n        juju_charm=\"github-runner-planner\",\n        http_route=\"\"\n      }[5m]),\n      \"http_route\",\n      \"unknown\",\n      \"\",\n      \"\"\n    )\n  )\n)\n",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1040,32 +990,7 @@
           },
           "unit": "req/s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "/api/v1/flavors/{name}"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -1095,14 +1020,14 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum by (http_route) (\n  rate(http_server_request_duration_seconds_count{\n    juju_charm=\"github-runner-planner\",\n    http_response_status_code!=\"200\"}[5m])\n)",
+          "expr": "sum by (http_route) (\n  rate(http_server_request_duration_seconds_count{\n    juju_charm=\"github-runner-planner\",\n    http_response_status_code!~\"2..\",\n    http_route!=\"\"\n  }[5m])\n)\nor\nsum by (http_route) (\n  label_replace(\n    rate(http_server_request_duration_seconds_count{\n      juju_charm=\"github-runner-planner\",\n      http_response_status_code!~\"2..\",\n      http_route=\"\"\n    }[5m]),\n    \"http_route\",\n    \"unknown\",\n    \"\",\n    \"\"\n  )\n)\n",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Non-200 request rate (by endpoint)",
+      "title": "Non-2XX request rate (by endpoint)",
       "type": "timeseries"
     }
   ],
