@@ -43,6 +43,16 @@ func (m *mockStore) ListFlavors(ctx context.Context, platform string) ([]databas
 	}
 	return m.flavors, nil
 }
+func (m *mockStore) GetFlavor(ctx context.Context, name string) (*database.Flavor, error) {
+	return m.lastFlavor, nil
+}
+func (m *mockStore) UpdateFlavor(ctx context.Context, flavor *database.Flavor) error {
+	m.lastFlavor = flavor
+	return nil
+}
+func (m *mockStore) DeleteFlavor(ctx context.Context, platform, name string) error {
+	return nil
+}
 func (m *mockStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
 	if m.pressErr != nil {
 		return nil, m.pressErr

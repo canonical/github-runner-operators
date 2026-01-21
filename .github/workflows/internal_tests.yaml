@@ -29,9 +29,9 @@ jobs:
           git diff --exit-code
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64
+          version: v2.8.0
 
       - name: Run Unit and Integration Test of internal packages
         env:
