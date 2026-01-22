@@ -29,9 +29,16 @@ const (
 	authTokenBasePattern     = "/api/v1/auth/token"
 	createAuthTokenPattern   = "/api/v1/auth/token/{name}"
 	deleteAuthTokenPattern   = "/api/v1/auth/token/{name}"
+	jobPattern               = "/api/v1/jobs/{platform}/{id}"
+	jobsPattern              = "/api/v1/jobs/{platform}"
 	healthPattern            = "/health"
 	allFlavorName            = "_"
 	flavorPlatform           = "github" // Currently only github is supported
+)
+
+var (
+	// errFieldAlreadySet is returned when attempting to update a field that is already set.
+	errFieldAlreadySet = errors.New("field is already set")
 )
 
 // FlavorStore is a small interface that matches the relevant method on internal/database.Database.
@@ -43,6 +50,9 @@ type FlavorStore interface {
 	DeleteFlavor(ctx context.Context, platform string, name string) error
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
 	SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error)
+	ListJobs(ctx context.Context, platform string, option ...database.ListJobOptions) ([]database.Job, error)
+	UpdateJobStarted(ctx context.Context, platform, id string, startedAt time.Time, raw map[string]interface{}) error
+	UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]interface{}) error
 }
 
 // AuthStore is an interface that provides authorization token management.
@@ -77,6 +87,9 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
 	s.mux.Handle("GET "+authTokenBasePattern, otelhttp.WithRouteTag(authTokenBasePattern, s.adminProtected(http.HandlerFunc(s.listAuthTokens))))
 	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
+	s.mux.Handle("GET "+jobsPattern, otelhttp.WithRouteTag(jobsPattern, s.tokenProtected(http.HandlerFunc(s.listJobs))))
+	s.mux.Handle("GET "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
+	s.mux.Handle("PATCH "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.updateJob))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
 
 	return s
@@ -364,10 +377,7 @@ type tokenResponse struct {
 // createAuthToken handles creation of a general authentication token (admin-protected).
 func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if name == "" {
-		http.Error(w, "missing token name", http.StatusBadRequest)
-		return
-	}
+
 	token, err := s.auth.CreateAuthToken(r.Context(), name)
 	if err == nil {
 		respondWithJSON(w, http.StatusCreated, tokenResponse{Name: name, Token: base64.RawURLEncoding.EncodeToString(token[:])})
@@ -395,10 +405,6 @@ func (s *Server) listAuthTokens(w http.ResponseWriter, r *http.Request) {
 // deleteAuthToken handles deletion of a general authentication token (admin-protected).
 func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if name == "" {
-		http.Error(w, "missing token name", http.StatusBadRequest)
-		return
-	}
 	if err := s.auth.DeleteAuthToken(r.Context(), name); err != nil {
 		if errors.Is(err, database.ErrNotExist) {
 			w.WriteHeader(http.StatusNoContent)
@@ -408,6 +414,102 @@ func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// listJobs handles retrieving jobs by platform.
+func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+
+	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot list jobs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, jobs)
+}
+
+// getJob handles retrieving a single job by platform and ID.
+func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	id := r.PathValue("id")
+
+	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{WithId: id})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(jobs) == 0 {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, jobs[0])
+}
+
+type updateJobRequest struct {
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// updateJob handles updating a job's started_at and/or completed_at fields that are not yet set.
+// Non-atomic operation: concurrent updates may race, but is acceptable for debug use.
+func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
+	platform := r.PathValue("platform")
+	id := r.PathValue("id")
+
+	job, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{WithId: id})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(job) == 0 {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	req := updateJobRequest{}
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.applyJobUpdates(r.Context(), req, job[0], platform, id); err != nil {
+		if errors.Is(err, errFieldAlreadySet) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, fmt.Sprintf("cannot update job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// applyJobUpdates applies the updates from the request to the job.
+func (s *Server) applyJobUpdates(ctx context.Context, req updateJobRequest, job database.Job, platform, id string) error {
+	if req.StartedAt != nil {
+		if job.StartedAt != nil {
+			return fmt.Errorf("%w: cannot update started_at", errFieldAlreadySet)
+		}
+		if err := s.store.UpdateJobStarted(ctx, platform, id, *req.StartedAt, nil); err != nil {
+			return fmt.Errorf("cannot update job started_at: %w", err)
+		}
+	}
+
+	if req.CompletedAt != nil {
+		if job.CompletedAt != nil {
+			return fmt.Errorf("%w: cannot update completed_at", errFieldAlreadySet)
+		}
+		if err := s.store.UpdateJobCompleted(ctx, platform, id, *req.CompletedAt, nil); err != nil {
+			return fmt.Errorf("cannot update job completed_at: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // respondWithJSON sends a JSON response with the given status code and payload.

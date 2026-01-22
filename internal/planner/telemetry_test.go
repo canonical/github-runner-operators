@@ -93,6 +93,18 @@ func (m *mockStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string
 	return "", database.ErrNotExist
 }
 
+func (m *mockStore) ListJobs(ctx context.Context, platform string, option ...database.ListJobOptions) ([]database.Job, error) {
+	return []database.Job{}, nil
+}
+
+func (m *mockStore) UpdateJobStarted(ctx context.Context, platform, id string, startedAt time.Time, raw map[string]interface{}) error {
+	return nil
+}
+
+func (m *mockStore) UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]interface{}) error {
+	return nil
+}
+
 // assertMetricObservedWithLabels asserts the gauge has a datapoint matching flavor + platform + value.
 func assertMetricObservedWithLabels(t *testing.T, tm telemetry.TestMetrics, name, platform, flavor string, expectedPressure int64) {
 	t.Helper()
