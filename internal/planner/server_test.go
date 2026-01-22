@@ -13,9 +13,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,6 +38,12 @@ type fakeStore struct {
 	deleteTokErr error
 
 	nameToToken map[string][32]byte
+
+	// Job controls
+	jobs           map[string]*database.Job
+	listJobsErr    error
+	updateStartErr error
+	updateComplErr error
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -139,6 +147,50 @@ func (f *fakeStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struc
 	return f.pressureChange, nil
 }
 
+func (f *fakeStore) ListJobs(ctx context.Context, platform string, option ...database.ListJobOptions) ([]database.Job, error) {
+	if f.listJobsErr != nil {
+		return nil, f.listJobsErr
+	}
+	if f.jobs == nil {
+		return []database.Job{}, nil
+	}
+	var results []database.Job
+	for key, job := range f.jobs {
+		if job.Platform != platform {
+			continue
+		}
+		if len(option) > 0 && option[0].WithId != "" && job.ID != option[0].WithId {
+			continue
+		}
+		results = append(results, *f.jobs[key])
+	}
+	return results, nil
+}
+
+func (f *fakeStore) UpdateJobStarted(ctx context.Context, platform, id string, startedAt time.Time, raw map[string]interface{}) error {
+	if f.updateStartErr != nil {
+		return f.updateStartErr
+	}
+	key := platform + ":" + id
+	if job, ok := f.jobs[key]; ok {
+		job.StartedAt = &startedAt
+		return nil
+	}
+	return database.ErrNotExist
+}
+
+func (f *fakeStore) UpdateJobCompleted(ctx context.Context, platform, id string, completedAt time.Time, raw map[string]interface{}) error {
+	if f.updateComplErr != nil {
+		return f.updateComplErr
+	}
+	key := platform + ":" + id
+	if job, ok := f.jobs[key]; ok {
+		job.CompletedAt = &completedAt
+		return nil
+	}
+	return database.ErrNotExist
+}
+
 func newRequest(method, url, body, token string) *http.Request {
 	req := httptest.NewRequest(method, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -172,6 +224,14 @@ func TestCreateFlavor(t *testing.T) {
 		body:               `{"platform":"github"}`,
 		expectedStatus:     http.StatusConflict,
 		expectedFlavorName: "existing-flavor",
+		expectedPlatform:   "github",
+	}, {
+		name:               "shouldFailWhenDatabaseError",
+		storeErr:           errors.New("database error"),
+		url:                "/api/v1/flavors/runner-small",
+		body:               `{"platform":"github"}`,
+		expectedStatus:     http.StatusInternalServerError,
+		expectedFlavorName: "runner-small",
 		expectedPlatform:   "github",
 	}, {
 		name:           "shouldFailOnInvalidJSON",
@@ -241,6 +301,11 @@ func TestGetFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/non-existent-flavor",
 		expectedStatus: http.StatusNotFound,
 	}, {
+		name:           "shouldFailWhenDatabaseError",
+		storeErr:       errors.New("database error"),
+		url:            "/api/v1/flavors/runner-small",
+		expectedStatus: http.StatusInternalServerError,
+	}, {
 		name:           "shouldFailWhenNameIsAllFlavors",
 		storeErr:       database.ErrNotExist,
 		url:            "/api/v1/flavors/_",
@@ -304,6 +369,13 @@ func TestUpdateFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/not-exist",
 		body:           `{"platform":"github","name":"not-exist","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
 		expectedStatus: http.StatusNotFound,
+		assertFlavor:   false,
+	}, {
+		name:           "shouldFailWhenDatabaseError",
+		storeErr:       errors.New("database error"),
+		url:            "/api/v1/flavors/runner-small",
+		body:           `{"platform":"github","name":"runner-small","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
+		expectedStatus: http.StatusInternalServerError,
 		assertFlavor:   false,
 	}, {
 		name: "shouldFailWhenNameIsAllFlavors",
@@ -382,6 +454,19 @@ func TestDeleteFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/runner-small",
 		expectedStatus: http.StatusOK,
 		flavorToAssert: "runner-small",
+	}, {
+		name: "shouldFailWhenDatabaseError",
+		storeFlavor: &database.Flavor{
+			Platform:        "github",
+			Name:            "runner-small",
+			Labels:          []string{"x64"},
+			Priority:        10,
+			IsDisabled:      false,
+			MinimumPressure: 5,
+		},
+		storeErr:       errors.New("database error"),
+		url:            "/api/v1/flavors/runner-small",
+		expectedStatus: http.StatusInternalServerError,
 	}, {
 		name: "shouldFailWhenNameIsAllFlavors",
 		storeFlavor: &database.Flavor{
@@ -649,94 +734,727 @@ func TestHealth(t *testing.T) {
 }
 
 func TestAuthTokenEndpoints(t *testing.T) {
-	admin := "planner_v0_thisIsAValidAdminToken___________1234"
-	t.Run("create token success", func(t *testing.T) {
-		token := sha256.Sum256([]byte(admin))
-		store := &fakeStore{nameToToken: map[string][32]byte{"github-runner": token}}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
+	admin := "planner_v0_valid_admin_token________________________________"
 
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/github-runner", "", admin)
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
+	tests := []struct {
+		name             string
+		method           string
+		url              string
+		authHeader       string
+		createTokErr     error
+		deleteTokErr     error
+		nameToToken      map[string][32]byte
+		expectedStatus   int
+		validateResponse func(t *testing.T, w *httptest.ResponseRecorder)
+	}{{
+		name:           "shouldSucceedCreatingToken",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/github-runner",
+		authHeader:     "Bearer " + admin,
+		nameToToken:    map[string][32]byte{"github-runner": sha256.Sum256([]byte(admin))},
+		expectedStatus: http.StatusCreated,
+	}, {
+		name:           "shouldFailCreatingTokenWhenConflict",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/existing",
+		authHeader:     "Bearer " + admin,
+		createTokErr:   database.ErrExist,
+		expectedStatus: http.StatusConflict,
+	}, {
+		name:           "shouldFailCreatingTokenWhenUnauthorized",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailCreatingTokenWithInvalidAuthHeader",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailCreatingTokenWithoutBearerPrefix",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     admin,
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailCreatingTokenWithEmptyAuthHeader",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailCreatingTokenOnDatabaseError",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer " + admin,
+		createTokErr:   errors.New("database error"),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailCreatingTokenWithEmptyName",
+		method:         http.MethodPost,
+		url:            "/api/v1/auth/token/",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name:           "shouldSucceedDeletingToken",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name:           "shouldSucceedDeletingTokenWhenNotFound",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/nonexistent",
+		authHeader:     "Bearer " + admin,
+		deleteTokErr:   database.ErrNotExist,
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name:           "shouldFailDeletingTokenWhenUnauthorized",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailDeletingTokenWithInvalidAuthHeader",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailDeletingTokenOnDatabaseError",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/name",
+		authHeader:     "Bearer " + admin,
+		deleteTokErr:   errors.New("database error"),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailDeletingTokenWithEmptyName",
+		method:         http.MethodDelete,
+		url:            "/api/v1/auth/token/",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusNotFound,
+	}}
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		var resp map[string]string
-		json.NewDecoder(w.Body).Decode(&resp)
-		assert.Equal(t, "github-runner", resp["name"])
-		expected := base64.RawURLEncoding.EncodeToString(token[:])
-		assert.Equal(t, expected, resp["token"])
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				createTokErr: tt.createTokErr,
+				deleteTokErr: tt.deleteTokErr,
+				nameToToken:  tt.nameToToken,
+			}
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
-	t.Run("create token conflict", func(t *testing.T) {
-		store := &fakeStore{createTokErr: database.ErrExist}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/existing", "", admin)
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusConflict, w.Code)
-	})
+			req := httptest.NewRequest(tt.method, tt.url, nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			w := httptest.NewRecorder()
 
-	t.Run("create token unauthorized", func(t *testing.T) {
-		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodPost, "/api/v1/auth/token/name", "", "invalid-token")
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-	})
+			server.ServeHTTP(w, req)
 
-	t.Run("delete token success", func(t *testing.T) {
-		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", admin)
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code)
-	})
-
-	t.Run("delete token unauthorized", func(t *testing.T) {
-		store := &fakeStore{}
-		server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-		req := newRequest(http.MethodDelete, "/api/v1/auth/token/name", "", "invalid-token")
-		w := httptest.NewRecorder()
-		server.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-	})
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.expectedStatus == http.StatusCreated {
+				var resp map[string]string
+				require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+				assert.Equal(t, "github-runner", resp["name"])
+				assert.NotEmpty(t, resp["token"])
+			}
+		})
+	}
 }
 
-func TestCreateFlavor_Unauthorized(t *testing.T) {
-	/*
-		arrange: empty store, server with admin token, request uses invalid token
-		act: POST /api/v1/flavors/unauth
-		assert: returns 401 Unauthorized
-	*/
-	store := &fakeStore{}
+func TestTokenProtected(t *testing.T) {
 	admin := "planner_v0_valid_admin_token________________________________"
-	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-	body := `{"platform":"github","labels":["x64"],"priority":1}`
-	req := newRequest(http.MethodPost, "/api/v1/flavors/unauth", body, "invalid-token")
-	w := httptest.NewRecorder()
+	validGeneralToken := sha256.Sum256([]byte("valid-general-token"))
+	validGeneralTokenEncoded := base64.RawURLEncoding.EncodeToString(validGeneralToken[:])
 
-	server.ServeHTTP(w, req)
+	tests := []struct {
+		name           string
+		authHeader     string
+		nameToToken    map[string][32]byte
+		expectedStatus int
+	}{{
+		name:           "shouldSucceedWithValidAdminToken",
+		authHeader:     "Bearer " + admin,
+		expectedStatus: http.StatusOK,
+	}, {
+		name:           "shouldSucceedWithValidGeneralToken",
+		authHeader:     "Bearer " + validGeneralTokenEncoded,
+		nameToToken:    map[string][32]byte{"test": validGeneralToken},
+		expectedStatus: http.StatusOK,
+	}, {
+		name:           "shouldFailWithInvalidToken",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithInvalidBase64Token",
+		authHeader:     "Bearer !!!invalid-base64!!!",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithWrongLengthToken",
+		authHeader:     "Bearer " + base64.RawURLEncoding.EncodeToString([]byte("short")),
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithoutBearerPrefix",
+		authHeader:     admin,
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailWithEmptyAuthHeader",
+		authHeader:     "",
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name:           "shouldFailWithInvalidAuthFormat",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}}
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{nameToToken: tt.nameToToken}
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/flavors/test", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
 }
 
-func TestGetFlavorPressure_Unauthorized(t *testing.T) {
+func TestEndpoints_Unauthorized(t *testing.T) {
 	/*
-		arrange: store with preset pressures, server with admin token, request uses invalid token
-		act: GET /api/v1/flavors/_/pressure
-		assert: returns 401 Unauthorized
+		arrange: various stores and endpoints
+		act: send requests with invalid token
+		assert: all return 401 Unauthorized
 	*/
-	pressures := atomic.Value{}
-	pressures.Store(map[string]int{"runner-small": 1})
-	store := &fakeStore{pressures: pressures}
-	admin := "planner_v0_valid_admin_token________________________________"
-	server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
-	req := newRequest(http.MethodGet, "/api/v1/flavors/_/pressure", "", "invalid-token")
-	w := httptest.NewRecorder()
+	createdAt := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	newStartedAt := time.Date(2025, 1, 1, 10, 6, 0, 0, time.UTC)
 
-	server.ServeHTTP(w, req)
+	tests := []struct {
+		name   string
+		method string
+		url    string
+		body   string
+	}{{
+		name:   "CreateFlavor",
+		method: http.MethodPost,
+		url:    "/api/v1/flavors/runner-small",
+		body:   `{"platform":"github","labels":["x64"],"priority":1}`,
+	}, {
+		name:   "GetFlavorPressure",
+		method: http.MethodGet,
+		url:    "/api/v1/flavors/_/pressure",
+		body:   "",
+	}, {
+		name:   "GetJob",
+		method: http.MethodGet,
+		url:    "/api/v1/jobs/github/job-1",
+		body:   "",
+	}, {
+		name:   "UpdateJob",
+		method: http.MethodPatch,
+		url:    "/api/v1/jobs/github/job-1",
+		body:   fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+	}}
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup store with necessary data
+			pressures := atomic.Value{}
+			pressures.Store(map[string]int{"runner-small": 1})
+			store := &fakeStore{
+				pressures: pressures,
+				jobs: map[string]*database.Job{
+					"github:job-1": {
+						Platform:  "github",
+						ID:        "job-1",
+						Labels:    []string{"x64"},
+						CreatedAt: createdAt,
+					},
+				},
+			}
+
+			admin := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
+			req := newRequest(tt.method, tt.url, tt.body, "invalid-token")
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
+		})
+	}
+}
+
+func TestGetJob(t *testing.T) {
+	/*
+		arrange: setup fake store with jobs, server with admin token
+		act: send requests to get specific job
+		assert: verify responses match expected status codes and return single job object
+	*/
+	createdAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name           string
+		jobs           map[string]*database.Job
+		listJobsErr    error
+		method         string
+		url            string
+		expectedStatus int
+	}{{
+		name: "shouldSucceedGettingSpecificJob",
+		jobs: map[string]*database.Job{
+			"github:job-123": {
+				Platform:    "github",
+				ID:          "job-123",
+				Labels:      []string{"x64", "large"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: nil,
+				Raw:         map[string]interface{}{"key": "value"},
+			},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github/job-123",
+		expectedStatus: http.StatusOK,
+	}, {
+		name: "shouldFailWhenJobNotFound",
+		jobs: map[string]*database.Job{
+			"github:job-123": {
+				Platform:    "github",
+				ID:          "job-123",
+				Labels:      []string{"x64", "large"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: nil,
+				Raw:         map[string]interface{}{"key": "value"},
+			},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github/nonexistent",
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name:           "shouldFailWhenPlatformMissing",
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs//job-1",
+		expectedStatus: http.StatusMovedPermanently,
+	}, {
+		name:           "shouldFailOnDatabaseError",
+		listJobsErr:    errors.New("database error"),
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github/job-1",
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailForNonGetMethod",
+		method:         http.MethodPost,
+		url:            "/api/v1/jobs/github/job-1",
+		expectedStatus: http.StatusMethodNotAllowed,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				jobs:        tt.jobs,
+				listJobsErr: tt.listJobsErr,
+			}
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+			req := newRequest(tt.method, tt.url, "", adminToken)
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var job database.Job
+				err := json.NewDecoder(w.Body).Decode(&job)
+				assert.NoError(t, err)
+				key := job.Platform + ":" + job.ID
+				expectedJob, exists := tt.jobs[key]
+				assert.True(t, exists, "Unexpected job returned: %s", key)
+				if exists {
+					assert.Equal(t, expectedJob.Platform, job.Platform)
+					assert.Equal(t, expectedJob.ID, job.ID)
+					assert.Equal(t, expectedJob.Labels, job.Labels)
+					assert.Equal(t, expectedJob.CreatedAt, job.CreatedAt)
+					assert.Equal(t, expectedJob.StartedAt, job.StartedAt)
+					assert.Equal(t, expectedJob.CompletedAt, job.CompletedAt)
+					assert.Equal(t, expectedJob.Raw, job.Raw)
+				}
+			}
+		})
+	}
+}
+
+func TestListJobs(t *testing.T) {
+	/*
+		arrange: setup fake store with jobs, server with admin token
+		act: send requests to list jobs for platform
+		assert: verify responses match expected status codes and job counts
+	*/
+	createdAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	startedAt := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	completedAt := time.Date(2026, 1, 1, 10, 10, 0, 0, time.UTC)
+
+	tests := []struct {
+		name           string
+		jobs           map[string]*database.Job
+		listJobsErr    error
+		method         string
+		url            string
+		expectedStatus int
+		expectedCount  int
+	}{{
+		name: "shouldSucceedListingAllJobsForPlatform",
+		jobs: map[string]*database.Job{
+			"github:job-1": {
+				Platform:    "github",
+				ID:          "job-1",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   &startedAt,
+				CompletedAt: nil,
+			},
+			"github:job-2": {
+				Platform:    "github",
+				ID:          "job-2",
+				Labels:      []string{"arm64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: &completedAt,
+			},
+		},
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusOK,
+		expectedCount:  2,
+	}, {
+		name:           "shouldSucceedWithEmptyListWhenNoJobs",
+		jobs:           map[string]*database.Job{},
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusOK,
+		expectedCount:  0,
+	}, {
+		name:           "shouldFailOnDatabaseError",
+		listJobsErr:    errors.New("database error"),
+		method:         http.MethodGet,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailForNonGetMethod",
+		method:         http.MethodPost,
+		url:            "/api/v1/jobs/github",
+		expectedStatus: http.StatusMethodNotAllowed,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				jobs:        tt.jobs,
+				listJobsErr: tt.listJobsErr,
+			}
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+			req := newRequest(tt.method, tt.url, "", adminToken)
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			if tt.expectedStatus == http.StatusOK {
+				var jobs []database.Job
+				err := json.NewDecoder(w.Body).Decode(&jobs)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedCount, len(jobs))
+				if tt.expectedCount > 0 {
+					assertJobsMatch(t, tt.jobs, jobs)
+				}
+			}
+		})
+	}
+}
+
+// assertJobsMatch verifies that the returned jobs match the expected jobs from the test data
+func assertJobsMatch(t *testing.T, expected map[string]*database.Job, actual []database.Job) {
+	t.Helper()
+	for _, job := range actual {
+		key := job.Platform + ":" + job.ID
+		expectedJob, exists := expected[key]
+		assert.True(t, exists, "Unexpected job returned: %s", key)
+		if exists {
+			assert.Equal(t, expectedJob.Platform, job.Platform)
+			assert.Equal(t, expectedJob.ID, job.ID)
+			assert.Equal(t, expectedJob.Labels, job.Labels)
+			assert.Equal(t, expectedJob.CreatedAt, job.CreatedAt)
+			assert.Equal(t, expectedJob.StartedAt, job.StartedAt)
+			assert.Equal(t, expectedJob.CompletedAt, job.CompletedAt)
+			assert.Equal(t, expectedJob.Raw, job.Raw)
+		}
+	}
+}
+
+func TestUpdateJob(t *testing.T) {
+	/*
+		arrange: setup fake store with jobs, server with admin token
+		act: send requests to update job's started_at and completed_at fields
+		assert: verify responses match expected status codes and job updates
+	*/
+	createdAt := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	startedAt := time.Date(2025, 1, 1, 10, 5, 0, 0, time.UTC)
+	completedAt := time.Date(2025, 1, 1, 10, 10, 0, 0, time.UTC)
+	newStartedAt := time.Date(2025, 1, 1, 10, 6, 0, 0, time.UTC)
+	newCompletedAt := time.Date(2025, 1, 1, 10, 11, 0, 0, time.UTC)
+
+	tests := []struct {
+		name           string
+		jobs           map[string]*database.Job
+		listJobsErr    error
+		updateStartErr error
+		updateComplErr error
+		method         string
+		url            string
+		body           string
+		expectedStatus int
+	}{{
+		name: "shouldSucceedUpdatingStartedAt",
+		jobs: map[string]*database.Job{
+			"github:job-1": {
+				Platform:    "github",
+				ID:          "job-1",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: nil,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-1",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name: "shouldSucceedUpdatingCompletedAt",
+		jobs: map[string]*database.Job{
+			"github:job-2": {
+				Platform:    "github",
+				ID:          "job-2",
+				Labels:      []string{"arm64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: nil,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-2",
+		body:           fmt.Sprintf(`{"completed_at":"%s"}`, newCompletedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name: "shouldSucceedUpdatingBothFields",
+		jobs: map[string]*database.Job{
+			"github:job-3": {
+				Platform:    "github",
+				ID:          "job-3",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: nil,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-3",
+		body:           fmt.Sprintf(`{"started_at":"%s","completed_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano), newCompletedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name: "shouldFailWhenStartedAtNotNull",
+		jobs: map[string]*database.Job{
+			"github:job-4": {
+				Platform:    "github",
+				ID:          "job-4",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   &startedAt,
+				CompletedAt: nil,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-4",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name: "shouldFailWhenCompletedAtNotNull",
+		jobs: map[string]*database.Job{
+			"github:job-5": {
+				Platform:    "github",
+				ID:          "job-5",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: &completedAt,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-5",
+		body:           fmt.Sprintf(`{"completed_at":"%s"}`, newCompletedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name: "shouldSucceedUpdatingStartedAtEvenWhenCompletedAtNotNull",
+		jobs: map[string]*database.Job{
+			"github:job-6": {
+				Platform:    "github",
+				ID:          "job-6",
+				Labels:      []string{"x64"},
+				CreatedAt:   createdAt,
+				StartedAt:   nil,
+				CompletedAt: &completedAt,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-6",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusNoContent,
+	}, {
+		name:           "shouldFailWhenJobNotFound",
+		jobs:           map[string]*database.Job{},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/nonexistent",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name: "shouldFailWhenPlatformMissing",
+		jobs: map[string]*database.Job{
+			"github:job-7": {
+				Platform:  "github",
+				ID:        "job-7",
+				CreatedAt: createdAt,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs//job-7",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusMovedPermanently,
+	}, {
+		name: "shouldFailWhenIdMissing",
+		jobs: map[string]*database.Job{
+			"github:job-8": {
+				Platform:  "github",
+				ID:        "job-8",
+				CreatedAt: createdAt,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusNotFound,
+	}, {
+		name: "shouldFailOnInvalidJSON",
+		jobs: map[string]*database.Job{
+			"github:job-9": {
+				Platform:  "github",
+				ID:        "job-9",
+				CreatedAt: createdAt,
+			},
+		},
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-9",
+		body:           `{invalid-json}`,
+		expectedStatus: http.StatusBadRequest,
+	}, {
+		name: "shouldFailOnListJobsError",
+		jobs: map[string]*database.Job{
+			"github:job-10": {
+				Platform:  "github",
+				ID:        "job-10",
+				CreatedAt: createdAt,
+			},
+		},
+		listJobsErr:    errors.New("database error"),
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-10",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name: "shouldFailOnUpdateStartedError",
+		jobs: map[string]*database.Job{
+			"github:job-11": {
+				Platform:  "github",
+				ID:        "job-11",
+				CreatedAt: createdAt,
+			},
+		},
+		updateStartErr: errors.New("update error"),
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-11",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name: "shouldFailOnUpdateCompletedError",
+		jobs: map[string]*database.Job{
+			"github:job-12": {
+				Platform:  "github",
+				ID:        "job-12",
+				CreatedAt: createdAt,
+			},
+		},
+		updateComplErr: errors.New("update error"),
+		method:         http.MethodPatch,
+		url:            "/api/v1/jobs/github/job-12",
+		body:           fmt.Sprintf(`{"completed_at":"%s"}`, newCompletedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name: "shouldFailForNonPatchMethod",
+		jobs: map[string]*database.Job{
+			"github:job-13": {
+				Platform:  "github",
+				ID:        "job-13",
+				CreatedAt: createdAt,
+			},
+		},
+		method:         http.MethodPost,
+		url:            "/api/v1/jobs/github/job-13",
+		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
+		expectedStatus: http.StatusMethodNotAllowed,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{
+				jobs:           tt.jobs,
+				listJobsErr:    tt.listJobsErr,
+				updateStartErr: tt.updateStartErr,
+				updateComplErr: tt.updateComplErr,
+			}
+			adminToken := "planner_v0_valid_admin_token________________________________"
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+			req := newRequest(tt.method, tt.url, tt.body, adminToken)
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			// Verify job was actually updated if success
+			if tt.expectedStatus == http.StatusNoContent && tt.jobs != nil {
+				for key, job := range store.jobs {
+					if strings.Contains(tt.body, "started_at") {
+						assert.Equal(t, &newStartedAt, job.StartedAt, "Job %s started_at was not updated correctly", key)
+					}
+					if strings.Contains(tt.body, "completed_at") {
+						assert.Equal(t, &newCompletedAt, job.CompletedAt, "Job %s completed_at was not updated correctly", key)
+					}
+				}
+			}
+		})
+	}
 }

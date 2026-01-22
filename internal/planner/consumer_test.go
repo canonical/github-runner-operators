@@ -74,6 +74,10 @@ func (db *fakeDB) UpdateJobCompleted(ctx context.Context, platform, id string, c
 	return nil
 }
 
+func (db *fakeDB) ListJobs(ctx context.Context, platform string, option ...database.ListJobOptions) ([]database.Job, error) {
+	return []database.Job{}, nil
+}
+
 func mergeRaw(job *database.Job, raw map[string]interface{}) {
 	if raw == nil {
 		return
