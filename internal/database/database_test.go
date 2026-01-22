@@ -151,6 +151,22 @@ func TestDatabase_CreateAuthToken_Duplicate(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestDatabase_ListAuthTokens(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	_, err := db.CreateAuthToken(ctx, "test")
+	assert.NoError(t, err)
+
+	_, err = db.CreateAuthToken(ctx, "foo")
+	assert.NoError(t, err)
+
+	names, err := db.ListAuthTokens(ctx)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"test", "foo"}, names)
+}
+
 func TestDatabase_VerifyAuthToken(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)

@@ -15,8 +15,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,6 +37,7 @@ type fakeStore struct {
 
 	// Auth token controls
 	createTokErr error
+	listTokErr   error
 	deleteTokErr error
 
 	nameToToken map[string][32]byte
@@ -114,6 +117,13 @@ func (f *fakeStore) CreateAuthToken(ctx context.Context, name string) ([32]byte,
 	var tok [32]byte
 	f.nameToToken[name] = tok
 	return tok, nil
+}
+
+func (f *fakeStore) ListAuthTokens(ctx context.Context) ([]string, error) {
+	if f.listTokErr != nil {
+		return nil, f.listTokErr
+	}
+	return slices.Collect(maps.Keys(f.nameToToken)), nil
 }
 
 func (f *fakeStore) DeleteAuthToken(ctx context.Context, name string) error {

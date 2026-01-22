@@ -99,6 +99,19 @@ func (d *Database) CreateAuthToken(ctx context.Context, name string) ([32]byte, 
 	return token, nil
 }
 
+// ListAuthTokens lists the names of all existing authentication tokens.
+func (d *Database) ListAuthTokens(ctx context.Context) ([]string, error) {
+	rows, err := d.conn.Query(ctx, "SELECT name FROM auth")
+	if err != nil {
+		return nil, fmt.Errorf("cannot list auth token names: %w", err)
+	}
+	tokenNames, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("cannot list auth token names: %w", err)
+	}
+	return tokenNames, nil
+}
+
 // VerifyAuthToken verifies an authentication token.
 // It returns the associated token name if the token is valid.
 // If the token is invalid or not found, it returns ErrNotExist.

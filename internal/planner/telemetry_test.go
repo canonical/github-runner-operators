@@ -71,6 +71,10 @@ func (m *mockStore) CreateAuthToken(ctx context.Context, name string) ([32]byte,
 	return [32]byte{}, nil
 }
 
+func (m *mockStore) ListAuthTokens(ctx context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
 func (m *mockStore) DeleteAuthToken(ctx context.Context, name string) error {
 	return nil
 }
