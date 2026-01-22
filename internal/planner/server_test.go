@@ -14,8 +14,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +35,7 @@ type fakeStore struct {
 
 	// Auth token controls
 	createTokErr error
+	listTokErr   error
 	deleteTokErr error
 
 	nameToToken map[string][32]byte
@@ -106,6 +109,13 @@ func (f *fakeStore) CreateAuthToken(ctx context.Context, name string) ([32]byte,
 	var tok [32]byte
 	f.nameToToken[name] = tok
 	return tok, nil
+}
+
+func (f *fakeStore) ListAuthTokens(ctx context.Context) ([]string, error) {
+	if f.listTokErr != nil {
+		return nil, f.listTokErr
+	}
+	return slices.Collect(maps.Keys(f.nameToToken)), nil
 }
 
 func (f *fakeStore) DeleteAuthToken(ctx context.Context, name string) error {
@@ -702,6 +712,52 @@ func TestAuthTokenEndpoints(t *testing.T) {
 		server.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
+}
+
+func TestListAuthTokens(t *testing.T) {
+	/*
+		arrange: Setup the server and the mock store with auth token.
+		act: Make listAuthTokens request.
+		assert: The returned auth token names match the expected names, and the HTTP status code is as expected.
+	*/
+	tests := []struct {
+		name           string
+		errToReturn    error
+		tokenNames     []string
+		expectedStatus int
+		checkNames     bool
+	}{{
+		name:           "shouldSucceed",
+		tokenNames:     []string{"token1", "token2"},
+		expectedStatus: http.StatusOK,
+		checkNames:     true,
+	}, {
+		name:           "shouldFailOnStoreError",
+		errToReturn:    fmt.Errorf("store error"),
+		expectedStatus: http.StatusInternalServerError,
+	}}
+
+	admin := "planner_v0_thisIsAValidAdminToken___________1234"
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{listTokErr: tt.errToReturn}
+			for _, name := range tt.tokenNames {
+				store.CreateAuthToken(t.Context(), name)
+			}
+
+			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
+			req := newRequest(http.MethodGet, "/api/v1/auth/token", "", admin)
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.checkNames {
+				var res map[string][]string
+				json.NewDecoder(w.Body).Decode(&res)
+				assert.ElementsMatch(t, tt.tokenNames, res["names"])
+			}
+		})
+	}
 }
 
 func TestCreateFlavor_Unauthorized(t *testing.T) {

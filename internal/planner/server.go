@@ -26,6 +26,7 @@ import (
 const (
 	flavorPattern            = "/api/v1/flavors/{name}"
 	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
+	authTokenBasePattern     = "/api/v1/auth/token"
 	createAuthTokenPattern   = "/api/v1/auth/token/{name}"
 	deleteAuthTokenPattern   = "/api/v1/auth/token/{name}"
 	healthPattern            = "/health"
@@ -47,6 +48,7 @@ type FlavorStore interface {
 // AuthStore is an interface that provides authorization token management.
 type AuthStore interface {
 	CreateAuthToken(ctx context.Context, name string) ([32]byte, error)
+	ListAuthTokens(ctx context.Context) ([]string, error)
 	DeleteAuthToken(ctx context.Context, name string) error
 	VerifyAuthToken(ctx context.Context, token [32]byte) (string, error)
 }
@@ -73,6 +75,7 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 	s.mux.Handle("DELETE "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.deleteFlavor))))
 	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
 	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
+	s.mux.Handle("GET "+authTokenBasePattern, otelhttp.WithRouteTag(authTokenBasePattern, s.adminProtected(http.HandlerFunc(s.listAuthTokens))))
 	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
 
@@ -375,6 +378,18 @@ func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, fmt.Sprintf("failed to create token: %v", err), http.StatusInternalServerError)
+}
+
+// listAuthTokens handles listing of all general authentication tokens (admin-protected).
+// On database failures, returns status code 500.
+// Returns a JSON array of token names.
+func (s *Server) listAuthTokens(w http.ResponseWriter, r *http.Request) {
+	names, err := s.auth.ListAuthTokens(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot list tokens: %v", err), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, map[string]any{"names": names})
 }
 
 // deleteAuthToken handles deletion of a general authentication token (admin-protected).
