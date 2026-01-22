@@ -753,7 +753,8 @@ func TestListAuthTokens(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, w.Code)
 			if tt.checkNames {
 				var res map[string][]string
-				json.NewDecoder(w.Body).Decode(&res)
+				err := json.NewDecoder(w.Body).Decode(&res)
+				assert.NoError(t, err)
 				assert.ElementsMatch(t, tt.tokenNames, res["names"])
 			}
 		})

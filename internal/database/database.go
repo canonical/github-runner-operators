@@ -101,7 +101,7 @@ func (d *Database) CreateAuthToken(ctx context.Context, name string) ([32]byte, 
 
 // ListAuthTokens lists the names of all existing authentication tokens.
 func (d *Database) ListAuthTokens(ctx context.Context) ([]string, error) {
-	rows, err := d.conn.Query(ctx, "SELECT name FROM auth;")
+	rows, err := d.conn.Query(ctx, "SELECT name FROM auth")
 	if err != nil {
 		return nil, fmt.Errorf("cannot list auth token names: %w", err)
 	}
