@@ -27,7 +27,7 @@ data "juju_model" "my_model" {
 }
 
 module "github_runner_planner" {
-  source = "git::https://github.com/canonical/github-runner-operators/tree/main/planner-operator/terraform"
+  source = "git::https://github.com/canonical/github-runner-operators//charms/planner-operator/terraform"
 
   model_uuid = data.juju_model.my_model.uuid
   # (Customize configuration variables here if needed)
