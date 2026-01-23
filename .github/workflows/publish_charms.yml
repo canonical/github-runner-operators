@@ -22,7 +22,7 @@ jobs:
     name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm }})
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.1
+      - uses: actions/checkout@v6.0.2
       - name: Remove Android SDK
         run: sudo rm -rf /usr/local/lib/android
       - name: setup lxd
