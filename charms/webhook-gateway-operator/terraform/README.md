@@ -27,7 +27,7 @@ data "juju_model" "my_model" {
 }
 
 module "github_runner_webhook_gateway" {
-  source = "git::https://github.com/canonical/github-runner-operators/tree/main/webhook-gateway-operator/terraform"
+  source = "git::https://github.com/canonical/github-runner-operators//charms/webhook-gateway-operator/terraform"
 
   model_uuid = data.juju_model.my_model.uuid
   # (Customize configuration variables here if needed)
