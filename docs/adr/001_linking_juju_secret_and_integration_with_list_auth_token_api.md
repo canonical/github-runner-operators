@@ -15,8 +15,7 @@ This helps resolve the issue with Juju secret cleanup on integration removed.
 
 ## Context
 
-The GitHub runner planner charm integrates with the GitHub runner charm to instruct the GitHub runner charm on the number of runners to spawn.
-For this integration, the planner needs to pass a Juju secret containing an auth token to the GitHub runner charm, this is done by creating a Juju secret and passing the Juju secret ID in the integration.
+For the planner charm integration with GitHub runner charm, the planner needs to pass a Juju secret containing an auth token to the GitHub runner charm, this is done by creating a Juju secret and passing the Juju secret ID in the integration.
 On removing this integration, the Juju secret needs to be cleaned up, which requires the Juju secret ID.
 
 The general way to resolve this is to store the information on which Juju secret is linked to which Juju integration.
@@ -24,8 +23,7 @@ The Juju secret can be labelled with a string and retrieved by it.
 This allows using a string to link a Juju secret to an integration.
 
 It was decided that the GitHub runner planner charm will be using the [holistic charm pattern](https://discourse.charmhub.io/t/deltas-vs-holistic-charming/11095).
-Under the holistic charm pattern, the event handling should not rely on the delta from the events, such as, the integration ID from integration removed event.
-Therefore, there needs to be a mapping of Juju integration with the Juju secrets.
+Under the holistic charm pattern, the event handling should not rely on the delta from the events, such as, the integration ID from integration removed event. Therefore, there needs to be a mapping of Juju integration with the Juju secrets.
 
 ## Decision
 
@@ -40,5 +38,12 @@ However, since the auth token is already stored in the database, it makes sense 
 
 ## Consequences
 
+### Positive
+
 - The way the Juju secret cleanup is handled fits the holistic charm pattern.
-- A new API is added for listing the names of the auth tokens.
+- The API for listing the name of auth token can be used for debugging.
+
+### Negative
+
+- An additional API call to the planner, and database access during each execute of charm events.
+- The list auth token API is tied to the cleanup of Juju secrets in the planner charm.
