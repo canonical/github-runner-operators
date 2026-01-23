@@ -15,8 +15,6 @@ This helps resolve the issue with Juju secret cleanup on integration removed.
 
 ## Context
 
-
-
 The GitHub runner planner charm integrates with the GitHub runner charm to instruct the GitHub runner charm on the number of runners to spawn.
 For this integration, the planner needs to pass a Juju secret containing an auth token to the GitHub runner charm, this is done by creating a Juju secret and passing the Juju secret ID in the integration.
 On removing this integration, the Juju secret needs to be cleaned up, which requires the Juju secret ID.
@@ -31,7 +29,7 @@ Therefore, there needs to be a mapping of Juju integration with the Juju secrets
 
 ## Decision
 
-The auth token is named by the integration ID and unit name.
+The auth token is named by the integration ID.
 On relation removed, the planner checks the list of auth token names and compare it with the integrations.
 If there is an auth token without a corresponding integration, then that auth token and the Juju secret with the same label needs to be cleaned up.
 
