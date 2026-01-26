@@ -11,11 +11,11 @@ replaced-by:
 In the planner Go application, an API endpoint is added to list the names of all auth tokens.
 This API is guarded with admin token level access.
 
-This helps resolve the issue with Juju secret cleanup on integration removed.
+This helps resolve the issue with Juju secret cleanup on integration removal.
 
 ## Context
 
-For the planner charm integration with GitHub runner charm, the planner needs to pass a Juju secret containing an auth token to the GitHub runner charm, this is done by creating a Juju secret and passing the Juju secret ID in the integration.
+For the planner charm integration with GitHub runner charm, the planner needs to pass a Juju secret containing an auth token to the GitHub runner charm. This is done by creating a Juju secret and passing the Juju secret ID in the integration.
 On removing this integration, the Juju secret needs to be cleaned up, which requires the Juju secret ID.
 
 The general way to resolve this is to store the information on which Juju secret is linked to which Juju integration.
