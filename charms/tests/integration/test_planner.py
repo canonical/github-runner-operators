@@ -54,3 +54,26 @@ def test_planner_prometheus_metrics(
     response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics")
 
     assert response.status_code == requests.status_codes.codes.OK
+
+
+@pytest.mark.usefixtures("planner_with_integrations", "any_charm_github_runner_app")
+def test_planner_github_runner_integration(
+    juju: jubilant.Juju,
+    planner_app: str,
+    github_runner_app: str,
+):
+    """
+    arrange: The planner app and any-charm app mocking github-runner is deployed.
+    act: The planner app and a github-runner app deployed and integrated with each other.
+    assert: The integration data contains the endpoint and auth token.
+    """
+    juju.integrate(planner_app, github_runner_app)
+    juju.wait(
+        lambda status: jubilant.all_active(status, planner_app),
+        timeout=6 * 60,
+        delay=10,
+    )
+    
+    # WIP
+    status = juju.status()
+    print(status)
