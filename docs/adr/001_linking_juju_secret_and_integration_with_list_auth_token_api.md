@@ -1,6 +1,6 @@
 ---
 title: ADR-001 - linking Juju secret and integration with list auth token API
-author: Andrew Liaw
+author: Andrew Liaw (andrew.liaw@canonical.com)
 date: 2026/01/23
 domain: architecture
 replaced-by: 
@@ -34,7 +34,7 @@ If there is an auth token without a corresponding integration, then that auth to
 ## Alternatives considered
 
 Other alternatives include other places to store the state, e.g., peer integration data, local file, etc.
-However, since the auth token is already stored in the database, it makes sense to store the state there as well.
+However, since the auth token is stored in the database, it makes sense to store the state in the database as they are related data to reduce the complexity of relation handling.
 
 ## Consequences
 
