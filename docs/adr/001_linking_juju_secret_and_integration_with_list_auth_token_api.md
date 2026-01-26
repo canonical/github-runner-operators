@@ -31,6 +31,9 @@ The auth token is named by the integration ID.
 On relation removed, the planner checks the list of auth token names and compare it with the integrations.
 If there is an auth token without a corresponding integration, then that auth token and the Juju secret with the same label needs to be cleaned up.
 
+The advantage of this approach is the Juju secret cleanup fits the holistic charm pattern.
+However, this ties the cleanup of the Juju secrets in the planner charm with the list auth token API of the planner, which are not obvious they are related.
+
 ## Alternatives considered
 
 Other alternatives include other places to store the state, e.g., peer integration data, local file, etc.
@@ -38,12 +41,6 @@ However, since the auth token is stored in the database, it makes sense to store
 
 ## Consequences
 
-### Positive
-
-- The way the Juju secret cleanup is handled fits the holistic charm pattern.
-- The API for listing the name of auth token can be used for debugging.
-
-### Negative
-
-- An additional API call to the planner, and database access during each execute of charm events.
-- The list auth token API is tied to the cleanup of Juju secrets in the planner charm.
+Additional impact of the change includes the added API for listing the names of the auth tokens can be used for debugging.
+A negative consequence would be having an additional API call from the charm to the planner during each execution of charm events.
+This is likely would not have a large impact as the scale keeps the number of the auth token low which makes the database query cheap.
