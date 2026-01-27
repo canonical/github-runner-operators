@@ -660,7 +660,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "Top 20 repository using self-hosted runners per day",
+      "description": "Top 20 repositories using self-hosted runners within the selected time range",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -723,7 +723,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "topk(20, \nsum by (repo) (\n  increase(github_runner_planner_webhook_job_running_seconds_count[1d])\n  )\n)",
+          "expr": "topk(20, \nsum by (repo) (\n  increase(github_runner_planner_webhook_job_running_seconds_count[$__range])\n  )\n)",
           "instant": true,
           "legendFormat": "__auto",
           "range": false,
