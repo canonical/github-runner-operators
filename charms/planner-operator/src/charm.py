@@ -75,7 +75,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         try:
             result = subprocess.run(
                 [
-                    "/charm/bin/planner",
+                    "/usr/local/bin/planner",
                     "update-flavor",
                     "--flavor",
                     flavor,

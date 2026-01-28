@@ -55,3 +55,4 @@ actions:
         type: boolean
         description: True to disable the flavor, false to enable it
     required: [flavor, disable]
+    additionalProperties: false
