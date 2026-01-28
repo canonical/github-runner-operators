@@ -13,6 +13,8 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -36,6 +38,7 @@ const (
 	adminTokenEnvVar  = "APP_ADMIN_TOKEN_VALUE"
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
+	platform          = "github"
 	shutdownTimeout   = 30 * time.Second
 	heartbeatInterval = 30 * time.Second
 )
@@ -53,6 +56,11 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "update-flavor" {
+		handleUpdateFlavor()
+		return
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -158,5 +166,54 @@ func shutdown(server *http.Server, consumer *planner.JobConsumer, consumerWg *sy
 	log.Println("Shutting down telemetry...")
 	if err := telemetry.Shutdown(shutdownCtx); err != nil {
 		log.Printf("failed to shutdown telemetry: %v", err)
+	}
+}
+
+func handleUpdateFlavor() {
+	updateCmd := flag.NewFlagSet("update-flavor", flag.ExitOnError)
+	flavor := updateCmd.String("flavor", "", "Name of the flavor to update")
+	disable := updateCmd.Bool("disable", false, "Disable the flavor")
+	enable := updateCmd.Bool("enable", false, "Enable the flavor")
+
+	if err := updateCmd.Parse(os.Args[2:]); err != nil {
+		log.Fatalf("Failed to parse flags: %v", err)
+	}
+
+	if *flavor == "" {
+		log.Fatalln("--flavor is required")
+	}
+
+	if *enable == *disable {
+		log.Fatalln("exactly one of --enable or --disable must be specified")
+	}
+
+	dbURI, found := os.LookupEnv(dbURI)
+	if !found {
+		log.Fatalln(dbURI, "environment variable not set.")
+	}
+
+	ctx := context.Background()
+	db, err := database.New(ctx, dbURI)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	if *enable {
+		if err := db.EnableFlavor(ctx, platform, *flavor); err != nil {
+			if errors.Is(err, database.ErrNotExist) {
+				log.Fatalf("Flavor '%s' not found", *flavor)
+			}
+			log.Fatalf("Failed to enable flavor: %v", err)
+		}
+		fmt.Printf("Flavor '%s' enabled successfully\n", *flavor)
+	} else {
+		if err := db.DisableFlavor(ctx, platform, *flavor); err != nil {
+			if errors.Is(err, database.ErrNotExist) {
+				log.Fatalf("Flavor '%s' not found", *flavor)
+			}
+			log.Fatalf("Failed to disable flavor: %v", err)
+		}
+		fmt.Printf("Flavor '%s' disabled successfully\n", *flavor)
 	}
 }

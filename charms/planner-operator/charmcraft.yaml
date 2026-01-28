@@ -43,3 +43,15 @@ config:
         Planner admin token used to create/delete general auth tokens.
         It must start with 'planner_v0_' followed by exactly 20 characters that can be letters,
         numbers, hyphens (-), or underscores (_). To generate the token, you can run `echo "planner_v0_$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]' | head -c 20)"`
+
+actions:
+  update-flavor:
+    description: Enable or disable a specific flavor
+    params:
+      flavor:
+        type: string
+        description: Name of the flavor to update
+      disable:
+        type: boolean
+        description: True to disable the flavor, false to enable it
+    required: [flavor, disable]

@@ -6,6 +6,7 @@
 
 import logging
 import pathlib
+import subprocess
 import typing
 
 import ops
@@ -25,6 +26,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
+        self.framework.observe(
+            self.on.update_flavor_action, self._on_update_flavor_action
+        )
 
     def get_cos_dir(self) -> str:
         """Get the COS directory for this charm.
@@ -58,6 +62,45 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         app = super()._create_app()
         setattr(app, "gen_environment", gen_environment)
         return app
+
+    def _on_update_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the update-flavor action.
+
+        Args:
+            event: The action event.
+        """
+        flavor = event.params["flavor"]
+        disable = event.params["disable"]
+
+        try:
+            result = subprocess.run(
+                [
+                    "/charm/bin/planner",
+                    "update-flavor",
+                    "--flavor",
+                    flavor,
+                    "--disable" if disable else "--enable",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
+            event.set_results(
+                {
+                    "message": f"Flavor '{flavor}' {'disabled' if disable else 'enabled'} successfully",
+                    "output": result.stdout,
+                }
+            )
+        except subprocess.CalledProcessError as e:
+            event.fail(f"Failed to update flavor: {e.stderr}")
+            logger.error("Failed to update flavor %s: %s", flavor, e.stderr)
+        except subprocess.TimeoutExpired:
+            event.fail("Command timed out")
+            logger.error("Update flavor command timed out for %s", flavor)
+        except Exception as e:
+            event.fail(f"Unexpected error: {str(e)}")
+            logger.exception("Unexpected error updating flavor %s", flavor)
 
 
 if __name__ == "__main__":
