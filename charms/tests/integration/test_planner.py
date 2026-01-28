@@ -98,7 +98,7 @@ def test_planner_update_flavor_action(
 
     # Run action to disable the flavor
     unit_name = f"{planner_app}/0"
-    result = juju.run_action(
+    result = juju.run(
         unit_name,
         "update-flavor",
         params={"flavor": flavor_name, "disable": True},
@@ -116,7 +116,7 @@ def test_planner_update_flavor_action(
     assert flavor_data["is_disabled"] is True, "Flavor should be disabled after action"
 
     # Run action to enable the flavor
-    result = juju.run_action(
+    result = juju.run(
         unit_name,
         "update-flavor",
         params={"flavor": flavor_name, "disable": False},

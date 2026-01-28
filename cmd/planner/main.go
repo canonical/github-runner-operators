@@ -170,6 +170,11 @@ func shutdown(server *http.Server, consumer *planner.JobConsumer, consumerWg *sy
 }
 
 func handleUpdateFlavor() {
+	flavorName, shouldEnable := parseUpdateFlavorFlags()
+	executeFlavorUpdate(flavorName, shouldEnable)
+}
+
+func parseUpdateFlavorFlags() (string, bool) {
 	updateCmd := flag.NewFlagSet("update-flavor", flag.ExitOnError)
 	flavor := updateCmd.String("flavor", "", "Name of the flavor to update")
 	disable := updateCmd.Bool("disable", false, "Disable the flavor")
@@ -187,6 +192,10 @@ func handleUpdateFlavor() {
 		log.Fatalln("exactly one of --enable or --disable must be specified")
 	}
 
+	return *flavor, *enable
+}
+
+func executeFlavorUpdate(flavorName string, enable bool) {
 	dbURI, found := os.LookupEnv(dbURI)
 	if !found {
 		log.Fatalln(dbURI, "environment variable not set.")
@@ -199,21 +208,29 @@ func handleUpdateFlavor() {
 	}
 	defer db.Close()
 
-	if *enable {
-		if err := db.EnableFlavor(ctx, platform, *flavor); err != nil {
-			if errors.Is(err, database.ErrNotExist) {
-				log.Fatalf("Flavor '%s' not found", *flavor)
-			}
-			log.Fatalf("Failed to enable flavor: %v", err)
-		}
-		fmt.Printf("Flavor '%s' enabled successfully\n", *flavor)
+	if enable {
+		enableFlavor(ctx, db, flavorName)
 	} else {
-		if err := db.DisableFlavor(ctx, platform, *flavor); err != nil {
-			if errors.Is(err, database.ErrNotExist) {
-				log.Fatalf("Flavor '%s' not found", *flavor)
-			}
-			log.Fatalf("Failed to disable flavor: %v", err)
-		}
-		fmt.Printf("Flavor '%s' disabled successfully\n", *flavor)
+		disableFlavor(ctx, db, flavorName)
 	}
+}
+
+func enableFlavor(ctx context.Context, db *database.Database, flavorName string) {
+	if err := db.EnableFlavor(ctx, platform, flavorName); err != nil {
+		if errors.Is(err, database.ErrNotExist) {
+			log.Fatalf("Flavor '%s' not found", flavorName)
+		}
+		log.Fatalf("Failed to enable flavor: %v", err)
+	}
+	fmt.Printf("Flavor '%s' enabled successfully\n", flavorName)
+}
+
+func disableFlavor(ctx context.Context, db *database.Database, flavorName string) {
+	if err := db.DisableFlavor(ctx, platform, flavorName); err != nil {
+		if errors.Is(err, database.ErrNotExist) {
+			log.Fatalf("Flavor '%s' not found", flavorName)
+		}
+		log.Fatalf("Failed to disable flavor: %v", err)
+	}
+	fmt.Printf("Flavor '%s' disabled successfully\n", flavorName)
 }
