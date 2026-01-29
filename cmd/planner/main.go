@@ -196,13 +196,13 @@ func parseUpdateFlavorFlags() (string, bool) {
 }
 
 func executeFlavorUpdate(flavorName string, enable bool) {
-	dbURI, found := os.LookupEnv(dbURI)
+	dbConnURI, found := os.LookupEnv(dbURI)
 	if !found {
 		log.Fatalln(dbURI, "environment variable not set.")
 	}
 
 	ctx := context.Background()
-	db, err := database.New(ctx, dbURI)
+	db, err := database.New(ctx, dbConnURI)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
