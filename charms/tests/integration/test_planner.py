@@ -76,7 +76,6 @@ def test_planner_github_runner_integration(
         delay=10,
     )
     
-    # jubliant does not support getting relation data.
     unit = f"{github_runner_app}/0"
     stdout = juju.cli("juju", "show-unit", unit, "--format=json")
     result = json.loads(stdout)
@@ -84,6 +83,7 @@ def test_planner_github_runner_integration(
         if relation["related-endpoint"] == planner_app:
             assert "endpoint: http://" in relation["application-data"]["endpoint"]
             assert "token: secret://" in relation["application-data"]["token"]
+            return
     else:
         pytest.fail(f"No relation found for {planner_app}:planner")
         
