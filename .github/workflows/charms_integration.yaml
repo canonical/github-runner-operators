@@ -44,6 +44,8 @@ jobs:
       rockcraft-channel: latest/edge
       charmcraft-channel: latest/edge
       test-tox-env: charms-integration
+      tmate-debug: true
+      tmate-timeout: 300
 
   charms-integration-status-check:
     runs-on: ubuntu-latest
