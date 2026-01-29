@@ -1,5 +1,6 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import json
 import subprocess
 import jubilant
 import pytest
@@ -76,7 +77,13 @@ def test_planner_github_runner_integration(
     )
     
     # jubliant does not support getting relation data.
-    result = subprocess.run(["juju", "show-unit", f"{github_runner_app}/0"], check=True)
-    assert "endpoint: http://" in str(result.stdout)
-    assert "token: secret://" in str(result.stdout)
-    
+    unit = f"{github_runner_app}/0"
+    stdout = juju.cli("juju", "show-unit", unit, "--format=json")
+    result = json.loads(stdout)
+    for relation in result[unit]["relation-info"]:
+        if relation["related-endpoint"] == planner_app:
+            assert "endpoint: http://" in relation["application-data"]["endpoint"]
+            assert "token: secret://" in relation["application-data"]["token"]
+    else:
+        pytest.fail(f"No relation found for {planner_app}:planner")
+        
