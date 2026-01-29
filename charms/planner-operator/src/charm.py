@@ -128,7 +128,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
 
         auth_token_name = self._get_auth_token_name(relation.id)
         if auth_token_name not in auth_token_set:
-            auth_token = self._create_auth_token(self, admin_token, auth_token_name)
+            auth_token = self._create_auth_token(admin_token, auth_token_name)
             secret = self.app.add_secret({"token": auth_token}, label=auth_token_name)
             secret.grant(relation)
             relation.data[self.app][

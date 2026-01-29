@@ -67,7 +67,7 @@ def test_planner_github_runner_integration(
     assert: The integration data contains the endpoint and auth token.
     """
     github_runner_app = any_charm_github_runner_app
-    juju.integrate(planner_app, github_runner_app)
+    juju.integrate(f"{planner_app}:planner", github_runner_app)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
         timeout=6 * 60,
