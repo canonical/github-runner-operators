@@ -256,7 +256,7 @@ def deploy_any_charm_github_runner_app_fixture( juju: jubilant.Juju) -> str:
             class AnyCharm(AnyCharmBase):
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
-                    self.framework.observe(self.on['github-runner-planner-v0'].\
+                    self.framework.observe(self.on['require-github-runner-planner-v0'].\
 relation_changed, self._image_relation_changed)
 
                 def _image_relation_changed(self, event):
