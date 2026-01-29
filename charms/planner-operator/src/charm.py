@@ -6,7 +6,6 @@
 
 import logging
 import pathlib
-import subprocess
 import typing
 
 import ops
@@ -73,7 +72,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         disable = event.params["disable"]
 
         try:
-            result = subprocess.run(
+            process = self._container.exec(
                 [
                     "/usr/local/bin/planner",
                     "update-flavor",
@@ -81,21 +80,20 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                     flavor,
                     "--disable" if disable else "--enable",
                 ],
-                capture_output=True,
-                text=True,
-                check=True,
                 timeout=30,
+                combine_stderr=True,
             )
+            stdout, _ = process.wait_output()
             event.set_results(
                 {
                     "message": f"Flavor '{flavor}' {'disabled' if disable else 'enabled'} successfully",
-                    "output": result.stdout,
+                    "output": stdout,
                 }
             )
-        except subprocess.CalledProcessError as e:
-            event.fail(f"Failed to update flavor: {e.stderr}")
-            logger.error("Failed to update flavor %s: %s", flavor, e.stderr)
-        except subprocess.TimeoutExpired:
+        except ops.pebble.ExecError as e:
+            event.fail(f"Failed to update flavor: {e.stdout}")
+            logger.error("Failed to update flavor %s: %s", flavor, e.stdout)
+        except ops.pebble.TimeoutError:
             event.fail("Command timed out")
             logger.error("Update flavor command timed out for %s", flavor)
         except Exception as e:
