@@ -66,6 +66,7 @@ def test_planner_github_runner_integration(
     act: The planner app and a github-runner app deployed and integrated with each other.
     assert: The integration data contains the endpoint and auth token.
     """
+    github_runner_app = any_charm_github_runner_app
     juju.integrate(planner_app, github_runner_app)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
@@ -75,4 +76,8 @@ def test_planner_github_runner_integration(
     
     # WIP
     status = juju.status()
+    
+    print("############################################################################################")
     print(status)
+    print( status[github_runner_app].relations)
+    print("############################################################################################")
