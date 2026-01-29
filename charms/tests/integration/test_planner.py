@@ -1,5 +1,6 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import subprocess
 import jubilant
 import pytest
 import requests
@@ -74,10 +75,8 @@ def test_planner_github_runner_integration(
         delay=10,
     )
     
-    # WIP
-    status = juju.status()
+    # jubliant does not support getting relation data.
+    result = subprocess.run(["juju", "show-unit", f"{github_runner_app}/0"], check=True)
+    assert "endpoint: http://" in str(result.stdout)
+    assert "token: secret://" in str(result.stdout)
     
-    print("############################################################################################")
-    print(status)
-    print( status[github_runner_app].relations)
-    print("############################################################################################")
