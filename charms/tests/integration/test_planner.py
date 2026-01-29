@@ -77,7 +77,7 @@ def test_planner_github_runner_integration(
     )
     
     unit = f"{github_runner_app}/0"
-    stdout = juju.cli("juju", "show-unit", unit, "--format=json")
+    stdout = juju.cli("show-unit", unit, "--format=json")
     result = json.loads(stdout)
     for relation in result[unit]["relation-info"]:
         if relation["related-endpoint"] == planner_app:
