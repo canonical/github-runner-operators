@@ -56,11 +56,10 @@ def test_planner_prometheus_metrics(
     assert response.status_code == requests.status_codes.codes.OK
 
 
-@pytest.mark.usefixtures("planner_with_integrations", "any_charm_github_runner_app")
 def test_planner_github_runner_integration(
     juju: jubilant.Juju,
     planner_app: str,
-    github_runner_app: str,
+    any_charm_github_runner_app: str,
 ):
     """
     arrange: The planner app and any-charm app mocking github-runner is deployed.
