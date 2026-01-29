@@ -80,6 +80,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                     flavor,
                     "--disable" if disable else "--enable",
                 ],
+                environment=self._gen_environment(),
                 timeout=30,
                 combine_stderr=True,
             )
