@@ -41,6 +41,6 @@ However, since the auth token is stored in the database, it makes sense to store
 
 ## Consequences
 
-Additional impact of the change includes the added API for listing the names of the auth tokens can be used for debugging.
+Additional impact of the change includes the added API for listing the names of the auth tokens, which can be used for debugging.
 A negative consequence would be having an additional API call from the charm to the planner during each execution of charm events.
-This is likely would not have a large impact as the scale keeps the number of the auth token low which makes the database query cheap.
+This likely would not have a large impact as the scale keeps the number of the auth token low, which makes the database query cheap.
