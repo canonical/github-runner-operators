@@ -4,14 +4,12 @@
 
 """Go Charm entrypoint."""
 
-import json
 import logging
 import pathlib
 import typing
-import urllib.request
-import urllib.error
 
 import ops
+import requests
 
 import paas_charm.go
 
@@ -68,9 +66,37 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         setattr(app, "gen_environment", gen_environment)
         return app
 
-    def _update_flavor_via_api(
-        self, flavor_name: str, is_disabled: bool
-    ) -> tuple[bool, str]:
+    def _on_enable_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the enable-flavor action.
+
+        Args:
+            event: The action event.
+        """
+        flavor = event.params["flavor"]
+        try:
+            message = self._update_flavor_via_api(flavor, is_disabled=False)
+            event.set_results({"message": message})
+        except RuntimeError as e:
+            error_msg = str(e)
+            event.fail(error_msg)
+            logger.error("Failed to enable flavor %s: %s", flavor, error_msg)
+
+    def _on_disable_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the disable-flavor action.
+
+        Args:
+            event: The action event.
+        """
+        flavor = event.params["flavor"]
+        try:
+            message = self._update_flavor_via_api(flavor, is_disabled=True)
+            event.set_results({"message": message})
+        except RuntimeError as e:
+            error_msg = str(e)
+            event.fail(error_msg)
+            logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
+
+    def _update_flavor_via_api(self, flavor_name: str, is_disabled: bool) -> str:
         """Update flavor via REST API.
 
         Args:
@@ -78,48 +104,44 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             is_disabled: Whether to disable (True) or enable (False) the flavor.
 
         Returns:
-            A tuple of (success, message).
+            Success message.
+
+        Raises:
+            RuntimeError: If admin token is not configured or API call fails.
         """
         env = self._gen_environment()
         port = env.get("APP_PORT", "8080")
         admin_token = env.get("APP_ADMIN_TOKEN_VALUE")
 
         if not admin_token:
-            return False, "Admin token not configured"
+            raise RuntimeError("Admin token not configured")
 
         url = f"http://127.0.0.1:{port}/api/v1/flavors/{flavor_name}"
 
         try:
             current_flavor = self._get_flavor(url, admin_token)
             if not current_flavor:
-                return False, f"Flavor '{flavor_name}' not found"
+                raise RuntimeError(f"Flavor '{flavor_name}' not found")
 
             current_flavor["is_disabled"] = is_disabled
 
-            data = json.dumps(current_flavor).encode("utf-8")
-            req = urllib.request.Request(
+            response = requests.patch(
                 url,
-                data=data,
-                method="PATCH",
-                headers={
-                    "Authorization": f"Bearer {admin_token}",
-                    "Content-Type": "application/json",
-                },
+                json=current_flavor,
+                headers={"Authorization": f"Bearer {admin_token}"},
+                timeout=10,
             )
+            response.raise_for_status()
+            action = "disabled" if is_disabled else "enabled"
+            return f"Flavor '{flavor_name}' {action} successfully"
 
-            with urllib.request.urlopen(req, timeout=10) as response:
-                if response.status == 200:
-                    action = "disabled" if is_disabled else "enabled"
-                    return True, f"Flavor '{flavor_name}' {action} successfully"
-                return False, f"Unexpected status code: {response.status}"
-
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8") if e.fp else ""
-            return False, f"HTTP error {e.code}: {error_body}"
-        except urllib.error.URLError as e:
-            return False, f"Connection error: {e.reason}"
-        except Exception as e:
-            return False, f"Unexpected error: {str(e)}"
+        except requests.exceptions.HTTPError as e:
+            error_body = e.response.text if e.response else ""
+            raise RuntimeError(
+                f"HTTP error {e.response.status_code}: {error_body}"
+            ) from e
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Connection error: {str(e)}") from e
 
     def _get_flavor(self, url: str, admin_token: str) -> dict[str, typing.Any] | None:
         """Get current flavor configuration from API.
@@ -132,49 +154,15 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             The flavor configuration dict, or None if not found.
         """
         try:
-            req = urllib.request.Request(
+            response = requests.get(
                 url,
-                method="GET",
                 headers={"Authorization": f"Bearer {admin_token}"},
+                timeout=10,
             )
-            with urllib.request.urlopen(req, timeout=10) as response:
-                if response.status == 200:
-                    return json.loads(response.read().decode("utf-8"))
-                return None
-        except urllib.error.HTTPError:
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException:
             return None
-        except Exception:
-            return None
-
-    def _on_enable_flavor_action(self, event: ops.ActionEvent) -> None:
-        """Handle the enable-flavor action.
-
-        Args:
-            event: The action event.
-        """
-        flavor = event.params["flavor"]
-        success, message = self._update_flavor_via_api(flavor, is_disabled=False)
-
-        if success:
-            event.set_results({"message": message})
-        else:
-            event.fail(message)
-            logger.error("Failed to enable flavor %s: %s", flavor, message)
-
-    def _on_disable_flavor_action(self, event: ops.ActionEvent) -> None:
-        """Handle the disable-flavor action.
-
-        Args:
-            event: The action event.
-        """
-        flavor = event.params["flavor"]
-        success, message = self._update_flavor_via_api(flavor, is_disabled=True)
-
-        if success:
-            event.set_results({"message": message})
-        else:
-            event.fail(message)
-            logger.error("Failed to disable flavor %s: %s", flavor, message)
 
 
 if __name__ == "__main__":
