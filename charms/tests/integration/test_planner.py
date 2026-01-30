@@ -86,4 +86,3 @@ def test_planner_github_runner_integration(
             return
     else:
         pytest.fail(f"No relation found for {planner_app}:planner")
- 
