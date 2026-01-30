@@ -244,7 +244,7 @@ def integrate_planner_rabbitmq_postgresql_fixture(
 
 
 @pytest.fixture(scope="module", name="any_charm_github_runner_app")
-def deploy_any_charm_github_runner_app_fixture( juju: jubilant.Juju) -> str:
+def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     """Deploy any charm to act as a GitHub runner application."""
     app_name = "github-runner"
 
@@ -256,8 +256,10 @@ def deploy_any_charm_github_runner_app_fixture( juju: jubilant.Juju) -> str:
             class AnyCharm(AnyCharmBase):
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
-                    self.framework.observe(self.on['require-github-runner-planner-v0'].\
-relation_changed, self._image_relation_changed)
+                    self.framework.observe(
+                        self.on['require-github-runner-planner-v0'].relation_changed,
+                        self._image_relation_changed,
+                    )
 
                 def _image_relation_changed(self, event):
                     pass

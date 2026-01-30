@@ -114,14 +114,14 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
             response.raise_for_status()
-            auth_token_names = response.json().get("name")
+            auth_token_names = response.json()["name"]
         except requests.RequestException as err:
             logger.exception("Failed to list the names of auth tokens")
             raise PlannerError("Failed to list the names of auth tokens") from err
 
         if auth_token_names is None:
             auth_token_names = []
-        auth_token_set = {name for name in auth_token_names}
+        auth_token_set = set(auth_token_names)
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         if not relations or not (relation := relations[0]).units:
@@ -141,7 +141,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         # Clean up any auth tokens that are no longer needed
         for token_name in auth_token_set:
             self.model.get_secret(label=token_name).remove_all_revisions()
-            self._remove_auth_token(self, admin_token, token_name)
+            self._remove_auth_token(admin_token, token_name)
 
     @staticmethod
     def _create_auth_token(admin_token: str, name: str) -> str:
@@ -160,7 +160,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
             response.raise_for_status()
-            return response.json().get("token")
+            return response.json()["token"]
         except requests.RequestException as err:
             logger.exception("Failed to create auth token %s", name)
             raise PlannerError(f"Failed to create auth token {name}") from err
