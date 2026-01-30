@@ -81,8 +81,8 @@ def test_planner_github_runner_integration(
     result = json.loads(stdout)
     for relation in result[unit]["relation-info"]:
         if relation["endpoint"] == "provide-github-runner-planner-v0":
-            assert "endpoint: http://" in relation["application-data"]["endpoint"]
-            assert "token: secret://" in relation["application-data"]["token"]
+            assert "http://" in relation["application-data"]["endpoint"]
+            assert "secret://" in relation["application-data"]["token"]
             return
     else:
         pytest.fail(f"No relation found for {planner_app}:planner")
