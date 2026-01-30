@@ -91,13 +91,22 @@ func (f *fakeStore) GetFlavor(ctx context.Context, name string) (*database.Flavo
 	return nil, f.errToReturn
 }
 
-func (f *fakeStore) UpdateFlavor(ctx context.Context, flavor *database.Flavor) error {
-	f.lastFlavor = flavor
+func (f *fakeStore) DeleteFlavor(ctx context.Context, platform, name string) error {
+	f.lastFlavor = nil
 	return f.errToReturn
 }
 
-func (f *fakeStore) DeleteFlavor(ctx context.Context, platform, name string) error {
-	f.lastFlavor = nil
+func (f *fakeStore) EnableFlavor(ctx context.Context, platform, name string) error {
+	if f.lastFlavor != nil && f.lastFlavor.Name == name {
+		f.lastFlavor.IsDisabled = false
+	}
+	return f.errToReturn
+}
+
+func (f *fakeStore) DisableFlavor(ctx context.Context, platform, name string) error {
+	if f.lastFlavor != nil && f.lastFlavor.Name == name {
+		f.lastFlavor.IsDisabled = true
+	}
 	return f.errToReturn
 }
 
@@ -352,15 +361,15 @@ func TestUpdateFlavor(t *testing.T) {
 		assert: Verify the flavors are updated, and/or the HTTP status codes are as expected.
 	*/
 	tests := []struct {
-		name           string
-		storeFlavor    *database.Flavor
-		storeErr       error
-		url            string
-		body           string
-		expectedStatus int
-		assertFlavor   bool
+		name             string
+		storeFlavor      *database.Flavor
+		storeErr         error
+		url              string
+		body             string
+		expectedStatus   int
+		expectedDisabled bool
 	}{{
-		name: "shouldSucceed",
+		name: "shouldDisableFlavor",
 		storeFlavor: &database.Flavor{
 			Platform:        "github",
 			Name:            "runner-small",
@@ -369,24 +378,36 @@ func TestUpdateFlavor(t *testing.T) {
 			IsDisabled:      false,
 			MinimumPressure: 5,
 		},
-		url:            "/api/v1/flavors/runner-small",
-		body:           `{"platform":"github","name":"runner-small","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
-		expectedStatus: http.StatusOK,
-		assertFlavor:   true,
+		url:              "/api/v1/flavors/runner-small",
+		body:             `{"is_disabled":true}`,
+		expectedStatus:   http.StatusNoContent,
+		expectedDisabled: true,
+	}, {
+		name: "shouldEnableFlavor",
+		storeFlavor: &database.Flavor{
+			Platform:        "github",
+			Name:            "runner-small",
+			Labels:          []string{"x64"},
+			Priority:        10,
+			IsDisabled:      true,
+			MinimumPressure: 5,
+		},
+		url:              "/api/v1/flavors/runner-small",
+		body:             `{"is_disabled":false}`,
+		expectedStatus:   http.StatusNoContent,
+		expectedDisabled: false,
 	}, {
 		name:           "shouldFailWhenFlavorMissing",
 		storeErr:       database.ErrNotExist,
 		url:            "/api/v1/flavors/not-exist",
-		body:           `{"platform":"github","name":"not-exist","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
+		body:           `{"is_disabled":true}`,
 		expectedStatus: http.StatusNotFound,
-		assertFlavor:   false,
 	}, {
 		name:           "shouldFailWhenDatabaseError",
 		storeErr:       errors.New("database error"),
 		url:            "/api/v1/flavors/runner-small",
-		body:           `{"platform":"github","name":"runner-small","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
+		body:           `{"is_disabled":false}`,
 		expectedStatus: http.StatusInternalServerError,
-		assertFlavor:   false,
 	}, {
 		name: "shouldFailWhenNameIsAllFlavors",
 		storeFlavor: &database.Flavor{
@@ -398,7 +419,7 @@ func TestUpdateFlavor(t *testing.T) {
 			MinimumPressure: 5,
 		},
 		url:            "/api/v1/flavors/_",
-		body:           `{"platform":"github","name":"not-exist","labels":["x64"],"priority":5,"is_disabled":false,"minimum_pressure":10}`,
+		body:           `{"is_disabled":true}`,
 		expectedStatus: http.StatusBadRequest,
 	}, {
 		name: "shouldFailOnInvalidJSON",
@@ -427,12 +448,10 @@ func TestUpdateFlavor(t *testing.T) {
 			server.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
-			if tt.assertFlavor {
-				flavor := &database.Flavor{}
-				require.NoError(t, json.Unmarshal([]byte(tt.body), flavor))
-				storedFlavor, err := store.GetFlavor(t.Context(), flavor.Name)
+			if tt.expectedDisabled {
+				storedFlavor, err := store.GetFlavor(t.Context(), tt.storeFlavor.Name)
 				require.NoError(t, err)
-				assert.Equal(t, flavor, storedFlavor)
+				assert.Equal(t, tt.expectedDisabled, storedFlavor.IsDisabled)
 			}
 		})
 	}
