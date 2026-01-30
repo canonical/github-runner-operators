@@ -167,7 +167,7 @@ func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateFlavorRequest struct {
-	IsDisabled bool `json:"is_disabled"`
+	IsDisabled *bool `json:"is_disabled"`
 }
 
 // updateFlavor handles updating an existing flavor's disabled status.
@@ -181,6 +181,11 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.IsDisabled == nil {
+		http.Error(w, "is_disabled field is required", http.StatusBadRequest)
+		return
+	}
+
 	flavorName := r.PathValue("name")
 	if flavorName == allFlavorName {
 		http.Error(w, "update all flavors is not supported", http.StatusBadRequest)
@@ -188,7 +193,7 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var err error
-	if req.IsDisabled {
+	if *req.IsDisabled {
 		err = s.store.DisableFlavor(r.Context(), flavorPlatform, flavorName)
 	} else {
 		err = s.store.EnableFlavor(r.Context(), flavorPlatform, flavorName)

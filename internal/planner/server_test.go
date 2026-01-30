@@ -434,6 +434,19 @@ func TestUpdateFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/runner-small",
 		body:           `{invalid-json}`,
 		expectedStatus: http.StatusBadRequest,
+	}, {
+		name: "shouldFailWhenIsDisabledFieldMissing",
+		storeFlavor: &database.Flavor{
+			Platform:        "github",
+			Name:            "runner-small",
+			Labels:          []string{"x64"},
+			Priority:        10,
+			IsDisabled:      false,
+			MinimumPressure: 5,
+		},
+		url:            "/api/v1/flavors/runner-small",
+		body:           `{}`,
+		expectedStatus: http.StatusBadRequest,
 	}}
 
 	for _, tt := range tests {
@@ -448,7 +461,7 @@ func TestUpdateFlavor(t *testing.T) {
 			server.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
-			if tt.expectedDisabled {
+			if tt.expectedStatus == http.StatusNoContent {
 				storedFlavor, err := store.GetFlavor(t.Context(), tt.storeFlavor.Name)
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedDisabled, storedFlavor.IsDisabled)
