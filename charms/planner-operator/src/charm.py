@@ -10,6 +10,7 @@ import typing
 
 import requests
 import ops
+
 import paas_charm.go
 
 logger = logging.getLogger(__name__)
