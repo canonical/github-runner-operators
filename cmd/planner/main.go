@@ -13,8 +13,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -38,7 +36,6 @@ const (
 	adminTokenEnvVar  = "APP_ADMIN_TOKEN_VALUE"
 	serviceName       = "github-runner-planner"
 	rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
-	platform          = "github"
 	shutdownTimeout   = 30 * time.Second
 	heartbeatInterval = 30 * time.Second
 )
