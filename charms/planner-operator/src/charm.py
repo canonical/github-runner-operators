@@ -4,9 +4,12 @@
 
 """Go Charm entrypoint."""
 
+import json
 import logging
 import pathlib
 import typing
+import urllib.request
+import urllib.error
 
 import ops
 
@@ -26,7 +29,10 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(
-            self.on.update_flavor_action, self._on_update_flavor_action
+            self.on.enable_flavor_action, self._on_enable_flavor_action
+        )
+        self.framework.observe(
+            self.on.disable_flavor_action, self._on_disable_flavor_action
         )
 
     def get_cos_dir(self) -> str:
@@ -62,44 +68,113 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         setattr(app, "gen_environment", gen_environment)
         return app
 
-    def _on_update_flavor_action(self, event: ops.ActionEvent) -> None:
-        """Handle the update-flavor action.
+    def _update_flavor_via_api(
+        self, flavor_name: str, is_disabled: bool
+    ) -> tuple[bool, str]:
+        """Update flavor via REST API.
+
+        Args:
+            flavor_name: The name of the flavor to update.
+            is_disabled: Whether to disable (True) or enable (False) the flavor.
+
+        Returns:
+            A tuple of (success, message).
+        """
+        env = self._gen_environment()
+        port = env.get("APP_PORT", "8080")
+        admin_token = env.get("APP_ADMIN_TOKEN_VALUE")
+
+        if not admin_token:
+            return False, "Admin token not configured"
+
+        url = f"http://127.0.0.1:{port}/api/v1/flavors/{flavor_name}"
+
+        try:
+            current_flavor = self._get_flavor(url, admin_token)
+            if not current_flavor:
+                return False, f"Flavor '{flavor_name}' not found"
+
+            current_flavor["is_disabled"] = is_disabled
+
+            data = json.dumps(current_flavor).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                method="PATCH",
+                headers={
+                    "Authorization": f"Bearer {admin_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    action = "disabled" if is_disabled else "enabled"
+                    return True, f"Flavor '{flavor_name}' {action} successfully"
+                return False, f"Unexpected status code: {response.status}"
+
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            return False, f"HTTP error {e.code}: {error_body}"
+        except urllib.error.URLError as e:
+            return False, f"Connection error: {e.reason}"
+        except Exception as e:
+            return False, f"Unexpected error: {str(e)}"
+
+    def _get_flavor(self, url: str, admin_token: str) -> dict[str, typing.Any] | None:
+        """Get current flavor configuration from API.
+
+        Args:
+            url: The API URL for the flavor.
+            admin_token: The admin authentication token.
+
+        Returns:
+            The flavor configuration dict, or None if not found.
+        """
+        try:
+            req = urllib.request.Request(
+                url,
+                method="GET",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    return json.loads(response.read().decode("utf-8"))
+                return None
+        except urllib.error.HTTPError:
+            return None
+        except Exception:
+            return None
+
+    def _on_enable_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the enable-flavor action.
 
         Args:
             event: The action event.
         """
         flavor = event.params["flavor"]
-        disable = event.params["disable"]
+        success, message = self._update_flavor_via_api(flavor, is_disabled=False)
 
-        try:
-            process = self._container.exec(
-                [
-                    "/usr/local/bin/planner",
-                    "update-flavor",
-                    "--flavor",
-                    flavor,
-                    "--disable" if disable else "--enable",
-                ],
-                environment=self._gen_environment(),
-                timeout=30,
-                combine_stderr=True,
-            )
-            stdout, _ = process.wait_output()
-            event.set_results(
-                {
-                    "message": f"Flavor '{flavor}' {'disabled' if disable else 'enabled'} successfully",
-                    "output": stdout,
-                }
-            )
-        except ops.pebble.ExecError as e:
-            event.fail(f"Failed to update flavor: {e.stdout}")
-            logger.error("Failed to update flavor %s: %s", flavor, e.stdout)
-        except ops.pebble.TimeoutError:
-            event.fail("Command timed out")
-            logger.error("Update flavor command timed out for %s", flavor)
-        except Exception as e:
-            event.fail(f"Unexpected error: {str(e)}")
-            logger.exception("Unexpected error updating flavor %s", flavor)
+        if success:
+            event.set_results({"message": message})
+        else:
+            event.fail(message)
+            logger.error("Failed to enable flavor %s: %s", flavor, message)
+
+    def _on_disable_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the disable-flavor action.
+
+        Args:
+            event: The action event.
+        """
+        flavor = event.params["flavor"]
+        success, message = self._update_flavor_via_api(flavor, is_disabled=True)
+
+        if success:
+            event.set_results({"message": message})
+        else:
+            event.fail(message)
+            logger.error("Failed to disable flavor %s: %s", flavor, message)
 
 
 if __name__ == "__main__":

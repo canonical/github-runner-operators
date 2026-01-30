@@ -57,14 +57,14 @@ def test_planner_prometheus_metrics(
 
 
 @pytest.mark.usefixtures("planner_with_integrations")
-def test_planner_update_flavor_action(
+def test_planner_enable_disable_flavor_actions(
     juju: jubilant.Juju,
     planner_app: str,
     user_token: str,
 ):
     """
     arrange: The planner app is deployed with required integrations and a flavor exists.
-    act: Run update-flavor action to disable and then enable the flavor.
+    act: Run disable-flavor and enable-flavor actions.
     assert: Flavor is disabled and enabled correctly as verified via API.
     """
     status = juju.status()
@@ -100,8 +100,8 @@ def test_planner_update_flavor_action(
     unit_name = f"{planner_app}/0"
     result = juju.run(
         unit_name,
-        "update-flavor",
-        params={"flavor": flavor_name, "disable": True},
+        "disable-flavor",
+        params={"flavor": flavor_name},
     )
     assert result.status == "completed", f"Action failed: {result.results}"
     assert "successfully" in result.results.get("message", "").lower()
@@ -118,8 +118,8 @@ def test_planner_update_flavor_action(
     # Run action to enable the flavor
     result = juju.run(
         unit_name,
-        "update-flavor",
-        params={"flavor": flavor_name, "disable": False},
+        "enable-flavor",
+        params={"flavor": flavor_name},
     )
     assert result.status == "completed", f"Action failed: {result.results}"
     assert "successfully" in result.results.get("message", "").lower()

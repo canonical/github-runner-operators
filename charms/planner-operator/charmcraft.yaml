@@ -45,14 +45,19 @@ config:
         numbers, hyphens (-), or underscores (_). To generate the token, you can run `echo "planner_v0_$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]' | head -c 20)"`
 
 actions:
-  update-flavor:
-    description: Enable or disable a specific flavor
+  enable-flavor:
+    description: Enable a specific flavor
     params:
       flavor:
         type: string
-        description: Name of the flavor to update
-      disable:
-        type: boolean
-        description: True to disable the flavor, false to enable it
-    required: [flavor, disable]
+        description: Name of the flavor to enable
+    required: [flavor]
+    additionalProperties: false
+  disable-flavor:
+    description: Disable a specific flavor
+    params:
+      flavor:
+        type: string
+        description: Name of the flavor to disable
+    required: [flavor]
     additionalProperties: false

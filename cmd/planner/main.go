@@ -56,11 +56,6 @@ type config struct {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "update-flavor" {
-		handleUpdateFlavor()
-		return
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -167,70 +162,4 @@ func shutdown(server *http.Server, consumer *planner.JobConsumer, consumerWg *sy
 	if err := telemetry.Shutdown(shutdownCtx); err != nil {
 		log.Printf("failed to shutdown telemetry: %v", err)
 	}
-}
-
-func handleUpdateFlavor() {
-	flavorName, shouldEnable := parseUpdateFlavorFlags()
-	executeFlavorUpdate(flavorName, shouldEnable)
-}
-
-func parseUpdateFlavorFlags() (string, bool) {
-	updateCmd := flag.NewFlagSet("update-flavor", flag.ExitOnError)
-	flavor := updateCmd.String("flavor", "", "Name of the flavor to update")
-	disable := updateCmd.Bool("disable", false, "Disable the flavor")
-	enable := updateCmd.Bool("enable", false, "Enable the flavor")
-
-	if err := updateCmd.Parse(os.Args[2:]); err != nil {
-		log.Fatalf("Failed to parse flags: %v", err)
-	}
-
-	if *flavor == "" {
-		log.Fatalln("--flavor is required")
-	}
-
-	if *enable == *disable {
-		log.Fatalln("exactly one of --enable or --disable must be specified")
-	}
-
-	return *flavor, *enable
-}
-
-func executeFlavorUpdate(flavorName string, enable bool) {
-	dbConnURI, found := os.LookupEnv(dbURI)
-	if !found {
-		log.Fatalln(dbURI, "environment variable not set.")
-	}
-
-	ctx := context.Background()
-	db, err := database.New(ctx, dbConnURI)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-
-	if enable {
-		enableFlavor(ctx, db, flavorName)
-	} else {
-		disableFlavor(ctx, db, flavorName)
-	}
-}
-
-func enableFlavor(ctx context.Context, db *database.Database, flavorName string) {
-	if err := db.EnableFlavor(ctx, platform, flavorName); err != nil {
-		if errors.Is(err, database.ErrNotExist) {
-			log.Fatalf("Flavor '%s' not found", flavorName)
-		}
-		log.Fatalf("Failed to enable flavor: %v", err)
-	}
-	fmt.Printf("Flavor '%s' enabled successfully\n", flavorName)
-}
-
-func disableFlavor(ctx context.Context, db *database.Database, flavorName string) {
-	if err := db.DisableFlavor(ctx, platform, flavorName); err != nil {
-		if errors.Is(err, database.ErrNotExist) {
-			log.Fatalf("Flavor '%s' not found", flavorName)
-		}
-		log.Fatalf("Failed to disable flavor: %v", err)
-	}
-	fmt.Printf("Flavor '%s' disabled successfully\n", flavorName)
 }
