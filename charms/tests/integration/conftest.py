@@ -250,7 +250,7 @@ def deploy_any_charm_github_runner_app_fixture( juju: jubilant.Juju) -> str:
 
     any_charm_src_overwrite = {
         "any_charm.py": textwrap.dedent(
-            f"""\
+            """\
             from any_charm_base import AnyCharmBase
 
             class AnyCharm(AnyCharmBase):
