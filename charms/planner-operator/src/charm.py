@@ -134,7 +134,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             secret.grant(relation)
             relation.data[self.app][
                 "endpoint"
-            ] = f"http://{self.model.get_binding(relation).network.bind_address}:{HTTP_PORT}"
+            ] = self._base_url
             relation.data[self.app]["token"] = secret.id
         auth_token_set.discard(auth_token_name)
 
