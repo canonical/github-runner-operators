@@ -29,6 +29,10 @@ class PlannerError(Exception):
     """Error for planner application issues."""
 
 
+class JujuError(Exception):
+    """Error for Juju-related issues."""
+
+
 class GithubRunnerPlannerCharm(paas_charm.go.Charm):
     """Go Charm service."""
 
@@ -114,7 +118,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
             response.raise_for_status()
-            auth_token_names = response.json()["names"]
+            auth_token_names = [
+                token
+                for token in response.json()["names"]
+                if self._check_name_fit_auth_token(token)
+            ]
         except requests.RequestException as err:
             logger.exception("Failed to list the names of auth tokens")
             raise PlannerError("Failed to list the names of auth tokens") from err
@@ -124,16 +132,32 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         auth_token_set = set(auth_token_names)
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
-        
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
             if auth_token_name not in auth_token_set:
                 auth_token = self._create_auth_token(admin_token, auth_token_name)
-                secret = self.app.add_secret({"token": auth_token}, label=auth_token_name)
-                secret.grant(relation)
-                relation.data[self.app][
-                    "endpoint"
-                ] = self._base_url
+                try:
+                    secret = self.app.add_secret(
+                        {"token": auth_token}, label=auth_token_name
+                    )
+                    secret.grant(relation)
+                except ValueError as err:
+                    logger.exception(
+                        "Failed to add secret for relation %d", relation.id
+                    )
+                    raise JujuError(
+                        f"Failed to create or grant secret for relation {relation.id}"
+                    ) from err
+                except ops.hookcmds.Error as err:
+                    logger.exception(
+                        "Failed to grant secret for relation %d", relation.id
+                    )
+                    raise JujuError(
+                        f"Failed to grant secret for relation {relation.id}"
+                    ) from err
+                # The _base_url is set up by the parent class paas_charm.go.Charm.
+                # It points to the ingress URL if there is one, otherwise it points to the K8S service.
+                relation.data[self.app]["endpoint"] = self._base_url
                 relation.data[self.app]["token"] = secret.id
             auth_token_set.discard(auth_token_name)
 
@@ -144,7 +168,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 secret.remove_all_revisions()
             except ops.SecretNotFoundError:
                 # It is fine if the secret is already removed.
-                logger.debug("Secret with label %s not found during cleanup", token_name)
+                logger.debug(
+                    "Secret with label %s not found during cleanup", token_name
+                )
             self._remove_auth_token(admin_token, token_name)
 
     @staticmethod
@@ -193,7 +219,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         if not admin_token_secret_id:
             raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} config value is not set")
         admin_token_secret = self.model.get_secret(id=admin_token_secret_id)
-        return admin_token_secret.get_content().get("value")
+        return admin_token_secret.get_content()["value"]
 
     @staticmethod
     def _get_auth_token_name(relation_id: int) -> str:
@@ -206,6 +232,18 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             The auth token name.
         """
         return f"relation-{relation_id}"
+
+    @staticmethod
+    def _check_name_fit_auth_token(name: str) -> bool:
+        """Check if the name fits the auth token naming requirements.
+
+        Args:
+            name: The name to check.
+
+        Returns:
+            True if the name fits the requirements, False otherwise.
+        """
+        return name.startswith("relation-")
 
 
 if __name__ == "__main__":
