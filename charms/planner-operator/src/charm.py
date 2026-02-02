@@ -124,23 +124,27 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         auth_token_set = set(auth_token_names)
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
-        if not relations or not (relation := relations[0]).units:
-            return
-
-        auth_token_name = self._get_auth_token_name(relation.id)
-        if auth_token_name not in auth_token_set:
-            auth_token = self._create_auth_token(admin_token, auth_token_name)
-            secret = self.app.add_secret({"token": auth_token}, label=auth_token_name)
-            secret.grant(relation)
-            relation.data[self.app][
-                "endpoint"
-            ] = self._base_url
-            relation.data[self.app]["token"] = secret.id
-        auth_token_set.discard(auth_token_name)
+        
+        for relation in relations:
+            auth_token_name = self._get_auth_token_name(relation.id)
+            if auth_token_name not in auth_token_set:
+                auth_token = self._create_auth_token(admin_token, auth_token_name)
+                secret = self.app.add_secret({"token": auth_token}, label=auth_token_name)
+                secret.grant(relation)
+                relation.data[self.app][
+                    "endpoint"
+                ] = self._base_url
+                relation.data[self.app]["token"] = secret.id
+            auth_token_set.discard(auth_token_name)
 
         # Clean up any auth tokens that are no longer needed
         for token_name in auth_token_set:
-            self.model.get_secret(label=token_name).remove_all_revisions()
+            try:
+                secret = self.model.get_secret(label=token_name)
+                secret.remove_all_revisions()
+            except ops.SecretNotFoundError:
+                # It is fine if the secret is already removed.
+                logger.debug("Secret with label %s not found during cleanup", token_name)
             self._remove_auth_token(admin_token, token_name)
 
     @staticmethod
@@ -174,6 +178,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             name: The name of the auth token.
         """
         try:
+            # If the token does not exist, the response code will be 204 No Content.
             response = requests.delete(
                 f"http://localhost:{HTTP_PORT}/api/v1/auth/token/{name}",
                 headers={"Authorization": f"Bearer {admin_token}"},
