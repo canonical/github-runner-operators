@@ -45,7 +45,8 @@ var (
 type FlavorStore interface {
 	AddFlavor(ctx context.Context, flavor *database.Flavor) error
 	ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error)
-	UpdateFlavor(ctx context.Context, flavor *database.Flavor) error
+	EnableFlavor(ctx context.Context, platform, name string) error
+	DisableFlavor(ctx context.Context, platform, name string) error
 	GetFlavor(ctx context.Context, name string) (*database.Flavor, error)
 	DeleteFlavor(ctx context.Context, platform string, name string) error
 	GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error)
@@ -165,15 +166,23 @@ func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, flavor)
 }
 
-// updateFlavor handles updating an existing flavor.
-// If the flavor name is allFlavorName, returns status code 400.
-// If the flavor is not found, returns status code 404.
-// If updating the flavor fails, returns status code 500.
-// If successful, returns status code 200.
+type updateFlavorRequest struct {
+	IsDisabled *bool `json:"is_disabled"`
+}
+
+// updateFlavor handles updating an existing flavor's disabled status.
 func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeFlavorInRequestBody(r)
-	if err != nil {
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	req := &updateFlavorRequest{}
+	if err := decoder.Decode(req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.IsDisabled == nil {
+		http.Error(w, "is_disabled field is required", http.StatusBadRequest)
 		return
 	}
 
@@ -182,16 +191,14 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "update all flavors is not supported", http.StatusBadRequest)
 		return
 	}
-	flavor := &database.Flavor{
-		Name:            flavorName,
-		Platform:        req.Platform,
-		Labels:          req.Labels,
-		Priority:        req.Priority,
-		IsDisabled:      req.IsDisabled,
-		MinimumPressure: req.MinimumPressure,
+
+	var err error
+	if *req.IsDisabled {
+		err = s.store.DisableFlavor(r.Context(), flavorPlatform, flavorName)
+	} else {
+		err = s.store.EnableFlavor(r.Context(), flavorPlatform, flavorName)
 	}
 
-	err = s.store.UpdateFlavor(r.Context(), flavor)
 	if errors.Is(err, database.ErrNotExist) {
 		http.Error(w, "cannot find flavor to update", http.StatusNotFound)
 		return
@@ -200,7 +207,7 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("cannot update flavor: %v", err), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // deleteFlavor handles deleting an existing flavor.
