@@ -114,7 +114,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
             response.raise_for_status()
-            auth_token_names = response.json()["name"]
+            auth_token_names = response.json()["names"]
         except requests.RequestException as err:
             logger.exception("Failed to list the names of auth tokens")
             raise PlannerError("Failed to list the names of auth tokens") from err
