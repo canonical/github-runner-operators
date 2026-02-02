@@ -8,11 +8,10 @@ import logging
 import pathlib
 import typing
 
-import requests
 import ops
-import requests
 
 import paas_charm.go
+from planner import PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +23,6 @@ ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
 
 class ConfigError(Exception):
     """Error for configuration issues."""
-
-
-class PlannerError(Exception):
-    """Error for planner application issues."""
 
 
 class JujuError(Exception):
@@ -89,6 +84,20 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         setattr(app, "gen_environment", gen_environment)
         return app
 
+    def _create_planner_client(self, admin_token: str) -> PlannerClient:
+        """Create a planner client instance.
+
+        Args:
+            admin_token: Admin token for authentication.
+
+        Returns:
+            PlannerClient instance.
+        """
+        env = self._gen_environment()
+        port = env.get("APP_PORT", "8080")
+        base_url = f"http://127.0.0.1:{port}"
+        return PlannerClient(base_url, admin_token)
+
     def _on_enable_flavor_action(self, event: ops.ActionEvent) -> None:
         """Handle the enable-flavor action.
 
@@ -97,9 +106,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """
         flavor = event.params["flavor"]
         try:
-            message = self._update_flavor_via_api(flavor, is_disabled=False)
-            event.set_results({"message": message})
-        except RuntimeError as e:
+            admin_token = self._get_admin_token()
+            client = self._create_planner_client(admin_token)
+            client.update_flavor(flavor, is_disabled=False)
+            event.set_results({"message": f"Flavor '{flavor}' enabled successfully"})
+        except (ConfigError, PlannerError, RuntimeError) as e:
             error_msg = str(e)
             event.fail(error_msg)
             logger.error("Failed to enable flavor %s: %s", flavor, error_msg)
@@ -112,80 +123,15 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """
         flavor = event.params["flavor"]
         try:
-            message = self._update_flavor_via_api(flavor, is_disabled=True)
-            event.set_results({"message": message})
-        except RuntimeError as e:
+            admin_token = self._get_admin_token()
+            client = self._create_planner_client(admin_token)
+            client.update_flavor(flavor, is_disabled=True)
+            event.set_results({"message": f"Flavor '{flavor}' disabled successfully"})
+        except (ConfigError, PlannerError, RuntimeError) as e:
             error_msg = str(e)
             event.fail(error_msg)
             logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
 
-    def _update_flavor_via_api(self, flavor_name: str, is_disabled: bool) -> str:
-        """Update flavor via REST API.
-
-        Args:
-            flavor_name: The name of the flavor to update.
-            is_disabled: Whether to disable (True) or enable (False) the flavor.
-
-        Returns:
-            Success message.
-
-        Raises:
-            RuntimeError: If admin token is not configured or API call fails.
-        """
-        env = self._gen_environment()
-        port = env.get("APP_PORT", "8080")
-        admin_token = env.get("APP_ADMIN_TOKEN_VALUE")
-
-        if not admin_token:
-            raise RuntimeError("Admin token not configured")
-
-        url = f"http://127.0.0.1:{port}/api/v1/flavors/{flavor_name}"
-
-        try:
-            current_flavor = self._get_flavor(url, admin_token)
-            if not current_flavor:
-                raise RuntimeError(f"Flavor '{flavor_name}' not found")
-
-            current_flavor["is_disabled"] = is_disabled
-
-            response = requests.patch(
-                url,
-                json=current_flavor,
-                headers={"Authorization": f"Bearer {admin_token}"},
-                timeout=10,
-            )
-            response.raise_for_status()
-            action = "disabled" if is_disabled else "enabled"
-            return f"Flavor '{flavor_name}' {action} successfully"
-
-        except requests.exceptions.HTTPError as e:
-            error_body = e.response.text if e.response else ""
-            raise RuntimeError(
-                f"HTTP error {e.response.status_code}: {error_body}"
-            ) from e
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Connection error: {str(e)}") from e
-
-    def _get_flavor(self, url: str, admin_token: str) -> dict[str, typing.Any] | None:
-        """Get current flavor configuration from API.
-
-        Args:
-            url: The API URL for the flavor.
-            admin_token: The admin authentication token.
-
-        Returns:
-            The flavor configuration dict, or None if not found.
-        """
-        try:
-            response = requests.get(
-                url,
-                headers={"Authorization": f"Bearer {admin_token}"},
-                timeout=10,
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException:
-            return None
     def _on_manager_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         """Handle changes to the github-runner-manager relation."""
         self._setup()
@@ -215,31 +161,18 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         if not self.unit.is_leader():
             return
 
-        auth_token_names = None
-        try:
-            response = requests.get(
-                f"http://localhost:{HTTP_PORT}/api/v1/auth/token",
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            response.raise_for_status()
-            auth_token_names = [
-                token
-                for token in response.json()["names"]
-                if self._check_name_fit_auth_token(token)
-            ]
-        except requests.RequestException as err:
-            logger.exception("Failed to list the names of auth tokens")
-            raise PlannerError("Failed to list the names of auth tokens") from err
-
-        if auth_token_names is None:
-            auth_token_names = []
+        client = self._create_planner_client(admin_token)
+        all_token_names = client.list_auth_token_names()
+        auth_token_names = [
+            token for token in all_token_names if self._check_name_fit_auth_token(token)
+        ]
         auth_token_set = set(auth_token_names)
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
             if auth_token_name not in auth_token_set:
-                auth_token = self._create_auth_token(admin_token, auth_token_name)
+                auth_token = client.create_auth_token(auth_token_name)
                 try:
                     secret = self.app.add_secret(
                         {"token": auth_token}, label=auth_token_name
@@ -275,48 +208,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 logger.debug(
                     "Secret with label %s not found during cleanup", token_name
                 )
-            self._remove_auth_token(admin_token, token_name)
-
-    @staticmethod
-    def _create_auth_token(admin_token: str, name: str) -> str:
-        """Create an auth token secret in the planner application.
-
-        Args:
-            admin_token: The admin token for making API requests to planner.
-            name: The name of the auth token.
-
-        Returns:
-            The auth token.
-        """
-        try:
-            response = requests.post(
-                f"http://localhost:{HTTP_PORT}/api/v1/auth/token/{name}",
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            response.raise_for_status()
-            return response.json()["token"]
-        except requests.RequestException as err:
-            logger.exception("Failed to create auth token %s", name)
-            raise PlannerError(f"Failed to create auth token {name}") from err
-
-    @staticmethod
-    def _remove_auth_token(admin_token: str, name: str) -> None:
-        """Remove an auth token secret in the planner application.
-
-        Args:
-            admin_token: The admin token for making API requests to planner.
-            name: The name of the auth token.
-        """
-        try:
-            # If the token does not exist, the response code will be 204 No Content.
-            response = requests.delete(
-                f"http://localhost:{HTTP_PORT}/api/v1/auth/token/{name}",
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            response.raise_for_status()
-        except requests.RequestException as err:
-            logger.exception("Failed to remove auth token %s", name)
-            raise PlannerError(f"Failed to remove auth token {name}") from err
+            client.delete_auth_token(token_name)
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
