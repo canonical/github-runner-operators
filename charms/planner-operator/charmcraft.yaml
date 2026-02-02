@@ -34,6 +34,8 @@ requires:
     interface: postgresql_client
     optional: false
     limit: 1
+  planner:
+    interface: github_runner_planner_v0
 
 config:
   options:
