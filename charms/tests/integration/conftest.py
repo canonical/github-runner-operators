@@ -3,6 +3,7 @@
 import logging
 import secrets
 import string
+import textwrap
 from typing import Iterator
 
 import jubilant
@@ -82,7 +83,9 @@ def planner_admin_token_value_fixture() -> str:
 
 
 @pytest.fixture(scope="module", name="planner_admin_token_uri")
-def create_planner_admin_token_uri_fixture(juju: jubilant.Juju, planner_admin_token_value: str) -> str:
+def create_planner_admin_token_uri_fixture(
+    juju: jubilant.Juju, planner_admin_token_value: str
+) -> str:
     """Create a Juju secret for the planner admin token and return its URI.
 
     Secret is created before the app is deployed so it can be referenced in config.
@@ -238,3 +241,40 @@ def integrate_planner_rabbitmq_postgresql_fixture(
         delay=30,
     )
     return planner_app
+
+
+@pytest.fixture(scope="module", name="any_charm_github_runner_app")
+def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any charm to act as a GitHub runner application."""
+    app_name = "github-runner"
+
+    any_charm_src_overwrite = {
+        "any_charm.py": textwrap.dedent(
+            """\
+            from any_charm_base import AnyCharmBase
+
+            class AnyCharm(AnyCharmBase):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.framework.observe(
+                        self.on['require-github-runner-planner-v0'].relation_changed,
+                        self._image_relation_changed,
+                    )
+
+                def _image_relation_changed(self, event):
+                    pass
+            """
+        ),
+    }
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+        config={"src-overwrite": any_charm_src_overwrite},
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+    return app_name
