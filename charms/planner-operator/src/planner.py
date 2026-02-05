@@ -1,4 +1,4 @@
-# Copyright 2026 Ubuntu
+# Copyright 2026 Canonical
 # See LICENSE file for licensing details.
 
 """Planner API client."""
