@@ -84,19 +84,17 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         setattr(app, "gen_environment", gen_environment)
         return app
 
-    def _create_planner_client(self, admin_token: str) -> PlannerClient:
+    def _create_planner_client(self) -> PlannerClient:
         """Create a planner client instance.
-
-        Args:
-            admin_token: Admin token for authentication.
 
         Returns:
             PlannerClient instance.
         """
+        admin_token = self._get_admin_token()
         env = self._gen_environment()
         port = env.get("APP_PORT", "8080")
         base_url = f"http://127.0.0.1:{port}"
-        return PlannerClient(base_url, admin_token)
+        return PlannerClient(base_url=base_url, admin_token=admin_token)
 
     def _on_enable_flavor_action(self, event: ops.ActionEvent) -> None:
         """Handle the enable-flavor action.
@@ -106,9 +104,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """
         flavor = event.params["flavor"]
         try:
-            admin_token = self._get_admin_token()
-            client = self._create_planner_client(admin_token)
-            client.update_flavor(flavor, is_disabled=False)
+            client = self._create_planner_client()
+            client.update_flavor(flavor_name=flavor, is_disabled=False)
             event.set_results({"message": f"Flavor '{flavor}' enabled successfully"})
         except (ConfigError, PlannerError, RuntimeError) as e:
             error_msg = str(e)
@@ -123,9 +120,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """
         flavor = event.params["flavor"]
         try:
-            admin_token = self._get_admin_token()
-            client = self._create_planner_client(admin_token)
-            client.update_flavor(flavor, is_disabled=True)
+            client = self._create_planner_client()
+            client.update_flavor(flavor_name=flavor, is_disabled=True)
             event.set_results({"message": f"Flavor '{flavor}' disabled successfully"})
         except (ConfigError, PlannerError, RuntimeError) as e:
             error_msg = str(e)
@@ -140,7 +136,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """Setup the planner application."""
         self.unit.status = ops.MaintenanceStatus("Setting up planner application")
         try:
-            admin_token = self._get_admin_token()
+            self._get_admin_token()
         except ConfigError:
             logger.exception("Missing %s configuration", ADMIN_TOKEN_CONFIG_NAME)
             self.unit.status = ops.BlockedStatus(
@@ -149,19 +145,15 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             return
 
         self.unit.status = ops.MaintenanceStatus("Setup planner integrations")
-        self._setup_planner_relation(admin_token)
+        self._setup_planner_relation()
         self.unit.status = ops.ActiveStatus()
 
-    def _setup_planner_relation(self, admin_token: str) -> None:
-        """Setup the planner relations if this unit is the leader.
-
-        Args:
-            admin_token: The admin token for making API requests to planner.
-        """
+    def _setup_planner_relation(self) -> None:
+        """Setup the planner relations if this unit is the leader."""
         if not self.unit.is_leader():
             return
 
-        client = self._create_planner_client(admin_token)
+        client = self._create_planner_client()
         all_token_names = client.list_auth_token_names()
         auth_token_names = [
             token for token in all_token_names if self._check_name_fit_auth_token(token)

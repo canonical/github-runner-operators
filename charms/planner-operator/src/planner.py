@@ -52,8 +52,8 @@ class PlannerClient:
 
         try:
             response = requests.request(
-                method,
-                url,
+                method=method,
+                url=url,
                 json=json_data,
                 headers=headers,
                 timeout=self._timeout,
@@ -80,7 +80,9 @@ class PlannerClient:
             RuntimeError: If connection fails.
         """
         self._request(
-            "PATCH", f"/api/v1/flavors/{flavor_name}", {"is_disabled": is_disabled}
+            method="PATCH",
+            path=f"/api/v1/flavors/{flavor_name}",
+            json_data={"is_disabled": is_disabled},
         )
 
     def list_auth_token_names(self) -> list[str]:
@@ -93,7 +95,7 @@ class PlannerClient:
             PlannerError: If API returns non-2xx status code.
             RuntimeError: If connection fails.
         """
-        response = self._request("GET", "/api/v1/auth/token")
+        response = self._request(method="GET", path="/api/v1/auth/token")
         return response.json()["names"]
 
     def create_auth_token(self, name: str) -> str:
@@ -109,7 +111,7 @@ class PlannerClient:
             PlannerError: If API returns non-2xx status code.
             RuntimeError: If connection fails.
         """
-        response = self._request("POST", f"/api/v1/auth/token/{name}")
+        response = self._request(method="POST", path=f"/api/v1/auth/token/{name}")
         return response.json()["token"]
 
     def delete_auth_token(self, name: str) -> None:
@@ -122,4 +124,4 @@ class PlannerClient:
             PlannerError: If API returns non-2xx status code.
             RuntimeError: If connection fails.
         """
-        self._request("DELETE", f"/api/v1/auth/token/{name}")
+        self._request(method="DELETE", path=f"/api/v1/auth/token/{name}")
