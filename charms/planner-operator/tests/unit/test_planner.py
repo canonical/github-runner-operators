@@ -1,8 +1,9 @@
-# Copyright 2026 Canonical
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Unit test for planner client."""
 
+import pytest
 import requests
 
 from planner import PlannerClient, PlannerError
@@ -69,12 +70,8 @@ def test_http_error_raises_planner_error(requests_mock: object) -> None:
     )
     client = PlannerClient(base_url=base_url, admin_token="token")
 
-    try:
+    with pytest.raises(PlannerError, match="HTTP error 400"):
         client.list_auth_token_names()
-    except PlannerError as exc:
-        assert "HTTP error 400" in str(exc)
-    else:
-        raise AssertionError("PlannerError not raised")
 
 
 def test_connection_error_raises_runtime_error(requests_mock: object) -> None:
@@ -89,9 +86,5 @@ def test_connection_error_raises_runtime_error(requests_mock: object) -> None:
     )
     client = PlannerClient(base_url=base_url, admin_token="token")
 
-    try:
+    with pytest.raises(RuntimeError, match="Connection error"):
         client.list_auth_token_names()
-    except RuntimeError as exc:
-        assert "Connection error" in str(exc)
-    else:
-        raise AssertionError("RuntimeError not raised")
