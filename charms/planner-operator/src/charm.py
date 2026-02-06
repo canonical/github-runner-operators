@@ -9,8 +9,8 @@ import pathlib
 import typing
 
 import ops
-
 import paas_charm.go
+
 from planner import PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
