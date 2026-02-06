@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 Ubuntu
+# Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 """Go Charm entrypoint."""
@@ -8,10 +8,10 @@ import logging
 import pathlib
 import typing
 
-import requests
 import ops
-
 import paas_charm.go
+
+from planner import PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,6 @@ ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
 
 class ConfigError(Exception):
     """Error for configuration issues."""
-
-
-class PlannerError(Exception):
-    """Error for planner application issues."""
 
 
 class JujuError(Exception):
@@ -43,6 +39,12 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
+        self.framework.observe(
+            self.on.enable_flavor_action, self._on_enable_flavor_action
+        )
+        self.framework.observe(
+            self.on.disable_flavor_action, self._on_disable_flavor_action
+        )
 
         self.framework.observe(
             self.on[PLANNER_RELATION_NAME].relation_changed,
@@ -82,6 +84,50 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         setattr(app, "gen_environment", gen_environment)
         return app
 
+    def _create_planner_client(self) -> PlannerClient:
+        """Create a planner client instance.
+
+        Returns:
+            PlannerClient instance.
+        """
+        admin_token = self._get_admin_token()
+        env = self._gen_environment()
+        port = env.get("APP_PORT", "8080")
+        base_url = f"http://127.0.0.1:{port}"
+        return PlannerClient(base_url=base_url, admin_token=admin_token)
+
+    def _on_enable_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the enable-flavor action.
+
+        Args:
+            event: The action event.
+        """
+        flavor = event.params["flavor"]
+        try:
+            client = self._create_planner_client()
+            client.update_flavor(flavor_name=flavor, is_disabled=False)
+            event.set_results({"message": f"Flavor '{flavor}' enabled successfully"})
+        except (ConfigError, PlannerError, RuntimeError) as e:
+            error_msg = str(e)
+            event.fail(error_msg)
+            logger.error("Failed to enable flavor %s: %s", flavor, error_msg)
+
+    def _on_disable_flavor_action(self, event: ops.ActionEvent) -> None:
+        """Handle the disable-flavor action.
+
+        Args:
+            event: The action event.
+        """
+        flavor = event.params["flavor"]
+        try:
+            client = self._create_planner_client()
+            client.update_flavor(flavor_name=flavor, is_disabled=True)
+            event.set_results({"message": f"Flavor '{flavor}' disabled successfully"})
+        except (ConfigError, PlannerError, RuntimeError) as e:
+            error_msg = str(e)
+            event.fail(error_msg)
+            logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
+
     def _on_manager_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         """Handle changes to the github-runner-manager relation."""
         self._setup()
@@ -90,7 +136,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """Setup the planner application."""
         self.unit.status = ops.MaintenanceStatus("Setting up planner application")
         try:
-            admin_token = self._get_admin_token()
+            self._get_admin_token()
         except ConfigError:
             logger.exception("Missing %s configuration", ADMIN_TOKEN_CONFIG_NAME)
             self.unit.status = ops.BlockedStatus(
@@ -99,43 +145,26 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             return
 
         self.unit.status = ops.MaintenanceStatus("Setup planner integrations")
-        self._setup_planner_relation(admin_token)
+        self._setup_planner_relation()
         self.unit.status = ops.ActiveStatus()
 
-    def _setup_planner_relation(self, admin_token: str) -> None:
-        """Setup the planner relations if this unit is the leader.
-
-        Args:
-            admin_token: The admin token for making API requests to planner.
-        """
+    def _setup_planner_relation(self) -> None:
+        """Setup the planner relations if this unit is the leader."""
         if not self.unit.is_leader():
             return
 
-        auth_token_names = None
-        try:
-            response = requests.get(
-                f"http://localhost:{HTTP_PORT}/api/v1/auth/token",
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            response.raise_for_status()
-            auth_token_names = [
-                token
-                for token in response.json()["names"]
-                if self._check_name_fit_auth_token(token)
-            ]
-        except requests.RequestException as err:
-            logger.exception("Failed to list the names of auth tokens")
-            raise PlannerError("Failed to list the names of auth tokens") from err
-
-        if auth_token_names is None:
-            auth_token_names = []
+        client = self._create_planner_client()
+        all_token_names = client.list_auth_token_names()
+        auth_token_names = [
+            token for token in all_token_names if self._check_name_fit_auth_token(token)
+        ]
         auth_token_set = set(auth_token_names)
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
             if auth_token_name not in auth_token_set:
-                auth_token = self._create_auth_token(admin_token, auth_token_name)
+                auth_token = client.create_auth_token(auth_token_name)
                 try:
                     secret = self.app.add_secret(
                         {"token": auth_token}, label=auth_token_name
@@ -171,48 +200,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 logger.debug(
                     "Secret with label %s not found during cleanup", token_name
                 )
-            self._remove_auth_token(admin_token, token_name)
-
-    @staticmethod
-    def _create_auth_token(admin_token: str, name: str) -> str:
-        """Create an auth token secret in the planner application.
-
-        Args:
-            admin_token: The admin token for making API requests to planner.
-            name: The name of the auth token.
-
-        Returns:
-            The auth token.
-        """
-        try:
-            response = requests.post(
-                f"http://localhost:{HTTP_PORT}/api/v1/auth/token/{name}",
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            response.raise_for_status()
-            return response.json()["token"]
-        except requests.RequestException as err:
-            logger.exception("Failed to create auth token %s", name)
-            raise PlannerError(f"Failed to create auth token {name}") from err
-
-    @staticmethod
-    def _remove_auth_token(admin_token: str, name: str) -> None:
-        """Remove an auth token secret in the planner application.
-
-        Args:
-            admin_token: The admin token for making API requests to planner.
-            name: The name of the auth token.
-        """
-        try:
-            # If the token does not exist, the response code will be 204 No Content.
-            response = requests.delete(
-                f"http://localhost:{HTTP_PORT}/api/v1/auth/token/{name}",
-                headers={"Authorization": f"Bearer {admin_token}"},
-            )
-            response.raise_for_status()
-        except requests.RequestException as err:
-            logger.exception("Failed to remove auth token %s", name)
-            raise PlannerError(f"Failed to remove auth token {name}") from err
+            client.delete_auth_token(token_name)
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
