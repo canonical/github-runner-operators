@@ -278,3 +278,41 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
         delay=10,
     )
     return app_name
+
+
+@pytest.fixture(scope="module", name="any_charm_github_runner_with_flavor_app")
+def deploy_any_charm_github_runner_with_flavor_app_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any charm to act as a GitHub runner application that sets flavor data."""
+    app_name = "github-runner-with-flavor"
+
+    any_charm_src_overwrite = {
+        "any_charm.py": textwrap.dedent(
+            """\
+            from any_charm_base import AnyCharmBase
+
+            class AnyCharm(AnyCharmBase):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.framework.observe(
+                        self.on['require-github-runner-planner-v0'].relation_joined,
+                        self._on_planner_relation_joined,
+                    )
+
+                def _on_planner_relation_joined(self, event):
+                    if self.unit.is_leader():
+                        event.relation.data[self.app]["flavor"] = "test-relation-flavor"
+            """
+        ),
+    }
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+        config={"src-overwrite": any_charm_src_overwrite},
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+    return app_name

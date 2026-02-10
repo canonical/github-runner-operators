@@ -125,3 +125,15 @@ class PlannerClient:
             RuntimeError: If connection fails.
         """
         self._request(method="DELETE", path=f"/api/v1/auth/token/{name}")
+
+    def delete_flavor(self, flavor_name: str) -> None:
+        """Delete a flavor.
+
+        Args:
+            flavor_name: The name of the flavor.
+
+        Raises:
+            PlannerError: If API returns non-2xx status code.
+            RuntimeError: If connection fails.
+        """
+        self._request(method="DELETE", path=f"/api/v1/flavors/{flavor_name}")

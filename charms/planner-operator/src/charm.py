@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 HTTP_PORT: typing.Final[int] = 8080
 PLANNER_RELATION_NAME: typing.Final[str] = "planner"
 ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
+MANAGED_FLAVOR_SECRET_KEY: typing.Final[str] = "managed-flavor"
 
 
 class ConfigError(Exception):
@@ -39,16 +40,16 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(
-            self.on.enable_flavor_action, self._on_enable_flavor_action
-        )
-        self.framework.observe(
-            self.on.disable_flavor_action, self._on_disable_flavor_action
-        )
+        self.framework.observe(self.on.enable_flavor_action, self._on_enable_flavor_action)
+        self.framework.observe(self.on.disable_flavor_action, self._on_disable_flavor_action)
 
         self.framework.observe(
             self.on[PLANNER_RELATION_NAME].relation_changed,
             self._on_manager_relation_changed,
+        )
+        self.framework.observe(
+            self.on[PLANNER_RELATION_NAME].relation_broken,
+            self._on_planner_relation_broken,
         )
 
     def get_cos_dir(self) -> str:
@@ -132,8 +133,12 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """Handle changes to the github-runner-manager relation."""
         self._setup()
 
+    def _on_planner_relation_broken(self, _: ops.RelationBrokenEvent) -> None:
+        """Handle planner relation broken events."""
+        self._setup()
+
     def _setup(self) -> None:
-        """Setup the planner application."""
+        """Set up the planner application."""
         self.unit.status = ops.MaintenanceStatus("Setting up planner application")
         try:
             self._get_admin_token()
@@ -149,7 +154,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         self.unit.status = ops.ActiveStatus()
 
     def _setup_planner_relation(self) -> None:
-        """Setup the planner relations if this unit is the leader."""
+        """Set up planner relations if this unit is the leader."""
         if not self.unit.is_leader():
             return
 
@@ -163,44 +168,77 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
+            # A relation with no endpoint data is not yet set up or is being broken.
+            if not relation.data[self.app].get("endpoint") and auth_token_name in auth_token_set:
+                continue
             if auth_token_name not in auth_token_set:
-                auth_token = client.create_auth_token(auth_token_name)
-                try:
-                    secret = self.app.add_secret(
-                        {"token": auth_token}, label=auth_token_name
-                    )
-                    secret.grant(relation)
-                except ValueError as err:
-                    logger.exception(
-                        "Failed to add secret for relation %d", relation.id
-                    )
-                    raise JujuError(
-                        f"Failed to create or grant secret for relation {relation.id}"
-                    ) from err
-                except ops.hookcmds.Error as err:
-                    logger.exception(
-                        "Failed to grant secret for relation %d", relation.id
-                    )
-                    raise JujuError(
-                        f"Failed to grant secret for relation {relation.id}"
-                    ) from err
-                # The _base_url is set up by the parent class paas_charm.go.Charm.
-                # It points to the ingress URL if there is one, otherwise it points to the K8S service.
-                relation.data[self.app]["endpoint"] = self._base_url
-                relation.data[self.app]["token"] = secret.id
+                self._create_and_share_relation_secret(
+                    client=client,
+                    relation=relation,
+                    auth_token_name=auth_token_name,
+                )
+            self._sync_relation_flavor_secret(relation=relation, auth_token_name=auth_token_name)
             auth_token_set.discard(auth_token_name)
 
         # Clean up any auth tokens that are no longer needed
         for token_name in auth_token_set:
-            try:
-                secret = self.model.get_secret(label=token_name)
-                secret.remove_all_revisions()
-            except ops.SecretNotFoundError:
-                # It is fine if the secret is already removed.
-                logger.debug(
-                    "Secret with label %s not found during cleanup", token_name
-                )
-            client.delete_auth_token(token_name)
+            self._cleanup_orphaned_relation_resources(client=client, token_name=token_name)
+
+    def _create_and_share_relation_secret(
+        self,
+        client: PlannerClient,
+        relation: ops.Relation,
+        auth_token_name: str,
+    ) -> None:
+        """Create auth token and relation secret, then share relation connection data."""
+        auth_token = client.create_auth_token(auth_token_name)
+        try:
+            secret = self.app.add_secret({"token": auth_token}, label=auth_token_name)
+            secret.grant(relation)
+        except ValueError as err:
+            logger.exception("Failed to add secret for relation %d", relation.id)
+            raise JujuError(
+                f"Failed to create or grant secret for relation {relation.id}"
+            ) from err
+        except ops.hookcmds.Error as err:
+            logger.exception("Failed to grant secret for relation %d", relation.id)
+            raise JujuError(f"Failed to grant secret for relation {relation.id}") from err
+
+        # The _base_url is set up by the parent class paas_charm.go.Charm.
+        # It points to ingress URL if there is one, otherwise to the K8S service.
+        relation.data[self.app]["endpoint"] = self._base_url
+        relation.data[self.app]["token"] = secret.id
+
+    def _cleanup_orphaned_relation_resources(self, client: PlannerClient, token_name: str) -> None:
+        """Delete orphaned managed flavor, secret revisions, and auth token."""
+        try:
+            secret = self.model.get_secret(label=token_name)
+            flavor_name = secret.get_content().get(MANAGED_FLAVOR_SECRET_KEY)
+            if flavor_name:
+                client.delete_flavor(flavor_name)
+            secret.remove_all_revisions()
+        except ops.SecretNotFoundError:
+            # It is fine if the secret is already removed.
+            logger.debug("Secret with label %s not found during cleanup", token_name)
+        client.delete_auth_token(token_name)
+
+    def _sync_relation_flavor_secret(self, relation: ops.Relation, auth_token_name: str) -> None:
+        """Store relation flavor in the managed secret for later cleanup."""
+        flavor_name = relation.data[relation.app].get("flavor")
+        secret = self.model.get_secret(label=auth_token_name)
+        secret_content = secret.get_content()
+
+        if not flavor_name:
+            if MANAGED_FLAVOR_SECRET_KEY not in secret_content:
+                return
+            secret_content.pop(MANAGED_FLAVOR_SECRET_KEY, None)
+            secret.set_content(secret_content)
+            return
+
+        if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) == flavor_name:
+            return
+        secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_name
+        secret.set_content(secret_content)
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)

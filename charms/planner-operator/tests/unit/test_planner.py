@@ -59,15 +59,25 @@ def test_delete_auth_token_completes_successfully(requests_mock: object) -> None
     client.delete_auth_token("runner")
 
 
+def test_delete_flavor_completes_successfully(requests_mock: object) -> None:
+    """
+    arrange: A requests mock for DELETE request to the /api/v1/flavors/{name} endpoint.
+    act: The delete_flavor method of the PlannerClient is called.
+    assert: The method completes successfully without raising an exception.
+    """
+    requests_mock.delete(f"{base_url}/api/v1/flavors/small", status_code=200)
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    client.delete_flavor("small")
+
+
 def test_http_error_raises_planner_error(requests_mock: object) -> None:
     """
     arrange: A requests mock that returns 400.
     act: The list_auth_token_names method of the PlannerClient is called.
     assert: A PlannerError is raised with the expected message.
     """
-    requests_mock.get(
-        f"{base_url}/api/v1/auth/token", status_code=400, text="bad request"
-    )
+    requests_mock.get(f"{base_url}/api/v1/auth/token", status_code=400, text="bad request")
     client = PlannerClient(base_url=base_url, admin_token="token")
 
     with pytest.raises(PlannerError, match="HTTP error 400"):
