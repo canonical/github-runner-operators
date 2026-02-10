@@ -1,19 +1,19 @@
 ---
-title: ADR-002 - flavor cleanup on relation removal
+title: ADR-002 - planner-managed flavor lifecycle from relation state
 author: Christopher Bartz (christopher.bartz@canonical.com)
 date: 2026/02/10
 domain: architecture
 replaced-by: 
 ---
 
-# Flavor cleanup on relation removal
+# Planner-managed flavor lifecycle from relation state
 
-The planner charm currently cleans up auth tokens and Juju secrets when the planner relation is removed.
-Flavor cleanup is also required when the relation is removed.
+The planner charm reconciles auth tokens and Juju secrets for the planner relation.
+Flavor resources should follow the same ownership and reconciliation model.
 
 ## Context
 
-The GitHub runner charm sets the flavor name in relation app data.
+The GitHub runner charm sets flavor state in relation app data.
 Flavor names are arbitrary and are not safely reconstructable from relation ID.
 When relation cleanup runs, the relation app data may no longer be available.
 
@@ -23,10 +23,19 @@ This requires persistent state that survives relation removal hooks.
 
 ## Decision
 
+The planner charm owns full lifecycle of relation-managed flavors (create and delete).
+GitHub runner declares desired flavor state in relation data, and planner reconciles actual state.
+
 The planner charm stores the runner-managed flavor name in the existing Juju secret labeled by relation ID (`relation-{id}`), alongside the auth token.
 The secret content includes:
 - `token`
 - `managed-flavor`
+
+During active relation reconciliation:
+1. The charm ensures relation auth token/secret exists.
+2. If relation flavor is present, it ensures flavor exists via planner API `POST /api/v1/flavors/{name}` (idempotent via conflict handling) using relation-provided flavor config.
+3. It writes flavor name to `managed-flavor` in the relation secret.
+4. If relation flavor is unset, it removes `managed-flavor` from the secret to avoid stale cleanup.
 
 During orphan cleanup:
 1. The charm reads `managed-flavor` from the secret.
@@ -41,8 +50,8 @@ Active relations and orphaned tokens are determined holistically from current re
 Other places to store flavor cleanup state include peer relation data or local files.
 These add extra charm state management and do not improve cleanup reliability.
 
-Another alternative is enforcing flavor naming conventions derived from relation ID.
-This is not viable because flavor names are user-defined and managed by the GitHub runner side.
+Another alternative is split ownership where github-runner creates flavors and planner only deletes them.
+This was rejected because split ownership duplicates API coupling and weakens holistic reconciliation.
 
 Another alternative is event-specific cleanup only in `relation_broken`.
 This conflicts with the holistic reconciliation approach and is less resilient to event ordering/retries.
@@ -50,5 +59,6 @@ This conflicts with the holistic reconciliation approach and is less resilient t
 ## Consequences
 
 The change reuses existing Juju secret infrastructure and avoids Go-side API changes.
+It simplifies github-runner charm responsibilities to relation-state publication.
 The relation secret gets an additional revision when flavor data is learned or updated.
 Cleanup remains idempotent because planner flavor deletion is idempotent.

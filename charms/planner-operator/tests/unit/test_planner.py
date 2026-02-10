@@ -47,6 +47,24 @@ def test_update_flavor_completes_successfully(requests_mock: object) -> None:
     client.update_flavor("small", True)
 
 
+def test_create_flavor_completes_successfully(requests_mock: object) -> None:
+    """
+    arrange: A requests mock for POST request to the /api/v1/flavors/{name} endpoint.
+    act: The create_flavor method of the PlannerClient is called.
+    assert: The method completes successfully without raising an exception.
+    """
+    requests_mock.post(f"{base_url}/api/v1/flavors/small", status_code=201)
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    client.create_flavor(
+        flavor_name="small",
+        platform="github",
+        labels=["self-hosted", "linux"],
+        priority=100,
+        minimum_pressure=0,
+    )
+
+
 def test_delete_auth_token_completes_successfully(requests_mock: object) -> None:
     """
     arrange: A requests mock for DELETE request to the /api/v1/auth/token/{name} endpoint.

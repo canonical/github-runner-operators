@@ -175,31 +175,13 @@ def test_planner_deletes_flavor_on_relation_removed(
 ):
     """
     arrange: Planner and a github-runner mock charm that sets relation flavor data.
-    act: Remove the planner relation from the github-runner mock.
-    assert: The managed flavor is deleted by planner relation cleanup.
+    act: Integrate then remove the planner relation from the github-runner mock.
+    assert: The managed flavor is created on relation setup and deleted on cleanup.
     """
     status = juju.status()
     unit_ip = status.apps[planner_app].units[f"{planner_app}/0"].address
     github_runner_app = any_charm_github_runner_with_flavor_app
     flavor_name = "test-relation-flavor"
-
-    response = requests.post(
-        f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
-        json={
-            "platform": "github",
-            "labels": ["self-hosted", "linux"],
-            "priority": 75,
-            "minimum_pressure": 0,
-        },
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {user_token}",
-        },
-    )
-    assert response.status_code in (
-        requests.status_codes.codes.created,
-        requests.status_codes.codes.conflict,
-    )
 
     juju.integrate(f"{planner_app}:planner", github_runner_app)
     juju.wait(
@@ -207,6 +189,17 @@ def test_planner_deletes_flavor_on_relation_removed(
         timeout=6 * 60,
         delay=10,
     )
+
+    for _ in range(24):
+        response = requests.get(
+            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        if response.status_code == requests.status_codes.codes.ok:
+            break
+        time.sleep(5)
+
+    assert response.status_code == requests.status_codes.codes.ok
 
     juju.cli("remove-relation", f"{planner_app}:planner", github_runner_app)
     juju.wait(

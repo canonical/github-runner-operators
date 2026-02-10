@@ -62,9 +62,7 @@ class PlannerClient:
             return response
         except requests.exceptions.HTTPError as e:
             error_body = e.response.text if e.response else ""
-            raise PlannerError(
-                f"HTTP error {e.response.status_code}: {error_body}"
-            ) from e
+            raise PlannerError(f"HTTP error {e.response.status_code}: {error_body}") from e
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Connection error: {str(e)}") from e
 
@@ -84,6 +82,46 @@ class PlannerClient:
             path=f"/api/v1/flavors/{flavor_name}",
             json_data={"is_disabled": is_disabled},
         )
+
+    def create_flavor(
+        self,
+        flavor_name: str,
+        platform: str,
+        labels: list[str],
+        priority: int,
+        minimum_pressure: int,
+        is_disabled: bool = False,
+    ) -> None:
+        """Create a flavor.
+
+        Args:
+            flavor_name: The name of the flavor.
+            platform: Flavor platform (e.g. github).
+            labels: Flavor labels.
+            priority: Flavor priority.
+            minimum_pressure: Flavor minimum pressure.
+            is_disabled: Whether flavor starts disabled.
+
+        Raises:
+            PlannerError: If API returns non-2xx status code.
+            RuntimeError: If connection fails.
+        """
+        try:
+            self._request(
+                method="POST",
+                path=f"/api/v1/flavors/{flavor_name}",
+                json_data={
+                    "platform": platform,
+                    "labels": labels,
+                    "priority": priority,
+                    "minimum_pressure": minimum_pressure,
+                    "is_disabled": is_disabled,
+                },
+            )
+        except PlannerError as err:
+            if "HTTP error 409" in str(err):
+                return
+            raise
 
     def list_auth_token_names(self) -> list[str]:
         """List all auth token names.

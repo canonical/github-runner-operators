@@ -4,6 +4,7 @@
 
 """Go Charm entrypoint."""
 
+import json
 import logging
 import pathlib
 import typing
@@ -20,6 +21,15 @@ HTTP_PORT: typing.Final[int] = 8080
 PLANNER_RELATION_NAME: typing.Final[str] = "planner"
 ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
 MANAGED_FLAVOR_SECRET_KEY: typing.Final[str] = "managed-flavor"
+FLAVOR_RELATION_KEY: typing.Final[str] = "flavor"
+FLAVOR_LABELS_RELATION_KEY: typing.Final[str] = "flavor-labels"
+FLAVOR_PLATFORM_RELATION_KEY: typing.Final[str] = "flavor-platform"
+FLAVOR_PRIORITY_RELATION_KEY: typing.Final[str] = "flavor-priority"
+FLAVOR_MINIMUM_PRESSURE_RELATION_KEY: typing.Final[str] = "flavor-minimum-pressure"
+DEFAULT_FLAVOR_PLATFORM: typing.Final[str] = "github"
+DEFAULT_FLAVOR_LABELS: typing.Final[list[str]] = ["self-hosted"]
+DEFAULT_FLAVOR_PRIORITY: typing.Final[int] = 100
+DEFAULT_FLAVOR_MINIMUM_PRESSURE: typing.Final[int] = 0
 
 
 class ConfigError(Exception):
@@ -177,7 +187,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                     relation=relation,
                     auth_token_name=auth_token_name,
                 )
-            self._sync_relation_flavor_secret(relation=relation, auth_token_name=auth_token_name)
+            self._sync_relation_flavor_secret(
+                client=client, relation=relation, auth_token_name=auth_token_name
+            )
             auth_token_set.discard(auth_token_name)
 
         # Clean up any auth tokens that are no longer needed
@@ -222,9 +234,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             logger.debug("Secret with label %s not found during cleanup", token_name)
         client.delete_auth_token(token_name)
 
-    def _sync_relation_flavor_secret(self, relation: ops.Relation, auth_token_name: str) -> None:
+    def _sync_relation_flavor_secret(
+        self, client: PlannerClient, relation: ops.Relation, auth_token_name: str
+    ) -> None:
         """Store relation flavor in the managed secret for later cleanup."""
-        flavor_name = relation.data[relation.app].get("flavor")
+        flavor_name = relation.data[relation.app].get(FLAVOR_RELATION_KEY)
         secret = self.model.get_secret(label=auth_token_name)
         secret_content = secret.get_content()
 
@@ -235,10 +249,57 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             secret.set_content(secret_content)
             return
 
+        platform = (
+            relation.data[relation.app].get(FLAVOR_PLATFORM_RELATION_KEY)
+            or DEFAULT_FLAVOR_PLATFORM
+        )
+        labels = self._parse_relation_labels(
+            relation.data[relation.app].get(FLAVOR_LABELS_RELATION_KEY)
+        )
+        priority = self._parse_relation_int(
+            relation.data[relation.app].get(FLAVOR_PRIORITY_RELATION_KEY),
+            FLAVOR_PRIORITY_RELATION_KEY,
+            default=DEFAULT_FLAVOR_PRIORITY,
+        )
+        minimum_pressure = self._parse_relation_int(
+            relation.data[relation.app].get(FLAVOR_MINIMUM_PRESSURE_RELATION_KEY),
+            FLAVOR_MINIMUM_PRESSURE_RELATION_KEY,
+            default=DEFAULT_FLAVOR_MINIMUM_PRESSURE,
+        )
+        client.create_flavor(
+            flavor_name=flavor_name,
+            platform=platform,
+            labels=labels,
+            priority=priority,
+            minimum_pressure=minimum_pressure,
+        )
+
         if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) == flavor_name:
             return
         secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_name
         secret.set_content(secret_content)
+
+    def _parse_relation_labels(self, raw_labels: str | None) -> list[str]:
+        """Parse relation labels field from JSON array or comma-separated string."""
+        if not raw_labels:
+            return list(DEFAULT_FLAVOR_LABELS)
+        try:
+            parsed = json.loads(raw_labels)
+            if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
+        return labels if labels else list(DEFAULT_FLAVOR_LABELS)
+
+    def _parse_relation_int(self, value: str | None, field_name: str, default: int) -> int:
+        """Parse integer relation field, returning default when unset."""
+        if value in (None, ""):
+            return default
+        try:
+            return int(value)
+        except ValueError as err:
+            raise JujuError(f"Invalid {field_name} value {value!r}") from err
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)

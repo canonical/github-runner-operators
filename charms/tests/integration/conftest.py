@@ -301,6 +301,10 @@ def deploy_any_charm_github_runner_with_flavor_app_fixture(juju: jubilant.Juju) 
                 def _on_planner_relation_joined(self, event):
                     if self.unit.is_leader():
                         event.relation.data[self.app]["flavor"] = "test-relation-flavor"
+                        event.relation.data[self.app]["flavor-platform"] = "github"
+                        event.relation.data[self.app]["flavor-labels"] = '["self-hosted","linux"]'
+                        event.relation.data[self.app]["flavor-priority"] = "75"
+                        event.relation.data[self.app]["flavor-minimum-pressure"] = "0"
             """
         ),
     }
