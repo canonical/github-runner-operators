@@ -167,7 +167,7 @@ def test_planner_enable_disable_flavor_actions(
 
 
 @pytest.mark.usefixtures("planner_with_integrations")
-def test_planner_deletes_flavor_on_relation_removed(
+def test_planner_reconciles_flavor_lifecycle_on_relation_changes(
     juju: jubilant.Juju,
     planner_app: str,
     any_charm_github_runner_with_flavor_app: str,
