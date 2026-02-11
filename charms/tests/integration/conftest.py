@@ -1,5 +1,6 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import json
 import logging
 import secrets
 import string
@@ -275,7 +276,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
         "any-charm",
         app=app_name,
         channel="latest/beta",
-        config={"src-overwrite": any_charm_src_overwrite},
+        config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
