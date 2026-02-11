@@ -25,7 +25,7 @@ def planner_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     if len(charm) > 1:
         planner_charm = [file for file in charm if "planner" in file]
         return planner_charm[0]
-    return charm
+    return charm[0]
 
 
 @pytest.fixture(name="planner_app_image", scope="module")
@@ -42,7 +42,7 @@ def webhook_gateway_charm_file_fixture(pytestconfig: pytest.Config) -> str | Non
     if len(charm) > 1:
         webhook_gateway_charm = [file for file in charm if "webhook-gateway" in file]
         return webhook_gateway_charm[0]
-    return charm
+    return charm[0]
 
 
 @pytest.fixture(name="webhook_gateway_app_image", scope="module")
@@ -279,7 +279,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
-        timeout=10 * 60,
+        timeout=30 * 60,  # use long timeout due to infra issues - REVERT before merging
         delay=10,
     )
     return app_name
