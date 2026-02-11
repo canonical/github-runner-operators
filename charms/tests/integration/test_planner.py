@@ -58,17 +58,25 @@ def test_planner_prometheus_metrics(
     assert response.status_code == requests.status_codes.codes.OK
 
 
+@pytest.mark.usefixtures("planner_with_integrations")
 def test_planner_github_runner_integration(
     juju: jubilant.Juju,
     planner_app: str,
     any_charm_github_runner_app: str,
+    user_token: str,
 ):
     """
     arrange: The planner app and any-charm app mocking github-runner is deployed.
-    act: The planner app and a github-runner app deployed and integrated with each other.
-    assert: The integration data contains the endpoint and auth token.
+    act: Integrate, verify relation data and managed flavor creation, then remove
+         the relation and verify managed flavor cleanup.
+    assert: The integration data contains the endpoint and auth token, the managed
+            flavor is created on relation setup and deleted on relation removal.
     """
+    status = juju.status()
+    unit_ip = status.apps[planner_app].units[f"{planner_app}/0"].address
     github_runner_app = any_charm_github_runner_app
+    flavor_name = "test-relation-flavor"
+
     juju.integrate(f"{planner_app}:planner", github_runner_app)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
@@ -83,9 +91,36 @@ def test_planner_github_runner_integration(
         if relation["endpoint"] == "provide-github-runner-planner-v0":
             assert "http://" in relation["application-data"]["endpoint"]
             assert "secret://" in relation["application-data"]["token"]
-            return
+            break
     else:
         pytest.fail(f"No relation found for {planner_app}:planner")
+
+    for _ in range(24):
+        response = requests.get(
+            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        if response.status_code == requests.status_codes.codes.ok:
+            break
+        time.sleep(5)
+    assert response.status_code == requests.status_codes.codes.ok
+
+    juju.cli("remove-relation", f"{planner_app}:planner", github_runner_app)
+    juju.wait(
+        lambda state: jubilant.all_active(state, planner_app),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    for _ in range(24):
+        response = requests.get(
+            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        if response.status_code == requests.status_codes.codes.not_found:
+            break
+        time.sleep(5)
+    assert response.status_code == requests.status_codes.codes.not_found
 
 
 @pytest.mark.usefixtures("planner_with_integrations")
@@ -166,55 +201,3 @@ def test_planner_enable_disable_flavor_actions(
     assert flavor_data["is_disabled"] is False, "Flavor should be enabled after action"
 
 
-@pytest.mark.usefixtures("planner_with_integrations")
-def test_planner_reconciles_flavor_lifecycle_on_relation_changes(
-    juju: jubilant.Juju,
-    planner_app: str,
-    any_charm_github_runner_with_flavor_app: str,
-    user_token: str,
-):
-    """
-    arrange: Planner and a github-runner mock charm that sets relation flavor data.
-    act: Integrate then remove the planner relation from the github-runner mock.
-    assert: The managed flavor is created on relation setup and deleted on cleanup.
-    """
-    status = juju.status()
-    unit_ip = status.apps[planner_app].units[f"{planner_app}/0"].address
-    github_runner_app = any_charm_github_runner_with_flavor_app
-    flavor_name = "test-relation-flavor"
-
-    juju.integrate(f"{planner_app}:planner", github_runner_app)
-    juju.wait(
-        lambda state: jubilant.all_active(state, planner_app),
-        timeout=6 * 60,
-        delay=10,
-    )
-
-    for _ in range(24):
-        response = requests.get(
-            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
-            headers={"Authorization": f"Bearer {user_token}"},
-        )
-        if response.status_code == requests.status_codes.codes.ok:
-            break
-        time.sleep(5)
-
-    assert response.status_code == requests.status_codes.codes.ok
-
-    juju.cli("remove-relation", f"{planner_app}:planner", github_runner_app)
-    juju.wait(
-        lambda state: jubilant.all_active(state, planner_app),
-        timeout=6 * 60,
-        delay=10,
-    )
-
-    for _ in range(24):
-        response = requests.get(
-            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
-            headers={"Authorization": f"Bearer {user_token}"},
-        )
-        if response.status_code == requests.status_codes.codes.not_found:
-            break
-        time.sleep(5)
-
-    assert response.status_code == requests.status_codes.codes.not_found
