@@ -236,7 +236,12 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
     def _sync_relation_flavor_secret(
         self, client: PlannerClient, relation: ops.Relation, auth_token_name: str
     ) -> None:
-        """Store relation flavor in the managed secret for later cleanup."""
+        """Reconcile the managed flavor for a relation.
+
+        The auth_token_name is used as the Juju secret label to look up the
+        per-relation secret where the managed flavor name is tracked. This
+        allows cleanup of the flavor when the relation is later removed.
+        """
         flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
         secret = self.model.get_secret(label=auth_token_name)
         secret_content = secret.get_content()
