@@ -258,7 +258,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
                     self.framework.observe(
-                        self.on['require-github-runner-planner-v0'].relation_joined,
+                        self.on['provide-github-runner-planner-v0'].relation_joined,
                         self._on_planner_relation_joined,
                     )
 
