@@ -119,9 +119,6 @@ class FlavorConfig:
             raise InvalidDataError(f"Invalid JSON in labels field: {err}") from err
         except InvalidDataError:
             raise
-        # Fallback to comma-separated parsing is no longer used - we raise an error instead
-        # labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
-        # return labels if labels else list(DEFAULT_FLAVOR_LABELS)
 
     @staticmethod
     def _parse_int(value: str | None, field_name: str, default: int) -> int:
