@@ -342,8 +342,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         # The _base_url is set up by the parent class paas_charm.go.Charm.
         # It points to ingress URL if there is one, otherwise to the K8S service.
         relation.data[self.app]["endpoint"] = self._base_url
-        if secret.id:
-            relation.data[self.app]["token"] = secret.id
+        if not secret.id:
+            raise JujuError(f"Secret for relation {relation.id} has no ID")
+        relation.data[self.app]["token"] = secret.id
 
     def _cleanup_orphaned_relation_resources(self, client: PlannerClient, token_name: str) -> None:
         """Delete orphaned managed flavor, secret revisions, and auth token."""
@@ -399,10 +400,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
-        if not admin_token_secret_id:
-            raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} config value is not set")
-        if not isinstance(admin_token_secret_id, str):
-            raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} must be a string")
+        if not admin_token_secret_id or not isinstance(admin_token_secret_id, str):
+            raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} config value must be a string")
         admin_token_secret = self.model.get_secret(id=admin_token_secret_id)
         return admin_token_secret.get_content()["value"]
 
