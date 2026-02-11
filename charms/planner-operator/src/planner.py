@@ -175,3 +175,16 @@ class PlannerClient:
             RuntimeError: If connection fails.
         """
         self._request(method="DELETE", path=f"/api/v1/flavors/{flavor_name}")
+
+    def list_flavor_names(self) -> list[str]:
+        """List all flavor names.
+
+        Returns:
+            List of flavor names.
+
+        Raises:
+            PlannerError: If API returns non-2xx status code.
+            RuntimeError: If connection fails.
+        """
+        response = self._request(method="GET", path="/api/v1/flavors")
+        return response.json()["names"]

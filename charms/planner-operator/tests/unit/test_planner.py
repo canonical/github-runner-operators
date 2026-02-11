@@ -23,6 +23,18 @@ def test_list_auth_token_names_returns_names(requests_mock: object) -> None:
     assert client.list_auth_token_names() == ["one", "two"]
 
 
+def test_list_flavor_names_returns_names(requests_mock: object) -> None:
+    """
+    arrange: A requests mock for GET request to the /api/v1/flavors endpoint.
+    act: The list_flavor_names method of the PlannerClient is called.
+    assert: The returned list of flavor names matches the expected list.
+    """
+    requests_mock.get(f"{base_url}/api/v1/flavors", json={"names": ["small", "large"]})
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    assert client.list_flavor_names() == ["small", "large"]
+
+
 def test_create_auth_token_returns_token(requests_mock: object) -> None:
     """
     arrange: A requests mock for POST request to the /api/v1/auth/token/{name} endpoint.

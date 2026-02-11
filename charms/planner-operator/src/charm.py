@@ -8,6 +8,7 @@ import json
 import logging
 import pathlib
 import typing
+from dataclasses import dataclass
 
 import ops
 import paas_charm.go
@@ -38,6 +39,98 @@ class ConfigError(Exception):
 
 class JujuError(Exception):
     """Error for Juju-related issues."""
+
+
+@dataclass
+class FlavorConfig:
+    """Configuration for a planner flavor from relation data."""
+
+    name: str
+    platform: str
+    labels: list[str]
+    priority: int
+    minimum_pressure: int
+
+    @classmethod
+    def from_relation_data(cls, relation_data: ops.RelationDataContent) -> "FlavorConfig | None":
+        """Parse flavor configuration from relation data.
+
+        Args:
+            relation_data: Relation data from the remote application.
+
+        Returns:
+            FlavorConfig if flavor name is present, None otherwise.
+
+        Raises:
+            JujuError: If relation data contains invalid values.
+        """
+        flavor_name = relation_data.get(FLAVOR_RELATION_KEY)
+        if not flavor_name:
+            return None
+
+        platform = relation_data.get(FLAVOR_PLATFORM_RELATION_KEY) or DEFAULT_FLAVOR_PLATFORM
+        labels = cls._parse_labels(relation_data.get(FLAVOR_LABELS_RELATION_KEY))
+        priority = cls._parse_int(
+            relation_data.get(FLAVOR_PRIORITY_RELATION_KEY),
+            FLAVOR_PRIORITY_RELATION_KEY,
+            DEFAULT_FLAVOR_PRIORITY,
+        )
+        minimum_pressure = cls._parse_int(
+            relation_data.get(FLAVOR_MINIMUM_PRESSURE_RELATION_KEY),
+            FLAVOR_MINIMUM_PRESSURE_RELATION_KEY,
+            DEFAULT_FLAVOR_MINIMUM_PRESSURE,
+        )
+
+        return cls(
+            name=flavor_name,
+            platform=platform,
+            labels=labels,
+            priority=priority,
+            minimum_pressure=minimum_pressure,
+        )
+
+    @staticmethod
+    def _parse_labels(raw_labels: str | None) -> list[str]:
+        """Parse relation labels field from JSON array or comma-separated string.
+
+        Args:
+            raw_labels: Raw labels string from relation data.
+
+        Returns:
+            List of parsed labels or default labels if empty.
+        """
+        if not raw_labels:
+            return list(DEFAULT_FLAVOR_LABELS)
+        try:
+            parsed = json.loads(raw_labels)
+            if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
+        return labels if labels else list(DEFAULT_FLAVOR_LABELS)
+
+    @staticmethod
+    def _parse_int(value: str | None, field_name: str, default: int) -> int:
+        """Parse integer relation field, returning default when unset.
+
+        Args:
+            value: Raw value from relation data.
+            field_name: Name of the field for error messages.
+            default: Default value if unset.
+
+        Returns:
+            Parsed integer or default value.
+
+        Raises:
+            JujuError: If value is present but not a valid integer.
+        """
+        if value in (None, ""):
+            return default
+        try:
+            return int(value)
+        except ValueError as err:
+            raise JujuError(f"Invalid {field_name} value {value!r}") from err
 
 
 class GithubRunnerPlannerCharm(paas_charm.go.Charm):
@@ -164,36 +257,66 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         self.unit.status = ops.ActiveStatus()
 
     def _setup_planner_relation(self) -> None:
-        """Set up planner relations if this unit is the leader."""
+        """Set up planner relations using holistic data management approach.
+
+        This method reconciles the desired state (active relations) with the actual state
+        (tokens, flavors, secrets) to ensure consistency, handling cleanup of orphaned
+        resources that may remain from unreliable relation_broken events.
+        """
         if not self.unit.is_leader():
             return
 
         client = self._create_planner_client()
-        all_token_names = client.list_auth_token_names()
-        auth_token_names = [
-            token for token in all_token_names if self._check_name_fit_auth_token(token)
-        ]
-        auth_token_set = set(auth_token_names)
 
+        # Collect current state from the planner API
+        all_token_names = set(client.list_auth_token_names())
+        managed_token_names = {
+            token for token in all_token_names if self._check_name_fit_auth_token(token)
+        }
+
+        # Collect desired state from active relations
         relations = self.model.relations[PLANNER_RELATION_NAME]
+        expected_token_names = set()
+        managed_flavor_names = set()
+
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
-            # A relation with no endpoint data is not yet set up or is being broken.
-            if not relation.data[self.app].get("endpoint") and auth_token_name in auth_token_set:
+            expected_token_names.add(auth_token_name)
+
+            # Skip relations that are being broken (no endpoint data set)
+            if (
+                not relation.data[self.app].get("endpoint")
+                and auth_token_name in managed_token_names
+            ):
                 continue
-            if auth_token_name not in auth_token_set:
+
+            # Ensure auth token and secret exist
+            if auth_token_name not in managed_token_names:
                 self._create_and_share_relation_secret(
                     client=client,
                     relation=relation,
                     auth_token_name=auth_token_name,
                 )
-            self._sync_relation_flavor_secret(
-                client=client, relation=relation, auth_token_name=auth_token_name
-            )
-            auth_token_set.discard(auth_token_name)
 
-        # Clean up any auth tokens that are no longer needed
-        for token_name in auth_token_set:
+            # Sync flavor if requested in relation data
+            flavor_config = FlavorConfig.from_relation_data(relation.data[relation.app])
+            if flavor_config:
+                managed_flavor_names.add(flavor_config.name)
+                self._sync_relation_flavor(
+                    client=client,
+                    relation=relation,
+                    auth_token_name=auth_token_name,
+                    flavor_config=flavor_config,
+                )
+            else:
+                self._clear_relation_flavor(
+                    auth_token_name=auth_token_name,
+                )
+
+        # Clean up orphaned tokens (tokens that exist but have no corresponding relation)
+        # This also cleans up their associated flavors via _cleanup_orphaned_relation_resources
+        orphaned_token_names = managed_token_names - expected_token_names
+        for token_name in orphaned_token_names:
             self._cleanup_orphaned_relation_resources(client=client, token_name=token_name)
 
     def _create_and_share_relation_secret(
@@ -219,7 +342,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         # The _base_url is set up by the parent class paas_charm.go.Charm.
         # It points to ingress URL if there is one, otherwise to the K8S service.
         relation.data[self.app]["endpoint"] = self._base_url
-        relation.data[self.app]["token"] = secret.id
+        if secret.id:
+            relation.data[self.app]["token"] = secret.id
 
     def _cleanup_orphaned_relation_resources(self, client: PlannerClient, token_name: str) -> None:
         """Delete orphaned managed flavor, secret revisions, and auth token."""
@@ -227,84 +351,58 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             secret = self.model.get_secret(label=token_name)
             flavor_name = secret.get_content().get(MANAGED_FLAVOR_SECRET_KEY)
             if flavor_name:
-                client.delete_flavor(flavor_name)
+                try:
+                    client.delete_flavor(flavor_name)
+                except PlannerError as err:
+                    logger.warning("Failed to delete flavor %s: %s", flavor_name, err)
             secret.remove_all_revisions()
         except ops.SecretNotFoundError:
             # It is fine if the secret is already removed.
             logger.debug("Secret with label %s not found during cleanup", token_name)
-        client.delete_auth_token(token_name)
+        try:
+            client.delete_auth_token(token_name)
+        except PlannerError as err:
+            logger.warning("Failed to delete auth token %s: %s", token_name, err)
 
-    def _sync_relation_flavor_secret(
-        self, client: PlannerClient, relation: ops.Relation, auth_token_name: str
+    def _sync_relation_flavor(
+        self,
+        client: PlannerClient,
+        relation: ops.Relation,
+        auth_token_name: str,
+        flavor_config: FlavorConfig,
     ) -> None:
-        """Store relation flavor in the managed secret for later cleanup."""
-        flavor_name = relation.data[relation.app].get(FLAVOR_RELATION_KEY)
+        """Create/update flavor and store flavor name in secret for tracking."""
+        client.create_flavor(
+            flavor_name=flavor_config.name,
+            platform=flavor_config.platform,
+            labels=flavor_config.labels,
+            priority=flavor_config.priority,
+            minimum_pressure=flavor_config.minimum_pressure,
+        )
+
         secret = self.model.get_secret(label=auth_token_name)
         secret_content = secret.get_content()
-
-        if not flavor_name:
-            if MANAGED_FLAVOR_SECRET_KEY not in secret_content:
-                return
-            secret_content.pop(MANAGED_FLAVOR_SECRET_KEY, None)
+        if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) != flavor_config.name:
+            secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_config.name
             secret.set_content(secret_content)
-            return
 
-        platform = (
-            relation.data[relation.app].get(FLAVOR_PLATFORM_RELATION_KEY)
-            or DEFAULT_FLAVOR_PLATFORM
-        )
-        labels = self._parse_relation_labels(
-            relation.data[relation.app].get(FLAVOR_LABELS_RELATION_KEY)
-        )
-        priority = self._parse_relation_int(
-            relation.data[relation.app].get(FLAVOR_PRIORITY_RELATION_KEY),
-            FLAVOR_PRIORITY_RELATION_KEY,
-            default=DEFAULT_FLAVOR_PRIORITY,
-        )
-        minimum_pressure = self._parse_relation_int(
-            relation.data[relation.app].get(FLAVOR_MINIMUM_PRESSURE_RELATION_KEY),
-            FLAVOR_MINIMUM_PRESSURE_RELATION_KEY,
-            default=DEFAULT_FLAVOR_MINIMUM_PRESSURE,
-        )
-        client.create_flavor(
-            flavor_name=flavor_name,
-            platform=platform,
-            labels=labels,
-            priority=priority,
-            minimum_pressure=minimum_pressure,
-        )
-
-        if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) == flavor_name:
-            return
-        secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_name
-        secret.set_content(secret_content)
-
-    def _parse_relation_labels(self, raw_labels: str | None) -> list[str]:
-        """Parse relation labels field from JSON array or comma-separated string."""
-        if not raw_labels:
-            return list(DEFAULT_FLAVOR_LABELS)
+    def _clear_relation_flavor(self, auth_token_name: str) -> None:
+        """Clear flavor tracking from relation secret when no longer requested."""
         try:
-            parsed = json.loads(raw_labels)
-            if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-        labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
-        return labels if labels else list(DEFAULT_FLAVOR_LABELS)
-
-    def _parse_relation_int(self, value: str | None, field_name: str, default: int) -> int:
-        """Parse integer relation field, returning default when unset."""
-        if value in (None, ""):
-            return default
-        try:
-            return int(value)
-        except ValueError as err:
-            raise JujuError(f"Invalid {field_name} value {value!r}") from err
+            secret = self.model.get_secret(label=auth_token_name)
+            secret_content = secret.get_content()
+            if MANAGED_FLAVOR_SECRET_KEY in secret_content:
+                secret_content.pop(MANAGED_FLAVOR_SECRET_KEY)
+                secret.set_content(secret_content)
+        except ops.SecretNotFoundError:
+            logger.debug("Secret with label %s not found when clearing flavor", auth_token_name)
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
         if not admin_token_secret_id:
             raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} config value is not set")
+        if not isinstance(admin_token_secret_id, str):
+            raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} must be a string")
         admin_token_secret = self.model.get_secret(id=admin_token_secret_id)
         return admin_token_secret.get_content()["value"]
 
