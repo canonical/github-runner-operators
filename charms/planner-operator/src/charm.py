@@ -10,7 +10,6 @@ import typing
 
 import ops
 import paas_charm.go
-
 from planner import PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
@@ -136,7 +135,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """Setup the planner application."""
         self.unit.status = ops.MaintenanceStatus("Setting up planner application")
         try:
-            self._get_admin_token()
+            client = self._create_planner_client()
         except ConfigError:
             logger.exception("Missing %s configuration", ADMIN_TOKEN_CONFIG_NAME)
             self.unit.status = ops.BlockedStatus(
@@ -145,15 +144,14 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             return
 
         self.unit.status = ops.MaintenanceStatus("Setup planner integrations")
-        self._setup_planner_relation()
+        self._setup_planner_relation(client=client)
         self.unit.status = ops.ActiveStatus()
 
-    def _setup_planner_relation(self) -> None:
+    def _setup_planner_relation(self, client: PlannerClient) -> None:
         """Setup the planner relations if this unit is the leader."""
         if not self.unit.is_leader():
             return
 
-        client = self._create_planner_client()
         all_token_names = client.list_auth_token_names()
         auth_token_names = [
             token for token in all_token_names if self._check_name_fit_auth_token(token)
