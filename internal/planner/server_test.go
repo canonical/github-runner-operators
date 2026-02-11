@@ -325,10 +325,17 @@ func TestGetFlavor(t *testing.T) {
 		url:            "/api/v1/flavors/runner-small",
 		expectedStatus: http.StatusInternalServerError,
 	}, {
-		name:           "shouldFailWhenNameIsAllFlavors",
-		storeErr:       database.ErrNotExist,
+		name: "shouldSucceedWhenNameIsAllFlavors",
+		storeFlavor: &database.Flavor{
+			Platform:        "github",
+			Name:            "runner-small",
+			Labels:          []string{"x64"},
+			Priority:        10,
+			IsDisabled:      false,
+			MinimumPressure: 5,
+		},
 		url:            "/api/v1/flavors/_",
-		expectedStatus: http.StatusBadRequest,
+		expectedStatus: http.StatusOK,
 	}}
 
 	for _, tt := range tests {

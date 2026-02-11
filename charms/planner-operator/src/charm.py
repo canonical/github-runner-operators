@@ -41,6 +41,10 @@ class JujuError(Exception):
     """Error for Juju-related issues."""
 
 
+class InvalidDataError(Exception):
+    """Error for invalid relation data."""
+
+
 @dataclass
 class FlavorConfig:
     """Configuration for a planner flavor from relation data."""
@@ -62,7 +66,7 @@ class FlavorConfig:
             FlavorConfig if flavor name is present, None otherwise.
 
         Raises:
-            JujuError: If relation data contains invalid values.
+            InvalidDataError: If relation data contains invalid values.
         """
         flavor_name = relation_data.get(FLAVOR_RELATION_KEY)
         if not flavor_name:
@@ -98,6 +102,9 @@ class FlavorConfig:
 
         Returns:
             List of parsed labels or default labels if empty.
+
+        Raises:
+            InvalidDataError: If JSON parsing fails with invalid structure.
         """
         if not raw_labels:
             return list(DEFAULT_FLAVOR_LABELS)
@@ -105,10 +112,16 @@ class FlavorConfig:
             parsed = json.loads(raw_labels)
             if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
                 return parsed
-        except json.JSONDecodeError:
-            pass
-        labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
-        return labels if labels else list(DEFAULT_FLAVOR_LABELS)
+            raise InvalidDataError(
+                f"Invalid labels format: expected list of strings, got {type(parsed).__name__}"
+            )
+        except json.JSONDecodeError as err:
+            raise InvalidDataError(f"Invalid JSON in labels field: {err}") from err
+        except InvalidDataError:
+            raise
+        # Fallback to comma-separated parsing is no longer used - we raise an error instead
+        # labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
+        # return labels if labels else list(DEFAULT_FLAVOR_LABELS)
 
     @staticmethod
     def _parse_int(value: str | None, field_name: str, default: int) -> int:
@@ -123,14 +136,16 @@ class FlavorConfig:
             Parsed integer or default value.
 
         Raises:
-            JujuError: If value is present but not a valid integer.
+            InvalidDataError: If value is present but not a valid integer.
         """
         if value in (None, ""):
             return default
         try:
             return int(value)
         except ValueError as err:
-            raise JujuError(f"Invalid {field_name} value {value!r}") from err
+            raise InvalidDataError(
+                f"Invalid {field_name} value {value!r}: must be an integer"
+            ) from err
 
 
 class GithubRunnerPlannerCharm(paas_charm.go.Charm):
@@ -310,6 +325,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 )
             else:
                 self._clear_relation_flavor(
+                    client=client,
                     auth_token_name=auth_token_name,
                 )
 
@@ -387,12 +403,18 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_config.name
             secret.set_content(secret_content)
 
-    def _clear_relation_flavor(self, auth_token_name: str) -> None:
-        """Clear flavor tracking from relation secret when no longer requested."""
+    def _clear_relation_flavor(self, client: PlannerClient, auth_token_name: str) -> None:
+        """Delete flavor and clear tracking from relation secret when no longer requested."""
         try:
             secret = self.model.get_secret(label=auth_token_name)
             secret_content = secret.get_content()
-            if MANAGED_FLAVOR_SECRET_KEY in secret_content:
+            flavor_name = secret_content.get(MANAGED_FLAVOR_SECRET_KEY)
+            if flavor_name:
+                try:
+                    client.delete_flavor(flavor_name)
+                    logger.info("Deleted flavor %s that is no longer requested", flavor_name)
+                except PlannerError as err:
+                    logger.warning("Failed to delete flavor %s: %s", flavor_name, err)
                 secret_content.pop(MANAGED_FLAVOR_SECRET_KEY)
                 secret.set_content(secret_content)
         except ops.SecretNotFoundError:
@@ -405,9 +427,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         admin_token_secret = self.model.get_secret(id=admin_token_secret_id)
         return admin_token_secret.get_content()["value"]
 
-    @staticmethod
-    def _get_auth_token_name(relation_id: int) -> str:
-        """Build the auth token name based on relation ID.
+    def _get_auth_token_name(self, relation_id: int) -> str:
+        """Build the auth token name based on application name and relation ID.
 
         Args:
             relation_id: The relation ID.
@@ -415,10 +436,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         Returns:
             The auth token name.
         """
-        return f"relation-{relation_id}"
+        return f"{self.app.name}-relation-{relation_id}"
 
-    @staticmethod
-    def _check_name_fit_auth_token(name: str) -> bool:
+    def _check_name_fit_auth_token(self, name: str) -> bool:
         """Check if the name fits the auth token naming requirements.
 
         Args:
@@ -427,7 +447,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         Returns:
             True if the name fits the requirements, False otherwise.
         """
-        return name.startswith("relation-")
+        return name.startswith(f"{self.app.name}-relation-")
 
 
 if __name__ == "__main__":

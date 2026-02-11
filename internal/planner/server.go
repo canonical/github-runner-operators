@@ -142,15 +142,28 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
 }
 
-// getFlavor handles retrieving a flavor.
-// If the flavor name is allFlavorName, returns status code 400.
+// getFlavor handles retrieving a flavor or listing all flavors.
+// If the flavor name is allFlavorName, returns all flavors with status code 200.
 // If the flavor is not found, returns status code 404.
 // If getting the flavor fails, returns status code 500.
 // If successful, returns status code 200 with the flavor JSON.
 func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
 	flavorName := r.PathValue("name")
 	if flavorName == allFlavorName {
-		http.Error(w, "get all flavors is not supported", http.StatusBadRequest)
+		// List all flavors
+		flavors, err := s.store.ListFlavors(r.Context(), "")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("cannot list flavors: %v", err), http.StatusInternalServerError)
+			return
+		}
+		flavorNames := make([]string, 0, len(flavors))
+		for _, flavor := range flavors {
+			flavorNames = append(flavorNames, flavor.Name)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string][]string{"names": flavorNames}); err != nil {
+			http.Error(w, fmt.Sprintf("cannot encode flavors: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 	flavor, err := s.store.GetFlavor(r.Context(), flavorName)
