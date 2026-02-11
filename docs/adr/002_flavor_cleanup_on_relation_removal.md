@@ -53,6 +53,9 @@ These add extra charm state management and do not improve cleanup reliability.
 Another alternative is split ownership where github-runner creates flavors and planner only deletes them.
 This was rejected because split ownership duplicates API coupling and weakens holistic reconciliation.
 
+Another alternative is encoding the relation ID in the flavor name (e.g., `relation-{id}-{flavor_name}`) so that managed flavors can be discovered by listing flavors and filtering by prefix.
+This was rejected because the flavor name appears in Grafana dashboards, Prometheus metrics labels, and other observability surfaces, where the relation ID prefix would add noise with no operational value.
+
 Another alternative is event-specific cleanup only in `relation_broken`.
 This conflicts with the holistic reconciliation approach and is less resilient to event ordering/retries.
 
