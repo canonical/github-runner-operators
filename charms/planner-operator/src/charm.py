@@ -4,6 +4,7 @@
 
 """Go Charm entrypoint."""
 
+import dataclasses
 import json
 import logging
 import pathlib
@@ -238,68 +239,29 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         self, client: PlannerClient, relation: ops.Relation, auth_token_name: str
     ) -> None:
         """Store relation flavor in the managed secret for later cleanup."""
-        flavor_name = relation.data[relation.app].get(FLAVOR_RELATION_KEY)
+        flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
         secret = self.model.get_secret(label=auth_token_name)
         secret_content = secret.get_content()
 
-        if not flavor_name:
+        if not flavor_config:
             if MANAGED_FLAVOR_SECRET_KEY not in secret_content:
                 return
             secret_content.pop(MANAGED_FLAVOR_SECRET_KEY, None)
             secret.set_content(secret_content)
             return
 
-        platform = (
-            relation.data[relation.app].get(FLAVOR_PLATFORM_RELATION_KEY)
-            or DEFAULT_FLAVOR_PLATFORM
-        )
-        labels = self._parse_relation_labels(
-            relation.data[relation.app].get(FLAVOR_LABELS_RELATION_KEY)
-        )
-        priority = self._parse_relation_int(
-            relation.data[relation.app].get(FLAVOR_PRIORITY_RELATION_KEY),
-            FLAVOR_PRIORITY_RELATION_KEY,
-            default=DEFAULT_FLAVOR_PRIORITY,
-        )
-        minimum_pressure = self._parse_relation_int(
-            relation.data[relation.app].get(FLAVOR_MINIMUM_PRESSURE_RELATION_KEY),
-            FLAVOR_MINIMUM_PRESSURE_RELATION_KEY,
-            default=DEFAULT_FLAVOR_MINIMUM_PRESSURE,
-        )
         client.create_flavor(
-            flavor_name=flavor_name,
-            platform=platform,
-            labels=labels,
-            priority=priority,
-            minimum_pressure=minimum_pressure,
+            flavor_name=flavor_config.name,
+            platform=flavor_config.platform,
+            labels=flavor_config.labels,
+            priority=flavor_config.priority,
+            minimum_pressure=flavor_config.minimum_pressure,
         )
 
-        if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) == flavor_name:
+        if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) == flavor_config.name:
             return
-        secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_name
+        secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_config.name
         secret.set_content(secret_content)
-
-    def _parse_relation_labels(self, raw_labels: str | None) -> list[str]:
-        """Parse relation labels field from JSON array or comma-separated string."""
-        if not raw_labels:
-            return list(DEFAULT_FLAVOR_LABELS)
-        try:
-            parsed = json.loads(raw_labels)
-            if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-        labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
-        return labels if labels else list(DEFAULT_FLAVOR_LABELS)
-
-    def _parse_relation_int(self, value: str | None, field_name: str, default: int) -> int:
-        """Parse integer relation field, returning default when unset."""
-        if value in (None, ""):
-            return default
-        try:
-            return int(value)
-        except ValueError as err:
-            raise JujuError(f"Invalid {field_name} value {value!r}") from err
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
@@ -331,6 +293,72 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             True if the name fits the requirements, False otherwise.
         """
         return name.startswith("relation-")
+
+
+@dataclasses.dataclass(frozen=True)
+class RelationFlavorConfig:
+    """Flavor configuration parsed from relation data."""
+
+    name: str
+    platform: str
+    labels: list[str]
+    priority: int
+    minimum_pressure: int
+
+    @classmethod
+    def from_relation_data(
+        cls, relation_data: typing.Mapping[str, str]
+    ) -> "RelationFlavorConfig | None":
+        """Parse flavor config from relation data.
+
+        Args:
+            relation_data: The relation data mapping (string keys and values).
+
+        Returns:
+            A RelationFlavorConfig if a flavor name is set, None otherwise.
+        """
+        flavor_name = relation_data.get(FLAVOR_RELATION_KEY)
+        if not flavor_name:
+            return None
+        return cls(
+            name=flavor_name,
+            platform=relation_data.get(FLAVOR_PLATFORM_RELATION_KEY) or DEFAULT_FLAVOR_PLATFORM,
+            labels=_parse_relation_labels(relation_data.get(FLAVOR_LABELS_RELATION_KEY)),
+            priority=_parse_relation_int(
+                relation_data.get(FLAVOR_PRIORITY_RELATION_KEY),
+                FLAVOR_PRIORITY_RELATION_KEY,
+                default=DEFAULT_FLAVOR_PRIORITY,
+            ),
+            minimum_pressure=_parse_relation_int(
+                relation_data.get(FLAVOR_MINIMUM_PRESSURE_RELATION_KEY),
+                FLAVOR_MINIMUM_PRESSURE_RELATION_KEY,
+                default=DEFAULT_FLAVOR_MINIMUM_PRESSURE,
+            ),
+        )
+
+
+def _parse_relation_labels(raw_labels: str | None) -> list[str]:
+    """Parse relation labels field from JSON array or comma-separated string."""
+    if not raw_labels:
+        return list(DEFAULT_FLAVOR_LABELS)
+    try:
+        parsed = json.loads(raw_labels)
+        if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
+    return labels if labels else list(DEFAULT_FLAVOR_LABELS)
+
+
+def _parse_relation_int(value: str | None, field_name: str, default: int) -> int:
+    """Parse integer relation field, returning default when unset."""
+    if value in (None, ""):
+        return default
+    try:
+        return int(value)
+    except ValueError as err:
+        raise JujuError(f"Invalid {field_name} value {value!r}") from err
 
 
 if __name__ == "__main__":
