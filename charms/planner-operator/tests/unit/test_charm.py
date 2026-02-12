@@ -49,10 +49,10 @@ def test_from_relation_data_parses_all_fields():
     """
     data = {
         "flavor": "large",
-        "flavor-platform": "openstack",
-        "flavor-labels": '["self-hosted", "linux", "x64"]',
-        "flavor-priority": "50",
-        "flavor-minimum-pressure": "10",
+        "platform": "openstack",
+        "labels": '["self-hosted", "linux", "x64"]',
+        "priority": "50",
+        "minimum-pressure": "10",
     }
 
     config = RelationFlavorConfig.from_relation_data(data)
@@ -70,7 +70,7 @@ def test_from_relation_data_parses_comma_separated_labels():
     act: Parse the relation data.
     assert: Labels are split correctly.
     """
-    data = {"flavor": "small", "flavor-labels": "self-hosted, linux, x64"}
+    data = {"flavor": "small", "labels": "self-hosted, linux, x64"}
 
     config = RelationFlavorConfig.from_relation_data(data)
 
@@ -83,9 +83,9 @@ def test_from_relation_data_errors_on_invalid_priority():
     act: Parse the relation data.
     assert: JujuError is raised.
     """
-    data = {"flavor": "small", "flavor-priority": "not-a-number"}
+    data = {"flavor": "small", "priority": "not-a-number"}
 
-    with pytest.raises(JujuError, match="Invalid flavor-priority"):
+    with pytest.raises(JujuError, match="Invalid priority"):
         RelationFlavorConfig.from_relation_data(data)
 
 
@@ -95,7 +95,7 @@ def test_from_relation_data_errors_on_invalid_minimum_pressure():
     act: Parse the relation data.
     assert: JujuError is raised.
     """
-    data = {"flavor": "small", "flavor-minimum-pressure": "bad"}
+    data = {"flavor": "small", "minimum-pressure": "bad"}
 
-    with pytest.raises(JujuError, match="Invalid flavor-minimum-pressure"):
+    with pytest.raises(JujuError, match="Invalid minimum-pressure"):
         RelationFlavorConfig.from_relation_data(data)

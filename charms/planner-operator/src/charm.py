@@ -21,11 +21,11 @@ HTTP_PORT: typing.Final[int] = 8080
 PLANNER_RELATION_NAME: typing.Final[str] = "planner"
 ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
 MANAGED_FLAVOR_SECRET_KEY: typing.Final[str] = "managed-flavor"
-FLAVOR_RELATION_KEY: typing.Final[str] = "flavor"
-FLAVOR_LABELS_RELATION_KEY: typing.Final[str] = "flavor-labels"
-FLAVOR_PLATFORM_RELATION_KEY: typing.Final[str] = "flavor-platform"
-FLAVOR_PRIORITY_RELATION_KEY: typing.Final[str] = "flavor-priority"
-FLAVOR_MINIMUM_PRESSURE_RELATION_KEY: typing.Final[str] = "flavor-minimum-pressure"
+PLANNER_FLAVOR_RELATION_KEY: typing.Final[str] = "flavor"
+PLANNER_LABELS_RELATION_KEY: typing.Final[str] = "labels"
+PLANNER_PLATFORM_RELATION_KEY: typing.Final[str] = "platform"
+PLANNER_PRIORITY_RELATION_KEY: typing.Final[str] = "priority"
+PLANNER_MINIMUM_PRESSURE_RELATION_KEY: typing.Final[str] = "minimum-pressure"
 DEFAULT_FLAVOR_PLATFORM: typing.Final[str] = "github"
 DEFAULT_FLAVOR_LABELS: typing.Final[list[str]] = ["self-hosted"]
 DEFAULT_FLAVOR_PRIORITY: typing.Final[int] = 100
@@ -320,21 +320,21 @@ class RelationFlavorConfig:
         Returns:
             A RelationFlavorConfig if a flavor name is set, None otherwise.
         """
-        flavor_name = relation_data.get(FLAVOR_RELATION_KEY)
+        flavor_name = relation_data.get(PLANNER_FLAVOR_RELATION_KEY)
         if not flavor_name:
             return None
         return cls(
             name=flavor_name,
-            platform=relation_data.get(FLAVOR_PLATFORM_RELATION_KEY) or DEFAULT_FLAVOR_PLATFORM,
-            labels=_parse_relation_labels(relation_data.get(FLAVOR_LABELS_RELATION_KEY)),
+            platform=relation_data.get(PLANNER_PLATFORM_RELATION_KEY) or DEFAULT_FLAVOR_PLATFORM,
+            labels=_parse_relation_labels(relation_data.get(PLANNER_LABELS_RELATION_KEY)),
             priority=_parse_relation_int(
-                relation_data.get(FLAVOR_PRIORITY_RELATION_KEY),
-                FLAVOR_PRIORITY_RELATION_KEY,
+                relation_data.get(PLANNER_PRIORITY_RELATION_KEY),
+                PLANNER_PRIORITY_RELATION_KEY,
                 default=DEFAULT_FLAVOR_PRIORITY,
             ),
             minimum_pressure=_parse_relation_int(
-                relation_data.get(FLAVOR_MINIMUM_PRESSURE_RELATION_KEY),
-                FLAVOR_MINIMUM_PRESSURE_RELATION_KEY,
+                relation_data.get(PLANNER_MINIMUM_PRESSURE_RELATION_KEY),
+                PLANNER_MINIMUM_PRESSURE_RELATION_KEY,
                 default=DEFAULT_FLAVOR_MINIMUM_PRESSURE,
             ),
         )
