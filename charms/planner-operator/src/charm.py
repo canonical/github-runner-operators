@@ -177,7 +177,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
-            # A relation with no endpoint data is not yet set up or is being broken.
+            # If the relation has no endpoint data yet but already has an auth token,
+            # treat it as setup-in-progress or being torn down and skip reconciliation.
+            # This avoids creating or deleting tokens while the relation is in a transient state.
             if not relation.data[self.app].get("endpoint") and auth_token_name in auth_token_set:
                 continue
             if auth_token_name not in auth_token_set:
@@ -249,7 +251,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         if not flavor_config:
             if MANAGED_FLAVOR_SECRET_KEY not in secret_content:
                 return
-            secret_content.pop(MANAGED_FLAVOR_SECRET_KEY, None)
+            secret_content.pop(MANAGED_FLAVOR_SECRET_KEY)
             secret.set_content(secret_content)
             return
 
