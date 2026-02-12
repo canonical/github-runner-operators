@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 def planner_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the built planner charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if not charm:
+        return None
     if len(charm) > 1:
         planner_charm = [file for file in charm if "planner" in file]
         return planner_charm[0]
@@ -40,6 +42,8 @@ def planner_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
 def webhook_gateway_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the built webhook gateway charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if not charm:
+        return None
     if len(charm) > 1:
         webhook_gateway_charm = [file for file in charm if "webhook-gateway" in file]
         return webhook_gateway_charm[0]
