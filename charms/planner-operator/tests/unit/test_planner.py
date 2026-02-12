@@ -130,6 +130,18 @@ def test_delete_flavor_completes_successfully(requests_mock: object) -> None:
     client.delete_flavor("small")
 
 
+def test_delete_flavor_succeeds_when_not_found(requests_mock: object) -> None:
+    """
+    arrange: A requests mock that returns 404 for the flavor DELETE endpoint.
+    act: The delete_flavor method of the PlannerClient is called.
+    assert: The method completes without raising an exception.
+    """
+    requests_mock.delete(f"{base_url}/api/v1/flavors/gone", status_code=404, text="not found")
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    client.delete_flavor("gone")
+
+
 def test_http_error_raises_planner_error(requests_mock: object) -> None:
     """
     arrange: A requests mock that returns 400.
