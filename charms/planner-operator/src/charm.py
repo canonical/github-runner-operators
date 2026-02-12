@@ -28,7 +28,7 @@ PLANNER_PRIORITY_RELATION_KEY: typing.Final[str] = "priority"
 PLANNER_MINIMUM_PRESSURE_RELATION_KEY: typing.Final[str] = "minimum-pressure"
 DEFAULT_FLAVOR_PLATFORM: typing.Final[str] = "github"
 DEFAULT_FLAVOR_LABELS: typing.Final[list[str]] = ["self-hosted"]
-DEFAULT_FLAVOR_PRIORITY: typing.Final[int] = 100
+DEFAULT_FLAVOR_PRIORITY: typing.Final[int] = 50
 DEFAULT_FLAVOR_MINIMUM_PRESSURE: typing.Final[int] = 0
 
 

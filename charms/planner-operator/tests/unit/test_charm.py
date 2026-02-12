@@ -37,7 +37,7 @@ def test_from_relation_data_uses_defaults():
     assert config.name == "small"
     assert config.platform == "github"
     assert config.labels == ["self-hosted"]
-    assert config.priority == 100
+    assert config.priority == 50
     assert config.minimum_pressure == 0
 
 
