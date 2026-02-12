@@ -280,7 +280,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
-        timeout=30 * 60,  # use long timeout due to infra issues - REVERT before merging
+        timeout=10 * 60,
         delay=10,
     )
     return app_name
