@@ -22,7 +22,11 @@ class Flavor:
 
 
 class PlannerError(Exception):
-    """Error for planner application issues."""
+    """Error for planner API HTTP errors."""
+
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"HTTP error {status_code}: {body}")
+        self.status_code = status_code
 
 
 class PlannerClient:
@@ -75,7 +79,7 @@ class PlannerClient:
             return response
         except requests.exceptions.HTTPError as e:
             error_body = e.response.text if e.response else ""
-            raise PlannerError(f"HTTP error {e.response.status_code}: {error_body}") from e
+            raise PlannerError(e.response.status_code, error_body) from e
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Connection error: {str(e)}") from e
 
@@ -121,7 +125,7 @@ class PlannerClient:
                 is_disabled=data["is_disabled"],
             )
         except PlannerError as err:
-            if "HTTP error 404" in str(err):
+            if err.status_code == 404:
                 return None
             raise
 
@@ -161,7 +165,7 @@ class PlannerClient:
                 },
             )
         except PlannerError as err:
-            if "HTTP error 409" in str(err):
+            if err.status_code == 409:
                 return
             raise
 
@@ -219,6 +223,6 @@ class PlannerClient:
         try:
             self._request(method="DELETE", path=f"/api/v1/flavors/{flavor_name}")
         except PlannerError as err:
-            if "HTTP error 404" in str(err):
+            if err.status_code == 404:
                 return
             raise

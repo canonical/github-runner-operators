@@ -151,8 +151,9 @@ def test_http_error_raises_planner_error(requests_mock: object) -> None:
     requests_mock.get(f"{base_url}/api/v1/auth/token", status_code=400, text="bad request")
     client = PlannerClient(base_url=base_url, admin_token="token")
 
-    with pytest.raises(PlannerError, match="HTTP error 400"):
+    with pytest.raises(PlannerError, match="HTTP error 400") as exc_info:
         client.list_auth_token_names()
+    assert exc_info.value.status_code == 400
 
 
 def test_connection_error_raises_runtime_error(requests_mock: object) -> None:
