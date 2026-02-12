@@ -19,7 +19,7 @@ When relation cleanup runs, the relation app data may no longer be available.
 
 The planner charm follows a [holistic charm pattern](https://discourse.charmhub.io/t/deltas-vs-holistic-charming/11095).
 Relation removal cleanup is done by reconciling active relations with planner auth tokens.
-This requires persistent state that survives relation removal hooks.
+This removal requires a persistent state that survives relation removal hooks.
 
 ## Decision
 
@@ -62,6 +62,6 @@ This conflicts with the holistic reconciliation approach and is less resilient t
 ## Consequences
 
 The change reuses existing Juju secret infrastructure and avoids Go-side API changes.
-It simplifies github-runner charm responsibilities to relation-state publication.
+The github-runner charm only needs to publish desired flavor state in relation data and does not need a planner API client for flavor management.
 The relation secret gets an additional revision when flavor data is learned or updated.
 Cleanup remains idempotent because planner flavor deletion is idempotent.
