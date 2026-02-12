@@ -36,6 +36,7 @@ def test_planner_postgresql_integration(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {user_token}",
         },
+        timeout=30,
     )
 
     assert response.status_code == requests.status_codes.codes.created
@@ -53,7 +54,7 @@ def test_planner_prometheus_metrics(
     """
     status = juju.status()
     unit_ip = status.apps[planner_app].units[planner_app + "/0"].address
-    response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics")
+    response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics", timeout=30)
 
     assert response.status_code == requests.status_codes.codes.OK
 
@@ -99,6 +100,7 @@ def test_planner_github_runner_integration(
         response = requests.get(
             f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
             headers={"Authorization": f"Bearer {user_token}"},
+            timeout=30,
         )
         if response.status_code == requests.status_codes.codes.ok:
             break
@@ -116,6 +118,7 @@ def test_planner_github_runner_integration(
         response = requests.get(
             f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
             headers={"Authorization": f"Bearer {user_token}"},
+            timeout=30,
         )
         if response.status_code == requests.status_codes.codes.not_found:
             break
@@ -151,6 +154,7 @@ def test_planner_enable_disable_flavor_actions(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {user_token}",
         },
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.created
 
@@ -158,6 +162,7 @@ def test_planner_enable_disable_flavor_actions(
     response = requests.get(
         f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
         headers={"Authorization": f"Bearer {user_token}"},
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
@@ -177,6 +182,7 @@ def test_planner_enable_disable_flavor_actions(
     response = requests.get(
         f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
         headers={"Authorization": f"Bearer {user_token}"},
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
@@ -195,6 +201,7 @@ def test_planner_enable_disable_flavor_actions(
     response = requests.get(
         f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
         headers={"Authorization": f"Bearer {user_token}"},
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
