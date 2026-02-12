@@ -78,8 +78,9 @@ class PlannerClient:
             response.raise_for_status()
             return response
         except requests.exceptions.HTTPError as e:
-            error_body = e.response.text if e.response else ""
-            raise PlannerError(e.response.status_code, error_body) from e
+            error_body = e.response.text if e.response is not None else ""
+            status_code = e.response.status_code if e.response is not None else 0
+            raise PlannerError(status_code, error_body) from e
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Connection error: {str(e)}") from e
 

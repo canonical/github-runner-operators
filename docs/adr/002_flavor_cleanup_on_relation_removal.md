@@ -65,3 +65,5 @@ The change reuses existing Juju secret infrastructure and avoids Go-side API cha
 The github-runner charm only needs to publish desired flavor state in relation data and does not need a planner API client for flavor management.
 The relation secret gets an additional revision when flavor data is learned or updated.
 Cleanup remains idempotent because planner flavor deletion is idempotent.
+If two relations declare the same flavor name, one relation's cleanup can delete a flavor still desired by the other.
+This is not handled yet and would require uniqueness enforcement or reference counting.
