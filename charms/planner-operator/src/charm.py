@@ -12,7 +12,7 @@ import typing
 
 import ops
 import paas_charm.go
-from planner import PlannerClient, PlannerError
+from planner import Flavor, PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
 
@@ -247,13 +247,23 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
         secret = self.model.get_secret(label=auth_token_name)
         secret_content = secret.get_content()
+        existing_flavor = secret_content.get(MANAGED_FLAVOR_SECRET_KEY)
 
         if not flavor_config:
-            if MANAGED_FLAVOR_SECRET_KEY not in secret_content:
+            if not existing_flavor:
                 return
+            client.delete_flavor(existing_flavor)
             secret_content.pop(MANAGED_FLAVOR_SECRET_KEY)
             secret.set_content(secret_content)
             return
+
+        if self._flavor_matches(client, flavor_config, existing_flavor):
+            return
+
+        # Delete the old flavor when the name or config has changed,
+        # since create_flavor does not update existing flavors.
+        if existing_flavor:
+            client.delete_flavor(existing_flavor)
 
         client.create_flavor(
             flavor_name=flavor_config.name,
@@ -263,10 +273,29 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             minimum_pressure=flavor_config.minimum_pressure,
         )
 
-        if secret_content.get(MANAGED_FLAVOR_SECRET_KEY) == flavor_config.name:
+        if existing_flavor == flavor_config.name:
             return
         secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_config.name
         secret.set_content(secret_content)
+
+    @staticmethod
+    def _flavor_matches(
+        client: PlannerClient,
+        desired: "RelationFlavorConfig",
+        existing_flavor_name: str | None,
+    ) -> bool:
+        """Check whether the existing planner flavor already matches the desired config."""
+        if existing_flavor_name != desired.name:
+            return False
+        existing = client.get_flavor(desired.name)
+        if existing is None:
+            return False
+        return (
+            existing.platform == desired.platform
+            and existing.labels == desired.labels
+            and existing.priority == desired.priority
+            and existing.minimum_pressure == desired.minimum_pressure
+        )
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)

@@ -6,7 +6,7 @@
 import pytest
 import requests
 
-from planner import PlannerClient, PlannerError
+from planner import Flavor, PlannerClient, PlannerError
 
 base_url = "http://127.0.0.1:8080"
 
@@ -75,6 +75,47 @@ def test_delete_auth_token_completes_successfully(requests_mock: object) -> None
     client = PlannerClient(base_url=base_url, admin_token="token")
 
     client.delete_auth_token("runner")
+
+
+def test_get_flavor_returns_flavor_config(requests_mock: object) -> None:
+    """
+    arrange: A requests mock for GET request to the /api/v1/flavors/{name} endpoint.
+    act: The get_flavor method of the PlannerClient is called.
+    assert: The returned dict matches the expected flavor config.
+    """
+    flavor_data = {
+        "name": "small",
+        "platform": "github",
+        "labels": ["self-hosted", "linux"],
+        "priority": 100,
+        "is_disabled": False,
+        "minimum_pressure": 0,
+    }
+    requests_mock.get(f"{base_url}/api/v1/flavors/small", json=flavor_data)
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    result = client.get_flavor("small")
+
+    assert result == Flavor(
+        name="small",
+        platform="github",
+        labels=["self-hosted", "linux"],
+        priority=100,
+        minimum_pressure=0,
+        is_disabled=False,
+    )
+
+
+def test_get_flavor_returns_none_when_not_found(requests_mock: object) -> None:
+    """
+    arrange: A requests mock that returns 404 for the flavor endpoint.
+    act: The get_flavor method of the PlannerClient is called.
+    assert: None is returned.
+    """
+    requests_mock.get(f"{base_url}/api/v1/flavors/missing", status_code=404, text="not found")
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    assert client.get_flavor("missing") is None
 
 
 def test_delete_flavor_completes_successfully(requests_mock: object) -> None:

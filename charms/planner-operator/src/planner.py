@@ -3,9 +3,22 @@
 
 """Planner API client."""
 
+import dataclasses
 import typing
 
 import requests
+
+
+@dataclasses.dataclass(frozen=True)
+class Flavor:
+    """Flavor as returned by the planner API."""
+
+    name: str
+    platform: str
+    labels: list[str]
+    priority: int
+    minimum_pressure: int
+    is_disabled: bool
 
 
 class PlannerError(Exception):
@@ -82,6 +95,35 @@ class PlannerClient:
             path=f"/api/v1/flavors/{flavor_name}",
             json_data={"is_disabled": is_disabled},
         )
+
+    def get_flavor(self, flavor_name: str) -> Flavor | None:
+        """Get a flavor by name.
+
+        Args:
+            flavor_name: The name of the flavor.
+
+        Returns:
+            The Flavor, or None if the flavor does not exist.
+
+        Raises:
+            PlannerError: If API returns non-2xx/404 status code.
+            RuntimeError: If connection fails.
+        """
+        try:
+            response = self._request(method="GET", path=f"/api/v1/flavors/{flavor_name}")
+            data = response.json()
+            return Flavor(
+                name=data["name"],
+                platform=data["platform"],
+                labels=data["labels"],
+                priority=data["priority"],
+                minimum_pressure=data["minimum_pressure"],
+                is_disabled=data["is_disabled"],
+            )
+        except PlannerError as err:
+            if "HTTP error 404" in str(err):
+                return None
+            raise
 
     def create_flavor(
         self,
