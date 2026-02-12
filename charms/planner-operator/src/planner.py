@@ -4,9 +4,12 @@
 """Planner API client."""
 
 import dataclasses
+import logging
 import typing
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,6 +170,7 @@ class PlannerClient:
             )
         except PlannerError as err:
             if err.status_code == 409:
+                logger.debug("Flavor %s already exists, skipping create", flavor_name)
                 return
             raise
 

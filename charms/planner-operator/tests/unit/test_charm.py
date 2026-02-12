@@ -58,7 +58,7 @@ def test_from_relation_data_parses_all_fields():
     config = RelationFlavorConfig.from_relation_data(data)
 
     assert config.name == "large"
-    assert config.platform == "openstack"
+    assert config.platform == "github"
     assert config.labels == ["self-hosted", "linux", "x64"]
     assert config.priority == 50
     assert config.minimum_pressure == 10

@@ -245,7 +245,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         allows cleanup of the flavor when the relation is later removed.
         """
         flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
-        secret = self.model.get_secret(label=auth_token_name)
+        try:
+            secret = self.model.get_secret(label=auth_token_name)
+        except ops.SecretNotFoundError:
+            logger.warning("Secret %s not found, skipping flavor sync", auth_token_name)
+            return
         secret_content = secret.get_content()
         existing_flavor = secret_content.get(MANAGED_FLAVOR_SECRET_KEY)
 
@@ -356,7 +360,7 @@ class RelationFlavorConfig:
             return None
         return cls(
             name=flavor_name,
-            platform=relation_data.get(PLANNER_PLATFORM_RELATION_KEY) or DEFAULT_FLAVOR_PLATFORM,
+            platform=DEFAULT_FLAVOR_PLATFORM,
             labels=_parse_relation_labels(relation_data.get(PLANNER_LABELS_RELATION_KEY)),
             priority=_parse_relation_int(
                 relation_data.get(PLANNER_PRIORITY_RELATION_KEY),
