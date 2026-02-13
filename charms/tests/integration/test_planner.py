@@ -96,15 +96,7 @@ def test_planner_github_runner_integration(
     else:
         pytest.fail(f"No relation found for {planner_app}:planner")
 
-    for _ in range(24):
-        response = requests.get(
-            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
-            headers={"Authorization": f"Bearer {user_token}"},
-            timeout=30,
-        )
-        if response.status_code == requests.status_codes.codes.ok:
-            break
-        time.sleep(5)
+    response = poll_flavor_status(unit_ip, flavor_name, user_token, requests.status_codes.codes.ok)
     assert response.status_code == requests.status_codes.codes.ok
 
     juju.cli("remove-relation", f"{planner_app}:planner", github_runner_app)
@@ -114,15 +106,7 @@ def test_planner_github_runner_integration(
         delay=10,
     )
 
-    for _ in range(24):
-        response = requests.get(
-            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
-            headers={"Authorization": f"Bearer {user_token}"},
-            timeout=30,
-        )
-        if response.status_code == requests.status_codes.codes.not_found:
-            break
-        time.sleep(5)
+    response = poll_flavor_status(unit_ip, flavor_name, user_token, requests.status_codes.codes.not_found)
     assert response.status_code == requests.status_codes.codes.not_found
 
 
@@ -208,3 +192,15 @@ def test_planner_enable_disable_flavor_actions(
     assert flavor_data["is_disabled"] is False, "Flavor should be enabled after action"
 
 
+def poll_flavor_status(unit_ip, flavor_name, token, expected_status, attempts=24, interval=5):
+    """Poll the flavor API until the expected HTTP status is returned."""
+    for _ in range(attempts):
+        response = requests.get(
+            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if response.status_code == expected_status:
+            return response
+        time.sleep(interval)
+    return response
