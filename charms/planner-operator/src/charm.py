@@ -360,6 +360,7 @@ class RelationFlavorConfig:
             return None
         return cls(
             name=flavor_name,
+            # The planner API only supports "github" as platform for now.
             platform=DEFAULT_FLAVOR_PLATFORM,
             labels=_parse_relation_labels(relation_data.get(PLANNER_LABELS_RELATION_KEY)),
             priority=_parse_relation_int(
