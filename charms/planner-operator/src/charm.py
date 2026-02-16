@@ -192,11 +192,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 self._sync_relation_flavor_secret(
                     client=client, relation=relation, auth_token_name=auth_token_name
                 )
-                reconciled.add(auth_token_name)
             except (PlannerError, JujuError):
                 logger.exception(
                     "Failed to reconcile relation %s, skipping", relation.id
                 )
+            finally:
                 reconciled.add(auth_token_name)
 
         # Clean up tokens that exist on the planner but have no active relation.
