@@ -184,7 +184,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             auth_token_name = self._get_auth_token_name(relation.id)
             try:
                 if auth_token_name not in existing_tokens:
-                    self._create_and_share_relation_secret(
+                    self._create_relation_credentials(
                         client=client,
                         relation=relation,
                         auth_token_name=auth_token_name,
@@ -204,9 +204,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         # Only tokens that were successfully reconciled are excluded.
         orphaned = existing_tokens - reconciled
         for token_name in orphaned:
-            self._cleanup_orphaned_relation_resources(client=client, token_name=token_name)
+            self._delete_orphaned_credentials(client=client, token_name=token_name)
 
-    def _create_and_share_relation_secret(
+    def _create_relation_credentials(
         self,
         client: PlannerClient,
         relation: ops.Relation,
@@ -231,7 +231,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         relation.data[self.app]["endpoint"] = self._base_url
         relation.data[self.app]["token"] = secret.id
 
-    def _cleanup_orphaned_relation_resources(self, client: PlannerClient, token_name: str) -> None:
+    def _delete_orphaned_credentials(self, client: PlannerClient, token_name: str) -> None:
         """Delete orphaned secret revisions and auth token."""
         try:
             secret = self.model.get_secret(label=token_name)
