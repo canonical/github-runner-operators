@@ -26,22 +26,16 @@ This removal requires a persistent state that survives relation removal hooks.
 The planner charm owns full lifecycle of relation-managed flavors (create and delete).
 GitHub runner declares desired flavor state in relation data, and planner reconciles actual state.
 
-The planner charm stores the runner-managed flavor name in the existing Juju secret labeled by relation ID (`relation-{id}`), alongside the auth token.
-The secret content includes:
-- `token`
-- `managed-flavor`
-
 During active relation reconciliation:
 1. The charm ensures relation auth token/secret exists.
-2. If relation flavor is present, it ensures flavor exists via planner API `POST /api/v1/flavors/{name}` (idempotent via conflict handling) using relation-provided flavor config.
-3. It writes flavor name to `managed-flavor` in the relation secret.
-4. If relation flavor is unset, it removes `managed-flavor` from the secret to avoid stale cleanup.
+2. It builds the desired set of flavors from active relation data.
+3. It lists current planner flavors via `GET /api/v1/flavors`.
+4. It ensures each desired flavor exists with matching config (delete/create when stale, create when missing).
+5. It deletes flavors present in planner but absent from desired relation state.
 
 During orphan cleanup:
-1. The charm reads `managed-flavor` from the secret.
-2. If present, it calls planner API `DELETE /api/v1/flavors/{name}`.
-3. If flavor deletion succeeds, it removes the secret and deletes the auth token.
-4. If flavor deletion fails, the hook errors and Juju retries with the same secret/token state.
+1. The charm removes the relation secret and deletes the auth token.
+2. Flavor cleanup is handled by the flavor reconciliation step, which compares planner DB state with active relations.
 
 Active relations and orphaned tokens are determined holistically from current relation state during reconciliation, without relying on relation event deltas.
 
@@ -56,14 +50,17 @@ This was rejected because split ownership duplicates API coupling and weakens ho
 Another alternative is encoding the relation ID in the flavor name (e.g., `relation-{id}-{flavor_name}`) so that managed flavors can be discovered by listing flavors and filtering by prefix.
 This was rejected because the flavor name appears in Grafana dashboards, Prometheus metrics labels, and other observability surfaces, where the relation ID prefix would add noise with no operational value.
 
+Another alternative is storing the managed flavor name in the per-relation Juju secret (alongside the auth token) and reading it back during cleanup.
+This was rejected because it couples reconciliation logic to Juju secret read-modify-write operations and makes the secret a second source of truth alongside the planner database.
+The DB-based approach uses a single source of truth and avoids fragile secret content management.
+
 Another alternative is event-specific cleanup only in `relation_broken`.
 This conflicts with the holistic reconciliation approach and is less resilient to event ordering/retries.
 
 ## Consequences
 
-The change reuses existing Juju secret infrastructure and avoids Go-side API changes.
+The change depends on planner exposing `GET /api/v1/flavors` so the charm can reconcile DB state holistically.
 The github-runner charm only needs to publish desired flavor state in relation data and does not need a planner API client for flavor management.
-The relation secret gets an additional revision when flavor data is learned or updated.
 Cleanup remains idempotent because planner flavor deletion is idempotent.
 If two relations declare the same flavor name, one relation's cleanup can temporarily delete a flavor still desired by the other.
 The next hook execution recreates it via the remaining relation's reconciliation pass.

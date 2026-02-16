@@ -117,18 +117,24 @@ class PlannerClient:
         try:
             response = self._request(method="GET", path=f"/api/v1/flavors/{flavor_name}")
             data = response.json()
-            return Flavor(
-                name=data["name"],
-                platform=data["platform"],
-                labels=data["labels"],
-                priority=data["priority"],
-                minimum_pressure=data["minimum_pressure"],
-                is_disabled=data["is_disabled"],
-            )
+            return self._parse_flavor(data)
         except PlannerError as err:
             if err.status_code == 404:
                 return None
             raise
+
+    def list_flavors(self) -> list[Flavor]:
+        """List all flavors.
+
+        Returns:
+            List of planner flavors.
+
+        Raises:
+            PlannerError: If API returns non-2xx status code or connection fails.
+        """
+        response = self._request(method="GET", path="/api/v1/flavors")
+        data = response.json()
+        return [self._parse_flavor(flavor) for flavor in data]
 
     def create_flavor(
         self,
@@ -223,3 +229,15 @@ class PlannerClient:
             if err.status_code == 404:
                 return
             raise
+
+    @staticmethod
+    def _parse_flavor(data: dict[str, typing.Any]) -> Flavor:
+        """Parse a flavor payload from planner API responses."""
+        return Flavor(
+            name=data["name"],
+            platform=data["platform"],
+            labels=data["labels"],
+            priority=data["priority"],
+            minimum_pressure=data["minimum_pressure"],
+            is_disabled=data["is_disabled"],
+        )

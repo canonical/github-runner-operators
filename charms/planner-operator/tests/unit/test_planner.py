@@ -118,6 +118,67 @@ def test_get_flavor_returns_none_when_not_found(requests_mock: object) -> None:
     assert client.get_flavor("missing") is None
 
 
+def test_list_flavors_returns_flavor_list(requests_mock: object) -> None:
+    """
+    arrange: A requests mock for GET request to the /api/v1/flavors endpoint.
+    act: The list_flavors method of the PlannerClient is called.
+    assert: The returned list matches the expected Flavor objects.
+    """
+    flavor_data = [
+        {
+            "name": "small",
+            "platform": "github",
+            "labels": ["self-hosted", "linux"],
+            "priority": 100,
+            "is_disabled": False,
+            "minimum_pressure": 0,
+        },
+        {
+            "name": "large",
+            "platform": "github",
+            "labels": ["self-hosted", "linux", "x64"],
+            "priority": 200,
+            "is_disabled": True,
+            "minimum_pressure": 10,
+        },
+    ]
+    requests_mock.get(f"{base_url}/api/v1/flavors", json=flavor_data)
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    assert client.list_flavors() == [
+        Flavor(
+            name="small",
+            platform="github",
+            labels=["self-hosted", "linux"],
+            priority=100,
+            minimum_pressure=0,
+            is_disabled=False,
+        ),
+        Flavor(
+            name="large",
+            platform="github",
+            labels=["self-hosted", "linux", "x64"],
+            priority=200,
+            minimum_pressure=10,
+            is_disabled=True,
+        ),
+    ]
+
+
+def test_list_flavors_raises_planner_error_on_http_error(requests_mock: object) -> None:
+    """
+    arrange: A requests mock that returns 500 for the flavor list endpoint.
+    act: The list_flavors method of the PlannerClient is called.
+    assert: A PlannerError is raised.
+    """
+    requests_mock.get(f"{base_url}/api/v1/flavors", status_code=500, text="server error")
+    client = PlannerClient(base_url=base_url, admin_token="token")
+
+    with pytest.raises(PlannerError, match="HTTP error 500") as exc_info:
+        client.list_flavors()
+    assert exc_info.value.status_code == 500
+
+
 def test_delete_flavor_completes_successfully(requests_mock: object) -> None:
     """
     arrange: A requests mock for DELETE request to the /api/v1/flavors/{name} endpoint.

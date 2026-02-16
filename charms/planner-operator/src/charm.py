@@ -12,7 +12,7 @@ import typing
 
 import ops
 import paas_charm.go
-from planner import PlannerClient, PlannerError
+from planner import Flavor, PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 HTTP_PORT: typing.Final[int] = 8080
 PLANNER_RELATION_NAME: typing.Final[str] = "planner"
 ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
-MANAGED_FLAVOR_SECRET_KEY: typing.Final[str] = "managed-flavor"
 PLANNER_FLAVOR_RELATION_KEY: typing.Final[str] = "flavor"
 PLANNER_LABELS_RELATION_KEY: typing.Final[str] = "labels"
 PLANNER_PLATFORM_RELATION_KEY: typing.Final[str] = "platform"
@@ -181,6 +180,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         ]
         existing_tokens = set(auth_token_names)
         reconciled = set()
+        wanted_flavors = {}
+        flavor_orphan_cleanup_safe = True
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
@@ -194,17 +195,24 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                         relation=relation,
                         auth_token_name=auth_token_name,
                     )
-                self._sync_relation_flavor_secret(
-                    client=client, relation=relation, auth_token_name=auth_token_name
-                )
+                flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
+                if flavor_config is not None:
+                    wanted_flavors[flavor_config.name] = flavor_config
             except (PlannerError, JujuError):
                 logger.exception(
                     "Failed to reconcile relation %s, skipping", relation.id
                 )
+                flavor_orphan_cleanup_safe = False
             finally:
                 reconciled.add(auth_token_name)
 
-        # Clean up tokens, flavors, and secrets that have no active relation.
+        self._sync_managed_flavors(
+            client=client,
+            wanted_flavors=wanted_flavors,
+            delete_orphans=flavor_orphan_cleanup_safe,
+        )
+
+        # Clean up tokens and secrets that have no active relation.
         # Only tokens that were successfully reconciled are excluded.
         orphaned = existing_tokens - reconciled
         for token_name in orphaned:
@@ -236,77 +244,57 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         relation.data[self.app]["token"] = secret.id
 
     def _cleanup_orphaned_relation_resources(self, client: PlannerClient, token_name: str) -> None:
-        """Delete orphaned managed flavor, secret revisions, and auth token."""
+        """Delete orphaned secret revisions and auth token."""
         try:
             secret = self.model.get_secret(label=token_name)
-            flavor_name = secret.get_content().get(MANAGED_FLAVOR_SECRET_KEY)
-            if flavor_name:
-                client.delete_flavor(flavor_name)
             secret.remove_all_revisions()
         except ops.SecretNotFoundError:
             # It is fine if the secret is already removed.
             logger.debug("Secret with label %s not found during cleanup", token_name)
         client.delete_auth_token(token_name)
 
-    def _sync_relation_flavor_secret(
-        self, client: PlannerClient, relation: ops.Relation, auth_token_name: str
+    def _sync_managed_flavors(
+        self,
+        client: PlannerClient,
+        wanted_flavors: dict[str, "RelationFlavorConfig"],
+        delete_orphans: bool = True,
     ) -> None:
-        """Reconcile the managed flavor for a relation.
+        """Reconcile planner flavors from relation-declared desired state."""
+        existing_flavors = {flavor.name: flavor for flavor in client.list_flavors()}
+        for flavor_name, desired in wanted_flavors.items():
+            existing = existing_flavors.pop(flavor_name, None)
+            if existing is not None and self._flavor_matches(desired, existing):
+                continue
 
-        The auth_token_name is used as the Juju secret label to look up the
-        per-relation secret where the managed flavor name is tracked. This
-        allows cleanup of the flavor when the relation is later removed.
-        """
-        flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
-        try:
-            secret = self.model.get_secret(label=auth_token_name)
-        except ops.SecretNotFoundError:
-            logger.warning("Secret %s not found, skipping flavor sync", auth_token_name)
+            # Delete the old flavor if a stale config exists, since create does not update.
+            if existing is not None:
+                client.delete_flavor(flavor_name)
+
+            client.create_flavor(
+                flavor_name=desired.name,
+                platform=desired.platform,
+                labels=desired.labels,
+                priority=desired.priority,
+                minimum_pressure=desired.minimum_pressure,
+            )
+
+        if not delete_orphans:
+            if existing_flavors:
+                logger.warning(
+                    "Skipping deletion of %d unmanaged flavors because relation reconciliation had errors",
+                    len(existing_flavors),
+                )
             return
-        secret_content = secret.get_content()
-        existing_flavor = secret_content.get(MANAGED_FLAVOR_SECRET_KEY)
 
-        if not flavor_config:
-            if not existing_flavor:
-                return
-            client.delete_flavor(existing_flavor)
-            secret_content.pop(MANAGED_FLAVOR_SECRET_KEY)
-            secret.set_content(secret_content)
-            return
-
-        if self._flavor_matches(client, flavor_config, existing_flavor):
-            return
-
-        # Delete the old flavor when the name or config has changed,
-        # since create_flavor does not update existing flavors.
-        if existing_flavor:
-            client.delete_flavor(existing_flavor)
-
-        client.create_flavor(
-            flavor_name=flavor_config.name,
-            platform=flavor_config.platform,
-            labels=flavor_config.labels,
-            priority=flavor_config.priority,
-            minimum_pressure=flavor_config.minimum_pressure,
-        )
-
-        if existing_flavor == flavor_config.name:
-            return
-        secret_content[MANAGED_FLAVOR_SECRET_KEY] = flavor_config.name
-        secret.set_content(secret_content)
+        for flavor_name in existing_flavors:
+            client.delete_flavor(flavor_name)
 
     @staticmethod
     def _flavor_matches(
-        client: PlannerClient,
         desired: "RelationFlavorConfig",
-        existing_flavor_name: str | None,
+        existing: Flavor,
     ) -> bool:
         """Check whether the existing planner flavor already matches the desired config."""
-        if existing_flavor_name != desired.name:
-            return False
-        existing = client.get_flavor(desired.name)
-        if existing is None:
-            return False
         return (
             existing.platform == desired.platform
             and existing.labels == desired.labels
