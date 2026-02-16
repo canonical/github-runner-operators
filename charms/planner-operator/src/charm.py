@@ -275,7 +275,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
     ) -> bool:
         """Check whether the existing planner flavor already matches the desired config."""
         return (
-            existing.platform == desired.platform
+            existing.name == desired.name
+            and existing.platform == desired.platform
             and existing.labels == desired.labels
             and existing.priority == desired.priority
             and existing.minimum_pressure == desired.minimum_pressure
