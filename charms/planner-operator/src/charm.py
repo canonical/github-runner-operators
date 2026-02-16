@@ -181,7 +181,6 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         existing_tokens = set(auth_token_names)
         reconciled = set()
         wanted_flavors = {}
-        flavor_orphan_cleanup_safe = True
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
@@ -195,22 +194,17 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                         relation=relation,
                         auth_token_name=auth_token_name,
                     )
-                flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
-                if flavor_config is not None:
-                    wanted_flavors[flavor_config.name] = flavor_config
             except (PlannerError, JujuError):
                 logger.exception(
                     "Failed to reconcile relation %s, skipping", relation.id
                 )
-                flavor_orphan_cleanup_safe = False
             finally:
                 reconciled.add(auth_token_name)
+            flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
+            if flavor_config is not None:
+                wanted_flavors[flavor_config.name] = flavor_config
 
-        self._sync_managed_flavors(
-            client=client,
-            wanted_flavors=wanted_flavors,
-            delete_orphans=flavor_orphan_cleanup_safe,
-        )
+        self._sync_managed_flavors(client=client, wanted_flavors=wanted_flavors)
 
         # Clean up tokens and secrets that have no active relation.
         # Only tokens that were successfully reconciled are excluded.
@@ -257,7 +251,6 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         self,
         client: PlannerClient,
         wanted_flavors: dict[str, "RelationFlavorConfig"],
-        delete_orphans: bool = True,
     ) -> None:
         """Reconcile planner flavors from relation-declared desired state."""
         existing_flavors = {flavor.name: flavor for flavor in client.list_flavors()}
@@ -277,14 +270,6 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 priority=desired.priority,
                 minimum_pressure=desired.minimum_pressure,
             )
-
-        if not delete_orphans:
-            if existing_flavors:
-                logger.warning(
-                    "Skipping deletion of %d unmanaged flavors because relation reconciliation had errors",
-                    len(existing_flavors),
-                )
-            return
 
         for flavor_name in existing_flavors:
             client.delete_flavor(flavor_name)

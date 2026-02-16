@@ -104,11 +104,11 @@ def test_from_relation_data_errors_on_invalid_minimum_pressure():
         RelationFlavorConfig.from_relation_data(data)
 
 
-def test_sync_managed_flavors_skips_orphan_deletes_when_flag_disabled():
+def test_sync_managed_flavors_skips_matching_flavor():
     """
-    arrange: Existing flavors include one wanted flavor and one unmanaged flavor.
-    act: Sync managed flavors with delete_orphans disabled.
-    assert: Unmanaged flavor is not deleted.
+    arrange: An existing flavor that matches the wanted config.
+    act: Sync managed flavors.
+    assert: The flavor is neither deleted nor recreated.
     """
     charm = GithubRunnerPlannerCharm.__new__(GithubRunnerPlannerCharm)
     client = Mock()
@@ -118,14 +118,6 @@ def test_sync_managed_flavors_skips_orphan_deletes_when_flag_disabled():
             platform="github",
             labels=["self-hosted"],
             priority=50,
-            minimum_pressure=0,
-            is_disabled=False,
-        ),
-        Flavor(
-            name="manual-debug",
-            platform="github",
-            labels=["debug"],
-            priority=1,
             minimum_pressure=0,
             is_disabled=False,
         ),
@@ -140,16 +132,17 @@ def test_sync_managed_flavors_skips_orphan_deletes_when_flag_disabled():
         )
     }
 
-    charm._sync_managed_flavors(client=client, wanted_flavors=wanted, delete_orphans=False)
+    charm._sync_managed_flavors(client=client, wanted_flavors=wanted)
 
     client.delete_flavor.assert_not_called()
+    client.create_flavor.assert_not_called()
 
 
-def test_sync_managed_flavors_deletes_orphans_when_flag_enabled():
+def test_sync_managed_flavors_deletes_orphans():
     """
-    arrange: Existing flavors include an unmanaged flavor and no wanted flavors.
-    act: Sync managed flavors with delete_orphans enabled.
-    assert: The unmanaged flavor is deleted.
+    arrange: An existing flavor with no matching wanted entry.
+    act: Sync managed flavors.
+    assert: The orphaned flavor is deleted.
     """
     charm = GithubRunnerPlannerCharm.__new__(GithubRunnerPlannerCharm)
     client = Mock()
@@ -164,6 +157,6 @@ def test_sync_managed_flavors_deletes_orphans_when_flag_enabled():
         )
     ]
 
-    charm._sync_managed_flavors(client=client, wanted_flavors={}, delete_orphans=True)
+    charm._sync_managed_flavors(client=client, wanted_flavors={})
 
     client.delete_flavor.assert_called_once_with("manual-debug")
