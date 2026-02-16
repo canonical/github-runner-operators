@@ -64,8 +64,7 @@ class PlannerClient:
             Response object.
 
         Raises:
-            PlannerError: If API returns non-2xx status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code or connection fails.
         """
         url = f"{self._base_url}{path}"
         headers = {"Authorization": f"Bearer {self._admin_token}"}
@@ -85,7 +84,7 @@ class PlannerClient:
             status_code = e.response.status_code if e.response is not None else 0
             raise PlannerError(status_code, error_body) from e
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Connection error: {str(e)}") from e
+            raise PlannerError(0, f"Connection error: {str(e)}") from e
 
     def update_flavor(self, flavor_name: str, is_disabled: bool) -> None:
         """Update flavor disabled status.
@@ -95,8 +94,7 @@ class PlannerClient:
             is_disabled: Whether to disable (True) or enable (False) the flavor.
 
         Raises:
-            PlannerError: If API returns non-2xx status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code or connection fails.
         """
         self._request(
             method="PATCH",
@@ -114,8 +112,7 @@ class PlannerClient:
             The Flavor, or None if the flavor does not exist.
 
         Raises:
-            PlannerError: If API returns non-2xx/404 status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx/404 status code or connection fails.
         """
         try:
             response = self._request(method="GET", path=f"/api/v1/flavors/{flavor_name}")
@@ -153,8 +150,7 @@ class PlannerClient:
             is_disabled: Whether flavor starts disabled.
 
         Raises:
-            PlannerError: If API returns non-2xx status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code or connection fails.
         """
         try:
             self._request(
@@ -181,8 +177,7 @@ class PlannerClient:
             List of auth token names.
 
         Raises:
-            PlannerError: If API returns non-2xx status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code or connection fails.
         """
         response = self._request(method="GET", path="/api/v1/auth/token")
         return response.json()["names"]
@@ -197,8 +192,7 @@ class PlannerClient:
             The auth token value.
 
         Raises:
-            PlannerError: If API returns non-2xx status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code or connection fails.
         """
         response = self._request(method="POST", path=f"/api/v1/auth/token/{name}")
         return response.json()["token"]
@@ -210,8 +204,7 @@ class PlannerClient:
             name: The name of the auth token.
 
         Raises:
-            PlannerError: If API returns non-2xx status code.
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code or connection fails.
         """
         self._request(method="DELETE", path=f"/api/v1/auth/token/{name}")
 
@@ -222,8 +215,7 @@ class PlannerClient:
             flavor_name: The name of the flavor.
 
         Raises:
-            PlannerError: If API returns non-2xx status code (other than 404).
-            RuntimeError: If connection fails.
+            PlannerError: If API returns non-2xx status code (other than 404) or connection fails.
         """
         try:
             self._request(method="DELETE", path=f"/api/v1/flavors/{flavor_name}")

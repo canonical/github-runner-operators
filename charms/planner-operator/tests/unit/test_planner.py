@@ -156,11 +156,11 @@ def test_http_error_raises_planner_error(requests_mock: object) -> None:
     assert exc_info.value.status_code == 400
 
 
-def test_connection_error_raises_runtime_error(requests_mock: object) -> None:
+def test_connection_error_raises_planner_error(requests_mock: object) -> None:
     """
     arrange: A requests mock that raises a connection error.
     act: The list_auth_token_names method of the PlannerClient is called.
-    assert: A RuntimeError is raised with the expected message.
+    assert: A PlannerError is raised with status_code 0 and a connection error message.
     """
     requests_mock.get(
         f"{base_url}/api/v1/auth/token",
@@ -168,5 +168,6 @@ def test_connection_error_raises_runtime_error(requests_mock: object) -> None:
     )
     client = PlannerClient(base_url=base_url, admin_token="token")
 
-    with pytest.raises(RuntimeError, match="Connection error"):
+    with pytest.raises(PlannerError, match="Connection error") as exc_info:
         client.list_auth_token_names()
+    assert exc_info.value.status_code == 0

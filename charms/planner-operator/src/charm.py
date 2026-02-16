@@ -118,7 +118,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             client = self._create_planner_client()
             client.update_flavor(flavor_name=flavor, is_disabled=False)
             event.set_results({"message": f"Flavor '{flavor}' enabled successfully"})
-        except (ConfigError, PlannerError, RuntimeError) as e:
+        except (ConfigError, PlannerError) as e:
             error_msg = str(e)
             event.fail(error_msg)
             logger.error("Failed to enable flavor %s: %s", flavor, error_msg)
@@ -134,7 +134,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             client = self._create_planner_client()
             client.update_flavor(flavor_name=flavor, is_disabled=True)
             event.set_results({"message": f"Flavor '{flavor}' disabled successfully"})
-        except (ConfigError, PlannerError, RuntimeError) as e:
+        except (ConfigError, PlannerError) as e:
             error_msg = str(e)
             event.fail(error_msg)
             logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
@@ -172,29 +172,37 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         auth_token_names = [
             token for token in all_token_names if self._check_name_fit_auth_token(token)
         ]
-        auth_token_set = set(auth_token_names)
+        existing_tokens = set(auth_token_names)
+        reconciled = set()
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
             auth_token_name = self._get_auth_token_name(relation.id)
             # During relation_broken the departing relation is still listed but has
-            # no endpoint. Skip reconciliation and leave the token in auth_token_set
-            # so orphan cleanup deletes its resources.
-            if not relation.data[self.app].get("endpoint") and auth_token_name in auth_token_set:
+            # no endpoint. Skip it so orphan cleanup deletes its resources.
+            if not relation.data[self.app].get("endpoint") and auth_token_name in existing_tokens:
                 continue
-            if auth_token_name not in auth_token_set:
-                self._create_and_share_relation_secret(
-                    client=client,
-                    relation=relation,
-                    auth_token_name=auth_token_name,
+            try:
+                if auth_token_name not in existing_tokens:
+                    self._create_and_share_relation_secret(
+                        client=client,
+                        relation=relation,
+                        auth_token_name=auth_token_name,
+                    )
+                self._sync_relation_flavor_secret(
+                    client=client, relation=relation, auth_token_name=auth_token_name
                 )
-            self._sync_relation_flavor_secret(
-                client=client, relation=relation, auth_token_name=auth_token_name
-            )
-            auth_token_set.discard(auth_token_name)
+                reconciled.add(auth_token_name)
+            except (PlannerError, JujuError):
+                logger.exception(
+                    "Failed to reconcile relation %s, skipping", relation.id
+                )
+                reconciled.add(auth_token_name)
 
-        # Clean up any auth tokens that are no longer needed
-        for token_name in auth_token_set:
+        # Clean up tokens that exist on the planner but have no active relation.
+        # Only tokens that were successfully reconciled are excluded.
+        orphaned = existing_tokens - reconciled
+        for token_name in orphaned:
             self._cleanup_orphaned_relation_resources(client=client, token_name=token_name)
 
     def _create_and_share_relation_secret(
