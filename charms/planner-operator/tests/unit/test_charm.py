@@ -138,6 +138,46 @@ def test_sync_managed_flavors_skips_matching_flavor():
     client.create_flavor.assert_not_called()
 
 
+def test_sync_managed_flavors_recreates_stale_flavor():
+    """
+    arrange: An existing flavor with different config than wanted.
+    act: Sync managed flavors.
+    assert: The stale flavor is deleted and recreated with the new config.
+    """
+    charm = GithubRunnerPlannerCharm.__new__(GithubRunnerPlannerCharm)
+    client = Mock()
+    client.list_flavors.return_value = [
+        Flavor(
+            name="small",
+            platform="github",
+            labels=["self-hosted"],
+            priority=50,
+            minimum_pressure=0,
+            is_disabled=False,
+        ),
+    ]
+    wanted = {
+        "small": RelationFlavorConfig(
+            name="small",
+            platform="github",
+            labels=["self-hosted", "x64"],
+            priority=100,
+            minimum_pressure=5,
+        )
+    }
+
+    charm._sync_managed_flavors(client=client, wanted_flavors=wanted)
+
+    client.delete_flavor.assert_called_once_with("small")
+    client.create_flavor.assert_called_once_with(
+        flavor_name="small",
+        platform="github",
+        labels=["self-hosted", "x64"],
+        priority=100,
+        minimum_pressure=5,
+    )
+
+
 def test_sync_managed_flavors_deletes_orphans():
     """
     arrange: An existing flavor with no matching wanted entry.
