@@ -184,15 +184,20 @@ class PlannerClient:
         return response.json()["token"]
 
     def delete_auth_token(self, name: str) -> None:
-        """Delete an auth token.
+        """Delete an auth token. A 404 is treated as success for idempotent cleanup.
 
         Args:
             name: The name of the auth token.
 
         Raises:
-            PlannerError: If API returns non-2xx status code or connection fails.
+            PlannerError: If API returns non-2xx status code (other than 404) or connection fails.
         """
-        self._request(method="DELETE", path=f"/api/v1/auth/token/{name}")
+        try:
+            self._request(method="DELETE", path=f"/api/v1/auth/token/{name}")
+        except PlannerError as err:
+            if err.status_code == 404:
+                return
+            raise
 
     def delete_flavor(self, flavor_name: str) -> None:
         """Delete a flavor. A 404 is treated as success for idempotent cleanup.
