@@ -78,6 +78,9 @@ func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors .
 }
 
 func (f *fakeStore) ListFlavors(ctx context.Context, platform string) ([]database.Flavor, error) {
+	if f.errToReturn != nil {
+		return nil, f.errToReturn
+	}
 	if f.lastFlavor != nil && f.lastFlavor.Platform == platform {
 		return []database.Flavor{*f.lastFlavor}, nil
 	}
@@ -350,6 +353,72 @@ func TestGetFlavor(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, flavor, storedFlavor)
 			}
+		})
+	}
+}
+
+func TestListFlavors(t *testing.T) {
+	storeFlavor := &database.Flavor{
+		Platform:        "github",
+		Name:            "runner-small",
+		Labels:          []string{"x64"},
+		Priority:        10,
+		IsDisabled:      false,
+		MinimumPressure: 5,
+	}
+	store := &fakeStore{lastFlavor: storeFlavor}
+	adminToken := "planner_v0_valid_admin_token________________________________"
+	server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+	req := newRequest(http.MethodGet, "/api/v1/flavors", "", adminToken)
+	w := httptest.NewRecorder()
+
+	server.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var flavors []database.Flavor
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&flavors))
+	require.Len(t, flavors, 1)
+	assert.Equal(t, *storeFlavor, flavors[0])
+}
+
+func TestListFlavorsErrors(t *testing.T) {
+	adminToken := "planner_v0_valid_admin_token________________________________"
+
+	tests := []struct {
+		name           string
+		storeErr       error
+		authHeader     string
+		expectedStatus int
+	}{{
+		name:           "shouldFailWhenStoreErrors",
+		storeErr:       errors.New("database error"),
+		authHeader:     "Bearer " + adminToken,
+		expectedStatus: http.StatusInternalServerError,
+	}, {
+		name:           "shouldFailWhenUnauthorized",
+		authHeader:     "Bearer invalid-token",
+		expectedStatus: http.StatusUnauthorized,
+	}, {
+		name:           "shouldFailWithInvalidAuthHeader",
+		authHeader:     "InvalidFormat",
+		expectedStatus: http.StatusBadRequest,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{errToReturn: tt.storeErr}
+			server := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/flavors", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			w := httptest.NewRecorder()
+
+			server.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
 		})
 	}
 }
