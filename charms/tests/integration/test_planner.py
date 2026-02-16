@@ -65,13 +65,15 @@ def test_planner_github_runner_integration(
     planner_app: str,
     any_charm_github_runner_app: str,
     user_token: str,
+    planner_admin_token_value: str,
 ):
     """
     arrange: The planner app and any-charm app mocking github-runner is deployed.
     act: Integrate, verify relation data and managed flavor creation, then remove
          the relation and verify managed flavor cleanup.
     assert: The integration data contains the endpoint and auth token, the managed
-            flavor is created on relation setup and deleted on relation removal.
+            flavor is created on relation setup, and both the flavor and auth token
+            are deleted on relation removal.
     """
     status = juju.status()
     unit_ip = status.apps[planner_app].units[f"{planner_app}/0"].address
@@ -108,6 +110,16 @@ def test_planner_github_runner_integration(
 
     response = poll_flavor_status(unit_ip, flavor_name, user_token, requests.status_codes.codes.not_found)
     assert response.status_code == requests.status_codes.codes.not_found
+
+    response = requests.get(
+        f"http://{unit_ip}:{APP_PORT}/api/v1/auth/token",
+        headers={"Authorization": f"Bearer {planner_admin_token_value}"},
+        timeout=30,
+    )
+    assert response.status_code == requests.status_codes.codes.ok
+    token_names = response.json()["names"]
+    relation_tokens = [name for name in token_names if name.startswith("relation-")]
+    assert not relation_tokens, f"Orphaned relation tokens found: {relation_tokens}"
 
 
 @pytest.mark.usefixtures("planner_with_integrations")
