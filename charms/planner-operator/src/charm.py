@@ -142,11 +142,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """Handle changes to the github-runner-manager relation."""
         self._setup()
 
-    def _on_planner_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
+    def _on_planner_relation_broken(self, _: ops.RelationBrokenEvent) -> None:
         """Handle planner relation broken events."""
-        self._setup(broken_relation_id=event.relation.id)
+        self._setup()
 
-    def _setup(self, broken_relation_id: int | None = None) -> None:
+    def _setup(self) -> None:
         """Set up the planner application."""
         self.unit.status = ops.MaintenanceStatus("Setting up planner application")
         try:
@@ -159,18 +159,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             return
 
         self.unit.status = ops.MaintenanceStatus("Setup planner integrations")
-        self._setup_planner_relation(client=client, broken_relation_id=broken_relation_id)
+        self._setup_planner_relation(client=client)
         self.unit.status = ops.ActiveStatus()
 
-    def _setup_planner_relation(
-        self, client: PlannerClient, broken_relation_id: int | None = None
-    ) -> None:
-        """Setup the planner relations if this unit is the leader.
-
-        During relation_broken, Juju still lists the broken relation among
-        the active relations. Passing its ID via broken_relation_id excludes
-        it from reconciliation so its resources are cleaned up as orphans.
-        """
+    def _setup_planner_relation(self, client: PlannerClient) -> None:
+        """Setup the planner relations if this unit is the leader."""
         if not self.unit.is_leader():
             return
 
@@ -184,7 +177,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
-            if relation.id == broken_relation_id:
+            # Relations with no remote app data (broken or not yet initialized)
+            # are excluded from reconciliation so their tokens are cleaned up as orphans.
+            if relation.app is None or not relation.data.get(relation.app):
                 continue
             auth_token_name = self._get_auth_token_name(relation.id)
             try:
