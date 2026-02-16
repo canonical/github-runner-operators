@@ -41,21 +41,12 @@ Active relations and orphaned tokens are determined holistically from current re
 
 ## Alternatives considered
 
-Other places to store flavor cleanup state include peer relation data or local files.
-These add extra charm state management and do not improve cleanup reliability.
-
-Another alternative is split ownership where github-runner creates flavors and planner only deletes them.
-This was rejected because split ownership duplicates API coupling and weakens holistic reconciliation.
-
 Another alternative is encoding the relation ID in the flavor name (e.g., `relation-{id}-{flavor_name}`) so that managed flavors can be discovered by listing flavors and filtering by prefix.
 This was rejected because the flavor name appears in Grafana dashboards, Prometheus metrics labels, and other observability surfaces, where the relation ID prefix would add noise with no operational value.
 
 Another alternative is storing the managed flavor name in the per-relation Juju secret (alongside the auth token) and reading it back during cleanup.
 This was rejected because it couples reconciliation logic to Juju secret read-modify-write operations and makes the secret a second source of truth alongside the planner database.
 The DB-based approach uses a single source of truth and avoids fragile secret content management.
-
-Another alternative is event-specific cleanup only in `relation_broken`.
-This conflicts with the holistic reconciliation approach and is less resilient to event ordering/retries.
 
 ## Consequences
 
