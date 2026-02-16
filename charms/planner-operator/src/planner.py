@@ -102,26 +102,6 @@ class PlannerClient:
             json_data={"is_disabled": is_disabled},
         )
 
-    def get_flavor(self, flavor_name: str) -> Flavor | None:
-        """Get a flavor by name.
-
-        Args:
-            flavor_name: The name of the flavor.
-
-        Returns:
-            The Flavor, or None if the flavor does not exist.
-
-        Raises:
-            PlannerError: If API returns non-2xx/404 status code or connection fails.
-        """
-        try:
-            response = self._request(method="GET", path=f"/api/v1/flavors/{flavor_name}")
-            data = response.json()
-            return self._parse_flavor(data)
-        except PlannerError as err:
-            if err.status_code == 404:
-                return None
-            raise
 
     def list_flavors(self) -> list[Flavor]:
         """List all flavors.

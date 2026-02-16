@@ -77,47 +77,6 @@ def test_delete_auth_token_completes_successfully(requests_mock: object) -> None
     client.delete_auth_token("runner")
 
 
-def test_get_flavor_returns_flavor_config(requests_mock: object) -> None:
-    """
-    arrange: A requests mock for GET request to the /api/v1/flavors/{name} endpoint.
-    act: The get_flavor method of the PlannerClient is called.
-    assert: The returned dict matches the expected flavor config.
-    """
-    flavor_data = {
-        "name": "small",
-        "platform": "github",
-        "labels": ["self-hosted", "linux"],
-        "priority": 100,
-        "is_disabled": False,
-        "minimum_pressure": 0,
-    }
-    requests_mock.get(f"{base_url}/api/v1/flavors/small", json=flavor_data)
-    client = PlannerClient(base_url=base_url, admin_token="token")
-
-    result = client.get_flavor("small")
-
-    assert result == Flavor(
-        name="small",
-        platform="github",
-        labels=["self-hosted", "linux"],
-        priority=100,
-        minimum_pressure=0,
-        is_disabled=False,
-    )
-
-
-def test_get_flavor_returns_none_when_not_found(requests_mock: object) -> None:
-    """
-    arrange: A requests mock that returns 404 for the flavor endpoint.
-    act: The get_flavor method of the PlannerClient is called.
-    assert: None is returned.
-    """
-    requests_mock.get(f"{base_url}/api/v1/flavors/missing", status_code=404, text="not found")
-    client = PlannerClient(base_url=base_url, admin_token="token")
-
-    assert client.get_flavor("missing") is None
-
-
 def test_list_flavors_returns_flavor_list(requests_mock: object) -> None:
     """
     arrange: A requests mock for GET request to the /api/v1/flavors endpoint.
