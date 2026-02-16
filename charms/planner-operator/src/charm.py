@@ -204,7 +204,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             finally:
                 reconciled.add(auth_token_name)
 
-        # Clean up tokens that exist on the planner but have no active relation.
+        # Clean up tokens, flavors, and secrets that have no active relation.
         # Only tokens that were successfully reconciled are excluded.
         orphaned = existing_tokens - reconciled
         for token_name in orphaned:
