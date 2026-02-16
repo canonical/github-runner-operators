@@ -198,8 +198,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                 logger.exception(
                     "Failed to reconcile relation %s, skipping", relation.id
                 )
-            finally:
-                reconciled.add(auth_token_name)
+            reconciled.add(auth_token_name)
             flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
             if flavor_config is not None:
                 wanted_flavors[flavor_config.name] = flavor_config
