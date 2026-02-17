@@ -4,13 +4,15 @@
 
 """Go Charm entrypoint."""
 
+import dataclasses
+import json
 import logging
 import pathlib
 import typing
 
 import ops
 import paas_charm.go
-from planner import PlannerClient, PlannerError
+from planner import Flavor, PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,15 @@ logger = logging.getLogger(__name__)
 HTTP_PORT: typing.Final[int] = 8080
 PLANNER_RELATION_NAME: typing.Final[str] = "planner"
 ADMIN_TOKEN_CONFIG_NAME: typing.Final[str] = "admin-token"
+PLANNER_FLAVOR_RELATION_KEY: typing.Final[str] = "flavor"
+PLANNER_LABELS_RELATION_KEY: typing.Final[str] = "labels"
+PLANNER_PLATFORM_RELATION_KEY: typing.Final[str] = "platform"
+PLANNER_PRIORITY_RELATION_KEY: typing.Final[str] = "priority"
+PLANNER_MINIMUM_PRESSURE_RELATION_KEY: typing.Final[str] = "minimum-pressure"
+DEFAULT_FLAVOR_PLATFORM: typing.Final[str] = "github"
+DEFAULT_FLAVOR_LABELS: typing.Final[list[str]] = ["self-hosted"]
+DEFAULT_FLAVOR_PRIORITY: typing.Final[int] = 50
+DEFAULT_FLAVOR_MINIMUM_PRESSURE: typing.Final[int] = 0
 
 
 class ConfigError(Exception):
@@ -38,16 +49,16 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(
-            self.on.enable_flavor_action, self._on_enable_flavor_action
-        )
-        self.framework.observe(
-            self.on.disable_flavor_action, self._on_disable_flavor_action
-        )
+        self.framework.observe(self.on.enable_flavor_action, self._on_enable_flavor_action)
+        self.framework.observe(self.on.disable_flavor_action, self._on_disable_flavor_action)
 
         self.framework.observe(
             self.on[PLANNER_RELATION_NAME].relation_changed,
             self._on_manager_relation_changed,
+        )
+        self.framework.observe(
+            self.on[PLANNER_RELATION_NAME].relation_broken,
+            self._on_planner_relation_broken,
         )
 
     def get_cos_dir(self) -> str:
@@ -106,7 +117,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             client = self._create_planner_client()
             client.update_flavor(flavor_name=flavor, is_disabled=False)
             event.set_results({"message": f"Flavor '{flavor}' enabled successfully"})
-        except (ConfigError, PlannerError, RuntimeError) as e:
+        except (ConfigError, PlannerError) as e:
             error_msg = str(e)
             event.fail(error_msg)
             logger.error("Failed to enable flavor %s: %s", flavor, error_msg)
@@ -122,7 +133,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             client = self._create_planner_client()
             client.update_flavor(flavor_name=flavor, is_disabled=True)
             event.set_results({"message": f"Flavor '{flavor}' disabled successfully"})
-        except (ConfigError, PlannerError, RuntimeError) as e:
+        except (ConfigError, PlannerError) as e:
             error_msg = str(e)
             event.fail(error_msg)
             logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
@@ -131,8 +142,12 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """Handle changes to the github-runner-manager relation."""
         self._setup()
 
+    def _on_planner_relation_broken(self, _: ops.RelationBrokenEvent) -> None:
+        """Handle planner relation broken events."""
+        self._setup()
+
     def _setup(self) -> None:
-        """Setup the planner application."""
+        """Set up the planner application."""
         self.unit.status = ops.MaintenanceStatus("Setting up planner application")
         try:
             client = self._create_planner_client()
@@ -156,49 +171,116 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         auth_token_names = [
             token for token in all_token_names if self._check_name_fit_auth_token(token)
         ]
-        auth_token_set = set(auth_token_names)
+        existing_tokens = set(auth_token_names)
+        reconciled = set()
+        wanted_flavors = {}
 
         relations = self.model.relations[PLANNER_RELATION_NAME]
         for relation in relations:
+            # Relations with no remote app data (broken or not yet initialized)
+            # are excluded from reconciliation so their tokens are cleaned up as orphans.
+            if relation.app is None or not relation.data.get(relation.app):
+                continue
             auth_token_name = self._get_auth_token_name(relation.id)
-            if auth_token_name not in auth_token_set:
-                auth_token = client.create_auth_token(auth_token_name)
-                try:
-                    secret = self.app.add_secret(
-                        {"token": auth_token}, label=auth_token_name
-                    )
-                    secret.grant(relation)
-                except ValueError as err:
-                    logger.exception(
-                        "Failed to add secret for relation %d", relation.id
-                    )
-                    raise JujuError(
-                        f"Failed to create or grant secret for relation {relation.id}"
-                    ) from err
-                except ops.hookcmds.Error as err:
-                    logger.exception(
-                        "Failed to grant secret for relation %d", relation.id
-                    )
-                    raise JujuError(
-                        f"Failed to grant secret for relation {relation.id}"
-                    ) from err
-                # The _base_url is set up by the parent class paas_charm.go.Charm.
-                # It points to the ingress URL if there is one, otherwise it points to the K8S service.
-                relation.data[self.app]["endpoint"] = self._base_url
-                relation.data[self.app]["token"] = secret.id
-            auth_token_set.discard(auth_token_name)
-
-        # Clean up any auth tokens that are no longer needed
-        for token_name in auth_token_set:
             try:
-                secret = self.model.get_secret(label=token_name)
-                secret.remove_all_revisions()
-            except ops.SecretNotFoundError:
-                # It is fine if the secret is already removed.
-                logger.debug(
-                    "Secret with label %s not found during cleanup", token_name
+                if auth_token_name not in existing_tokens:
+                    self._create_relation_credentials(
+                        client=client,
+                        relation=relation,
+                        auth_token_name=auth_token_name,
+                    )
+            except (PlannerError, JujuError):
+                logger.exception(
+                    "Failed to reconcile relation %s, skipping", relation.id
                 )
-            client.delete_auth_token(token_name)
+            reconciled.add(auth_token_name)
+            flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
+            if flavor_config is not None:
+                wanted_flavors[flavor_config.name] = flavor_config
+
+        self._sync_managed_flavors(client=client, wanted_flavors=wanted_flavors)
+
+        # Clean up tokens and secrets that have no active relation.
+        # Only tokens that were successfully reconciled are excluded.
+        orphaned = existing_tokens - reconciled
+        for token_name in orphaned:
+            self._delete_orphaned_credentials(client=client, token_name=token_name)
+
+    def _create_relation_credentials(
+        self,
+        client: PlannerClient,
+        relation: ops.Relation,
+        auth_token_name: str,
+    ) -> None:
+        """Create auth token and relation secret, then share relation connection data."""
+        auth_token = client.create_auth_token(auth_token_name)
+        try:
+            secret = self.app.add_secret({"token": auth_token}, label=auth_token_name)
+            secret.grant(relation)
+        except ValueError as err:
+            logger.exception("Failed to add secret for relation %d", relation.id)
+            raise JujuError(
+                f"Failed to create or grant secret for relation {relation.id}"
+            ) from err
+        except ops.hookcmds.Error as err:
+            logger.exception("Failed to grant secret for relation %d", relation.id)
+            raise JujuError(f"Failed to grant secret for relation {relation.id}") from err
+
+        # The _base_url is set up by the parent class paas_charm.go.Charm.
+        # It points to ingress URL if there is one, otherwise to the K8S service.
+        relation.data[self.app]["endpoint"] = self._base_url
+        relation.data[self.app]["token"] = secret.id
+
+    def _delete_orphaned_credentials(self, client: PlannerClient, token_name: str) -> None:
+        """Delete orphaned secret revisions and auth token."""
+        try:
+            secret = self.model.get_secret(label=token_name)
+            secret.remove_all_revisions()
+        except ops.SecretNotFoundError:
+            # It is fine if the secret is already removed.
+            logger.debug("Secret with label %s not found during cleanup", token_name)
+        client.delete_auth_token(token_name)
+
+    def _sync_managed_flavors(
+        self,
+        client: PlannerClient,
+        wanted_flavors: dict[str, "RelationFlavorConfig"],
+    ) -> None:
+        """Reconcile planner flavors from relation-declared desired state."""
+        existing_flavors = {flavor.name: flavor for flavor in client.list_flavors()}
+        for flavor_name, desired in wanted_flavors.items():
+            existing = existing_flavors.pop(flavor_name, None)
+            if existing is not None and self._flavor_matches(desired, existing):
+                continue
+
+            # Delete the old flavor if a stale config exists, since create does not update.
+            if existing is not None:
+                client.delete_flavor(flavor_name)
+
+            client.create_flavor(
+                flavor_name=desired.name,
+                platform=desired.platform,
+                labels=desired.labels,
+                priority=desired.priority,
+                minimum_pressure=desired.minimum_pressure,
+            )
+
+        for flavor_name in existing_flavors:
+            client.delete_flavor(flavor_name)
+
+    @staticmethod
+    def _flavor_matches(
+        desired: "RelationFlavorConfig",
+        existing: Flavor,
+    ) -> bool:
+        """Check whether the existing planner flavor already matches the desired config."""
+        return (
+            existing.name == desired.name
+            and existing.platform == desired.platform
+            and existing.labels == desired.labels
+            and existing.priority == desired.priority
+            and existing.minimum_pressure == desired.minimum_pressure
+        )
 
     def _get_admin_token(self) -> str:
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
@@ -230,6 +312,73 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             True if the name fits the requirements, False otherwise.
         """
         return name.startswith("relation-")
+
+
+@dataclasses.dataclass(frozen=True)
+class RelationFlavorConfig:
+    """Flavor configuration parsed from relation data."""
+
+    name: str
+    platform: str
+    labels: list[str]
+    priority: int
+    minimum_pressure: int
+
+    @classmethod
+    def from_relation_data(
+        cls, relation_data: typing.Mapping[str, str]
+    ) -> "RelationFlavorConfig | None":
+        """Parse flavor config from relation data.
+
+        Args:
+            relation_data: The relation data mapping (string keys and values).
+
+        Returns:
+            A RelationFlavorConfig if a flavor name is set, None otherwise.
+        """
+        flavor_name = relation_data.get(PLANNER_FLAVOR_RELATION_KEY)
+        if not flavor_name:
+            return None
+        return cls(
+            name=flavor_name,
+            # The planner API only supports "github" as platform for now.
+            platform=DEFAULT_FLAVOR_PLATFORM,
+            labels=_parse_relation_labels(relation_data.get(PLANNER_LABELS_RELATION_KEY)),
+            priority=_parse_relation_int(
+                relation_data.get(PLANNER_PRIORITY_RELATION_KEY),
+                PLANNER_PRIORITY_RELATION_KEY,
+                default=DEFAULT_FLAVOR_PRIORITY,
+            ),
+            minimum_pressure=_parse_relation_int(
+                relation_data.get(PLANNER_MINIMUM_PRESSURE_RELATION_KEY),
+                PLANNER_MINIMUM_PRESSURE_RELATION_KEY,
+                default=DEFAULT_FLAVOR_MINIMUM_PRESSURE,
+            ),
+        )
+
+
+def _parse_relation_labels(raw_labels: str | None) -> list[str]:
+    """Parse relation labels field from JSON array or comma-separated string."""
+    if not raw_labels:
+        return list(DEFAULT_FLAVOR_LABELS)
+    try:
+        parsed = json.loads(raw_labels)
+        if isinstance(parsed, list) and all(isinstance(label, str) for label in parsed):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    labels = [item.strip() for item in raw_labels.split(",") if item.strip()]
+    return labels if labels else list(DEFAULT_FLAVOR_LABELS)
+
+
+def _parse_relation_int(value: str | None, field_name: str, default: int) -> int:
+    """Parse integer relation field, returning default when unset."""
+    if value in (None, ""):
+        return default
+    try:
+        return int(value)
+    except ValueError as err:
+        raise JujuError(f"Invalid {field_name} value {value!r}") from err
 
 
 if __name__ == "__main__":
