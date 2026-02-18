@@ -1,6 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 import json
+import time
 import jubilant
 import pytest
 import requests
@@ -35,6 +36,7 @@ def test_planner_postgresql_integration(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {user_token}",
         },
+        timeout=30,
     )
 
     assert response.status_code == requests.status_codes.codes.created
@@ -52,39 +54,72 @@ def test_planner_prometheus_metrics(
     """
     status = juju.status()
     unit_ip = status.apps[planner_app].units[planner_app + "/0"].address
-    response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics")
+    response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics", timeout=30)
 
     assert response.status_code == requests.status_codes.codes.OK
 
 
+@pytest.mark.usefixtures("planner_with_integrations")
 def test_planner_github_runner_integration(
     juju: jubilant.Juju,
     planner_app: str,
     any_charm_github_runner_app: str,
+    user_token: str,
+    planner_admin_token_value: str,
 ):
     """
     arrange: The planner app and any-charm app mocking github-runner is deployed.
-    act: The planner app and a github-runner app deployed and integrated with each other.
-    assert: The integration data contains the endpoint and auth token.
+    act: Integrate, verify relation data and managed flavor creation, then remove
+         the relation and verify managed flavor cleanup.
+    assert: The integration data contains the endpoint and auth token, the managed
+            flavor is created on relation setup, and both the flavor and auth token
+            are deleted on relation removal.
     """
+    status = juju.status()
+    unit_ip = status.apps[planner_app].units[f"{planner_app}/0"].address
     github_runner_app = any_charm_github_runner_app
+    flavor_name = "test-relation-flavor"
+
     juju.integrate(f"{planner_app}:planner", github_runner_app)
     juju.wait(
         lambda status: jubilant.all_active(status, planner_app),
         timeout=6 * 60,
         delay=10,
     )
-    
+
     unit = f"{github_runner_app}/0"
     stdout = juju.cli("show-unit", unit, "--format=json")
     result = json.loads(stdout)
     for relation in result[unit]["relation-info"]:
-        if relation["endpoint"] == "provide-github-runner-planner-v0":
+        if relation["endpoint"] == "require-github-runner-planner-v0":
             assert "http://" in relation["application-data"]["endpoint"]
             assert "secret://" in relation["application-data"]["token"]
-            return
+            break
     else:
         pytest.fail(f"No relation found for {planner_app}:planner")
+
+    response = poll_flavor_status(unit_ip, flavor_name, user_token, requests.status_codes.codes.ok)
+    assert response.status_code == requests.status_codes.codes.ok
+
+    juju.cli("remove-relation", f"{planner_app}:planner", github_runner_app)
+    juju.wait(
+        lambda state: jubilant.all_active(state, planner_app),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    response = poll_flavor_status(unit_ip, flavor_name, user_token, requests.status_codes.codes.not_found)
+    assert response.status_code == requests.status_codes.codes.not_found
+
+    response = requests.get(
+        f"http://{unit_ip}:{APP_PORT}/api/v1/auth/token",
+        headers={"Authorization": f"Bearer {planner_admin_token_value}"},
+        timeout=30,
+    )
+    assert response.status_code == requests.status_codes.codes.ok
+    token_names = response.json()["names"]
+    relation_tokens = [name for name in token_names if name.startswith("relation-")]
+    assert not relation_tokens, f"Orphaned relation tokens found: {relation_tokens}"
 
 
 @pytest.mark.usefixtures("planner_with_integrations")
@@ -115,6 +150,7 @@ def test_planner_enable_disable_flavor_actions(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {user_token}",
         },
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.created
 
@@ -122,6 +158,7 @@ def test_planner_enable_disable_flavor_actions(
     response = requests.get(
         f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
         headers={"Authorization": f"Bearer {user_token}"},
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
@@ -141,6 +178,7 @@ def test_planner_enable_disable_flavor_actions(
     response = requests.get(
         f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
         headers={"Authorization": f"Bearer {user_token}"},
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
@@ -159,7 +197,22 @@ def test_planner_enable_disable_flavor_actions(
     response = requests.get(
         f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
         headers={"Authorization": f"Bearer {user_token}"},
+        timeout=30,
     )
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
     assert flavor_data["is_disabled"] is False, "Flavor should be enabled after action"
+
+
+def poll_flavor_status(unit_ip, flavor_name, token, expected_status, attempts=24, interval=5):
+    """Poll the flavor API until the expected HTTP status is returned."""
+    for _ in range(attempts):
+        response = requests.get(
+            f"http://{unit_ip}:{APP_PORT}/api/v1/flavors/{flavor_name}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if response.status_code == expected_status:
+            return response
+        time.sleep(interval)
+    return response

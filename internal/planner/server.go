@@ -24,6 +24,7 @@ import (
 )
 
 const (
+	flavorsPattern           = "/api/v1/flavors"
 	flavorPattern            = "/api/v1/flavors/{name}"
 	getFlavorPressurePattern = "/api/v1/flavors/{name}/pressure"
 	authTokenBasePattern     = "/api/v1/auth/token"
@@ -80,6 +81,7 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 
 	// Register routes
 	// General endpoints require either a valid general token or the admin token
+	s.mux.Handle("GET "+flavorsPattern, otelhttp.WithRouteTag(flavorsPattern, s.adminProtected(http.HandlerFunc(s.listFlavors))))
 	s.mux.Handle("POST "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.createFlavor))))
 	s.mux.Handle("GET "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.getFlavor))))
 	s.mux.Handle("PATCH "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.updateFlavor))))
@@ -140,6 +142,17 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
+}
+
+// listFlavors handles listing all flavors (admin-protected).
+func (s *Server) listFlavors(w http.ResponseWriter, r *http.Request) {
+	flavors, err := s.store.ListFlavors(r.Context(), flavorPlatform)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("cannot list flavors: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, flavors)
 }
 
 // getFlavor handles retrieving a flavor.

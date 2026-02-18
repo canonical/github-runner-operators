@@ -1,5 +1,6 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import json
 import logging
 import secrets
 import string
@@ -22,10 +23,12 @@ logger = logging.getLogger(__name__)
 def planner_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the built planner charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if not charm:
+        return None
     if len(charm) > 1:
         planner_charm = [file for file in charm if "planner" in file]
         return planner_charm[0]
-    return charm
+    return charm[0]
 
 
 @pytest.fixture(name="planner_app_image", scope="module")
@@ -39,10 +42,12 @@ def planner_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
 def webhook_gateway_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the built webhook gateway charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if not charm:
+        return None
     if len(charm) > 1:
         webhook_gateway_charm = [file for file in charm if "webhook-gateway" in file]
         return webhook_gateway_charm[0]
-    return charm
+    return charm[0]
 
 
 @pytest.fixture(name="webhook_gateway_app_image", scope="module")
@@ -257,12 +262,17 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
                     self.framework.observe(
-                        self.on['require-github-runner-planner-v0'].relation_changed,
-                        self._image_relation_changed,
+                        self.on['require-github-runner-planner-v0'].relation_joined,
+                        self._on_planner_relation_joined,
                     )
 
-                def _image_relation_changed(self, event):
-                    pass
+                def _on_planner_relation_joined(self, event):
+                    if self.unit.is_leader():
+                        event.relation.data[self.app]["flavor"] = "test-relation-flavor"
+                        event.relation.data[self.app]["platform"] = "github"
+                        event.relation.data[self.app]["labels"] = '["self-hosted","linux"]'
+                        event.relation.data[self.app]["priority"] = "75"
+                        event.relation.data[self.app]["minimum-pressure"] = "0"
             """
         ),
     }
@@ -270,11 +280,11 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
         "any-charm",
         app=app_name,
         channel="latest/beta",
-        config={"src-overwrite": any_charm_src_overwrite},
+        config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
-        timeout=6 * 60,
+        timeout=10 * 60,
         delay=10,
     )
     return app_name
