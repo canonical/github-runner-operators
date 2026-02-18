@@ -91,7 +91,7 @@ def test_planner_github_runner_integration(
     stdout = juju.cli("show-unit", unit, "--format=json")
     result = json.loads(stdout)
     for relation in result[unit]["relation-info"]:
-        if relation["endpoint"] == "provide-github-runner-planner-v0":
+        if relation["endpoint"] == "require-github-runner-planner-v0":
             assert "http://" in relation["application-data"]["endpoint"]
             assert "secret://" in relation["application-data"]["token"]
             break
