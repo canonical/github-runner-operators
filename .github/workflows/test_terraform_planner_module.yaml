@@ -55,7 +55,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_ENV"
       - run: juju add-model stg-deploy-planner
-      - uses: hashicorp/setup-terraform@v3.1.2
+      - uses: hashicorp/setup-terraform@v4.0.0
       - name: Generate admin token (ephemeral)
         run: |
           python3 - <<EOS >> "$GITHUB_ENV"
