@@ -55,7 +55,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_ENV"
       - run: juju add-model stg-deploy-webhook-gateway
-      - uses: hashicorp/setup-terraform@v3.1.2
+      - uses: hashicorp/setup-terraform@v4.0.0
       - run: terraform init
         working-directory: ${{env.WORKING_DIR}}
       - run: terraform validate
