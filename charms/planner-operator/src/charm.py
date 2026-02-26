@@ -138,6 +138,21 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             event.fail(error_msg)
             logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
 
+    def _on_config_changed(self, event: ops.EventBase) -> None:
+        """Handle config changes that may affect _base_url (e.g. app-port)."""
+        super()._on_config_changed(event)
+        self._setup()
+
+    def _on_ingress_ready(self, event: ops.HookEvent) -> None:
+        """Handle ingress ready to update relation endpoints with the new URL."""
+        super()._on_ingress_ready(event)
+        self._setup()
+
+    def _on_ingress_revoked(self, event: ops.HookEvent) -> None:
+        """Handle ingress revoked to update relation endpoints back to the K8S service URL."""
+        super()._on_ingress_revoked(event)
+        self._setup()
+
     def _on_manager_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         """Handle changes to the github-runner-manager relation."""
         self._setup()
@@ -194,6 +209,9 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                     "Failed to reconcile relation %s, skipping", relation.id
                 )
             reconciled.add(auth_token_name)
+            # Always sync the endpoint so it reflects the current _base_url
+            # (e.g. after ingress is added, removed, or changed).
+            relation.data[self.app]["endpoint"] = self._base_url
             flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
             if flavor_config is not None:
                 wanted_flavors[flavor_config.name] = flavor_config
@@ -226,9 +244,6 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             logger.exception("Failed to grant secret for relation %d", relation.id)
             raise JujuError(f"Failed to grant secret for relation {relation.id}") from err
 
-        # The _base_url is set up by the parent class paas_charm.go.Charm.
-        # It points to ingress URL if there is one, otherwise to the K8S service.
-        relation.data[self.app]["endpoint"] = self._base_url
         relation.data[self.app]["token"] = secret.id
 
     def _delete_orphaned_credentials(self, client: PlannerClient, token_name: str) -> None:
