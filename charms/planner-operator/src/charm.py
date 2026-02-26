@@ -12,6 +12,7 @@ import typing
 
 import ops
 import paas_charm.go
+
 from planner import Flavor, PlannerClient, PlannerError
 
 logger = logging.getLogger(__name__)
@@ -138,17 +139,32 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             event.fail(error_msg)
             logger.error("Failed to disable flavor %s: %s", flavor, error_msg)
 
+    def restart(self, rerun_migrations: bool = False) -> None:
+        """Restart the workload and reconcile planner relation data.
+
+        Overrides the parent to sync relation endpoints holistically
+        on every restart (ingress changes, config changes, etc.).
+
+        Args:
+            rerun_migrations: whether it is necessary to run the migrations again.
+        """
+        if not self.is_ready():
+            return
+        super().restart(rerun_migrations=rerun_migrations)
+        self._setup_planner_relations()
+
     def _on_manager_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         """Handle changes to the github-runner-manager relation."""
-        self._setup()
+        self.restart()
 
     def _on_planner_relation_broken(self, _: ops.RelationBrokenEvent) -> None:
         """Handle planner relation broken events."""
-        self._setup()
+        self.restart()
 
-    def _setup(self) -> None:
-        """Set up the planner application."""
-        self.unit.status = ops.MaintenanceStatus("Setting up planner application")
+    def _setup_planner_relations(self) -> None:
+        """Reconcile planner auth tokens, relation endpoints, and flavors."""
+        if not self.unit.is_leader():
+            return
         try:
             client = self._create_planner_client()
         except ConfigError:
@@ -156,15 +172,6 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             self.unit.status = ops.BlockedStatus(
                 f"Missing {ADMIN_TOKEN_CONFIG_NAME} configuration"
             )
-            return
-
-        self.unit.status = ops.MaintenanceStatus("Setup planner integrations")
-        self._setup_planner_relation(client=client)
-        self.unit.status = ops.ActiveStatus()
-
-    def _setup_planner_relation(self, client: PlannerClient) -> None:
-        """Setup the planner relations if this unit is the leader."""
-        if not self.unit.is_leader():
             return
 
         all_token_names = client.list_auth_token_names()
@@ -190,10 +197,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
                         auth_token_name=auth_token_name,
                     )
             except (PlannerError, JujuError):
-                logger.exception(
-                    "Failed to reconcile relation %s, skipping", relation.id
-                )
+                logger.exception("Failed to reconcile relation %s, skipping", relation.id)
             reconciled.add(auth_token_name)
+            # Always sync the endpoint so it reflects the current _base_url
+            # (e.g. after ingress is added, removed, or changed).
+            relation.data[self.app]["endpoint"] = self._base_url
             flavor_config = RelationFlavorConfig.from_relation_data(relation.data[relation.app])
             if flavor_config is not None:
                 wanted_flavors[flavor_config.name] = flavor_config
@@ -226,9 +234,6 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             logger.exception("Failed to grant secret for relation %d", relation.id)
             raise JujuError(f"Failed to grant secret for relation {relation.id}") from err
 
-        # The _base_url is set up by the parent class paas_charm.go.Charm.
-        # It points to ingress URL if there is one, otherwise to the K8S service.
-        relation.data[self.app]["endpoint"] = self._base_url
         relation.data[self.app]["token"] = secret.id
 
     def _delete_orphaned_credentials(self, client: PlannerClient, token_name: str) -> None:
