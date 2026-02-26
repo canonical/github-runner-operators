@@ -150,8 +150,8 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         """
         if not self.is_ready():
             return
-        self._setup_planner_relations()
         super().restart(rerun_migrations=rerun_migrations)
+        self._setup_planner_relations()
 
     def _on_manager_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         """Handle changes to the github-runner-manager relation."""
