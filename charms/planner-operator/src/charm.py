@@ -155,11 +155,11 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
 
     def _on_manager_relation_changed(self, _: ops.RelationChangedEvent) -> None:
         """Handle changes to the github-runner-manager relation."""
-        self._setup_planner_relations()
+        self.restart()
 
     def _on_planner_relation_broken(self, _: ops.RelationBrokenEvent) -> None:
         """Handle planner relation broken events."""
-        self._setup_planner_relations()
+        self.restart()
 
     def _setup_planner_relations(self) -> None:
         """Reconcile planner auth tokens, relation endpoints, and flavors."""
