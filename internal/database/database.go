@@ -55,6 +55,14 @@ const (
 `
 )
 
+// GitHub automatically adds these labels to all self-hosted runner jobs.
+// They are stripped from job labels on insertion so they don't interfere
+// with flavor matching. The original labels are preserved in the raw payload.
+var defaultGitHubLabels = map[string]struct{}{
+	"self-hosted": {},
+	"linux":       {},
+}
+
 var (
 	ErrNotExist = errors.New("does not exist")
 	ErrExist    = errors.New("already exists")
@@ -172,13 +180,15 @@ func (d *Database) AddJob(ctx context.Context, job *Job) error {
 		raw = map[string]interface{}{}
 	}
 
+	labels := stripDefaultLabels(job.Labels)
+
 	batch := &pgx.Batch{}
 	batch.Queue(
 		stmt,
 		pgx.NamedArgs{
 			"platform":     job.Platform,
 			"id":           job.ID,
-			"labels":       job.Labels,
+			"labels":       labels,
 			"created_at":   job.CreatedAt,
 			"started_at":   job.StartedAt,
 			"completed_at": job.CompletedAt,
@@ -614,4 +624,14 @@ func (d *Database) Close() {
 	if d.conn != nil {
 		d.conn.Close()
 	}
+}
+
+func stripDefaultLabels(labels []string) []string {
+	filtered := make([]string, 0, len(labels))
+	for _, l := range labels {
+		if _, ok := defaultGitHubLabels[l]; !ok {
+			filtered = append(filtered, l)
+		}
+	}
+	return filtered
 }
