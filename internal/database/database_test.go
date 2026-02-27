@@ -214,6 +214,8 @@ func TestDatabase_AddJob(t *testing.T) {
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assertSingleNotificationReceived(t, pressureUpdates)
 
+	job.Labels = []string{"amd64", "large"}
+
 	jobs, err := db.ListJobs(ctx, job.Platform)
 	assert.NoError(t, err)
 
@@ -304,6 +306,32 @@ func TestDatabase_AddJob_FlavorSelection(t *testing.T) {
 	assert.Nil(t, jobs[0].AssignedFlavor)
 }
 
+// Verify that GitHub's default labels ("self-hosted", "linux") are stripped
+// from job labels on insertion, so flavors don't need to include them.
+func TestDatabase_AddJob_DefaultLabelsStripped(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-x64-noble",
+		Labels:   []string{"x64", "noble"},
+		Priority: 100,
+	}))
+
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "1",
+		Labels:   []string{"self-hosted", "linux", "x64", "noble"},
+	}))
+
+	jobs, err := db.ListJobs(ctx, "github", ListJobOptions{WithId: "1"})
+	assert.NoError(t, err)
+	assert.Equal(t, "github-x64-noble", *jobs[0].AssignedFlavor)
+	assert.Equal(t, []string{"x64", "noble"}, jobs[0].Labels)
+}
+
 func TestDatabase_AddJob_EqualPriority(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
@@ -364,13 +392,13 @@ func TestDatabase_AddJob_AssignedFlavor(t *testing.T) {
 	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
 		Platform: "github",
 		Name:     "amd64-small",
-		Labels:   []string{"self-hosted", "amd64", "small"},
+		Labels:   []string{"amd64", "small"},
 		Priority: 0,
 	}))
 	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
 		Platform: "github",
 		Name:     "amd64-large",
-		Labels:   []string{"self-hosted", "amd64", "large"},
+		Labels:   []string{"amd64", "large"},
 		Priority: 0,
 	}))
 	assert.NoError(t, db.AddJob(ctx, &Job{
@@ -405,6 +433,7 @@ func TestDatabase_UpdateJobStarted(t *testing.T) {
 	assert.NoError(t, db.AddJob(ctx, &job))
 	assert.NoError(t, db.UpdateJobStarted(ctx, job.Platform, job.ID, startedAt, map[string]interface{}{"in_progress": "in_progress"}))
 
+	job.Labels = []string{"amd64", "large"}
 	job.StartedAt = &startedAt
 	job.Raw["in_progress"] = "in_progress"
 
@@ -447,6 +476,7 @@ func TestDatabase_UpdateJobCompleted(t *testing.T) {
 	assert.NoError(t, db.UpdateJobCompleted(ctx, job.Platform, job.ID, completedAt, map[string]interface{}{"completed": "completed"}))
 	assertSingleNotificationReceived(t, pressureUpdates)
 
+	job.Labels = []string{"amd64", "large"}
 	job.CompletedAt = &completedAt
 	job.Raw["completed"] = "completed"
 
