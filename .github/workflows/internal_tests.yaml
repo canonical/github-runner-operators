@@ -51,7 +51,7 @@ jobs:
       - name: Generate coverage report
         run: go tool cover -html=coverage.out -o=coverage.html
 
-      - uses: actions/upload-artifact@v6.0.0
+      - uses: actions/upload-artifact@v7.0.0
         with:
           name: coverage-report
           path: coverage.html
