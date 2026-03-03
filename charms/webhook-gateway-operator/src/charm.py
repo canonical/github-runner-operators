@@ -28,6 +28,7 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         """Patch _create_app to add OpenTelemetry environment variables."""
         original_app = super()._create_app()
         charm = self
+
         def gen_environment() -> dict[str, str]:
             env = original_app.gen_environment()
             env["OTEL_METRICS_EXPORTER"] = "prometheus"
@@ -36,7 +37,9 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
             env["OTEL_LOGS_EXPORTER"] = "console"
             if env.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
                 traces_endpoint = env["OTEL_EXPORTER_OTLP_ENDPOINT"]
-                env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = traces_endpoint.removesuffix("/") + "/v1/traces"
+                env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = (
+                    traces_endpoint.removesuffix("/") + "/v1/traces"
+                )
                 del env["OTEL_EXPORTER_OTLP_ENDPOINT"]
                 env["OTEL_TRACES_EXPORTER"] = "otlp"
                 env["OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"] = "http/protobuf"
@@ -45,6 +48,7 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         app = super()._create_app()
         setattr(app, "gen_environment", gen_environment)
         return app
+
 
 if __name__ == "__main__":
     ops.main(GithubRunnerWebhookGatewayCharm)
