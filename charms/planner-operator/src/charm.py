@@ -288,10 +288,10 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         )
 
     def _get_admin_token(self) -> str:
-        admin_token_secret_id = str(self.config.get(ADMIN_TOKEN_CONFIG_NAME))
+        admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
         if not admin_token_secret_id:
             raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} config value is not set")
-        admin_token_secret = self.model.get_secret(id=admin_token_secret_id)
+        admin_token_secret = self.model.get_secret(id=str(admin_token_secret_id))
         return admin_token_secret.get_content()["value"]
 
     @staticmethod
