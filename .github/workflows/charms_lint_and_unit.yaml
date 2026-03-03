@@ -43,11 +43,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install tox
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install tox
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
 
-      - name: Run lint and unit tests
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Run lint, complexity, static, unit, coverage
         working-directory: ${{ matrix.charm }}
-        run: tox -e lint,complexity,static,unit,coverage-report
+        run: tox -c tox.toml

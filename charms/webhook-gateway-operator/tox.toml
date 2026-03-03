@@ -1,0 +1,49 @@
+env_list = ["lint", "complexity", "static", "unit", "coverage-report"]
+
+[env_run_base]
+package = "skip"
+set_env = { PYTHONPATH = "{tox_root}/lib:{tox_root}/src:{tox_root}/tests", PYTHONBREAKPOINT = "pdb.set_trace", PY_COLORS = "1" }
+pass_env = ["PYTHONPATH", "CHARM_BUILD_DIR", "MODEL_SETTINGS"]
+
+[env.lint]
+description = "Check code against coding style standards"
+deps = ["ruff", "codespell"]
+commands = [
+  ["codespell", "{tox_root}"],
+  ["ruff", "check", "src", "tests"],
+  ["ruff", "format", "--check", "--diff", "src", "tests"],
+]
+
+[env.complexity]
+description = "Check cyclomatic complexity"
+deps = ["ruff"]
+commands = [["ruff", "check", "--select", "C90", "src", "tests"]]
+
+[env.static]
+description = "Run static type checks"
+deps = ["pyright", "-r requirements.txt"]
+commands = [["pyright"]]
+
+[env.unit]
+description = "Run unit tests"
+deps = ["pytest", "pytest-custom-exit-code", "coverage[toml]", "-r requirements.txt"]
+commands = [
+  [
+    "coverage",
+    "run",
+    "--source=src",
+    "-m",
+    "pytest",
+    "--tb",
+    "native",
+    "-v",
+    "-s",
+    "--suppress-no-test-exit-code",
+    { replace = "posargs", default = ["tests"], extend = true },
+  ],
+]
+
+[env.coverage-report]
+description = "Report coverage results"
+deps = ["coverage[toml]"]
+commands = [["coverage", "report", "--ignore-errors"]]
