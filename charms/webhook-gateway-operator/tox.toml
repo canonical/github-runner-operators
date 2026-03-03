@@ -39,11 +39,11 @@ commands = [
     "-v",
     "-s",
     "--suppress-no-test-exit-code",
-    { replace = "posargs", default = ["tests"], extend = true },
+    { replace = "posargs", default = ["tests/unit"], extend = true },
   ],
 ]
 
 [env.coverage-report]
 description = "Report coverage results"
 deps = ["coverage[toml]"]
-commands = [["coverage", "report", "--ignore-errors"]]
+commands = [["coverage", "report"]]
