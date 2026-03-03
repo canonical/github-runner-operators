@@ -1,7 +1,6 @@
 name: Charms Lint and Unit Tests
 on:
   pull_request:
-  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,7 +27,7 @@ jobs:
 
   charm-tests:
     needs: detect-changes
-    if: needs.detect-changes.outputs.charms == 'true'
+    if: ${{ needs.detect-changes.outputs.charms == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
