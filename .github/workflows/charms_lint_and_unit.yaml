@@ -51,4 +51,4 @@ jobs:
 
       - name: Run lint and unit tests
         working-directory: ${{ matrix.charm }}
-        run: tox
+        run: tox -e lint,complexity,static,unit,coverage-report
