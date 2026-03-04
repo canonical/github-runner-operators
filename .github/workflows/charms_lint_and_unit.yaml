@@ -1,0 +1,54 @@
+name: Charms Lint and Unit Tests
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      charms: ${{ steps.filter.outputs.charms }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            charms:
+              - 'charms/**'
+              - 'internal/**'
+              - '.github/workflows/charms_lint_and_unit.yaml'
+
+  charm-tests:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.charms == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        charm:
+          - charms/planner-operator
+          - charms/webhook-gateway-operator
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Run lint, complexity, static, unit, coverage
+        working-directory: ${{ matrix.charm }}
+        run: tox -c tox.toml

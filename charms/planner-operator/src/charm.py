@@ -234,7 +234,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
             logger.exception("Failed to grant secret for relation %d", relation.id)
             raise JujuError(f"Failed to grant secret for relation {relation.id}") from err
 
-        relation.data[self.app]["token"] = secret.id
+        relation.data[self.app]["token"] = str(secret.id)
 
     def _delete_orphaned_credentials(self, client: PlannerClient, token_name: str) -> None:
         """Delete orphaned secret revisions and auth token."""
@@ -291,7 +291,7 @@ class GithubRunnerPlannerCharm(paas_charm.go.Charm):
         admin_token_secret_id = self.config.get(ADMIN_TOKEN_CONFIG_NAME)
         if not admin_token_secret_id:
             raise ConfigError(f"{ADMIN_TOKEN_CONFIG_NAME} config value is not set")
-        admin_token_secret = self.model.get_secret(id=admin_token_secret_id)
+        admin_token_secret = self.model.get_secret(id=str(admin_token_secret_id))
         return admin_token_secret.get_content()["value"]
 
     @staticmethod

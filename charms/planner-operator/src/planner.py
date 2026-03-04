@@ -102,7 +102,6 @@ class PlannerClient:
             json_data={"is_disabled": is_disabled},
         )
 
-
     def list_flavors(self) -> list[Flavor]:
         """List all flavors.
 
