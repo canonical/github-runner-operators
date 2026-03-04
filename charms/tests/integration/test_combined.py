@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timezone
 
 import jubilant
 import requests
@@ -69,7 +70,7 @@ def send_workflow_job_webhook(
             "id": 12345,
             "labels": ["self-hosted", "linux", "x64"],
             "status": "queued",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
     }
 
