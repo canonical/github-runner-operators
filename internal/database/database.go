@@ -543,6 +543,7 @@ func (d *Database) GetPressures(ctx context.Context, platform string, flavors ..
 					   ON f.platform = j.platform
 					       AND j.assigned_flavor = f.name
 						   AND j.completed_at IS NULL
+						   AND j.created_at > NOW() - INTERVAL '5 days'
 	WHERE f.platform = @platform
 	`
 

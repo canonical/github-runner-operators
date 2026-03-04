@@ -868,3 +868,37 @@ func TestDatabase_GetPressures_MinimumPressure(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 10, pressures["github-amd64-medium-ps6"])
 }
+
+func TestDatabase_GetPressures_ExcludesJobsOlderThan5Days(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	flavor := &Flavor{
+		Platform: "github",
+		Name:     "github-amd64-medium-ps6",
+		Labels:   []string{"self-hosted", "amd64", "medium"},
+		Priority: 300,
+	}
+	require.NoError(t, db.AddFlavor(ctx, flavor))
+
+	recentJob := &Job{
+		Platform:  "github",
+		ID:        "recent-1",
+		Labels:    []string{"self-hosted", "amd64", "medium"},
+		CreatedAt: time.Now().Add(-2 * 24 * time.Hour),
+	}
+	require.NoError(t, db.AddJob(ctx, recentJob))
+
+	oldJob := &Job{
+		Platform:  "github",
+		ID:        "old-1",
+		Labels:    []string{"self-hosted", "amd64", "medium"},
+		CreatedAt: time.Now().Add(-6 * 24 * time.Hour),
+	}
+	require.NoError(t, db.AddJob(ctx, oldJob))
+
+	pressures, err := db.GetPressures(ctx, "github", "github-amd64-medium-ps6")
+	require.NoError(t, err)
+	assert.Equal(t, 1, pressures["github-amd64-medium-ps6"])
+}
