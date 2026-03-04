@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -100,7 +101,7 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 
 // ServeHTTP routes incoming HTTP requests to the appropriate handler methods.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	telemetry.LoggingHandler(logger, s.mux).ServeHTTP(w, r)
 }
 
 // flavorRequest represents the expected JSON payload for creating a flavor.

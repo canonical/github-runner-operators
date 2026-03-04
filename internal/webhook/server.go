@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/queue"
+	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -157,16 +158,7 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.ErrorContext(ctx, "failed to write response", "error", err)
 	}
-	logger.InfoContext(ctx, fmt.Sprintf(
-		"%s - - [%s] \"%s %s %s\" %d %d \"%s\"",
-		r.RemoteAddr,
-		receiveTime.Format("02/Jan/2006:15:04:05 -0700"),
-		r.Method,
-		r.URL.Path,
-		r.Proto,
-		status,
-		n,
-		r.UserAgent()))
+	telemetry.LogRequest(ctx, logger, r, receiveTime, status, n)
 }
 
 func validateSignature(message []byte, secret string, signature string) bool {
