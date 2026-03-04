@@ -841,6 +841,9 @@ func TestDatabase_GetPressures(t *testing.T) {
 			}
 
 			for _, j := range test.jobs {
+				if j.CreatedAt.IsZero() {
+					j.CreatedAt = time.Now()
+				}
 				assert.NoError(t, db.AddJob(ctx, j))
 			}
 
