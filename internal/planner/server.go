@@ -70,6 +70,7 @@ type AuthStore interface {
 type Server struct {
 	metrics    *Metrics
 	mux        *http.ServeMux
+	handler    http.Handler
 	store      FlavorStore
 	auth       AuthStore
 	adminToken string
@@ -95,13 +96,14 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 	s.mux.Handle("GET "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
 	s.mux.Handle("PATCH "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.updateJob))))
 	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
+	s.handler = server.LoggingHandler(logger, s.mux)
 
 	return s
 }
 
 // ServeHTTP routes incoming HTTP requests to the appropriate handler methods.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	server.LoggingHandler(logger, s.mux).ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 // flavorRequest represents the expected JSON payload for creating a flavor.

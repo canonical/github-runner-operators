@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// LogRequest logs an HTTP request in Apache combined format.
+// LogRequest logs an HTTP request in Apache-style format.
 func LogRequest(ctx context.Context, logger *slog.Logger, r *http.Request, receiveTime time.Time, status, bytesWritten int) {
 	logger.InfoContext(ctx, fmt.Sprintf(
 		"%s - - [%s] \"%s %s %s\" %d %d \"%s\"",
@@ -24,7 +24,7 @@ func LogRequest(ctx context.Context, logger *slog.Logger, r *http.Request, recei
 		r.UserAgent()))
 }
 
-// LoggingHandler returns middleware that logs every request in Apache combined format.
+// LoggingHandler returns middleware that logs every request in Apache-style format.
 // It wraps the ResponseWriter to capture the status code and bytes written.
 func LoggingHandler(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

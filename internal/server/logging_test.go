@@ -15,16 +15,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLogRequest(t *testing.T) {
 	// arrange: build a request and a logger that writes to a buffer
 	// act: call LogRequest
-	// assert: the log output contains the expected Apache-style format
+	// assert: the log output contains the expected format
 	var buf bytes.Buffer
 	testLogger := slog.New(slog.NewTextHandler(&buf, nil))
 	receiveTime := time.Date(2025, 6, 15, 14, 30, 0, 0, time.UTC)
-	req, _ := http.NewRequest("GET", "/api/v1/flavors", nil)
+	req, err := http.NewRequest("GET", "/api/v1/flavors", nil)
+	require.NoError(t, err)
 	req.RemoteAddr = "192.168.1.1:12345"
 	req.Header.Set("User-Agent", "test-agent/1.0")
 
@@ -45,7 +47,8 @@ func TestLogRequestErrorStatus(t *testing.T) {
 	var buf bytes.Buffer
 	testLogger := slog.New(slog.NewTextHandler(&buf, nil))
 	receiveTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	req, _ := http.NewRequest("POST", "/webhook", nil)
+	req, err := http.NewRequest("POST", "/webhook", nil)
+	require.NoError(t, err)
 	req.RemoteAddr = "10.0.0.1:9999"
 
 	LogRequest(context.Background(), testLogger, req, receiveTime, http.StatusUnauthorized, 0)
