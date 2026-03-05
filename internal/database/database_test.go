@@ -52,7 +52,7 @@ func (d *testDatabase) Acquire(ctx context.Context) (*pgxpool.Pool, error) {
 		d.mu.Unlock()
 		return nil, fmt.Errorf("failed to parse database URI: %w", err)
 	}
-	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
 	conn, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		d.mu.Unlock()

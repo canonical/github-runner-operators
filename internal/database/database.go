@@ -618,10 +618,10 @@ func New(ctx context.Context, uri string) (*Database, error) {
 		return nil, fmt.Errorf("failed to parse database URI: %w", err)
 	}
 
-	// Exec mode avoids named prepared statement collisions when using
-	// PgBouncer in transaction-pooling mode.
+	// DescribeExec uses unnamed prepared statements, avoiding name collisions
+	// when using PgBouncer.
 	// See https://github.com/jackc/pgx/wiki/Automatic-Prepared-Statement-Caching
-	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
 	conn, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the database: %v", err)
