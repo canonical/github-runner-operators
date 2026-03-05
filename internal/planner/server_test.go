@@ -36,9 +36,10 @@ type fakeStore struct {
 	pressureChange chan struct{}
 
 	// Auth token controls
-	createTokErr error
-	listTokErr   error
-	deleteTokErr error
+	createTokErr       error
+	listTokErr         error
+	deleteTokErr       error
+	verifyAuthTokenErr error
 
 	nameToToken map[string][32]byte
 
@@ -154,6 +155,9 @@ func (f *fakeStore) DeleteAuthToken(ctx context.Context, name string) error {
 }
 
 func (f *fakeStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string, error) {
+	if f.verifyAuthTokenErr != nil {
+		return "", f.verifyAuthTokenErr
+	}
 	if f.nameToToken == nil {
 		return "", database.ErrNotExist
 	}
@@ -982,10 +986,11 @@ func TestTokenProtected(t *testing.T) {
 	validGeneralTokenEncoded := base64.RawURLEncoding.EncodeToString(validGeneralToken[:])
 
 	tests := []struct {
-		name           string
-		authHeader     string
-		nameToToken    map[string][32]byte
-		expectedStatus int
+		name               string
+		authHeader         string
+		nameToToken        map[string][32]byte
+		verifyAuthTokenErr error
+		expectedStatus     int
 	}{{
 		name:           "shouldSucceedWithValidAdminToken",
 		authHeader:     "Bearer " + admin,
@@ -1008,6 +1013,11 @@ func TestTokenProtected(t *testing.T) {
 		authHeader:     "Bearer " + base64.RawURLEncoding.EncodeToString([]byte("short")),
 		expectedStatus: http.StatusUnauthorized,
 	}, {
+		name:               "shouldReturn500OnDBError",
+		authHeader:         "Bearer " + validGeneralTokenEncoded,
+		verifyAuthTokenErr: errors.New("database error"),
+		expectedStatus:     http.StatusInternalServerError,
+	}, {
 		name:           "shouldFailWithoutBearerPrefix",
 		authHeader:     admin,
 		expectedStatus: http.StatusBadRequest,
@@ -1023,7 +1033,10 @@ func TestTokenProtected(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{nameToToken: tt.nameToToken}
+			store := &fakeStore{
+				nameToToken:        tt.nameToToken,
+				verifyAuthTokenErr: tt.verifyAuthTokenErr,
+			}
 			server := NewServer(store, store, NewMetrics(store), admin, time.Tick(30*time.Second))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/flavors/test", nil)

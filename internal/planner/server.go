@@ -385,7 +385,12 @@ func (s *Server) tokenProtected(next http.Handler) http.Handler {
 		var tok [32]byte
 		copy(tok[:], raw)
 		if _, err := s.auth.VerifyAuthToken(r.Context(), tok); err != nil {
-			respondUnauthorized(w)
+			if errors.Is(err, database.ErrNotExist) {
+				respondUnauthorized(w)
+				return
+			}
+			logger.ErrorContext(r.Context(), "failed to verify auth token", "error", err)
+			http.Error(w, "failed to verify auth token", http.StatusInternalServerError)
 			return
 		}
 		next.ServeHTTP(w, r)
