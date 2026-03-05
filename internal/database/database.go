@@ -615,7 +615,7 @@ func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct
 func New(ctx context.Context, uri string) (*Database, error) {
 	cfg, err := pgxpool.ParseConfig(uri)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse database URI: %v", err)
+		return nil, fmt.Errorf("failed to parse database URI: %w", err)
 	}
 
 	// Exec mode avoids named prepared statement collisions when using
