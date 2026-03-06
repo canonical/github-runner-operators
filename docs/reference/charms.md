@@ -16,7 +16,7 @@ Required integrations
 
 Optional integrations
 
-- Tracing: the charm can export OpenTelemetry traces when connected to a tracing charm.
+- Tracing: the charm supports optional `tracing` relation to export OpenTelemetry traces.”
 
 Configuration
 
@@ -46,4 +46,4 @@ Provided integrations
 
 Configuration
 
-- Admin token: required to create or delete general auth tokens.
+- `admin-token`: required to create or delete general auth tokens.

@@ -12,7 +12,6 @@ flowchart TD
 
   subgraph WG["Webhook gateway charm"]
     WG_WEBHOOK
-    WG_REDELIVER["webhook-redeliverd"]
   end
 
   WG_WEBHOOK -->|Webhooks| MQ["RabbitMQ"]
@@ -24,8 +23,8 @@ flowchart TD
 
   MQ -->|Webhooks| PL_CONSUMER
 
-  PG[(PostgreSQL)] --> PL_CONSUMER
-  PG --> PL_API
+  PL_CONSUMER --> PG[(PostgreSQL)]
+  PG <--> PL_API
 
   PL_API -->|"HTTP streaming (pressure info)"| GR["GitHub runner charm"]
 ```
@@ -33,8 +32,7 @@ flowchart TD
 ## Components
 
 - GitHub runner webhook gateway charm: includes a `webhook-gateway` component that receives,
-  validates, and forwards GitHub webhooks, plus a `webhook-redeliverd` daemon for webhook
-  redelivery handling.
+  validates, and forwards GitHub webhooks to the AMQP broker.
 - GitHub runner planner charm: includes a `job-consumer` component that processes workflow job
   events and writes job state to PostgreSQL, plus a `planner` API component that manages flavors
   and auth tokens.
@@ -42,17 +40,16 @@ flowchart TD
   expected broker.
 - PostgreSQL database: stores job records, flavor definitions, and auth token metadata for the
   planner.
-- GitHub runner charm: consumes the planner relation to reconcile runner flavors and use auth
+- [GitHub runner charm](https://github.com/canonical/github-runner-operator): consumes the planner relation to reconcile runner flavors and use auth
   tokens when interacting with the planner API.
 
 ## Event flow
 
-- GitHub sends workflow job webhooks to the webhook gateway.
-- The gateway validates the signature and forwards the webhook payload to the AMQP broker.
-- The planner consumes the message, parses the workflow job event, and stores job state changes
-  in PostgreSQL.
-- The planner API exposes job and flavor endpoints, and the planner relation supplies auth tokens
-  and flavor pressure information to the GitHub runner charm.
+GitHub sends workflow job webhooks to the webhook gateway, which validates the signature and
+forwards the payload to the AMQP broker. The planner consumes the message, parses the workflow
+job event, and stores job state changes in PostgreSQL. The planner API exposes job and flavor
+endpoints, calculates flavor pressure internally, and streams pressure information to the GitHub
+runner charm.
 
 ## Control plane and relations
 
