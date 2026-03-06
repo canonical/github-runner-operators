@@ -16,7 +16,7 @@ Required integrations
 
 Optional integrations
 
-- Tracing: the charm supports optional `tracing` relation to export OpenTelemetry traces.”
+- Tracing: the charm supports optional `tracing` relation to export OpenTelemetry traces.
 
 Configuration
 
