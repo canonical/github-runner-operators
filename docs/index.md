@@ -1,6 +1,6 @@
 # GitHub runner operators
 
-GitHub runner operators is a set of Juju charms that operate self-hosted GitHub Actions runners.
+GitHub runner operators are a set of Juju charms that operate self-hosted GitHub Actions runners.
 The product receives GitHub webhooks, routes job events through a message broker, and exposes a
 planner API that coordinates runner capacity and job lifecycle data.
 

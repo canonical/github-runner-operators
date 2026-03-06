@@ -1,4 +1,4 @@
-# Charms reference
+# Charms
 
 This product is composed of two primary charms. The sections below describe each charm, its role,
 and the integrations it expects in a typical deployment.
@@ -41,8 +41,8 @@ Optional integrations
 
 Provided integrations
 
-- Planner relation: the charm provides `github_runner_planner_v0` so the GitHub runner charm can
-	retrieve auth tokens and desired flavor state.
+- Planner relation: the charm provides the `planner` relation endpoint (interface `github_runner_planner_v0`) so the GitHub runner charm can
+  retrieve auth tokens and desired flavor state.
 
 Configuration
 

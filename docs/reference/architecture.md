@@ -33,7 +33,7 @@ flowchart TD
 ## Components
 
 - GitHub runner webhook gateway charm: includes a `webhook-gateway` component that receives,
-  validates, and forward GitHub webhooks, plus a `webhook-redeliverd` daemon for webhook
+  validates, and forwards GitHub webhooks, plus a `webhook-redeliverd` daemon for webhook
   redelivery handling.
 - GitHub runner planner charm: includes a `job-consumer` component that processes workflow job
   events and writes job state to PostgreSQL, plus a `planner` API component that manages flavors
@@ -58,8 +58,8 @@ flowchart TD
 
 - The webhook gateway requires a `rabbitmq` relation for AMQP connectivity.
 - The planner requires `rabbitmq` and `postgresql` relations for event processing and storage.
-- The planner provides the `github_runner_planner_v0` relation so the GitHub runner charm can
-  retrieve auth tokens and desired flavor configuration.
+- The planner provides a `planner` relation endpoint (using the `github_runner_planner_v0`
+  interface) so the GitHub runner charm can retrieve auth tokens and desired flavor configuration.
 
 ## Observability
 
