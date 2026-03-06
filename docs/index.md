@@ -21,7 +21,7 @@ need reliable, observable, and policy-driven control of self-hosted runners at s
 - AMQP message broker: required by both charms for moving webhook events from the gateway to the planner. RabbitMQ is the expected broker.
 - PostgreSQL: required by the planner to persist job and flavor data.
 - Tracing and metrics: both charms can emit OpenTelemetry data and Prometheus metrics so that Grafana dashboards and tracing backends can be used for observability.
-- GitHub runner charm: consumes the planner relation to retrieve auth tokens and desired flavor configuration.
+- [GitHub runner charm](https://github.com/canonical/github-runner-operator): consumes the planner relation to retrieve auth tokens and desired flavor configuration.
 
 ## How the pieces fit
 
