@@ -611,9 +611,18 @@ func (d *Database) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct
 	return ch, nil
 }
 
-// New creates a new Database instance
+// New creates a new Database instance.
 func New(ctx context.Context, uri string) (*Database, error) {
-	conn, err := pgxpool.New(ctx, uri)
+	cfg, err := pgxpool.ParseConfig(uri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse database URI: %w", err)
+	}
+
+	// DescribeExec uses unnamed prepared statements, avoiding name collisions
+	// when using PgBouncer.
+	// See https://github.com/jackc/pgx/wiki/Automatic-Prepared-Statement-Caching
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	conn, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the database: %v", err)
 	}

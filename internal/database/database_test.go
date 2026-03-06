@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,10 +47,16 @@ func (d *testDatabase) reset(ctx context.Context, conn *pgxpool.Pool) error {
 
 func (d *testDatabase) Acquire(ctx context.Context) (*pgxpool.Pool, error) {
 	d.mu.Lock()
-	conn, err := pgxpool.New(ctx, d.uri)
+	cfg, err := pgxpool.ParseConfig(d.uri)
 	if err != nil {
 		d.mu.Unlock()
-		return nil, fmt.Errorf("failed to connect to the database: %v", err)
+		return nil, fmt.Errorf("failed to parse database URI: %w", err)
+	}
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	conn, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		d.mu.Unlock()
+		return nil, fmt.Errorf("failed to connect to the database: %w", err)
 	}
 
 	if err := d.reset(ctx, conn); err != nil {
