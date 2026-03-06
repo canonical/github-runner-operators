@@ -20,7 +20,7 @@ Optional integrations
 
 Configuration
 
-- Webhook secret: required to validate GitHub webhook signatures.
+- `webhook-secret`: required to validate GitHub webhook signatures.
 
 ## GitHub runner planner charm
 
