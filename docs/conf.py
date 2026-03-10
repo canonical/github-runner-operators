@@ -164,9 +164,9 @@ if os.getenv("OPENAPI", ""):
 # - https://launchpad.net/example
 # - https://git.launchpad.net/example
 #
-# html_theme_options = {
-# 'source_edit_link': 'https://github.com/canonical/sphinx-docs-starter-pack',
-# }
+html_theme_options = {
+    "source_edit_link": "https://github.com/canonical/github-runner-operators",
+}
 
 # Project slug; see https://meta.discourse.org/t/what-is-category-slug/87897
 #
@@ -223,13 +223,7 @@ sitemap_excludes = [
 # NOTE: If undefined, set to None, or empty,
 #       the sphinx_reredirects extension will be disabled.
 
-redirects = {
-    "reference/doc-cheat-sheet-myst/": "../myst-syntax-reference",
-    "reference/doc-cheat-sheet/": "../rst-syntax-reference",
-    "reference/style-guide-myst/": "../myst-syntax-reference",
-    "reference/style-guide/": "../rst-syntax-reference",
-    "how-to/migrate-from-pre-extension": "../update-starter-packs/pre-extension/",
-}
+redirects = {}
 
 
 ###########################
@@ -302,6 +296,7 @@ extensions = [
 
 exclude_patterns = [
     "doc-cheat-sheet*",
+    "adr/*",
 ]
 
 # Adds custom CSS files, located under 'html_static_path'

@@ -1,7 +1,7 @@
 Reference
 =========
 
-These documents provide references to GitHub Runner Operators.
+The following documents contain technical information for topics relevant to the GitHub Runner Operators.
 
 Contents
 --------
