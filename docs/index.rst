@@ -15,7 +15,7 @@ This repository ships two primary charms:
     records job state in PostgreSQL, and manages runner flavors and auth tokens
     for downstream runner integrations.
 
-This product is intended for platform engineers, SREs, and GitHub organization
+This product is intended for platform engineers, site reliability engineers, and GitHub organization
 administrators who need reliable, observable, and policy-driven control of
 self-hosted runners at scale.
 
@@ -81,3 +81,4 @@ In this documentation
     Reference <reference/index>
     Explanation <explanation/index>
     Release notes <release-notes/index>
+    Architecture design records <adr/index>
