@@ -60,7 +60,7 @@ html_title = project + " documentation"
 #         -H 'Accept: application/vnd.github.v3.raw' \
 #         https://api.github.com/repos/canonical/<REPO> | jq '.created_at'
 
-copyright = "2025 Canonical Ltd."
+copyright = "2026 Canonical Ltd."
 
 
 # Documentation website URL
