@@ -43,7 +43,7 @@ In this documentation
         :link: /how-to/index
         :link-type: doc
 
-        **Step-by-step guides** - learn key operations and customisation.
+        **Step-by-step guides** - learn key operations and customization.
 
 .. grid:: 1 1 2 2
 
