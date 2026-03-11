@@ -70,7 +70,7 @@ copyright = "2026 Canonical Ltd."
 # NOTE: The Open Graph Protocol (OGP) enhances page display in a social graph
 #       and is used by social media platforms; see https://ogp.me/
 
-ogp_site_url = "https://app.readthedocs.com/projects/canonical-github-runner-operators/"
+ogp_site_url = "https://documentation.ubuntu.com/github-runner-operators/"
 
 
 # Preview name of the documentation website
@@ -173,7 +173,7 @@ html_theme_options = {
 # TODO: If your documentation is hosted on https://docs.ubuntu.com/,
 #       uncomment and update as needed.
 
-# slug = ''
+slug = 'github-runner-operators'
 
 #######################
 # Sitemap configuration: https://sphinx-sitemap.readthedocs.io/
