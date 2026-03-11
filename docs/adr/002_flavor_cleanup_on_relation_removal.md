@@ -3,7 +3,7 @@ title: ADR-002 - planner-managed flavor lifecycle from relation state
 author: Christopher Bartz (christopher.bartz@canonical.com)
 date: 2026/02/10
 domain: architecture
-replaced-by: 
+replaced-by:
 ---
 
 # Planner-managed flavor lifecycle from relation state
@@ -14,7 +14,7 @@ Flavor resources should follow the same ownership and reconciliation model.
 ## Context
 
 The GitHub runner charm sets flavor state in relation app data.
-Flavor names are arbitrary and are not safely reconstructable from relation ID.
+Flavor names are arbitrary and are not safely reconstructible from relation ID.
 When relation cleanup runs, the relation app data may no longer be available.
 
 The planner charm follows a [holistic charm pattern](https://discourse.charmhub.io/t/deltas-vs-holistic-charming/11095).
@@ -27,6 +27,7 @@ The planner charm owns full lifecycle of relation-managed flavors (create and de
 GitHub runner declares desired flavor state in relation data, and planner reconciles actual state.
 
 During active relation reconciliation:
+
 1. The charm ensures relation auth token/secret exists.
 2. It builds the desired set of flavors from active relation data.
 3. It lists current planner flavors via `GET /api/v1/flavors`.
@@ -34,6 +35,7 @@ During active relation reconciliation:
 5. It deletes flavors present in planner but absent from desired relation state.
 
 During orphan cleanup:
+
 1. The charm removes the relation secret and deletes the auth token.
 2. Flavor cleanup is handled by the flavor reconciliation step, which compares planner DB state with active relations.
 
