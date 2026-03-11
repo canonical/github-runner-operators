@@ -70,7 +70,7 @@ copyright = "2026 Canonical Ltd."
 # NOTE: The Open Graph Protocol (OGP) enhances page display in a social graph
 #       and is used by social media platforms; see https://ogp.me/
 
-ogp_site_url = ""
+ogp_site_url = "https://app.readthedocs.com/projects/canonical-github-runner-operators/"
 
 
 # Preview name of the documentation website
