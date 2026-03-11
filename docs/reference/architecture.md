@@ -6,7 +6,7 @@ that manages runner flavors and job state.
 
 ## High-level overview of the deployment
 
-```mermaid
+```{mermaid}
 flowchart TD
   GH(["GitHub"]) --> WG_WEBHOOK["webhook-gateway"]
 
