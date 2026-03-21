@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-github/v82/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
@@ -273,6 +274,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	job, err := getWorkflowJob(ctx, msg.Headers, msg.Body)
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot parse webhook payload, discarding to DLQ", "error", err)
+		logger.DebugContext(ctx, "discarded webhook body", "body", string(msg.Body))
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
@@ -280,10 +282,24 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	}
 
 	if job == nil {
+		logger.DebugContext(ctx, "ignored webhook body", "body", string(msg.Body))
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
 	}
+
+	span.SetAttributes(
+		attribute.String("github.job_id", job.id),
+		attribute.String("github.repo", job.repo),
+		attribute.String("github.action", job.action),
+	)
+	logger.DebugContext(ctx, "consuming webhook",
+		"job_id", job.id,
+		"repo", job.repo,
+		"action", job.action,
+		"labels", strings.Join(job.labels, ","),
+		"body", string(msg.Body),
+	)
 
 	err = c.handleMessage(ctx, job)
 	if err == nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/canonical/github-runner-operators/internal/server"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 )
 
@@ -75,6 +76,9 @@ func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, 
 		logger.DebugContext(ctx, "invalid signature", "signature", signature)
 		return nil, &httpError{code: http.StatusForbidden, message: "webhook contains invalid signature"}
 	}
+	deliveryID := r.Header.Get(WebhookDeliveryHeader)
+	eventType := r.Header.Get(WebhookEventHeader)
+	logger.DebugContext(ctx, "received webhook", "delivery_id", deliveryID, "event", eventType)
 	return body, nil
 }
 
@@ -93,6 +97,11 @@ func (h *Handler) sendWebhook(ctx context.Context, githubHeaders map[string]stri
 	if err != nil {
 		return fmt.Errorf("failed to send webhook: %v", err)
 	}
+	logger.DebugContext(ctx, "sent webhook to queue",
+		"delivery_id", githubHeaders[WebhookDeliveryHeader],
+		"event", githubHeaders[WebhookEventHeader],
+		"body", string(body),
+	)
 	return nil
 }
 
@@ -103,6 +112,12 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 		}
 	}()
 	ctx, span := trace.Start(ctx, "serve webhook")
+	deliveryID := r.Header.Get(WebhookDeliveryHeader)
+	eventType := r.Header.Get(WebhookEventHeader)
+	span.SetAttributes(
+		attribute.String("github.delivery_id", deliveryID),
+		attribute.String("github.event", eventType),
+	)
 	webhook, err := h.receiveWebhook(ctx, r)
 	if err != nil {
 		inboundWebhookErrors.Add(ctx, 1)
@@ -124,6 +139,10 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 	}
 
 	ctx, span = trace.Start(ctx, "send webhook")
+	span.SetAttributes(
+		attribute.String("github.delivery_id", deliveryID),
+		attribute.String("github.event", eventType),
+	)
 	err = h.sendWebhook(ctx, githubHeaders, webhook)
 	if err != nil {
 		outboundWebhookErrors.Add(ctx, 1)
