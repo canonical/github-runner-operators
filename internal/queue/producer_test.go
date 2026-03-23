@@ -10,6 +10,7 @@ import (
 	"errors"
 	"testing"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,6 +36,7 @@ func TestPush(t *testing.T) {
 
 	assert.Contains(t, mockAmqpChannel.headers, headers)
 	assert.Contains(t, mockAmqpChannel.msgs, []byte("TestMessage"), "expected message to be published")
+	assert.Contains(t, mockAmqpChannel.deliveryModes, amqp.Persistent, "expected message to be persistent")
 }
 
 func TestPushFailure(t *testing.T) {

@@ -14,8 +14,9 @@ import (
 // MockAmqpChannel implements amqpChannel for unit testing.
 type MockAmqpChannel struct {
 	// Message tracking
-	msgs    [][]byte
-	headers []map[string]interface{}
+	msgs          [][]byte
+	headers       []map[string]interface{}
+	deliveryModes []uint8
 
 	// State
 	isclosed    bool
@@ -65,6 +66,7 @@ func (ch *MockAmqpChannel) PublishWithDeferredConfirm(exchange string, key strin
 	}
 	ch.msgs = append(ch.msgs, msg.Body)
 	ch.headers = append(ch.headers, msg.Headers)
+	ch.deliveryModes = append(ch.deliveryModes, msg.DeliveryMode)
 
 	doneCh := make(chan struct{}, 1)
 

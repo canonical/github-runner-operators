@@ -73,9 +73,10 @@ func (p *AmqpProducer) publishMsg(msg []byte, headers map[string]interface{}) (c
 		false,                 // mandatory
 		false,                 // immediate
 		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        msg,
-			Headers:     headers,
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			Body:         msg,
+			Headers:      headers,
 		},
 	)
 
