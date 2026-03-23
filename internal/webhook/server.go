@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"time"
 
+	gh "github.com/canonical/github-runner-operators/internal/github"
 	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/canonical/github-runner-operators/internal/server"
 	"go.opentelemetry.io/otel"
@@ -23,16 +24,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
-const (
-	WebhookSignatureHeader                  = "X-Hub-Signature-256"
-	WebhookEventHeader                      = "X-GitHub-Event"
-	WebhookHookIDHeader                     = "X-GitHub-Hook-ID"
-	WebhookDeliveryHeader                   = "X-GitHub-Delivery"
-	WebhookHookInstallationTargetTypeHeader = "X-GitHub-Hook-Installation-Target-Type"
-	WebhookHookInstallationTargetIDHeader   = "X-GitHub-Hook-Installation-Target-ID"
-	bodyLimit                               = 1048576
-	WebhookSignaturePrefix                  = "sha256="
-)
+const bodyLimit = 1048576
 
 type httpError struct {
 	code    int
@@ -58,7 +50,7 @@ type Handler struct {
 
 func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, error) {
 	reader := io.LimitReader(r.Body, bodyLimit+1)
-	signature := r.Header.Get(WebhookSignatureHeader)
+	signature := r.Header.Get(gh.SignatureHeader)
 	if signature == "" {
 		logger.DebugContext(ctx, "missing signature header", "header", r.Header)
 		return nil, &httpError{code: http.StatusForbidden, message: "missing signature header"}
@@ -76,8 +68,8 @@ func (h *Handler) receiveWebhook(ctx context.Context, r *http.Request) ([]byte, 
 		logger.DebugContext(ctx, "invalid signature", "signature", signature)
 		return nil, &httpError{code: http.StatusForbidden, message: "webhook contains invalid signature"}
 	}
-	deliveryID := r.Header.Get(WebhookDeliveryHeader)
-	eventType := r.Header.Get(WebhookEventHeader)
+	deliveryID := r.Header.Get(gh.DeliveryHeader)
+	eventType := r.Header.Get(gh.EventHeader)
 	logger.DebugContext(ctx, "received webhook", "delivery_id", deliveryID, "event", eventType)
 	return body, nil
 }
@@ -98,8 +90,8 @@ func (h *Handler) sendWebhook(ctx context.Context, githubHeaders map[string]stri
 		return fmt.Errorf("failed to send webhook: %v", err)
 	}
 	logger.DebugContext(ctx, "sent webhook to queue",
-		"delivery_id", githubHeaders[WebhookDeliveryHeader],
-		"event", githubHeaders[WebhookEventHeader],
+		"delivery_id", githubHeaders[gh.DeliveryHeader],
+		"event", githubHeaders[gh.EventHeader],
 		"body", string(body),
 	)
 	return nil
@@ -112,8 +104,8 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 		}
 	}()
 	ctx, span := trace.Start(ctx, "serve webhook")
-	deliveryID := r.Header.Get(WebhookDeliveryHeader)
-	eventType := r.Header.Get(WebhookEventHeader)
+	deliveryID := r.Header.Get(gh.DeliveryHeader)
+	eventType := r.Header.Get(gh.EventHeader)
 	span.SetAttributes(
 		attribute.String("github.delivery_id", deliveryID),
 		attribute.String("github.event", eventType),
@@ -131,11 +123,11 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 
 	// Extract GitHub headers from the request
 	githubHeaders := map[string]string{
-		WebhookEventHeader:                      r.Header.Get(WebhookEventHeader),
-		WebhookHookIDHeader:                     r.Header.Get(WebhookHookIDHeader),
-		WebhookDeliveryHeader:                   r.Header.Get(WebhookDeliveryHeader),
-		WebhookHookInstallationTargetTypeHeader: r.Header.Get(WebhookHookInstallationTargetTypeHeader),
-		WebhookHookInstallationTargetIDHeader:   r.Header.Get(WebhookHookInstallationTargetIDHeader),
+		gh.EventHeader:                      r.Header.Get(gh.EventHeader),
+		gh.HookIDHeader:                     r.Header.Get(gh.HookIDHeader),
+		gh.DeliveryHeader:                   r.Header.Get(gh.DeliveryHeader),
+		gh.HookInstallationTargetTypeHeader: r.Header.Get(gh.HookInstallationTargetTypeHeader),
+		gh.HookInstallationTargetIDHeader:   r.Header.Get(gh.HookInstallationTargetIDHeader),
 	}
 
 	ctx, span = trace.Start(ctx, "send webhook")
@@ -181,13 +173,13 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateSignature(message []byte, secret string, signature string) bool {
-	if len(signature) < len(WebhookSignaturePrefix) {
+	if len(signature) < len(gh.SignaturePrefix) {
 		return false
 	}
-	if signature[:len(WebhookSignaturePrefix)] != WebhookSignaturePrefix {
+	if signature[:len(gh.SignaturePrefix)] != gh.SignaturePrefix {
 		return false
 	}
-	signatureWithoutPrefix := signature[len(WebhookSignaturePrefix):]
+	signatureWithoutPrefix := signature[len(gh.SignaturePrefix):]
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(message)
 	sig, err := hex.DecodeString(signatureWithoutPrefix)

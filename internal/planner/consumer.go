@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	gh "github.com/canonical/github-runner-operators/internal/github"
 	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/google/go-github/v82/github"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -28,10 +29,8 @@ type JobDatabase interface {
 }
 
 const (
-	platform                = "github"
-	githubEventHeaderKey    = "X-GitHub-Event"
-	githubDeliveryHeaderKey = "X-GitHub-Delivery"
-	maxBackoff              = 5 * time.Minute
+	platform   = "github"
+	maxBackoff = 5 * time.Minute
 )
 
 var supportedActions = []string{"queued", "in_progress", "completed"}
@@ -96,7 +95,7 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 // Returns (nil, nil) for non-workflow_job events (should be ignored).
 // Returns error only for malformed webhooks.
 func parseWorkflowJobEvent(ctx context.Context, headers map[string]interface{}, body []byte) (*github.WorkflowJobEvent, error) {
-	eventTypeHeader, ok := headers[githubEventHeaderKey]
+	eventTypeHeader, ok := headers[gh.EventHeader]
 	if !ok {
 		return nil, fmt.Errorf("missing X-GitHub-Event header")
 	}
@@ -272,7 +271,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	ctx, span := trace.Start(ctx, "consume webhook")
 	defer span.End()
 
-	deliveryID, _ := msg.Headers[githubDeliveryHeaderKey].(string)
+	deliveryID, _ := msg.Headers[gh.DeliveryHeader].(string)
 	span.SetAttributes(attribute.String("github.delivery_id", deliveryID))
 
 	job, err := getWorkflowJob(ctx, msg.Headers, msg.Body)
