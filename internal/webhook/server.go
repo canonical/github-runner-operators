@@ -87,7 +87,7 @@ func (h *Handler) sendWebhook(ctx context.Context, githubHeaders map[string]stri
 	}
 	err := h.Producer.Push(ctx, rabbitHeaders, body)
 	if err != nil {
-		return fmt.Errorf("failed to send webhook: %v", err)
+		return fmt.Errorf("failed to send webhook: %w", err)
 	}
 	logger.DebugContext(ctx, "sent webhook to queue",
 		"delivery_id", githubHeaders[gh.DeliveryHeader],
