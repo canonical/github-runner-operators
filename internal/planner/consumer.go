@@ -28,9 +28,10 @@ type JobDatabase interface {
 }
 
 const (
-	platform             = "github"
-	githubEventHeaderKey = "X-GitHub-Event"
-	maxBackoff           = 5 * time.Minute
+	platform                = "github"
+	githubEventHeaderKey    = "X-GitHub-Event"
+	githubDeliveryHeaderKey = "X-GitHub-Delivery"
+	maxBackoff              = 5 * time.Minute
 )
 
 var supportedActions = []string{"queued", "in_progress", "completed"}
@@ -271,10 +272,13 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	ctx, span := trace.Start(ctx, "consume webhook")
 	defer span.End()
 
+	deliveryID, _ := msg.Headers[githubDeliveryHeaderKey].(string)
+	span.SetAttributes(attribute.String("github.delivery_id", deliveryID))
+
 	job, err := getWorkflowJob(ctx, msg.Headers, msg.Body)
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot parse webhook payload, discarding to DLQ", "error", err)
-		logger.DebugContext(ctx, "discarded webhook body", "body", string(msg.Body))
+		logger.DebugContext(ctx, "discarded webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
@@ -282,7 +286,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	}
 
 	if job == nil {
-		logger.DebugContext(ctx, "ignored webhook body", "body", string(msg.Body))
+		logger.DebugContext(ctx, "ignored webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
@@ -294,6 +298,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 		attribute.String("github.action", job.action),
 	)
 	logger.DebugContext(ctx, "consuming webhook",
+		"delivery_id", deliveryID,
 		"job_id", job.id,
 		"repo", job.repo,
 		"action", job.action,
