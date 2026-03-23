@@ -97,12 +97,12 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 func parseWorkflowJobEvent(ctx context.Context, headers map[string]interface{}, body []byte) (*github.WorkflowJobEvent, error) {
 	eventTypeHeader, ok := headers[gh.EventHeader]
 	if !ok {
-		return nil, fmt.Errorf("missing X-GitHub-Event header")
+		return nil, fmt.Errorf("missing %s header", gh.EventHeader)
 	}
 
 	eventType, ok := eventTypeHeader.(string)
 	if !ok {
-		return nil, fmt.Errorf("X-GitHub-Event must be string")
+		return nil, fmt.Errorf("%s must be string", gh.EventHeader)
 	}
 
 	event, err := github.ParseWebHook(eventType, body)
