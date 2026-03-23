@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/canonical/github-runner-operators/internal/database"
+	gh "github.com/canonical/github-runner-operators/internal/github"
 	"github.com/canonical/github-runner-operators/internal/queue"
 	"github.com/google/go-github/v82/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
@@ -27,9 +29,8 @@ type JobDatabase interface {
 }
 
 const (
-	platform             = "github"
-	githubEventHeaderKey = "X-GitHub-Event"
-	maxBackoff           = 5 * time.Minute
+	platform   = "github"
+	maxBackoff = 5 * time.Minute
 )
 
 var supportedActions = []string{"queued", "in_progress", "completed"}
@@ -94,14 +95,14 @@ func getWorkflowJob(ctx context.Context, headers map[string]interface{}, body []
 // Returns (nil, nil) for non-workflow_job events (should be ignored).
 // Returns error only for malformed webhooks.
 func parseWorkflowJobEvent(ctx context.Context, headers map[string]interface{}, body []byte) (*github.WorkflowJobEvent, error) {
-	eventTypeHeader, ok := headers[githubEventHeaderKey]
+	eventTypeHeader, ok := headers[gh.EventHeader]
 	if !ok {
-		return nil, fmt.Errorf("missing X-GitHub-Event header")
+		return nil, fmt.Errorf("missing %s header", gh.EventHeader)
 	}
 
 	eventType, ok := eventTypeHeader.(string)
 	if !ok {
-		return nil, fmt.Errorf("X-GitHub-Event must be string")
+		return nil, fmt.Errorf("%s must be string", gh.EventHeader)
 	}
 
 	event, err := github.ParseWebHook(eventType, body)
@@ -112,7 +113,7 @@ func parseWorkflowJobEvent(ctx context.Context, headers map[string]interface{}, 
 	jobEvent, ok := event.(*github.WorkflowJobEvent)
 	if !ok {
 		if eventType == "workflow_job" {
-			logger.WarnContext(ctx, "received workflow_job in \"X-GitHub-Event\" header but payload did not parse to expected type; possible GitHub API change or library issue")
+			logger.WarnContext(ctx, "received workflow_job event but payload did not parse to expected type; possible GitHub API change or library issue", "header_name", gh.EventHeader)
 		} else {
 			logger.DebugContext(ctx, "ignoring non-workflow_job event", "event_type", eventType)
 		}
@@ -270,9 +271,17 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	ctx, span := trace.Start(ctx, "consume webhook")
 	defer span.End()
 
+	deliveryID, _ := msg.Headers[gh.DeliveryHeader].(string)
+	eventType, _ := msg.Headers[gh.EventHeader].(string)
+	span.SetAttributes(
+		attribute.String("github.delivery_id", deliveryID),
+		attribute.String("github.event", eventType),
+	)
+
 	job, err := getWorkflowJob(ctx, msg.Headers, msg.Body)
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot parse webhook payload, discarding to DLQ", "error", err)
+		logger.DebugContext(ctx, "discarded webhook", "delivery_id", deliveryID)
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
@@ -280,10 +289,24 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	}
 
 	if job == nil {
+		logger.DebugContext(ctx, "ignored webhook", "delivery_id", deliveryID)
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
 	}
+
+	span.SetAttributes(
+		attribute.String("github.job_id", job.id),
+		attribute.String("github.repo", job.repo),
+		attribute.String("github.action", job.action),
+	)
+	logger.DebugContext(ctx, "consuming webhook",
+		"delivery_id", deliveryID,
+		"job_id", job.id,
+		"repo", job.repo,
+		"action", job.action,
+		"labels", strings.Join(job.labels, ","),
+	)
 
 	err = c.handleMessage(ctx, job)
 	if err == nil {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	gh "github.com/canonical/github-runner-operators/internal/github"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 )
@@ -64,7 +65,7 @@ func TestWebhookForwarded(t *testing.T) {
 	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
 	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
 	assert.Equal(t, 1, len(fakeProducer.Headers), "expected 1 header set")
-	assert.Equal(t, "workflow_job", fakeProducer.Headers[0]["X-GitHub-Event"], "expected X-GitHub-Event header to match")
+	assert.Equal(t, "workflow_job", fakeProducer.Headers[0][gh.EventHeader], "expected X-GitHub-Event header to match")
 	m := mr.Collect(t)
 	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
 	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
@@ -75,8 +76,8 @@ func TestWebhookForwarded(t *testing.T) {
 func setupRequest() *http.Request {
 	req := httptest.NewRequest(http.MethodPost, webhookPath, strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(WebhookSignatureHeader, valid_signature_header)
-	req.Header.Set(WebhookEventHeader, "workflow_job")
+	req.Header.Set(gh.SignatureHeader, valid_signature_header)
+	req.Header.Set(gh.EventHeader, "workflow_job")
 
 	return req
 }
@@ -127,7 +128,7 @@ func TestWebhookInvalidSignature(t *testing.T) {
 		},
 		{
 			name:                    "Wrong Prefix",
-			signature:               "mac256=" + valid_signature_header[len(WebhookSignaturePrefix):],
+			signature:               "mac256=" + valid_signature_header[len(gh.SignaturePrefix):],
 			expectedResponseMessage: "invalid signature",
 		},
 		{
@@ -157,9 +158,9 @@ func TestWebhookInvalidSignature(t *testing.T) {
 			defer telemetry.ReleaseTestMetricReader(t)
 			req := setupRequest()
 			if tt.name == "Missing Signature Header" {
-				req.Header.Del(WebhookSignatureHeader)
+				req.Header.Del(gh.SignatureHeader)
 			} else {
-				req.Header.Set(WebhookSignatureHeader, tt.signature)
+				req.Header.Set(gh.SignatureHeader, tt.signature)
 			}
 			w := httptest.NewRecorder()
 
