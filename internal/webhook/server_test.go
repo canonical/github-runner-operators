@@ -65,7 +65,7 @@ func TestWebhookForwarded(t *testing.T) {
 	assert.Equal(t, 1, len(fakeProducer.Messages), "expected 1 message in queue")
 	assert.Equal(t, payload, string(fakeProducer.Messages[0]), "expected message body to match")
 	assert.Equal(t, 1, len(fakeProducer.Headers), "expected 1 header set")
-	assert.Equal(t, "workflow_job", fakeProducer.Headers[0]["X-GitHub-Event"], "expected X-GitHub-Event header to match")
+	assert.Equal(t, "workflow_job", fakeProducer.Headers[0][gh.EventHeader], "expected X-GitHub-Event header to match")
 	m := mr.Collect(t)
 	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.gateway.inbound"))
 	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.gateway.inbound.errors"))
