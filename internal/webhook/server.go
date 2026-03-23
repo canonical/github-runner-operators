@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -89,11 +90,13 @@ func (h *Handler) sendWebhook(ctx context.Context, githubHeaders map[string]stri
 	if err != nil {
 		return fmt.Errorf("failed to send webhook: %v", err)
 	}
-	logger.DebugContext(ctx, "sent webhook to queue",
-		"delivery_id", githubHeaders[gh.DeliveryHeader],
-		"event", githubHeaders[gh.EventHeader],
-		"body", string(body),
-	)
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger.DebugContext(ctx, "sent webhook to queue",
+			"delivery_id", githubHeaders[gh.DeliveryHeader],
+			"event", githubHeaders[gh.EventHeader],
+			"body", string(body),
+		)
+	}
 	return nil
 }
 

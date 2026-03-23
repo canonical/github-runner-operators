@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -272,12 +273,18 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	defer span.End()
 
 	deliveryID, _ := msg.Headers[gh.DeliveryHeader].(string)
-	span.SetAttributes(attribute.String("github.delivery_id", deliveryID))
+	eventType, _ := msg.Headers[gh.EventHeader].(string)
+	span.SetAttributes(
+		attribute.String("github.delivery_id", deliveryID),
+		attribute.String("github.event", eventType),
+	)
 
 	job, err := getWorkflowJob(ctx, msg.Headers, msg.Body)
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot parse webhook payload, discarding to DLQ", "error", err)
-		logger.DebugContext(ctx, "discarded webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
+		if logger.Enabled(ctx, slog.LevelDebug) {
+			logger.DebugContext(ctx, "discarded webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
+		}
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
@@ -285,7 +292,9 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	}
 
 	if job == nil {
-		logger.DebugContext(ctx, "ignored webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
+		if logger.Enabled(ctx, slog.LevelDebug) {
+			logger.DebugContext(ctx, "ignored webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
+		}
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
@@ -296,14 +305,16 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 		attribute.String("github.repo", job.repo),
 		attribute.String("github.action", job.action),
 	)
-	logger.DebugContext(ctx, "consuming webhook",
-		"delivery_id", deliveryID,
-		"job_id", job.id,
-		"repo", job.repo,
-		"action", job.action,
-		"labels", strings.Join(job.labels, ","),
-		"body", string(msg.Body),
-	)
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger.DebugContext(ctx, "consuming webhook",
+			"delivery_id", deliveryID,
+			"job_id", job.id,
+			"repo", job.repo,
+			"action", job.action,
+			"labels", strings.Join(job.labels, ","),
+			"body", string(msg.Body),
+		)
+	}
 
 	err = c.handleMessage(ctx, job)
 	if err == nil {
