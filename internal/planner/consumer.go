@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -282,9 +281,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	job, err := getWorkflowJob(ctx, msg.Headers, msg.Body)
 	if err != nil {
 		logger.ErrorContext(ctx, "cannot parse webhook payload, discarding to DLQ", "error", err)
-		if logger.Enabled(ctx, slog.LevelDebug) {
-			logger.DebugContext(ctx, "discarded webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
-		}
+		logger.DebugContext(ctx, "discarded webhook", "delivery_id", deliveryID)
 		span.RecordError(err)
 		c.metrics.ObserveWebhookError(ctx, platform)
 		c.discardMessage(ctx, &msg)
@@ -292,9 +289,7 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 	}
 
 	if job == nil {
-		if logger.Enabled(ctx, slog.LevelDebug) {
-			logger.DebugContext(ctx, "ignored webhook body", "delivery_id", deliveryID, "body", string(msg.Body))
-		}
+		logger.DebugContext(ctx, "ignored webhook", "delivery_id", deliveryID)
 		c.metrics.ObserveDiscardedWebhook(ctx, platform)
 		c.ignoreMessage(ctx, &msg)
 		return nil
@@ -305,16 +300,13 @@ func (c *JobConsumer) pullMessage(ctx context.Context) error {
 		attribute.String("github.repo", job.repo),
 		attribute.String("github.action", job.action),
 	)
-	if logger.Enabled(ctx, slog.LevelDebug) {
-		logger.DebugContext(ctx, "consuming webhook",
-			"delivery_id", deliveryID,
-			"job_id", job.id,
-			"repo", job.repo,
-			"action", job.action,
-			"labels", strings.Join(job.labels, ","),
-			"body", string(msg.Body),
-		)
-	}
+	logger.DebugContext(ctx, "consuming webhook",
+		"delivery_id", deliveryID,
+		"job_id", job.id,
+		"repo", job.repo,
+		"action", job.action,
+		"labels", strings.Join(job.labels, ","),
+	)
 
 	err = c.handleMessage(ctx, job)
 	if err == nil {

@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -90,13 +89,10 @@ func (h *Handler) sendWebhook(ctx context.Context, githubHeaders map[string]stri
 	if err != nil {
 		return fmt.Errorf("failed to send webhook: %v", err)
 	}
-	if logger.Enabled(ctx, slog.LevelDebug) {
-		logger.DebugContext(ctx, "sent webhook to queue",
-			"delivery_id", githubHeaders[gh.DeliveryHeader],
-			"event", githubHeaders[gh.EventHeader],
-			"body", string(body),
-		)
-	}
+	logger.DebugContext(ctx, "sent webhook to queue",
+		"delivery_id", githubHeaders[gh.DeliveryHeader],
+		"event", githubHeaders[gh.EventHeader],
+	)
 	return nil
 }
 
@@ -107,22 +103,21 @@ func (h *Handler) serveHTTP(ctx context.Context, r *http.Request) error {
 		}
 	}()
 	ctx, span := trace.Start(ctx, "serve webhook")
-	deliveryID := r.Header.Get(gh.DeliveryHeader)
-	eventType := r.Header.Get(gh.EventHeader)
-	span.SetAttributes(
-		attribute.String("github.delivery_id", deliveryID),
-		attribute.String("github.event", eventType),
-	)
 	webhook, err := h.receiveWebhook(ctx, r)
 	if err != nil {
 		inboundWebhookErrors.Add(ctx, 1)
 		span.RecordError(err)
 		span.End()
 		return err
-	} else {
-		inboundWebhook.Add(ctx, 1)
-		span.End()
 	}
+	deliveryID := r.Header.Get(gh.DeliveryHeader)
+	eventType := r.Header.Get(gh.EventHeader)
+	span.SetAttributes(
+		attribute.String("github.delivery_id", deliveryID),
+		attribute.String("github.event", eventType),
+	)
+	inboundWebhook.Add(ctx, 1)
+	span.End()
 
 	// Extract GitHub headers from the request
 	githubHeaders := map[string]string{
