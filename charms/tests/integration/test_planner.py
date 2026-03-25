@@ -1,7 +1,10 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import base64
 import json
+import lzma
 import time
+
 import jubilant
 import pytest
 import requests
@@ -213,7 +216,8 @@ def test_planner_grafana_dashboard(
     """
     arrange: The planner app is deployed with required integrations.
     act: Integrate with a grafana-dashboard consumer and inspect relation data.
-    assert: The grafana-dashboard relation contains non-empty dashboard templates.
+    assert: The grafana-dashboard relation contains dashboard templates including
+        the custom planner dashboard with planner-specific metrics.
     """
     juju.integrate(
         f"{planner_app}:grafana-dashboard",
@@ -235,6 +239,14 @@ def test_planner_grafana_dashboard(
             dashboards = json.loads(dashboards_raw)
             templates = dashboards.get("templates", {})
             assert len(templates) >= 1, "expected at least one dashboard template"
+
+            all_content = ""
+            for template in templates.values():
+                raw = base64.b64decode(template["content"].encode("utf-8"))
+                all_content += lzma.decompress(raw).decode("utf-8")
+            assert "github_runner_planner_webhook_consumed_total" in all_content, (
+                "expected custom planner dashboard with planner-specific metrics"
+            )
             break
     else:
         pytest.fail("No grafana-dashboard relation found on planner")
