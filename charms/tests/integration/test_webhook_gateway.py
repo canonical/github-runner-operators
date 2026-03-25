@@ -1,5 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import json
+
 import jubilant
 import pytest
 import requests
@@ -51,3 +53,39 @@ def test_webhook_gateway_prometheus_metrics(
     response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics")
 
     assert response.status_code == requests.status_codes.codes.OK
+
+
+@pytest.mark.usefixtures("webhook_gateway_with_rabbitmq")
+def test_webhook_gateway_grafana_dashboard(
+    juju: jubilant.Juju,
+    webhook_gateway_app: str,
+    any_charm_grafana_consumer_app: str,
+):
+    """
+    arrange: The webhook gateway app is deployed with required integrations.
+    act: Integrate with a grafana-dashboard consumer and inspect relation data.
+    assert: The grafana-dashboard relation contains non-empty dashboard templates.
+    """
+    juju.integrate(
+        f"{webhook_gateway_app}:grafana-dashboard",
+        f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, webhook_gateway_app),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    unit = f"{webhook_gateway_app}/0"
+    stdout = juju.cli("show-unit", unit, "--format=json")
+    result = json.loads(stdout)
+    for relation in result[unit]["relation-info"]:
+        if relation["endpoint"] == "grafana-dashboard":
+            dashboards_raw = relation["application-data"].get("dashboards")
+            assert dashboards_raw, "expected non-empty dashboards in relation data"
+            dashboards = json.loads(dashboards_raw)
+            templates = dashboards.get("templates", {})
+            assert len(templates) >= 1, "expected at least one dashboard template"
+            break
+    else:
+        pytest.fail("No grafana-dashboard relation found on webhook-gateway")

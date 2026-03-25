@@ -204,6 +204,42 @@ def test_planner_enable_disable_flavor_actions(
     assert flavor_data["is_disabled"] is False, "Flavor should be enabled after action"
 
 
+@pytest.mark.usefixtures("planner_with_integrations")
+def test_planner_grafana_dashboard(
+    juju: jubilant.Juju,
+    planner_app: str,
+    any_charm_grafana_consumer_app: str,
+):
+    """
+    arrange: The planner app is deployed with required integrations.
+    act: Integrate with a grafana-dashboard consumer and inspect relation data.
+    assert: The grafana-dashboard relation contains non-empty dashboard templates.
+    """
+    juju.integrate(
+        f"{planner_app}:grafana-dashboard",
+        f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, planner_app),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    unit = f"{planner_app}/0"
+    stdout = juju.cli("show-unit", unit, "--format=json")
+    result = json.loads(stdout)
+    for relation in result[unit]["relation-info"]:
+        if relation["endpoint"] == "grafana-dashboard":
+            dashboards_raw = relation["application-data"].get("dashboards")
+            assert dashboards_raw, "expected non-empty dashboards in relation data"
+            dashboards = json.loads(dashboards_raw)
+            templates = dashboards.get("templates", {})
+            assert len(templates) >= 1, "expected at least one dashboard template"
+            break
+    else:
+        pytest.fail("No grafana-dashboard relation found on planner")
+
+
 def poll_flavor_status(unit_ip, flavor_name, token, expected_status, attempts=24, interval=5):
     """Poll the flavor API until the expected HTTP status is returned."""
     for _ in range(attempts):
