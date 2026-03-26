@@ -8,6 +8,7 @@ import time
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import poll_grafana_dashboard_templates
 
 APP_PORT = 8080
 METRICS_PORT = 9464
@@ -223,33 +224,17 @@ def test_planner_grafana_dashboard(
         f"{planner_app}:grafana-dashboard",
         f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
     )
-    juju.wait(
-        lambda status: jubilant.all_active(status, planner_app),
-        timeout=6 * 60,
-        delay=10,
+
+    templates = poll_grafana_dashboard_templates(juju, f"{planner_app}/0")
+    assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"
+
+    all_content = ""
+    for template in templates.values():
+        raw = base64.b64decode(template["content"].encode("utf-8"))
+        all_content += lzma.decompress(raw).decode("utf-8")
+    assert "github_runner_planner_webhook_consumed_total" in all_content, (
+        "expected custom planner dashboard with planner-specific metrics"
     )
-
-    unit = f"{planner_app}/0"
-    stdout = juju.cli("show-unit", unit, "--format=json")
-    result = json.loads(stdout)
-    for relation in result[unit]["relation-info"]:
-        if relation["endpoint"] == "grafana-dashboard":
-            dashboards_raw = relation["application-data"].get("dashboards")
-            assert dashboards_raw, "expected non-empty dashboards in relation data"
-            dashboards = json.loads(dashboards_raw)
-            templates = dashboards.get("templates", {})
-            assert len(templates) >= 1, "expected at least one dashboard template"
-
-            all_content = ""
-            for template in templates.values():
-                raw = base64.b64decode(template["content"].encode("utf-8"))
-                all_content += lzma.decompress(raw).decode("utf-8")
-            assert "github_runner_planner_webhook_consumed_total" in all_content, (
-                "expected custom planner dashboard with planner-specific metrics"
-            )
-            break
-    else:
-        pytest.fail("No grafana-dashboard relation found on planner")
 
 
 def poll_flavor_status(unit_ip, flavor_name, token, expected_status, attempts=24, interval=5):

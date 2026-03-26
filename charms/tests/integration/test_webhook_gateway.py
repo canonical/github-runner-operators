@@ -1,10 +1,9 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-import json
-
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import poll_grafana_dashboard_templates
 
 APP_PORT = 8080
 METRICS_PORT = 9464
@@ -70,22 +69,6 @@ def test_webhook_gateway_grafana_dashboard(
         f"{webhook_gateway_app}:grafana-dashboard",
         f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
     )
-    juju.wait(
-        lambda status: jubilant.all_active(status, webhook_gateway_app),
-        timeout=6 * 60,
-        delay=10,
-    )
 
-    unit = f"{webhook_gateway_app}/0"
-    stdout = juju.cli("show-unit", unit, "--format=json")
-    result = json.loads(stdout)
-    for relation in result[unit]["relation-info"]:
-        if relation["endpoint"] == "grafana-dashboard":
-            dashboards_raw = relation["application-data"].get("dashboards")
-            assert dashboards_raw, "expected non-empty dashboards in relation data"
-            dashboards = json.loads(dashboards_raw)
-            templates = dashboards.get("templates", {})
-            assert len(templates) >= 1, "expected at least one dashboard template"
-            break
-    else:
-        pytest.fail("No grafana-dashboard relation found on webhook-gateway")
+    templates = poll_grafana_dashboard_templates(juju, f"{webhook_gateway_app}/0")
+    assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"
