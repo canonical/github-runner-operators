@@ -1,10 +1,14 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+import base64
 import json
+import lzma
 import time
+
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import poll_grafana_dashboard_templates
 
 APP_PORT = 8080
 METRICS_PORT = 9464
@@ -202,6 +206,35 @@ def test_planner_enable_disable_flavor_actions(
     assert response.status_code == requests.status_codes.codes.OK
     flavor_data = response.json()
     assert flavor_data["is_disabled"] is False, "Flavor should be enabled after action"
+
+
+@pytest.mark.usefixtures("planner_with_integrations")
+def test_planner_grafana_dashboard(
+    juju: jubilant.Juju,
+    planner_app: str,
+    any_charm_grafana_consumer_app: str,
+):
+    """
+    arrange: The planner app is deployed with required integrations.
+    act: Integrate with a grafana-dashboard consumer and inspect relation data.
+    assert: The grafana-dashboard relation contains dashboard templates including
+        the custom planner dashboard with planner-specific metrics.
+    """
+    juju.integrate(
+        f"{planner_app}:grafana-dashboard",
+        f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
+    )
+
+    templates = poll_grafana_dashboard_templates(juju, f"{any_charm_grafana_consumer_app}/0")
+    assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"
+
+    all_content = ""
+    for template in templates.values():
+        raw = base64.b64decode(template["content"].encode("utf-8"))
+        all_content += lzma.decompress(raw).decode("utf-8")
+    assert "github_runner_planner_webhook_consumed_total" in all_content, (
+        "expected custom planner dashboard with planner-specific metrics"
+    )
 
 
 def poll_flavor_status(unit_ip, flavor_name, token, expected_status, attempts=24, interval=5):

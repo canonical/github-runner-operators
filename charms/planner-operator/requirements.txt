@@ -1,3 +1,4 @@
+--only-binary=pluggy
 ops==3.6.0
 paas-charm==1.11.1
 requests==2.33.0
