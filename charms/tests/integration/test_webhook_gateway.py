@@ -70,5 +70,5 @@ def test_webhook_gateway_grafana_dashboard(
         f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
     )
 
-    templates = poll_grafana_dashboard_templates(juju, f"{webhook_gateway_app}/0")
+    templates = poll_grafana_dashboard_templates(juju, f"{any_charm_grafana_consumer_app}/0")
     assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"

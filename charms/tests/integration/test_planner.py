@@ -225,7 +225,7 @@ def test_planner_grafana_dashboard(
         f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
     )
 
-    templates = poll_grafana_dashboard_templates(juju, f"{planner_app}/0")
+    templates = poll_grafana_dashboard_templates(juju, f"{any_charm_grafana_consumer_app}/0")
     assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"
 
     all_content = ""
