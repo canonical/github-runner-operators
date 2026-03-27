@@ -19,6 +19,10 @@ description: |
 extensions:
   - go-framework
 
+parts:
+  charm:
+    charm-binary-python-packages: [pydantic, pydantic-core]
+
 config:
   options:
     webhook-secret:
