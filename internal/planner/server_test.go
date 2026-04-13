@@ -48,6 +48,10 @@ type fakeStore struct {
 	listJobsErr    error
 	updateStartErr error
 	updateComplErr error
+
+	// Pressure controls
+	getPressuresErr        error
+	subscribeToPressureErr error
 }
 
 func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) error {
@@ -56,6 +60,9 @@ func (f *fakeStore) AddFlavor(ctx context.Context, flavor *database.Flavor) erro
 }
 
 func (f *fakeStore) GetPressures(ctx context.Context, platform string, flavors ...string) (map[string]int, error) {
+	if f.getPressuresErr != nil {
+		return nil, f.getPressuresErr
+	}
 	pressures := f.pressures.Load()
 	if pressures == nil {
 		return map[string]int{}, nil
@@ -170,6 +177,9 @@ func (f *fakeStore) VerifyAuthToken(ctx context.Context, token [32]byte) (string
 }
 
 func (f *fakeStore) SubscribeToPressureUpdate(ctx context.Context) (<-chan struct{}, error) {
+	if f.subscribeToPressureErr != nil {
+		return nil, f.subscribeToPressureErr
+	}
 	return f.pressureChange, nil
 }
 
