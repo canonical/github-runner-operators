@@ -91,13 +91,43 @@ func TestServer5xxLogsAtErrorLevel(t *testing.T) {
 			url:    "/api/v1/jobs/github/42",
 			body:   "",
 		},
+		{
+			name:   "createAuthToken",
+			store:  &fakeStore{createTokErr: dbErr},
+			method: http.MethodPost,
+			url:    "/api/v1/auth/token/my-token",
+			body:   "",
+		},
+		{
+			name:   "listAuthTokens",
+			store:  &fakeStore{listTokErr: dbErr},
+			method: http.MethodGet,
+			url:    "/api/v1/auth/token",
+			body:   "",
+		},
+		{
+			name:   "deleteAuthToken",
+			store:  &fakeStore{deleteTokErr: dbErr},
+			method: http.MethodDelete,
+			url:    "/api/v1/auth/token/my-token",
+			body:   "",
+		},
+		{
+			name:   "updateJob",
+			store:  &fakeStore{listJobsErr: dbErr},
+			method: http.MethodPatch,
+			url:    "/api/v1/jobs/github/42",
+			body:   `{"started_at":"2026-01-01T00:00:00Z"}`,
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := NewServer(tc.store, tc.store, NewMetrics(tc.store), adminToken, time.Tick(30*time.Second))
 			var buf bytes.Buffer
 			withTestLogger(t, &buf, func() {
+				ticker := time.NewTicker(30 * time.Second)
+				t.Cleanup(ticker.Stop)
+				srv := NewServer(tc.store, tc.store, NewMetrics(tc.store), adminToken, ticker.C)
 				req := newRequest(tc.method, tc.url, tc.body, adminToken)
 				w := httptest.NewRecorder()
 				srv.ServeHTTP(w, req)
@@ -116,10 +146,12 @@ func TestServer5xxDoesNotLeakAuthToken(t *testing.T) {
 	dbErr := errors.New("db failure")
 	store := &fakeStore{errToReturn: dbErr}
 	adminToken := "super-secret-admin-token-that-must-not-appear-in-logs"
-	srv := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 	var buf bytes.Buffer
 	withTestLogger(t, &buf, func() {
+		ticker := time.NewTicker(30 * time.Second)
+		t.Cleanup(ticker.Stop)
+		srv := NewServer(store, store, NewMetrics(store), adminToken, ticker.C)
 		req := newRequest(http.MethodGet, "/api/v1/flavors", "", adminToken)
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
@@ -133,10 +165,12 @@ func TestServer2xxLogsAtInfoNotError(t *testing.T) {
 	// arrange: a healthy store so requests succeed
 	store := &fakeStore{}
 	adminToken := "planner_v0_valid_admin_token________________________________"
-	srv := NewServer(store, store, NewMetrics(store), adminToken, time.Tick(30*time.Second))
 
 	var buf bytes.Buffer
 	withTestLogger(t, &buf, func() {
+		ticker := time.NewTicker(30 * time.Second)
+		t.Cleanup(ticker.Stop)
+		srv := NewServer(store, store, NewMetrics(store), adminToken, ticker.C)
 		req := newRequest(http.MethodGet, "/health", "", "")
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
