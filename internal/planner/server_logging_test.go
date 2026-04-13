@@ -152,6 +152,43 @@ func TestServer5xxLogsAtErrorLevel(t *testing.T) {
 	}
 }
 
+// noFlushWriter is an http.ResponseWriter that intentionally does not implement http.Flusher.
+// It is used to directly test the streaming setup error path in getFlavorPressure,
+// bypassing LoggingHandler (which always wraps writers with Flusher support).
+type noFlushWriter struct {
+	code    int
+	headers http.Header
+}
+
+func newNoFlushWriter() *noFlushWriter {
+	return &noFlushWriter{headers: make(http.Header)}
+}
+
+func (w *noFlushWriter) Header() http.Header         { return w.headers }
+func (w *noFlushWriter) WriteHeader(code int)        { w.code = code }
+func (w *noFlushWriter) Write(b []byte) (int, error) { return len(b), nil }
+
+// TestGetFlavorPressureStreamingSetupLogsError calls getFlavorPressure directly (bypassing
+// LoggingHandler, which always adds Flusher support) so a non-flushing writer can reach the
+// "unable to setup HTTP streaming" error path.
+func TestGetFlavorPressureStreamingSetupLogsError(t *testing.T) {
+	store := &fakeStore{}
+	store.pressures.Store(map[string]int{"runner-small": 3})
+	adminToken := "planner_v0_valid_admin_token________________________________"
+	srv := NewServer(store, store, NewMetrics(store), adminToken, nil)
+
+	var buf bytes.Buffer
+	withTestLogger(t, &buf, func() {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/flavors/runner-small/pressure?stream=true", nil)
+		req.SetPathValue("name", "runner-small")
+		w := newNoFlushWriter()
+		srv.getFlavorPressure(w, req)
+
+		require.Equal(t, http.StatusInternalServerError, w.code)
+		assert.Contains(t, buf.String(), "ERROR", "expected ERROR log for streaming setup failure")
+	})
+}
+
 func TestServer5xxDoesNotLeakAuthToken(t *testing.T) {
 	// arrange: inject a DB error and use a recognisable admin token
 	dbErr := errors.New("db failure")
