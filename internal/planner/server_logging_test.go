@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Canonical Ltd.
+ * Copyright 2026 Canonical Ltd.
  * See LICENSE file for licensing details.
  *
  * Tests verifying that 5xx responses are logged at ERROR level with error details,
@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -119,15 +118,27 @@ func TestServer5xxLogsAtErrorLevel(t *testing.T) {
 			url:    "/api/v1/jobs/github/42",
 			body:   `{"started_at":"2026-01-01T00:00:00Z"}`,
 		},
+		{
+			name:   "getFlavorPressureGetError",
+			store:  &fakeStore{getPressuresErr: dbErr},
+			method: http.MethodGet,
+			url:    "/api/v1/flavors/runner-small/pressure",
+			body:   "",
+		},
+		{
+			name:   "getFlavorPressureSubscribeError",
+			store:  &fakeStore{subscribeToPressureErr: dbErr},
+			method: http.MethodGet,
+			url:    "/api/v1/flavors/runner-small/pressure?stream=true",
+			body:   "",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			withTestLogger(t, &buf, func() {
-				ticker := time.NewTicker(30 * time.Second)
-				t.Cleanup(ticker.Stop)
-				srv := NewServer(tc.store, tc.store, NewMetrics(tc.store), adminToken, ticker.C)
+				srv := NewServer(tc.store, tc.store, NewMetrics(tc.store), adminToken, nil)
 				req := newRequest(tc.method, tc.url, tc.body, adminToken)
 				w := httptest.NewRecorder()
 				srv.ServeHTTP(w, req)
@@ -149,9 +160,7 @@ func TestServer5xxDoesNotLeakAuthToken(t *testing.T) {
 
 	var buf bytes.Buffer
 	withTestLogger(t, &buf, func() {
-		ticker := time.NewTicker(30 * time.Second)
-		t.Cleanup(ticker.Stop)
-		srv := NewServer(store, store, NewMetrics(store), adminToken, ticker.C)
+		srv := NewServer(store, store, NewMetrics(store), adminToken, nil)
 		req := newRequest(http.MethodGet, "/api/v1/flavors", "", adminToken)
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
@@ -168,9 +177,7 @@ func TestServer2xxLogsAtInfoNotError(t *testing.T) {
 
 	var buf bytes.Buffer
 	withTestLogger(t, &buf, func() {
-		ticker := time.NewTicker(30 * time.Second)
-		t.Cleanup(ticker.Stop)
-		srv := NewServer(store, store, NewMetrics(store), adminToken, ticker.C)
+		srv := NewServer(store, store, NewMetrics(store), adminToken, nil)
 		req := newRequest(http.MethodGet, "/health", "", "")
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
