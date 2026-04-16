@@ -123,7 +123,7 @@ def deploy_planner_app_fixture(
     resources = {
         "app-image": planner_app_image,
     }
-    juju.deploy(charm=planner_charm_file, app=app_name, resources=resources)
+    juju.deploy(charm=planner_charm_file, app=app_name, resources=resources, log=False)
     juju.wait(
         lambda status: jubilant.all_blocked(status, app_name),
         timeout=6 * 60,
@@ -131,7 +131,9 @@ def deploy_planner_app_fixture(
     )
     juju.grant_secret(planner_admin_token_uri, app_name)
     juju.config(
-        app_name, values={"metrics-port": 9464, "admin-token": planner_admin_token_uri}
+        app_name,
+        values={"metrics-port": 9464, "admin-token": planner_admin_token_uri},
+        log=False,
     )
     return app_name
 
@@ -174,7 +176,9 @@ def deploy_webhook_gateway_app_fixture(
     resources = {
         "app-image": webhook_gateway_app_image,
     }
-    juju.deploy(charm=webhook_gateway_charm_file, app=app_name, resources=resources)
+    juju.deploy(
+        charm=webhook_gateway_charm_file, app=app_name, resources=resources, log=False
+    )
     juju.wait(
         lambda status: jubilant.all_blocked(status, app_name),
         timeout=6 * 60,
@@ -182,7 +186,9 @@ def deploy_webhook_gateway_app_fixture(
     )
     secret_uri = juju.add_secret(name="webhook", content={"value": "fake-secret"})
     juju.grant_secret(secret_uri, app_name)
-    juju.config(app_name, values={"webhook-secret": secret_uri, "metrics-port": 9464})
+    juju.config(
+        app_name, values={"webhook-secret": secret_uri, "metrics-port": 9464}, log=False
+    )
     return app_name
 
 
@@ -190,7 +196,7 @@ def deploy_webhook_gateway_app_fixture(
 def deploy_rabbitmq_server_fixture(juju: jubilant.Juju) -> str:
     """Deploy rabbitmq charm (without integrations)."""
     rabbitmq_app = "rabbitmq-k8s"
-    juju.deploy(rabbitmq_app, channel="3.12/edge", trust=True)
+    juju.deploy(rabbitmq_app, channel="3.12/edge", trust=True, log=False)
     juju.wait(
         lambda status: jubilant.all_active(status, rabbitmq_app),
         timeout=(10 * 60),
@@ -220,7 +226,7 @@ def integrate_webhook_gateway_rabbitmq_fixture(
 def deploy_postgresql_server_fixture(juju: jubilant.Juju) -> str:
     """Deploy postgresql charm (without integrations)."""
     postgresql_app = "postgresql-k8s"
-    juju.deploy(postgresql_app, channel="16/edge", trust=True)
+    juju.deploy(postgresql_app, channel="16/edge", trust=True, log=False)
     juju.wait(
         lambda status: jubilant.all_active(status, postgresql_app),
         timeout=(10 * 60),
@@ -253,11 +259,7 @@ def deploy_any_charm_grafana_consumer_app_fixture(juju: jubilant.Juju) -> str:
     """Deploy any charm to act as a grafana-dashboard consumer."""
     app_name = "grafana-consumer"
 
-    juju.deploy(
-        "any-charm",
-        app=app_name,
-        channel="latest/beta",
-    )
+    juju.deploy("any-charm", app=app_name, channel="latest/beta", log=False)
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
         timeout=10 * 60,
@@ -272,8 +274,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     app_name = "github-runner"
 
     any_charm_src_overwrite = {
-        "any_charm.py": textwrap.dedent(
-            """\
+        "any_charm.py": textwrap.dedent("""\
             from any_charm_base import AnyCharmBase
 
             class AnyCharm(AnyCharmBase):
@@ -291,14 +292,14 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
                         event.relation.data[self.app]["labels"] = '["self-hosted","linux"]'
                         event.relation.data[self.app]["priority"] = "75"
                         event.relation.data[self.app]["minimum-pressure"] = "0"
-            """
-        ),
+            """),
     }
     juju.deploy(
         "any-charm",
         app=app_name,
         channel="latest/beta",
         config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
+        log=False,
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
