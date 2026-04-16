@@ -123,7 +123,7 @@ def deploy_planner_app_fixture(
     resources = {
         "app-image": planner_app_image,
     }
-    juju.deploy(charm=planner_charm_file, app=app_name, resources=resources)
+    juju.deploy(charm=planner_charm_file, app=app_name, resources=resources, log=False)
     juju.wait(
         lambda status: jubilant.all_blocked(status, app_name),
         timeout=6 * 60,
@@ -174,7 +174,7 @@ def deploy_webhook_gateway_app_fixture(
     resources = {
         "app-image": webhook_gateway_app_image,
     }
-    juju.deploy(charm=webhook_gateway_charm_file, app=app_name, resources=resources)
+    juju.deploy(charm=webhook_gateway_charm_file, app=app_name, resources=resources, log=False)
     juju.wait(
         lambda status: jubilant.all_blocked(status, app_name),
         timeout=6 * 60,
@@ -190,7 +190,7 @@ def deploy_webhook_gateway_app_fixture(
 def deploy_rabbitmq_server_fixture(juju: jubilant.Juju) -> str:
     """Deploy rabbitmq charm (without integrations)."""
     rabbitmq_app = "rabbitmq-k8s"
-    juju.deploy(rabbitmq_app, channel="3.12/edge", trust=True)
+    juju.deploy(rabbitmq_app, channel="3.12/edge", trust=True, log=False)
     juju.wait(
         lambda status: jubilant.all_active(status, rabbitmq_app),
         timeout=(10 * 60),
@@ -220,7 +220,7 @@ def integrate_webhook_gateway_rabbitmq_fixture(
 def deploy_postgresql_server_fixture(juju: jubilant.Juju) -> str:
     """Deploy postgresql charm (without integrations)."""
     postgresql_app = "postgresql-k8s"
-    juju.deploy(postgresql_app, channel="16/edge", trust=True)
+    juju.deploy(postgresql_app, channel="16/edge", trust=True, log=False)
     juju.wait(
         lambda status: jubilant.all_active(status, postgresql_app),
         timeout=(10 * 60),
@@ -257,6 +257,7 @@ def deploy_any_charm_grafana_consumer_app_fixture(juju: jubilant.Juju) -> str:
         "any-charm",
         app=app_name,
         channel="latest/beta",
+        log=False,
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
@@ -299,6 +300,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
         app=app_name,
         channel="latest/beta",
         config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
+        log=False,
     )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
