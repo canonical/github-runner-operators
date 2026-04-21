@@ -67,4 +67,3 @@ In this documentation
     How-to guides <how-to/index>
     Reference <reference/index>
     Explanation <explanation/index>
-    Changelog <changelog>
