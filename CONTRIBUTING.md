@@ -1,24 +1,14 @@
 # Contributing
 
-This document explains the processes and practices recommended for contributing enhancements to the GitHub runner Operator.
+This document explains the processes and practices recommended for contributing enhancements to the codebase.
 
 ## Overview
 
-- Generally, before developing enhancements to this charm, you should consider [opening an issue
-  ](https://github.com/canonical/github-runner-operators/issues) explaining your use case.
-- If you would like to chat with us about your use-cases or proposed implementation, you can reach
-  us at [Canonical Matrix public channel](https://matrix.to/#/#charmhub-charmdev:ubuntu.com)
-  or [Discourse](https://discourse.charmhub.io/).
-- Familiarizing yourself with the [Juju documentation](https://documentation.ubuntu.com/juju/3.6/howto/manage-charms/)
-  will help you a lot when working on new features or bug fixes.
+- Generally, before developing enhancements to this code base, you should consider [opening an issue](https://github.com/canonical/github-runner-operator/issues) explaining your use case.
+- If you would like to chat with us about your use-cases or proposed implementation, you can reach us at [Canonical Charm Development Matrix public channel](https://matrix.to/#/#charmhub-charmdev:ubuntu.com) or [Discourse](https://discourse.charmhub.io/).
 - All enhancements require review before being merged. Code review typically examines
   - code quality
   - test coverage
-  - user experience for Juju operators of this charm.
-- Once your pull request is approved, we squash and merge your pull request branch onto
-  the `main` branch. This creates a linear Git commit history.
-- For further information on contributing, please refer to our
-  [Contributing Guide](https://github.com/canonical/is-charms-contributing-guide).
 
 ## Code of conduct
 
@@ -99,87 +89,135 @@ To add signatures on your commits, follow the
 
 ## Develop
 
-To make contributions to this charm, you'll need a working
-[development setup](https://documentation.ubuntu.com/juju/latest/howto/manage-your-juju-deployment/set-up-your-juju-deployment-local-testing-and-development/).
+For any problems with this charm, please [report bugs here](https://github.com/canonical/github-runner-operator/issues).
 
-The code for this charm can be downloaded as follows:
+The code can be downloaded as follows:
 
-```
-git clone https://github.com/canonical/github-runner-operators
-```
-
-Make sure to install [`uv`](https://docs.astral.sh/uv/). For example, you can install `uv` on Ubuntu using:
-
-```bash
-sudo snap install astral-uv --classic
+```shell
+git clone https://github.com/canonical/github-runner-operators.git
 ```
 
-For other systems, follow the [`uv` installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+The code structure is as follows
 
-Then install `tox` with its extensions, and install a range of Python versions:
+- `internal/`: Internal Go libraries for the applications
+- `cmd/`: Entry points for Go applications (planner, webhook-gateway)
+- `charms/`: Entry point for charms (planner, webhook-gateway)
 
-```bash
-uv python install
-uv tool install tox --with tox-uv
-uv tool update-shell
-```
+### Style
 
-To create a development environment, run:
-
-```bash
-uv sync --all-groups
-source .venv/bin/activate
-```
+The applications written in this repository are written in Go.
+We like to follow idomatic Go practices and community standards when writing Go code.
+We have added an instruction file `go.instructions.md` in `.github/instructions.md` that is used by GitHub Copilot to help you write code that follows these practices.
+We have added a [Style Guide](./STYLE.md) that you can refer to for more details.
 
 ### Test
 
-This project uses `tox` for managing test environments. There are some pre-configured environments
-that can be used for linting and formatting code when you're preparing contributions to the charm:
+This project uses standard Go testing tools for unit tests and integration tests.
+You can have a look at the GitHub actions workflows in `.github/workflows/` to see how the tests are run in CI.
 
-* ``tox``: Executes all of the basic checks and tests (``lint``, ``unit``, ``static``, and ``coverage-report``).
-* ``tox -e fmt``: Runs formatting using ``ruff``.
-* ``tox -e lint``: Runs a range of static code analysis to check the code.
-* ``tox -e static``: Runs other checks such as ``bandit`` for security issues.
-* ``tox -e unit``: Runs the unit tests.
-* ``tox -e integration``: Runs the integration tests.
-
-### Build the rock and charm
-
-Use [Rockcraft](https://documentation.ubuntu.com/rockcraft/stable/) to create an
-OCI image for the GitHub runner app, and then upload the image to a MicroK8s registry,
-which stores OCI archives so they can be downloaded and deployed.
-
-Enable the MicroK8s registry:
-
-```bash
-microk8s enable registry
-```
-
-The following commands pack the OCI image and push it into
-the MicroK8s registry:
-
-```bash
-cd <project_dir>
-rockcraft pack
-skopeo --insecure-policy copy --dest-tls-verify=false oci-archive:<rock-name>.rock docker://localhost:32000/<app-name>:latest
-```
-
-Build the charm in this git repository using:
+Run unit tests using:
 
 ```shell
-charmcraft pack
+go test -race -v ./...
 ```
 
-### Deploy
+Currently, the internal database package is only covered by integration tests. You can run the database integration tests using:
 
-```bash
-# Create a model
-juju add-model charm-dev
-# Enable DEBUG logging
-juju model-config logging-config="<root>=INFO;unit=DEBUG"
-# Deploy the charm
-juju deploy ./github-runner*.charm 
+```shell
+POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" go test -cover -tags=integration -v ./internal/database 
+```
+It assumes you have access to a Postgres server running reachable at $POSTGRESQL_DB_CONNECT_STRING.
+You can use `docker` to run a Postgres server locally:
+```shell
+docker run -d --rm --name postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:16.11
 ```
 
+Run `webhook-gateway` integration tests using:
 
+```shell
+APP_WEBHOOK_SECRET_VALUE=fake APP_PORT=8080 RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -v -cover -tags=integration -race ./cmd/webhook-gateway/...
+```
 
+It assumes you have access to a RabbitMQ server running reachable at $RABBITMQ_CONNECT_STRING.
+You can use `docker` to run a RabbitMQ server locally:
+
+```shell
+docker run -d  --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management
+```
+
+Run `planner` integration tests using:
+
+```shell
+APP_PORT=8080 POSTGRESQL_DB_CONNECT_STRING="postgres://postgres:password@localhost:5432/postgres?sslmode=disable" RABBITMQ_CONNECT_STRING="amqp://guest:guest@localhost:5672/" go test -v -cover -tags=integration -race ./cmd/planner/...
+```
+
+It assumes you can reach postgres and rabbitmq servers as described above.
+
+### Test design
+
+We intend to have unit tests for all the logic in the internal packages (located in the `internal/` directory).
+Unit tests should test the logic in isolation using mocks/fakes for external dependencies. They should be fast to execute.
+
+Integration tests should test the integration of various components together.
+There should be at least an integration test located in the main package of the application they are testing (e.g. in `cmd/webhook-gateway/main_test.go` for the webhook gateway application).
+
+In addition to application integration tests, we also have charm integration tests located in the `charms/tests/integration` directory. These tests should test the charm 
+deployment and its integration with other charms. These tests are usually slower than application integration tests, and
+should not cover application logic tests; those should be covered in the application integration test.
+Aim to focus the charm integration tests only on operational aspects. E.g.
+
+- Testing if the charm deploys correctly
+- Testing if the charm config options work as expected
+- Testing if the charm integrates correctly with other charms 
+
+Aim to keep all tests (unit, integration, charm integration) 
+
+- Fast to execute
+- Reliable
+- Deterministic and repeatable
+- Easy to set up locally
+
+in order to be able to have fast iterations during development.
+
+### Coverage
+
+We require at least 85% code coverage for all internal packages. New code that lowers the current coverage
+should be avoided and discouraged during code reviews.
+
+### Cyclomatic complexity
+
+We recommend keeping cyclomatic complexity of functions/methods below 10.
+Higher complexity leads to code that is harder to read, understand, test and maintain.
+There are exceptions where higher complexity is justified (e.g., validation, initialization),
+but those should require explicit justification using `nolint` directives.
+
+### Charm development
+
+The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/).
+In order to build the `charm-name` rock, use the
+`build-charm-name-rock.sh` script.
+
+The respective charm code is in the `charms/charm-name` directory.
+
+Integration tests for the charm are in the `charms/tests/integration` directory.
+
+Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)
+for a step-by-step guide to develop a Kubernetes charm using Go.
+
+To run the charm integration test, the charm file and rock has to be provided as input.
+You would need an LXD and MicroK8s cloud to run the tests. Ensure the `microk8s`
+controller is active in your Juju client before running the tests. An
+example run command in the root directory is as follows:
+
+```shell
+tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
+```
+
+To add the rock to the MicroK8s registry, use the following command:
+
+```shell
+rockcraft.skopeo copy \
+  --insecure-policy --dest-tls-verify=false \
+  oci-archive:webhook-gateway_0.1_amd64.rock \
+  docker://localhost:32000/webhook-gateway:0.1
+```
