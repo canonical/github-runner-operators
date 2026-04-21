@@ -3,6 +3,7 @@
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import poll_grafana_dashboard_templates
 
 APP_PORT = 8080
 METRICS_PORT = 9464
@@ -51,3 +52,23 @@ def test_webhook_gateway_prometheus_metrics(
     response = requests.get(f"http://{unit_ip}:{METRICS_PORT}/metrics")
 
     assert response.status_code == requests.status_codes.codes.OK
+
+
+@pytest.mark.usefixtures("webhook_gateway_with_rabbitmq")
+def test_webhook_gateway_grafana_dashboard(
+    juju: jubilant.Juju,
+    webhook_gateway_app: str,
+    any_charm_grafana_consumer_app: str,
+):
+    """
+    arrange: The webhook gateway app is deployed with required integrations.
+    act: Integrate with a grafana-dashboard consumer and inspect relation data.
+    assert: The grafana-dashboard relation contains non-empty dashboard templates.
+    """
+    juju.integrate(
+        f"{webhook_gateway_app}:grafana-dashboard",
+        f"{any_charm_grafana_consumer_app}:require-grafana-dashboard",
+    )
+
+    templates = poll_grafana_dashboard_templates(juju, f"{any_charm_grafana_consumer_app}/0")
+    assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"

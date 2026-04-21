@@ -248,6 +248,24 @@ def integrate_planner_rabbitmq_postgresql_fixture(
     return planner_app
 
 
+@pytest.fixture(scope="module", name="any_charm_grafana_consumer_app")
+def deploy_any_charm_grafana_consumer_app_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any charm to act as a grafana-dashboard consumer."""
+    app_name = "grafana-consumer"
+
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return app_name
+
+
 @pytest.fixture(scope="module", name="any_charm_github_runner_app")
 def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     """Deploy any charm to act as a GitHub runner application."""

@@ -144,14 +144,16 @@ func (s *Server) createFlavor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Error(w, fmt.Sprintf("failed to create flavor: %v", err), http.StatusInternalServerError)
+	logger.ErrorContext(r.Context(), "failed to create flavor", "flavor", flavorName, "error", err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 // listFlavors handles listing all flavors (admin-protected).
 func (s *Server) listFlavors(w http.ResponseWriter, r *http.Request) {
 	flavors, err := s.store.ListFlavors(r.Context(), flavorPlatform)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot list flavors: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot list flavors", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -175,7 +177,8 @@ func (s *Server) getFlavor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot get flavor %v: %v", flavorName, err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot get flavor", "flavor", flavorName, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -220,7 +223,8 @@ func (s *Server) updateFlavor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot update flavor: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot update flavor", "flavor", flavorName, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -238,7 +242,8 @@ func (s *Server) deleteFlavor(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.store.DeleteFlavor(r.Context(), flavorPlatform, flavorName)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot delete flavor: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot delete flavor", "flavor", flavorName, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -258,7 +263,8 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	if stream {
 		pressureChange, err = s.store.SubscribeToPressureUpdate(r.Context())
 		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to subscribe to pressure updates: %v", err), http.StatusInternalServerError)
+			logger.ErrorContext(r.Context(), "failed to subscribe to pressure updates", "flavor", flavorName, "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -266,7 +272,8 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	pressures, err = s.getPressures(r.Context(), flavorPlatform, flavorName)
 
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to get flavor pressure: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "failed to get flavor pressure", "flavor", flavorName, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -285,6 +292,7 @@ func (s *Server) getFlavorPressure(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		logger.ErrorContext(r.Context(), "unable to setup HTTP streaming", "flavor", flavorName)
 		http.Error(w, "Unable to setup HTTP streaming", http.StatusInternalServerError)
 		return
 	}
@@ -415,7 +423,8 @@ func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token already exists", http.StatusConflict)
 		return
 	}
-	http.Error(w, fmt.Sprintf("failed to create token: %v", err), http.StatusInternalServerError)
+	logger.ErrorContext(r.Context(), "failed to create auth token", "name", name, "error", err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 // listAuthTokens handles listing of all general authentication tokens (admin-protected).
@@ -424,7 +433,8 @@ func (s *Server) createAuthToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listAuthTokens(w http.ResponseWriter, r *http.Request) {
 	names, err := s.auth.ListAuthTokens(r.Context())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot list tokens: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot list auth tokens", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	respondWithJSON(w, http.StatusOK, map[string]any{"names": names})
@@ -438,7 +448,8 @@ func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		http.Error(w, fmt.Sprintf("failed to delete token: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "failed to delete auth token", "name", name, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -450,7 +461,8 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 
 	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot list jobs: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot list jobs", "platform", platform, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -464,7 +476,8 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 
 	jobs, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{WithId: id})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot get job", "platform", platform, "id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if len(jobs) == 0 {
@@ -488,7 +501,8 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 
 	job, err := s.store.ListJobs(r.Context(), platform, database.ListJobOptions{WithId: id})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("cannot get job: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot get job for update", "platform", platform, "id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if len(job) == 0 {
@@ -510,7 +524,8 @@ func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		http.Error(w, fmt.Sprintf("cannot update job: %v", err), http.StatusInternalServerError)
+		logger.ErrorContext(r.Context(), "cannot update job", "platform", platform, "id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 

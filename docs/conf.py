@@ -1,5 +1,6 @@
 import datetime
 import os
+
 import yaml
 
 # Configuration for the Sphinx documentation builder.
@@ -297,6 +298,7 @@ extensions = [
 exclude_patterns = [
     "doc-cheat-sheet*",
     "adr/*",
+    "changelog.md"
 ]
 
 # Adds custom CSS files, located under 'html_static_path'
