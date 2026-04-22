@@ -323,7 +323,7 @@ func TestWaitingTimeHistogramResolvesBelowThirtySeconds(t *testing.T) {
 		act: observe the webhook and collect metrics
 		assert: the waiting-time histogram exposes at least one bucket boundary
 			strictly below 30 seconds, so sub-30s queue times are not collapsed
-			into a single bucket and low percentiles (p50/p80) remain meaningful
+			into a single bucket and low percentiles remain meaningful
 	*/
 	r := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
@@ -370,7 +370,7 @@ func TestWaitingTimeHistogramResolvesBelowThirtySeconds(t *testing.T) {
 		}
 	}
 	assert.True(t, hasSubThirty,
-		"waiting-time histogram should have bucket boundaries below 30s for p50/p80 resolution, got bounds=%v", bounds)
+		"waiting-time histogram should have bucket boundaries below 30s for low-percentile resolution, got bounds=%v", bounds)
 }
 
 func TestNewMetricsInitialization(t *testing.T) {

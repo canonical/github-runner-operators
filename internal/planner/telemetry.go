@@ -139,7 +139,7 @@ func NewMetrics(store FlavorStore) *Metrics {
 	m.webhookJobWaitingTime = must(
 		m.meter.Float64Histogram(
 			webhookJobWaitingTimeMetricName,
-			metric.WithDescription("Histogram of job waiting times from webhook reception to job start"),
+			metric.WithDescription("Histogram of time between workflow_job creation and job start on a runner"),
 			metric.WithUnit("s"),
 			jobWaitingBucket,
 		),
