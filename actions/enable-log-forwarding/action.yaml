@@ -23,9 +23,9 @@ runs:
   using: composite
   steps:
     - name: Configure collector for opt-in file log forwarding
-      shell: python3 {0}
+      shell: bash
       env:
         INPUT_FILES: ${{ inputs.files }}
         INPUT_OTLP_ENDPOINT: ${{ inputs.otlp-endpoint }}
         INPUT_CONFIG_FILE_NAME: ${{ inputs.config-file-name }}
-      run: ${{ github.action_path }}/enable-log-forwarding.py
+      run: python3 "${{ github.action_path }}/enable-log-forwarding.py"
