@@ -1,0 +1,31 @@
+name: Enable log forwarding
+description: Opt in to forward selected log files from a self-hosted GitHub runner to Loki.
+
+inputs:
+  files:
+    description: |
+      Newline or comma separated list of file paths or glob patterns to forward.
+      Example: /var/log/chrony/*.log
+    required: true
+  otlp-endpoint:
+    description: |
+      Optional gRPC endpoint for upstream OpenTelemetry Collector logs export.
+      When not set, the action falls back to ACTION_OTEL_EXPORTER_OTLP_ENDPOINT.
+      Example: otel-gateway.internal:4318
+    required: false
+    default: ""
+  config-file-name:
+    description: File name for the generated collector fragment.
+    required: false
+    default: 90-github-runner-log-forwarding.yaml
+
+runs:
+  using: composite
+  steps:
+    - name: Configure collector for opt-in file log forwarding
+      shell: python3 {0}
+      env:
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_OTLP_ENDPOINT: ${{ inputs.otlp-endpoint }}
+        INPUT_CONFIG_FILE_NAME: ${{ inputs.config-file-name }}
+      run: ${{ github.action_path }}/enable-log-forwarding.py

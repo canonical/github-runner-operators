@@ -1,0 +1,76 @@
+name: Enable Log Forwarding Action Tests
+
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.filter.outputs.action }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            action:
+              - 'actions/enable-log-forwarding/**'
+              - '.github/workflows/enable_log_forwarding_action_tests.yaml'
+
+  test-action:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.action == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate Python syntax
+        run: python -m py_compile actions/enable-log-forwarding/enable-log-forwarding.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s actions/enable-log-forwarding/tests -p 'test_*.py' -v
+
+  smoke-test-self-hosted:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.action == 'true' }}
+    runs-on: [self-hosted-linux-amd64-noble-edge]
+    env:
+      TEST_CONFIG_FILE: 98-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run enable log forwarding action
+        uses: ./actions/enable-log-forwarding
+        with:
+          files: |
+            /var/log/syslog
+          config-file-name: ${{ env.TEST_CONFIG_FILE }}
+          otlp-endpoint: 127.0.0.1:4318
+
+      - name: Verify generated config file exists
+        run: |
+          sudo test -f /etc/otelcol/config.d/${TEST_CONFIG_FILE}
+
+      - name: Verify generated config contains expected receiver
+        run: |
+          sudo grep -q '"filelog/github_runner_optin"' /etc/otelcol/config.d/${TEST_CONFIG_FILE}
+
+      - name: Clean up generated config
+        if: always()
+        run: |
+          sudo rm -f /etc/otelcol/config.d/${TEST_CONFIG_FILE}
+          sudo snap restart opentelemetry-collector
