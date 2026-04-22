@@ -1,8 +1,8 @@
-# Contribute
-
-## Overview
+# Contributing
 
 This document explains the processes and practices recommended for contributing enhancements to the codebase.
+
+## Overview
 
 - Generally, before developing enhancements to this code base, you should consider [opening an issue](https://github.com/canonical/github-runner-operator/issues) explaining your use case.
 - If you would like to chat with us about your use-cases or proposed implementation, you can reach us at [Canonical Charm Development Matrix public channel](https://matrix.to/#/#charmhub-charmdev:ubuntu.com) or [Discourse](https://discourse.charmhub.io/).
@@ -14,6 +14,14 @@ This document explains the processes and practices recommended for contributing 
 
 When contributing, you must abide by the
 [Ubuntu Code of Conduct](https://ubuntu.com/community/ethos/code-of-conduct).
+
+## Changelog
+
+Please ensure that any new feature, fix, or significant change is documented by
+adding an entry to the [CHANGELOG.md](docs/changelog.md) file. Use the date of the
+contribution as the header for new entries.
+
+To learn more about changelog best practices, visit [Keep a Changelog](https://keepachangelog.com/).
 
 ## Submissions
 
@@ -32,21 +40,31 @@ also, reference the issue or bug number when you submit the changes.
 
 Your changes will be reviewed in due time; if approved, they will be eventually merged.
 
-### Describing pull requests
+### AI
 
-To be properly considered, reviewed and merged,
-your pull request must provide the following details:
+You are free to use any tools you want while preparing your contribution, including
+AI, provided that you do so lawfully and ethically.
 
-- **Title**: Summarize the change in a short, descriptive title.
+Avoid using AI to complete issues tagged with the "good first issues" label. The
+purpose of these issues is to provide newcomers with opportunities to contribute
+to our projects and gain coding skills. Using AI to complete these tasks
+undermines their purpose.
 
-- **Overview**: Describe the problem that your pull request solves.
-  Mention any new features, bug fixes or refactoring.
+We have created instructions and tools that you can provide AI while preparing your contribution: [`copilot-collections`](https://github.com/canonical/copilot-collections)
 
-- **Rationale**: Explain why the change is needed.
+While it isn't necessary to use `copilot-collections` while preparing your
+contribution, these files contain details about our quality standards and
+practices that will help the AI avoid common pitfalls when interacting with
+our projects. By using these tools, you can avoid longer review times and nitpicks.
 
-- **Checklist**: Complete the following items:
+If you choose to use AI, please disclose this information to us by indicating
+AI usage in the PR description (for instance, marking the checklist item about
+AI usage). You don't need to go into explicit details about how and where you used AI.
 
-  - The PR is tagged with appropriate label (`urgent`, `trivial`, `senior-review-required`, `documentation`).
+Avoid submitting contributions that you don't fully understand.
+You are responsible for the entire contribution, including the AI-assisted portions.
+You must be willing to engage in discussion and respond to any questions, comments,
+or suggestions we may have. 
 
 ### Signing commits
 
@@ -54,9 +72,14 @@ To improve contribution tracking,
 we use the [Canonical contributor license agreement](https://assets.ubuntu.com/v1/ff2478d1-Canonical-HA-CLA-ANY-I_v1.2.pdf)
 (CLA) as a legal sign-off, and we require all commits to have verified signatures.
 
-### Canonical contributor agreement
+#### Canonical contributor agreement
 
-Canonical welcomes contributions to this repository. Please check out our [contributor agreement](https://ubuntu.com/legal/contributors) if you’re interested in contributing to the solution.
+Canonical welcomes contributions to the GitHub runner Operator. Please check out our
+[contributor agreement](https://ubuntu.com/legal/contributors) if you're interested in contributing to the solution.
+
+The CLA sign-off is simple line at the
+end of the commit message certifying that you wrote it
+or have the right to commit it as an open-source contribution.
 
 #### Verified signatures on commits
 
@@ -86,7 +109,6 @@ The applications written in this repository are written in Go.
 We like to follow idomatic Go practices and community standards when writing Go code.
 We have added an instruction file `go.instructions.md` in `.github/instructions.md` that is used by GitHub Copilot to help you write code that follows these practices.
 We have added a [Style Guide](./STYLE.md) that you can refer to for more details.
-
 
 ### Test
 
@@ -168,8 +190,6 @@ We recommend keeping cyclomatic complexity of functions/methods below 10.
 Higher complexity leads to code that is harder to read, understand, test and maintain.
 There are exceptions where higher complexity is justified (e.g., validation, initialization),
 but those should require explicit justification using `nolint` directives.
-
-
 
 ### Charm development
 
