@@ -4,8 +4,9 @@
 
 #### Checklist
 
-- [ ] I followed the [contributing guide](https://github.com/canonical/is-charms-contributing-guide)
-- [ ] I added or updated the documentation (if applicable)
+- [ ] Changes comply with the project's coding standards and guidelines (see CONTRIBUTING.md and STYLE.md)
+- [ ] `CONTRIBUTING.md` has been updated upon changes to the contribution/development process (e.g. changes to the way tests are run)
+- [ ] Technical author has been assigned to review the PR in case of documentation changes (usually *.md files)
 - [ ] I updated `docs/changelog.md` with user-relevant changes
 - [ ] I used AI to assist with preparing this PR
 - [ ] I added or updated tests as needed (unit and integration)
