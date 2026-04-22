@@ -17,6 +17,7 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
+	"github.com/google/go-github/v82/github"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -314,6 +315,62 @@ func TestMust(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWaitingTimeHistogramResolvesBelowThirtySeconds(t *testing.T) {
+	/*
+		arrange: metrics instance and an in_progress webhook with a 5-second wait
+		act: observe the webhook and collect metrics
+		assert: the waiting-time histogram exposes at least one bucket boundary
+			strictly below 30 seconds, so sub-30s queue times are not collapsed
+			into a single bucket and low percentiles (p50/p80) remain meaningful
+	*/
+	r := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
+
+	m := NewMetrics(&mockStore{})
+
+	createdAt := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	startedAt := createdAt.Add(5 * time.Second)
+	event := &github.WorkflowJobEvent{
+		Action: github.String("in_progress"),
+		WorkflowJob: &github.WorkflowJob{
+			CreatedAt: &github.Timestamp{Time: createdAt},
+			StartedAt: &github.Timestamp{Time: startedAt},
+		},
+		Repo: &github.Repository{FullName: github.String("acme/demo")},
+	}
+	m.ObserveConsumedGitHubWebhook(context.Background(), event)
+
+	tm := r.Collect(t)
+
+	var bounds []float64
+	for _, sm := range tm.ScopeMetrics {
+		for _, md := range sm.Metrics {
+			if md.Name != webhookJobWaitingTimeMetricName {
+				continue
+			}
+			hist, ok := md.Data.(metricdata.Histogram[float64])
+			if !ok {
+				t.Fatalf("expected histogram data for %s", md.Name)
+			}
+			if len(hist.DataPoints) == 0 {
+				t.Fatalf("expected at least one data point for %s", md.Name)
+			}
+			bounds = hist.DataPoints[0].Bounds
+		}
+	}
+	assert.NotEmpty(t, bounds, "waiting-time histogram must be recorded")
+
+	hasSubThirty := false
+	for _, b := range bounds {
+		if b > 0 && b < 30 {
+			hasSubThirty = true
+			break
+		}
+	}
+	assert.True(t, hasSubThirty,
+		"waiting-time histogram should have bucket boundaries below 30s for p50/p80 resolution, got bounds=%v", bounds)
 }
 
 func TestNewMetricsInitialization(t *testing.T) {

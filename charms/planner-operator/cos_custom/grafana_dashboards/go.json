@@ -536,7 +536,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "95% of jobs waited less than this amount of time before starting",
+      "description": "Time jobs waited between creation and starting, shown at the median (p50) and 95th percentile (p95)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -604,7 +604,7 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
@@ -620,11 +620,23 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
+          "expr": "histogram_quantile(0.50, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "p50",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
+          "instant": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "Job queue time",
