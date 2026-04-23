@@ -536,7 +536,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "Median time jobs waited between creation and starting on a runner",
+      "description": "Median time jobs waited between creation and starting on a runner. Note: for workflows with `needs:` or `concurrency:`, this includes dependency/blocking wait time, not just runner-queue wait — the value can therefore overstate pickup time.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -635,7 +635,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "95th percentile time jobs waited between creation and starting on a runner (tail latency)",
+      "description": "95th percentile time jobs waited between creation and starting on a runner (tail latency). Note: for workflows with `needs:` or `concurrency:`, this includes dependency/blocking wait time, not just runner-queue wait — the value can therefore overstate pickup time.",
       "fieldConfig": {
         "defaults": {
           "color": {
