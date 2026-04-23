@@ -49,7 +49,7 @@ jobs:
 
   smoke-test-self-hosted:
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.action == 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'self-hosted-smoke')) }}
+    if: ${{ needs.detect-changes.outputs.action == 'true' }}
     runs-on: [self-hosted-linux-amd64-noble-edge]
     env:
       TEST_CONFIG_FILE: 98-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
@@ -62,7 +62,7 @@ jobs:
           files: |
             /var/log/syslog
           config-file-name: ${{ env.TEST_CONFIG_FILE }}
-          otlp-endpoint: 127.0.0.1:4318
+          otlp-endpoint: 127.0.0.1:4317
 
       - name: Verify generated config file exists
         run: |
@@ -71,4 +71,3 @@ jobs:
       - name: Verify generated config contains expected receiver
         run: |
           sudo grep -q '"filelog/github_runner_optin"' /etc/otelcol/config.d/${TEST_CONFIG_FILE}
-

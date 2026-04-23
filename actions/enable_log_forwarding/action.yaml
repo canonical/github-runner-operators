@@ -1,3 +1,5 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 name: Enable log forwarding
 description: Opt in to forward selected log files from a self-hosted GitHub runner to Loki.
 
