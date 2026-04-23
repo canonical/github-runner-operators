@@ -133,10 +133,7 @@ def main():
             "Set input 'otlp-endpoint', or expose ACTION_OTEL_EXPORTER_OTLP_ENDPOINT to this workflow.",
             file=sys.stderr,
         )
-        print(
-            f"The generated pipeline will still reference '{EXPORTER_NAME}'. Collector restart may fail if that exporter is undefined.",
-            file=sys.stderr,
-        )
+        sys.exit(1)
 
     config_content = build_config(files, resolved_endpoint, exporter_already_exists)
 
