@@ -59,8 +59,8 @@ def build_config(files, resolved_endpoint, exporter_already_exists):
         ("github.repository", os.environ.get("GITHUB_REPOSITORY", "unknown")),
         ("github.runner.name", os.environ.get("RUNNER_NAME", "unknown")),
         ("github.workflow", os.environ.get("GITHUB_WORKFLOW", "unknown")),
-        ("github.job.name", os.environ.get("GITHUB_JOB", "unknown")),
-        ("github.job.id", os.environ.get("GITHUB_RUN_ID", "unknown")),
+        ("github.job.id", os.environ.get("GITHUB_JOB", "unknown")),
+        ("github.run.id", os.environ.get("GITHUB_RUN_ID", "unknown")),
         ("github.run.attempt", os.environ.get("GITHUB_RUN_ATTEMPT", "unknown")),
     ]
     config = {
