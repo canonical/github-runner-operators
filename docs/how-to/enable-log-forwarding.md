@@ -1,6 +1,6 @@
 # Enable log forwarding
 
-This action allows workflow authors to opt in to forwarding specific log files from self-hosted GitHub runners to Loki through the OpenTelemetry Collector snap.
+The `enable-log-forwarding` action allows workflow authors to opt in to forwarding specific log files from self-hosted GitHub runners to Loki through the OpenTelemetry Collector snap.
 
 By default, nothing is forwarded. Log forwarding starts only when this action is used in a workflow.
 
