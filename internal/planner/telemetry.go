@@ -116,11 +116,30 @@ func NewMetrics(store FlavorStore) *Metrics {
 		300*60,
 		360*60,
 	)
-	jobWaitingBucket := jobDurationBucket
+	// Queue times are usually lower than job running times, so the bucket
+	// layout resolves the low end more finely and caps the tail earlier.
+	jobWaitingBucket := metric.WithExplicitBucketBoundaries(
+		0,
+		1,
+		2.5,
+		5,
+		10,
+		15,
+		30,
+		60,
+		2*60,
+		5*60,
+		10*60,
+		20*60,
+		30*60,
+		60*60,
+		2*60*60,
+		4*60*60,
+	)
 	m.webhookJobWaitingTime = must(
 		m.meter.Float64Histogram(
 			webhookJobWaitingTimeMetricName,
-			metric.WithDescription("Histogram of job waiting times from webhook reception to job start"),
+			metric.WithDescription("Histogram of time between workflow_job creation and job start on a runner"),
 			metric.WithUnit("s"),
 			jobWaitingBucket,
 		),

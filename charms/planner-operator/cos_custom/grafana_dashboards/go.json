@@ -536,7 +536,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "95% of jobs waited less than this amount of time before starting",
+      "description": "Median time jobs waited between creation and starting on a runner. Treat with caution: this measures `started_at − created_at`, but the job's effective queued time (when it became eligible for a runner) may be later than `created_at`, so the value can overstate runner pickup time.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -594,7 +594,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 12,
         "y": 16
       },
@@ -620,14 +620,113 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
+          "expr": "histogram_quantile(0.50, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
           "instant": false,
-          "legendFormat": "__auto",
+          "legendFormat": "Median (p50)",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Job queue time",
+      "title": "Job queue time (median)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "95th percentile time jobs waited between creation and starting on a runner (tail latency). Treat with caution: this measures `started_at − created_at`, but the job's effective queued time (when it became eligible for a runner) may be later than `created_at`, so the value can overstate runner pickup time.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 16
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
+          "instant": false,
+          "legendFormat": "95th percentile (p95)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Job queue time (p95)",
       "type": "timeseries"
     },
     {
