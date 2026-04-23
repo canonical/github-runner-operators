@@ -23,7 +23,7 @@ jobs:
         with:
           filters: |
             action:
-              - 'actions/enable-log-forwarding/**'
+              - 'actions/enable_log_forwarding/**'
               - '.github/workflows/enable_log_forwarding_action_tests.yaml'
 
   test-action:
@@ -38,15 +38,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate Python syntax
-        run: python -m py_compile actions/enable-log-forwarding/enable-log-forwarding.py
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
 
-      - name: Run unit tests
-        run: python -m unittest discover -s actions/enable-log-forwarding/tests -p 'test_*.py' -v
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Run lint, static checks, and unit tests
+        run: tox -e actions-lint,actions-static,actions-unit
 
   smoke-test-self-hosted:
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.action == 'true' }}
+    if: ${{ needs.detect-changes.outputs.action == 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'self-hosted-smoke')) }}
     runs-on: [self-hosted-linux-amd64-noble-edge]
     env:
       TEST_CONFIG_FILE: 98-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
@@ -54,7 +57,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Run enable log forwarding action
-        uses: ./actions/enable-log-forwarding
+        uses: ./actions/enable_log_forwarding
         with:
           files: |
             /var/log/syslog
@@ -69,8 +72,3 @@ jobs:
         run: |
           sudo grep -q '"filelog/github_runner_optin"' /etc/otelcol/config.d/${TEST_CONFIG_FILE}
 
-      - name: Clean up generated config
-        if: always()
-        run: |
-          sudo rm -f /etc/otelcol/config.d/${TEST_CONFIG_FILE}
-          sudo snap restart opentelemetry-collector
