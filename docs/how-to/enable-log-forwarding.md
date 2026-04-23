@@ -4,15 +4,15 @@ The `enable-log-forwarding` action allows workflow authors to opt in to forwardi
 
 By default, nothing is forwarded. Log forwarding starts only when this action is used in a workflow.
 
-## Inputs
+## Provide inputs
 
 - `files` (required): newline or comma separated file paths or glob patterns.
 - `config-file-name` (optional, default `90-github-runner-log-forwarding.yaml`): generated config file name.
 - `otlp-endpoint` (optional): OTLP/HTTP endpoint used to create the exporter when one is not already configured.
 
-When `otlp-endpoint` is not set, the action falls back to `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, then `OTEL_EXPORTER_OTLP_ENDPOINT` from the workflow environment.
+When `otlp-endpoint` is not set, the action falls back to `ACTION_OTEL_EXPORTER_OTLP_ENDPOINT` from the workflow environment.
 
-## Usage
+## Use the action
 
 ```yaml
 jobs:
@@ -29,7 +29,7 @@ jobs:
 
 Pin to a release tag or commit SHA in production workflows.
 
-## Loki query hints
+## Examine Loki queries
 
 The action adds GitHub context as resource attributes on forwarded logs:
 
