@@ -42,7 +42,7 @@
       "version": ""
     }
   ],
-  "description": "Host-level resource metrics (CPU, memory, disk, network, load) for GitHub Actions runner VMs. Filter by github_job_id to inspect a specific workflow run.",
+  "description": "Host-level resource metrics (CPU, memory, disk, network, load) for GitHub Actions runner VMs. Filter by repository, workflow, job and runner to inspect a specific run.",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -51,22 +51,41 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 100,
       "title": "Overview",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 90 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
             ]
           },
           "unit": "percent",
@@ -75,31 +94,66 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
       "id": 1,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "title": "CPU Usage",
       "type": "stat",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "100 - (avg by (instance) (rate(system_cpu_time_seconds_total{state=\"idle\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])) * 100)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "100 - (avg by (github_runner) (rate(system_cpu_time_seconds_total{state=\"idle\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])) * 100)",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 90 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
             ]
           },
           "unit": "percent",
@@ -108,31 +162,66 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
       "id": 2,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "title": "Memory Usage",
       "type": "stat",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "100 * (1 - (system_memory_usage_bytes{state=\"free\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"} / sum without (state) (system_memory_usage_bytes{instance=~\"$instance\",github_job_id=~\"$github_job_id\"})))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "100 * (1 - (system_memory_usage_bytes{state=\"free\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"} / sum without (state) (system_memory_usage_bytes{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"})))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 90 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
             ]
           },
           "unit": "percent",
@@ -141,63 +230,152 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
       "id": 3,
-      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "title": "Filesystem Usage (/)",
       "type": "stat",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "100 * system_filesystem_usage_bytes{state=\"used\",mountpoint=\"/\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"} / (system_filesystem_usage_bytes{state=\"used\",mountpoint=\"/\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"} + system_filesystem_usage_bytes{state=\"free\",mountpoint=\"/\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "100 * system_filesystem_usage_bytes{state=\"used\",mountpoint=\"/\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"} / (system_filesystem_usage_bytes{state=\"used\",mountpoint=\"/\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"} + system_filesystem_usage_bytes{state=\"free\",mountpoint=\"/\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"})",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
           "unit": "Bps"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
       "id": 4,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "title": "Network In",
       "type": "stat",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "sum by (instance) (rate(system_network_io_bytes_total{direction=\"receive\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "sum by (github_runner) (rate(system_network_io_bytes_total{direction=\"receive\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
           "unit": "Bps"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
       "id": 5,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
       "title": "Network Out",
       "type": "stat",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "sum by (instance) (rate(system_network_io_bytes_total{direction=\"transmit\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "sum by (github_runner) (rate(system_network_io_bytes_total{direction=\"transmit\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -205,74 +383,201 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
       "id": 101,
       "title": "CPU",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 1, "fillOpacity": 10, "gradientMode": "none", "showPoints": "never" },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never"
+          },
           "unit": "percent",
           "min": 0,
           "max": 100
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "idle" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "system" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "user" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "iowait" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "idle"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "system"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "user"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "iowait"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
       "id": 10,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
       "title": "CPU Time by State",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "avg by (state) (rate(system_cpu_time_seconds_total{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])) * 100",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "avg by (state) (rate(system_cpu_time_seconds_total{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])) * 100",
           "legendFormat": "{{state}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never"
+          },
           "unit": "short",
           "min": 0
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
       "id": 11,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
       "title": "Load Average",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "system_cpu_load_average_1m{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "system_cpu_load_average_1m{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}",
           "legendFormat": "1m",
           "refId": "A"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "system_cpu_load_average_5m{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "system_cpu_load_average_5m{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}",
           "legendFormat": "5m",
           "refId": "B"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "system_cpu_load_average_15m{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "system_cpu_load_average_15m{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}",
           "legendFormat": "15m",
           "refId": "C"
         }
@@ -280,36 +585,132 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
       "id": 102,
       "title": "Memory",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 1, "fillOpacity": 20, "gradientMode": "none", "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
           "unit": "bytes",
           "min": 0
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "used" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "cached" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "buffered" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "free" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "used"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cached"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "buffered"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "free"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
       "id": 20,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
       "title": "Memory Usage by State",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "system_memory_usage_bytes{instance=~\"$instance\",github_job_id=~\"$github_job_id\",state=~\"used|cached|buffered|free\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "system_memory_usage_bytes{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\",state=~\"used|cached|buffered|free\"}",
           "legendFormat": "{{state}}",
           "refId": "A"
         }
@@ -317,56 +718,121 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
       "id": 103,
       "title": "Disk I/O",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
           "unit": "Bps",
           "min": 0
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
       "id": 30,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
       "title": "Disk Throughput",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "rate(system_disk_io_bytes_total{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(system_disk_io_bytes_total{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])",
           "legendFormat": "{{device}} {{direction}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
           "unit": "iops",
           "min": 0
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
       "id": 31,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
       "title": "Disk Operations/s",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "rate(system_disk_operations_total{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(system_disk_operations_total{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])",
           "legendFormat": "{{device}} {{direction}}",
           "refId": "A"
         }
@@ -374,22 +840,41 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "id": 104,
       "title": "Filesystem",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 90 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
             ]
           },
           "unit": "percent",
@@ -398,15 +883,34 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 33 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
       "id": 40,
-      "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
       "title": "Filesystem Usage %",
       "type": "bargauge",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "100 * system_filesystem_usage_bytes{state=\"used\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"} / (system_filesystem_usage_bytes{state=\"used\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"} + system_filesystem_usage_bytes{state=\"free\",instance=~\"$instance\",github_job_id=~\"$github_job_id\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "100 * system_filesystem_usage_bytes{state=\"used\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"} / (system_filesystem_usage_bytes{state=\"used\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"} + system_filesystem_usage_bytes{state=\"free\",github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"})",
           "legendFormat": "{{mountpoint}} ({{device}})",
           "refId": "A"
         }
@@ -414,62 +918,130 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
       "id": 105,
       "title": "Network",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
           "unit": "Bps",
           "min": 0
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
       "id": 50,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
       "title": "Network Traffic",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "rate(system_network_io_bytes_total{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(system_network_io_bytes_total{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])",
           "legendFormat": "{{device}} {{direction}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
           "unit": "pps",
           "min": 0
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
       "id": 51,
-      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "max"] } },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
       "title": "Network Errors & Drops",
       "type": "timeseries",
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "rate(system_network_errors_total{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(system_network_errors_total{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])",
           "legendFormat": "errors {{device}} {{direction}}",
           "refId": "A"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "rate(system_network_dropped_total{instance=~\"$instance\",github_job_id=~\"$github_job_id\"}[$__rate_interval])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(system_network_dropped_total{github_runner=~\"$github_runner\",github_job=~\"$github_job\",github_repository=~\"$github_repository\"}[$__rate_interval])",
           "legendFormat": "drops {{device}} {{direction}}",
           "refId": "B"
         }
@@ -478,62 +1050,93 @@
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["github-runner", "hostmetrics"],
+  "tags": [
+    "github-runner",
+    "hostmetrics"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
-        "hide": 0,
-        "includeAll": false,
-        "label": "Datasource",
-        "multi": false,
         "name": "prometheusds",
-        "options": [],
+        "type": "datasource",
+        "pluginId": "prometheus",
         "query": "prometheus",
+        "label": "Prometheus",
+        "hide": 0,
         "refresh": 1,
-        "type": "datasource"
+        "includeAll": false,
+        "multi": false
       },
       {
-        "current": {},
-        "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-        "definition": "label_values(system_cpu_time_seconds_total, github_job_id)",
-        "hide": 0,
+        "name": "github_repository",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "label": "Repository",
+        "query": "label_values(system_cpu_time_seconds_total, github_repository)",
+        "refresh": 2,
+        "sort": 1,
         "includeAll": true,
-        "allValue": ".*",
-        "label": "Job ID",
         "multi": false,
-        "name": "github_job_id",
-        "options": [],
-        "query": {
-          "query": "label_values(system_cpu_time_seconds_total, github_job_id)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 2,
-        "sort": 1,
-        "type": "query"
+        "allValue": ".*",
+        "hide": 0
       },
       {
-        "current": {},
-        "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-        "definition": "label_values(system_cpu_time_seconds_total{github_job_id=~\"$github_job_id\"}, instance)",
-        "hide": 0,
-        "includeAll": true,
-        "allValue": ".*",
-        "label": "Instance",
-        "multi": true,
-        "name": "instance",
-        "options": [],
-        "query": {
-          "query": "label_values(system_cpu_time_seconds_total{github_job_id=~\"$github_job_id\"}, instance)",
-          "refId": "StandardVariableQuery"
+        "name": "github_workflow",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
         },
+        "label": "Workflow",
+        "query": "label_values(system_cpu_time_seconds_total{github_repository=~\"$github_repository\"}, github_workflow)",
         "refresh": 2,
         "sort": 1,
-        "type": "query"
+        "includeAll": true,
+        "multi": false,
+        "allValue": ".*",
+        "hide": 0
+      },
+      {
+        "name": "github_job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "label": "Job",
+        "query": "label_values(system_cpu_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\"}, github_job)",
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "multi": false,
+        "allValue": ".*",
+        "hide": 0
+      },
+      {
+        "name": "github_runner",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "label": "Runner",
+        "query": "label_values(system_cpu_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\"}, github_runner)",
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "hide": 0
       }
     ]
   },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "GitHub Runner VM Hostmetrics",
