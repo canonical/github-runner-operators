@@ -11,11 +11,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 from typing import Sequence
 
 CONFIG_DIR = "/etc/otelcol/config.d"
 EXPORTER_NAME = "otlp_grpc"
+CONFIG_TEMPLATE_PATH = Path(__file__).with_name("collector_config.j2")
 SNAP_CMD = shutil.which("snap")
 SUDO_CMD = shutil.which("sudo")
 
@@ -78,10 +80,22 @@ def check_exporter_exists() -> bool:
     return False
 
 
-def build_config(
-    files: Sequence[str], resolved_endpoint: str, exporter_already_exists: bool
-) -> str:
-    """Build a collector pipeline config fragment for opt-in log forwarding."""
+def render_template(template_path: Path, context: dict[str, str]) -> str:
+    """Render a minimal Jinja-style template with {{ var }} placeholders."""
+    template = template_path.read_text(encoding="utf-8")
+    pattern = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}")
+
+    def replacer(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in context:
+            raise KeyError(f"Missing template variable: {key}")
+        return context[key]
+
+    return pattern.sub(replacer, template)
+
+
+def build_resource_attributes() -> list[dict[str, str]]:
+    """Build static GitHub resource attributes attached to forwarded logs."""
     attrs = [
         ("github.repository", os.getenv("GITHUB_REPOSITORY", "unknown")),
         ("github.runner.name", os.getenv("RUNNER_NAME", "unknown")),
@@ -90,43 +104,54 @@ def build_config(
         ("github.run.id", os.getenv("GITHUB_RUN_ID", "unknown")),
         ("github.run.attempt", os.getenv("GITHUB_RUN_ATTEMPT", "unknown")),
     ]
-    config = {
-        "receivers": {
-            "filelog/github_runner_optin": {
-                "include": files,
-                "start_at": "end",
+    return [{"key": key, "value": value, "action": "upsert"} for key, value in attrs]
+
+
+def build_exporters_section(
+    resolved_endpoint: str, exporter_already_exists: bool
+) -> str:
+    """Build the optional exporters JSON fragment for the template."""
+    if exporter_already_exists:
+        return ""
+
+    exporters_block = {
+        "exporters": {
+            EXPORTER_NAME: {
+                "endpoint": resolved_endpoint,
             }
-        },
-        "processors": {
-            "resource/github_runner_optin": {
-                "attributes": [
-                    {"key": key, "value": value, "action": "upsert"}
-                    for key, value in attrs
-                ]
-            }
-        },
-        "service": {
-            "pipelines": {
-                "logs/github_runner_optin": {
-                    "receivers": ["filelog/github_runner_optin"],
-                    "processors": ["resource/github_runner_optin", "batch"],
-                    "exporters": [EXPORTER_NAME],
-                }
-            }
-        },
+        }
     }
-    if not exporter_already_exists and resolved_endpoint:
-        config["exporters"] = {EXPORTER_NAME: {"endpoint": resolved_endpoint}}
-    return json.dumps(config, indent=2) + "\n"
+    block = json.dumps(exporters_block, indent=2)
+    inner = block.strip()[1:-1].strip()
+    return textwrap.indent(inner, "  ") + ",\n"
 
 
-def main():
-    """Validate inputs, write collector config, and restart the collector service."""
+def build_config(
+    files: Sequence[str], resolved_endpoint: str, exporter_already_exists: bool
+) -> str:
+    """Build a collector pipeline config fragment for opt-in log forwarding."""
+    context = {
+        "include_files": json.dumps(list(files)),
+        "resource_attributes": json.dumps(build_resource_attributes()),
+        "exporters_section": build_exporters_section(
+            resolved_endpoint, exporter_already_exists
+        ),
+        "exporter_name": json.dumps(EXPORTER_NAME),
+    }
+    return render_template(CONFIG_TEMPLATE_PATH, context)
+
+
+def read_files_input() -> str:
+    """Read and validate the required files input."""
     files_input = os.getenv("INPUT_FILES", "").strip()
     if not files_input:
         logger.error("Input 'files' cannot be empty.")
         sys.exit(1)
+    return files_input
 
+
+def resolve_config_path() -> str:
+    """Resolve and validate the destination config file path."""
     config_file_name = os.getenv(
         "INPUT_CONFIG_FILE_NAME", "90-github-runner-log-forwarding.yaml"
     ).strip()
@@ -140,45 +165,46 @@ def main():
         )
         sys.exit(1)
 
-    config_path = str(Path(CONFIG_DIR) / config_file_name)
+    return str(Path(CONFIG_DIR) / config_file_name)
 
+
+def ensure_collector_is_available() -> None:
+    """Check snap prerequisites needed to configure the collector."""
     if SNAP_CMD is None:
         logger.error("Required command is missing: snap")
         sys.exit(1)
 
-    if (
-        subprocess.run(
-            [SNAP_CMD, "list", "opentelemetry-collector"],
-            capture_output=True,
-            check=False,
-        ).returncode
-        != 0
-    ):
+    snap_list_result = subprocess.run(
+        [SNAP_CMD, "list", "opentelemetry-collector"],
+        capture_output=True,
+        check=False,
+    )
+    if snap_list_result.returncode != 0:
         logger.error("opentelemetry-collector snap is not installed on this runner.")
         sys.exit(1)
 
-    files = parse_files_into_list(files_input)
-    if not files:
-        logger.error("Input 'files' must contain at least one path or glob.")
-        sys.exit(1)
 
-    resolved_endpoint = resolve_endpoint()
-    exporter_already_exists = check_exporter_exists()
+def validate_exporter_configuration(
+    resolved_endpoint: str, exporter_already_exists: bool
+) -> None:
+    """Ensure there is enough exporter information to build a working config."""
+    if exporter_already_exists or resolved_endpoint:
+        return
 
-    if not exporter_already_exists and not resolved_endpoint:
-        logger.error(
-            "Exporter '%s' was not found in scanned collector config directories "
-            "and no OTLP endpoint was provided.",
-            EXPORTER_NAME,
-        )
-        logger.error(
-            "Set input 'otlp-endpoint', or expose "
-            "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT to this workflow.",
-        )
-        sys.exit(1)
+    logger.error(
+        "Exporter '%s' was not found in scanned collector config directories "
+        "and no OTLP endpoint was provided.",
+        EXPORTER_NAME,
+    )
+    logger.error(
+        "Set input 'otlp-endpoint', or expose "
+        "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT to this workflow.",
+    )
+    sys.exit(1)
 
-    config_content = build_config(files, resolved_endpoint, exporter_already_exists)
 
+def write_collector_config(config_content: str, config_path: str) -> None:
+    """Write generated config to /etc/otelcol/config.d via root privileges."""
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".yaml", delete=False, encoding="utf-8"
     ) as tmp:
@@ -214,6 +240,13 @@ def main():
 
     logger.info("Wrote log-forwarding collector config to: %s", config_path)
 
+
+def restart_collector() -> None:
+    """Restart collector service so new config is loaded."""
+    if SNAP_CMD is None:
+        logger.error("Required command is missing: snap")
+        sys.exit(1)
+
     restart_result = run_as_root(SNAP_CMD, "restart", "opentelemetry-collector")
     if restart_result.returncode != 0:
         stderr = restart_result.stderr.decode(errors="replace").strip()
@@ -223,6 +256,26 @@ def main():
         )
         sys.exit(1)
     logger.info("Restarted opentelemetry-collector to apply log-forwarding config.")
+
+
+def main():
+    """Validate inputs, write collector config, and restart the collector service."""
+    files_input = read_files_input()
+    config_path = resolve_config_path()
+    ensure_collector_is_available()
+
+    files = parse_files_into_list(files_input)
+    if not files:
+        logger.error("Input 'files' must contain at least one path or glob.")
+        sys.exit(1)
+
+    resolved_endpoint = resolve_endpoint()
+    exporter_already_exists = check_exporter_exists()
+    validate_exporter_configuration(resolved_endpoint, exporter_already_exists)
+
+    config_content = build_config(files, resolved_endpoint, exporter_already_exists)
+    write_collector_config(config_content, config_path)
+    restart_collector()
 
 
 if __name__ == "__main__":
