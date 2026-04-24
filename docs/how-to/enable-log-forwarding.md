@@ -32,10 +32,14 @@ jobs:
           files: |
             /var/log/chrony/*.log
             /var/log/syslog
-      - run: ./run-tests.sh
 ```
 
 Pin to a release tag or commit SHA in production workflows.
+
+Use these checks to confirm forwarding:
+
+- Check the action step is completed and prints success messages in the workflow logs.
+- Generate new log lines after the action step and query Loki to confirm they arrive.
 
 ## Examine Loki queries
 
