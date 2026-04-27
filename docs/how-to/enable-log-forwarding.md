@@ -12,6 +12,8 @@ By default, nothing is forwarded. Log forwarding starts only when this action is
 
 ## Provide inputs
 
+To enable log forwarding, set the following inputs in your workflow file as required by your setup:
+
 - `files` (required): newline or comma separated file paths or glob patterns.
 - `config-file-name` (optional, default `90-github-runner-log-forwarding.yaml`): generated config file name.
 - `otlp-endpoint` (optional): OTLP/gRPC endpoint used to create the exporter when one is not already configured.
@@ -34,7 +36,7 @@ jobs:
             /var/log/syslog
 ```
 
-Pin to a release tag or commit SHA in production workflows.
+Pin the action to a release tag or commit SHA in production workflows.
 
 Use these checks to confirm forwarding:
 
