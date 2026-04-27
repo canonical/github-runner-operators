@@ -195,7 +195,7 @@
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "sum(system_filesystem_usage_bytes{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\",mountpoint=\"/\",state=\"used\"}) / sum(system_filesystem_usage_bytes{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\",mountpoint=\"/\"})",
+          "expr": "sum(system_filesystem_usage_bytes{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\",mountpoint=\"/\",state=\"used\"}) / sum(system_filesystem_usage_bytes{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\",mountpoint=\"/\",state=~\"used|free\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -378,7 +378,7 @@
         },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "cores"},
+            "matcher": {"id": "byName", "options": "cores (per runner)"},
             "properties": [
               {"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}},
               {"id": "custom.lineStyle", "value": {"dash": [10, 10], "fill": "dash"}}
