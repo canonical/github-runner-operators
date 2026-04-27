@@ -64,7 +64,7 @@
       }
     ]
   },
-  "description": "Host-level resource metrics (CPU, memory, disk, filesystem, network) for GitHub Actions runner VMs, based on the OpenTelemetry hostmetrics receiver. Filter by repository, workflow, job and runner; select \"All\" to aggregate across the matching set.",
+  "description": "Host-level resource metrics (CPU, memory, disk, filesystem, network) for GitHub Actions runner VMs, based on the OpenTelemetry hostmetrics receiver.\n\nIntended usage: pick a `github_repository` / `github_workflow` / `github_job` to scope, then either drill into a single `github_runner` for per-host inspection, or set `github_runner` to a flavor regex (e.g. `flavor-x-.*`) to aggregate across runners of the same shape.\n\nMost panels aggregate by `device` / `mountpoint` only and intentionally sum or average across the selected runners — this gives meaningful fleet totals (or fleet averages, e.g. CPU utilization, disk busy %) when `github_runner` matches multiple hosts of the same role. Cross-host aggregation only makes sense when the matched runners share device/mountpoint semantics, which is why `github_runner` is expected to be scoped to a single flavor rather than truly \"All\" across heterogeneous shapes.",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
