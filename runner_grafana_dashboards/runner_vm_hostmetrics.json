@@ -263,7 +263,7 @@
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "count(count by (cpu) (system_cpu_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}))",
+          "expr": "count(count by (cpu, github_runner) (system_cpu_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -398,32 +398,32 @@
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "system_cpu_load_average_1m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}",
-          "legendFormat": "1m",
+          "expr": "avg(system_cpu_load_average_1m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"})",
+          "legendFormat": "1m (avg)",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "system_cpu_load_average_5m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}",
-          "legendFormat": "5m",
+          "expr": "avg(system_cpu_load_average_5m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"})",
+          "legendFormat": "5m (avg)",
           "range": true,
           "refId": "B"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "system_cpu_load_average_15m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}",
-          "legendFormat": "15m",
+          "expr": "avg(system_cpu_load_average_15m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"})",
+          "legendFormat": "15m (avg)",
           "range": true,
           "refId": "C"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "count(count by (cpu) (system_cpu_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}))",
-          "legendFormat": "cores",
+          "expr": "count(count by (cpu, github_runner) (system_cpu_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"})) / count(count by (github_runner) (system_cpu_load_average_1m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}))",
+          "legendFormat": "cores (per runner)",
           "range": true,
           "refId": "D"
         }
@@ -702,7 +702,7 @@
         {
           "datasource": {"type": "prometheus", "uid": "${prometheusds}"},
           "editorMode": "code",
-          "expr": "sum by (device) (rate(system_disk_io_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}[$__rate_interval]))",
+          "expr": "avg by (device) (rate(system_disk_io_time_seconds_total{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}[$__rate_interval]))",
           "legendFormat": "{{device}}",
           "range": true,
           "refId": "A"

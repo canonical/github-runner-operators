@@ -33,7 +33,9 @@ role — they cannot be edited or deleted through the UI.
 | `charms/<charm>/cos_custom/grafana_dashboards/` | Dashboards for a specific charm's workload metrics | `charms/<charm>/cos_custom/grafana_dashboards` |
 | `runner_grafana_dashboards/` | Dashboards for runner VM host-level metrics (CPU, memory, disk, network) | `runner_grafana_dashboards` |
 
-Dashboard JSON files must use `__inputs` to declare the datasource (type `prometheus`) and
-set `"editable": false`. Metric names follow the
+Dashboard JSON files should use `__inputs` to declare the datasource (type `prometheus`).
+Setting `"editable": false` is recommended for clarity, but is not strictly required:
+dashboards delivered through `cos-configuration-k8s` are filesystem-provisioned and
+therefore read-only in Grafana regardless of the JSON flag. Metric names follow the
 [OpenTelemetry hostmetrics receiver](https://opentelemetry.io/docs/collector/components/#receiver)
 Prometheus naming convention (e.g. `system_cpu_time_seconds_total`).
