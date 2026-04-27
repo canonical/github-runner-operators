@@ -26,7 +26,7 @@ jobs:
       - name: Remove Android SDK
         run: sudo rm -rf /usr/local/lib/android
       - name: setup lxd
-        uses: canonical/setup-lxd@v0.1.3
+        uses: canonical/setup-lxd@v1
       - name: rename ${{ matrix.charm }}-rockcraft.yaml
         run: |
           mv ${{ matrix.charm }}-rockcraft.yaml rockcraft.yaml
