@@ -215,6 +215,35 @@ def test_exporter_exists_in_config_dir_ignores_exclude_path():
     assert found is False
 
 
+def test_exporter_exists_in_config_dir_finds_exporter_in_json():
+    """
+    arrange: write a JSON config file containing the fixed exporter name.
+    act: check whether that exporter exists in the config directory.
+    assert: returns True when the exporter is present in a JSON fragment.
+    """
+    # Arrange
+    with tempfile.TemporaryDirectory() as config_dir:
+        existing = pathlib.Path(config_dir) / "91-other.json"
+        existing.write_text(
+            "{\n"
+            '  "exporters": {\n'
+            f'    "{module.EXPORTER_NAME}": {{\n'
+            '      "endpoint": "otel:4317"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        exclude = str(pathlib.Path(config_dir) / "91-optin.logs.yaml")
+
+        # Act
+        found = module.exporter_exists_in_config_dir(
+            module.EXPORTER_NAME, config_dir, exclude
+        )
+
+    # Assert
+    assert found is True
+
+
 def test_resolve_endpoint_exits_when_no_endpoint_set(monkeypatch):
     """
     arrange: ensure both endpoint environment variables are unset.

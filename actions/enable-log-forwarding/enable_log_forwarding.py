@@ -14,8 +14,6 @@ import tempfile
 from pathlib import Path
 from typing import Sequence
 
-import yaml
-
 CONFIG_DIR = "/etc/otelcol/config.d"
 EXPORTER_NAME = "otlp_grpc"
 SNAP_CMD = Path("/usr/bin/snap")
@@ -24,6 +22,15 @@ MKDIR_CMD = Path("/usr/bin/mkdir")
 CP_CMD = Path("/usr/bin/cp")
 CHMOD_CMD = Path("/usr/bin/chmod")
 FILES_SPLIT_PATTERN = re.compile(r"[,\n]")  # character class: split on comma or newline
+SUPPORTED_CONFIG_EXTENSIONS = {".yaml", ".yml", ".json"}
+# Detects the start of a top-level YAML exporters section (e.g. "exporters:").
+YAML_EXPORTERS_SECTION_PATTERN = re.compile(r"^\s*exporters\s*:\s*(?:#.*)?$")
+# Detects a YAML key that matches the exporter name, optionally quoted.
+YAML_EXPORTER_KEY_PATTERN_TEMPLATE = r"^\s*['\"]?{exporter_name}['\"]?\s*:\s*(?:#.*)?$"
+# Detects a JSON exporters object containing the exporter key.
+JSON_EXPORTER_KEY_PATTERN_TEMPLATE = (
+    r'"exporters"\s*:\s*\{{[\s\S]*?"{exporter_name}"\s*:'
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -79,30 +86,88 @@ def is_github_hosted_runner() -> bool:
     return os.getenv("RUNNER_ENVIRONMENT", "").strip().lower() == "github-hosted"
 
 
+def _contains_exporter_in_yaml(content: str, exporter_name: str) -> bool:
+    """Return whether YAML content defines exporter_name under exporters: section."""
+    in_exporters = False
+    exporters_indent = -1
+    exporter_key_pattern = re.compile(
+        YAML_EXPORTER_KEY_PATTERN_TEMPLATE.format(
+            exporter_name=re.escape(exporter_name)
+        )
+    )
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip())
+
+        if in_exporters:
+            if indent <= exporters_indent and not stripped.startswith("-"):
+                in_exporters = False
+            elif exporter_key_pattern.match(line):
+                return True
+
+        if YAML_EXPORTERS_SECTION_PATTERN.match(line):
+            in_exporters = True
+            exporters_indent = indent
+
+    return False
+
+
+def _contains_exporter_in_json(content: str, exporter_name: str) -> bool:
+    """Return whether JSON content defines exporter_name inside exporters object."""
+    json_pattern = re.compile(
+        JSON_EXPORTER_KEY_PATTERN_TEMPLATE.format(
+            exporter_name=re.escape(exporter_name)
+        ),
+    )
+    return bool(json_pattern.search(content))
+
+
+def _read_text_file(path: Path) -> str | None:
+    """Read file content safely, returning None on read errors."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _is_supported_config_file(path: Path) -> bool:
+    """Return whether path is a supported config file extension."""
+    return path.is_file() and path.suffix.lower() in SUPPORTED_CONFIG_EXTENSIONS
+
+
 def exporter_exists_in_config_dir(
     exporter_name: str, config_dir: str, exclude_path: str
 ) -> bool:
     """Check if an exporter with the given name is already defined in another config fragment."""
     config_dir_path = Path(config_dir)
+    exclude = Path(exclude_path).resolve()
     if not config_dir_path.is_dir():
         return False
+
     for config_file in config_dir_path.iterdir():
-        if not config_file.is_file() or config_file.suffix not in {
+        if not _is_supported_config_file(config_file):
+            continue
+        if config_file.resolve() == exclude:
+            continue
+
+        content = _read_text_file(config_file)
+        if content is None:
+            continue
+
+        if config_file.suffix.lower() in {
             ".yaml",
             ".yml",
-            ".json",
-        }:
-            continue
-        if str(config_file) == exclude_path:
-            continue
-        try:
-            content = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        except (yaml.YAMLError, OSError):
-            continue
-        if isinstance(content, dict):
-            exporters = content.get("exporters", {})
-            if isinstance(exporters, dict) and exporter_name in exporters:
-                return True
+        } and _contains_exporter_in_yaml(content, exporter_name):
+            return True
+        if config_file.suffix.lower() == ".json" and _contains_exporter_in_json(
+            content, exporter_name
+        ):
+            return True
+
     return False
 
 
