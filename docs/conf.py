@@ -272,6 +272,7 @@ linkcheck_retries = 3
 
 extensions = [
     "canonical_sphinx",
+    "myst_parser",
     "notfound.extension",
     "sphinx_design",
     "sphinx_reredirects",
@@ -292,6 +293,11 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_sitemap",
 ]
+
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
 
 # Excludes files or directories from processing
 

@@ -7,3 +7,4 @@ The following guides cover key processes and common tasks for managing and using
    :maxdepth: 1
 
    Contribute <contribute>
+   Enable log forwarding <enable-log-forwarding>
