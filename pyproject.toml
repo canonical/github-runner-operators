@@ -1,0 +1,13 @@
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.pylint.main]
+jobs = 1
+
+[tool.bandit]
+exclude_dirs = [
+  "actions/enable-log-forwarding/tests",
+  "charms",
+  "docs",
+]
