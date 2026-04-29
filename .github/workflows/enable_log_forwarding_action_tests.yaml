@@ -23,7 +23,7 @@ jobs:
         with:
           filters: |
             action:
-              - 'actions/enable_log_forwarding/**'
+              - 'actions/enable-log-forwarding/**'
               - '.github/workflows/enable_log_forwarding_action_tests.yaml'
 
   test-action:
@@ -52,12 +52,12 @@ jobs:
     if: ${{ needs.detect-changes.outputs.action == 'true' }}
     runs-on: [self-hosted-linux-amd64-noble-edge]
     env:
-      TEST_CONFIG_FILE: 98-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
+      TEST_CONFIG_FILE: 91-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
     steps:
       - uses: actions/checkout@v6
 
       - name: Run enable log forwarding action
-        uses: ./actions/enable_log_forwarding
+        uses: ./actions/enable-log-forwarding
         with:
           files: |
             /var/log/syslog
@@ -71,3 +71,20 @@ jobs:
       - name: Verify generated config contains expected receiver
         run: |
           sudo grep -q '"filelog/github_runner_optin"' /etc/otelcol/config.d/${TEST_CONFIG_FILE}
+
+  smoke-test-github-hosted:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.action == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run enable log forwarding action on github-hosted runner
+        uses: ./actions/enable-log-forwarding
+        with:
+          files: |
+            /var/log/syslog
+
+      - name: Verify workflow continues after github-hosted no-op
+        run: |
+          echo "enable-log-forwarding exited successfully on github-hosted runner"

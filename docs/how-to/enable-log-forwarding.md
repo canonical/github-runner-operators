@@ -7,8 +7,11 @@ By default, nothing is forwarded. Log forwarding starts only when this action is
 ## Prerequisites
 
 - Use a self-hosted Linux runner.
-- Install the `opentelemetry-collector` snap on the runner.
 - Ensure the workflow can update `/etc/otelcol/config.d` with root privileges.
+
+When this action runs on a GitHub-hosted runner, it performs a no-op and exits successfully so the job can continue.
+
+The action installs `opentelemetry-collector` when it is missing.
 
 ## Provide inputs
 
@@ -17,6 +20,8 @@ To enable log forwarding, set the following inputs in your workflow file as requ
 - `files` (required): newline or comma separated file paths or glob patterns.
 - `config-file-name` (optional, default `90-github-runner-log-forwarding.yaml`): generated config file name.
 - `otlp-endpoint` (optional): OTLP/gRPC endpoint used to create the exporter when one is not already configured.
+
+Avoid adding files that can contain secrets or sensitive information, because forwarded log lines are exported to your telemetry backend.
 
 When `otlp-endpoint` is not set, the action falls back to `ACTION_OTEL_EXPORTER_OTLP_ENDPOINT` from the workflow environment.
 
@@ -29,7 +34,7 @@ jobs:
   chrony-testing:
     runs-on: [self-hosted, linux]
     steps:
-      - uses: canonical/github-runner-operators/actions/enable_log_forwarding@main
+      - uses: canonical/github-runner-operators/actions/enable-log-forwarding@main
         with:
           files: |
             /var/log/chrony/*.log
@@ -47,9 +52,9 @@ Use these checks to confirm forwarding:
 
 The action adds GitHub context as resource attributes on forwarded logs:
 
-- `github.job.id`
+- `github.job`
 - `github.repository`
-- `github.runner.name`
+- `github.runner`
 - `github.workflow`
 - `github.run.id`
 - `github.run.attempt`

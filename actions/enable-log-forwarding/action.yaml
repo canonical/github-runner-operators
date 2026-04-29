@@ -6,24 +6,33 @@ description: Opt in to forward selected log files from a self-hosted GitHub runn
 inputs:
   files:
     description: |
-      Newline or comma separated list of file paths or glob patterns to forward.
-      Example: /var/log/chrony/*.log
+      Newline or comma-separated list of file paths and glob patterns to forward.
+      Examples:
+        newline-separated: /var/log/syslog\n/var/log/kern.log
+        comma-separated: /var/log/syslog,/var/log/kern.log
+        glob: /var/log/chrony/*.log
     required: true
   otlp-endpoint:
     description: |
       Optional OTLP/gRPC endpoint for upstream OpenTelemetry Collector logs export.
-      When not set, the action falls back to ACTION_OTEL_EXPORTER_OTLP_ENDPOINT.
+      When not set, the action falls back to ACTION_OTEL_EXPORTER_OTLP_ENDPOINT,
+      which is injected by Canonical self-hosted runners.
       Example: otel-gateway.internal:4317
     required: false
     default: ""
   config-file-name:
-    description: File name for the generated collector fragment.
+    description: |
+      File name for the generated collector fragment under /etc/otelcol/config.d.
+      Use this to control merge/load priority relative to other fragments.
     required: false
     default: 90-github-runner-log-forwarding.yaml
 
 runs:
   using: composite
   steps:
+    - name: Install action Python dependencies
+      shell: bash
+      run: pip install pyyaml --quiet
     - name: Configure collector for opt-in file log forwarding
       shell: bash
       env:
