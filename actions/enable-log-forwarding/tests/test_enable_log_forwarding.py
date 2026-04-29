@@ -9,102 +9,104 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 ACTION_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ACTION_DIR))
 
 module: Any = importlib.import_module("enable_log_forwarding")
 
 
-def test_parse_files_into_list():
+@pytest.mark.parametrize(
+    ("files_input", "expected"),
+    [
+        (
+            " /var/log/a.log,\n/var/log/b.log ,, /var/log/c*.log\n",
+            ["/var/log/a.log", "/var/log/b.log", "/var/log/c*.log"],
+        ),
+        (
+            "\n/var/log/only.log\n",
+            ["/var/log/only.log"],
+        ),
+    ],
+)
+def test_parse_files_into_list(files_input: str, expected: list[str]):
     """
-    arrange: prepare comma/newline-separated file input with extra empty tokens.
+    arrange: provide comma/newline-separated files input variants.
     act: parse the files input into a normalized list.
-    assert: parsed output keeps only non-empty, trimmed file paths.
+    assert: output keeps only non-empty, trimmed file paths.
     """
     # Arrange
-    files_input = " /var/log/a.log,\n/var/log/b.log ,, /var/log/c*.log\n"
 
     # Act
     parsed = module.parse_files_into_list(files_input)
 
     # Assert
-    assert parsed == ["/var/log/a.log", "/var/log/b.log", "/var/log/c*.log"]
+    assert parsed == expected
 
 
-def test_resolve_endpoint_prefers_input(monkeypatch):
+@pytest.mark.parametrize(
+    ("input_endpoint", "fallback_endpoint", "expected_endpoint"),
+    [
+        ("input-endpoint:4318", "system-endpoint:4318", "input-endpoint:4318"),
+        ("", "system-endpoint:4318", "system-endpoint:4318"),
+    ],
+)
+def test_resolve_endpoint_uses_input_then_fallback(
+    monkeypatch, input_endpoint: str, fallback_endpoint: str, expected_endpoint: str
+):
     """
-    arrange: set both explicit input and fallback endpoint environment variables.
+    arrange: set explicit input and fallback endpoint environment variables.
     act: resolve the endpoint used by the action.
-    assert: explicit input endpoint takes precedence over fallback.
+    assert: resolver returns explicit input first, otherwise fallback endpoint.
     """
     # Arrange
-    monkeypatch.setenv("INPUT_OTLP_ENDPOINT", "input-endpoint:4318")
-    monkeypatch.setenv("ACTION_OTEL_EXPORTER_OTLP_ENDPOINT", "system-endpoint:4318")
+    monkeypatch.setenv("INPUT_OTLP_ENDPOINT", input_endpoint)
+    monkeypatch.setenv("ACTION_OTEL_EXPORTER_OTLP_ENDPOINT", fallback_endpoint)
 
     # Act
     resolved = module.resolve_endpoint()
 
     # Assert
-    assert resolved == "input-endpoint:4318"
+    assert resolved == expected_endpoint
 
 
-def test_resolve_endpoint_falls_back_to_action_env(monkeypatch):
+@pytest.mark.parametrize(
+    ("runner_environment", "expected"),
+    [
+        ("github-hosted", True),
+        ("self-hosted", False),
+    ],
+)
+def test_is_github_hosted_runner_detection(
+    monkeypatch, runner_environment: str, expected: bool
+):
     """
-    arrange: set empty explicit input and a workflow-provided fallback endpoint.
-    act: resolve the endpoint used by the action.
-    assert: fallback workflow endpoint is returned.
-    """
-    # Arrange
-    monkeypatch.setenv("INPUT_OTLP_ENDPOINT", "")
-    monkeypatch.setenv("ACTION_OTEL_EXPORTER_OTLP_ENDPOINT", "system-endpoint:4318")
-
-    # Act
-    resolved = module.resolve_endpoint()
-
-    # Assert
-    assert resolved == "system-endpoint:4318"
-
-
-def test_is_github_hosted_runner_detects_github_hosted(monkeypatch):
-    """
-    arrange: set RUNNER_ENVIRONMENT to github-hosted.
+    arrange: set RUNNER_ENVIRONMENT for different runner types.
     act: check whether runner is github-hosted.
-    assert: returns True.
+    assert: returns expected boolean per runner environment.
     """
     # Arrange
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", runner_environment)
 
     # Act
     is_github_hosted = module.is_github_hosted_runner()
 
     # Assert
-    assert is_github_hosted is True
+    assert is_github_hosted is expected
 
 
-def test_is_github_hosted_runner_detects_non_github_hosted(monkeypatch):
+@pytest.mark.parametrize("runner_environment", ["github-hosted", "GITHUB-HOSTED"])
+def test_main_skips_configuration_on_github_hosted(
+    monkeypatch, runner_environment: str
+):
     """
-    arrange: set RUNNER_ENVIRONMENT to self-hosted.
-    act: check whether runner is github-hosted.
-    assert: returns False.
-    """
-    # Arrange
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "self-hosted")
-
-    # Act
-    is_github_hosted = module.is_github_hosted_runner()
-
-    # Assert
-    assert is_github_hosted is False
-
-
-def test_main_skips_configuration_on_github_hosted(monkeypatch):
-    """
-    arrange: set github-hosted environment and guard setup functions.
+    arrange: set github-hosted environment variants and guard setup functions.
     act: run main.
     assert: setup functions are not called and action exits successfully.
     """
     # Arrange
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", runner_environment)
 
     def _should_not_be_called() -> str:
         raise AssertionError("read_files_input should not be called")
@@ -115,39 +117,20 @@ def test_main_skips_configuration_on_github_hosted(monkeypatch):
     module.main()
 
 
-def test_build_config_adds_exporter_when_missing(monkeypatch):
+@pytest.mark.parametrize(
+    ("define_exporter", "has_exporters_block"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+def test_build_config_exporter_block_is_conditionally_defined(
+    monkeypatch, define_exporter: bool, has_exporters_block: bool
+):
     """
     arrange: define GitHub metadata env vars.
     act: build and parse collector config for selected log files.
-    assert: config includes receiver paths, pipeline exporter, and exporter endpoint.
-    """
-    # Arrange
-    monkeypatch.setenv("GITHUB_REPOSITORY", "canonical/github-runner-operators")
-    monkeypatch.setenv("RUNNER_NAME", "runner-1")
-    monkeypatch.setenv("GITHUB_WORKFLOW", "CI")
-    monkeypatch.setenv("GITHUB_JOB", "test")
-    monkeypatch.setenv("GITHUB_RUN_ID", "123")
-    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-
-    # Act
-    raw = module.build_config(["/var/log/syslog"], "otel:4318", module.EXPORTER_NAME)
-    config = json.loads(raw)
-
-    # Assert
-    assert config["receivers"]["filelog/github_runner_optin"]["include"] == [
-        "/var/log/syslog"
-    ]
-    assert config["service"]["pipelines"]["logs/github_runner_optin"]["exporters"] == [
-        module.EXPORTER_NAME
-    ]
-    assert config["exporters"][module.EXPORTER_NAME]["endpoint"] == "otel:4318"
-
-
-def test_build_config_skips_exporter_when_define_exporter_is_false(monkeypatch):
-    """
-    arrange: define GitHub metadata env vars.
-    act: build config with define_exporter=False.
-    assert: config has no exporters block but still references the exporter in the pipeline.
+    assert: exporter block is included only when define_exporter is True.
     """
     # Arrange
     monkeypatch.setenv("GITHUB_REPOSITORY", "canonical/github-runner-operators")
@@ -159,29 +142,63 @@ def test_build_config_skips_exporter_when_define_exporter_is_false(monkeypatch):
 
     # Act
     raw = module.build_config(
-        ["/var/log/syslog"], "otel:4318", module.EXPORTER_NAME, define_exporter=False
+        ["/var/log/syslog"],
+        "otel:4318",
+        module.EXPORTER_NAME,
+        define_exporter=define_exporter,
     )
     config = json.loads(raw)
 
     # Assert
-    assert "exporters" not in config
+    assert config["receivers"]["filelog/github_runner_optin"]["include"] == [
+        "/var/log/syslog"
+    ]
     assert config["service"]["pipelines"]["logs/github_runner_optin"]["exporters"] == [
         module.EXPORTER_NAME
     ]
+    assert ("exporters" in config) is has_exporters_block
+    if has_exporters_block:
+        assert config["exporters"][module.EXPORTER_NAME]["endpoint"] == "otel:4318"
 
 
-def test_exporter_exists_in_config_dir_finds_exporter():
+@pytest.mark.parametrize(
+    ("file_name", "content", "expected"),
+    [
+        (
+            "91-other.yaml",
+            f"exporters:\n  {module.EXPORTER_NAME}:\n    endpoint: otel:4317\n",
+            True,
+        ),
+        (
+            "91-other.json",
+            "{\n"
+            '  "exporters": {\n'
+            f'    "{module.EXPORTER_NAME}": {{\n'
+            '      "endpoint": "otel:4317"\n'
+            "    }\n"
+            "  }\n"
+            "}\n",
+            True,
+        ),
+        (
+            "91-other.yaml",
+            f"receivers:\n  {module.EXPORTER_NAME}:\n    endpoint: otel:4317\n",
+            False,
+        ),
+    ],
+)
+def test_exporter_exists_in_config_dir_detects_supported_formats_and_sections(
+    file_name: str, content: str, expected: bool
+):
     """
-    arrange: write a YAML config file containing the fixed exporter name.
-    act: check whether that exporter exists in the config directory.
-    assert: returns True when the exporter is present in another file.
+    arrange: prepare config fragments in different formats and sections.
+    act: check whether exporter exists in the config directory.
+    assert: returns True only when exporter is defined under exporters in supported formats.
     """
     # Arrange
     with tempfile.TemporaryDirectory() as config_dir:
-        existing = pathlib.Path(config_dir) / "91-other.yaml"
-        existing.write_text(
-            f"exporters:\n  {module.EXPORTER_NAME}:\n    endpoint: otel:4317\n"
-        )
+        existing = pathlib.Path(config_dir) / file_name
+        existing.write_text(content)
         exclude = str(pathlib.Path(config_dir) / "91-optin.logs.yaml")
 
         # Act
@@ -190,7 +207,7 @@ def test_exporter_exists_in_config_dir_finds_exporter():
         )
 
     # Assert
-    assert found is True
+    assert found is expected
 
 
 def test_exporter_exists_in_config_dir_ignores_exclude_path():
@@ -213,35 +230,6 @@ def test_exporter_exists_in_config_dir_ignores_exclude_path():
 
     # Assert
     assert found is False
-
-
-def test_exporter_exists_in_config_dir_finds_exporter_in_json():
-    """
-    arrange: write a JSON config file containing the fixed exporter name.
-    act: check whether that exporter exists in the config directory.
-    assert: returns True when the exporter is present in a JSON fragment.
-    """
-    # Arrange
-    with tempfile.TemporaryDirectory() as config_dir:
-        existing = pathlib.Path(config_dir) / "91-other.json"
-        existing.write_text(
-            "{\n"
-            '  "exporters": {\n'
-            f'    "{module.EXPORTER_NAME}": {{\n'
-            '      "endpoint": "otel:4317"\n'
-            "    }\n"
-            "  }\n"
-            "}\n"
-        )
-        exclude = str(pathlib.Path(config_dir) / "91-optin.logs.yaml")
-
-        # Act
-        found = module.exporter_exists_in_config_dir(
-            module.EXPORTER_NAME, config_dir, exclude
-        )
-
-    # Assert
-    assert found is True
 
 
 def test_resolve_endpoint_exits_when_no_endpoint_set(monkeypatch):
