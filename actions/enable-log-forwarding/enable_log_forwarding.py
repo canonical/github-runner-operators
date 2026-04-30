@@ -217,6 +217,7 @@ def build_config(
         config["exporters"] = {
             exporter_name: {
                 "endpoint": resolved_endpoint,
+                "tls": {"insecure": True},
             }
         }
 
