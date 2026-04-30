@@ -12,4 +12,4 @@
 Dashboard JSON files should use `__inputs` to declare the datasource (type `prometheus`).
 Setting `"editable": false` is recommended for clarity. Metric names follow the
 [OpenTelemetry hostmetrics receiver](https://opentelemetry.io/docs/collector/components/#receiver)
-Prometheus naming convention (e.g. `system_cpu_time_seconds_total`).
+Prometheus naming convention (for example, `system_cpu_time_seconds_total`).

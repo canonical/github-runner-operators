@@ -1,6 +1,6 @@
 # GitHub runner operators
 
-This repository contains applications, juju charms, Grafana dashboards and actions related to operating and using
+This repository contains applications, Juju charms, Grafana dashboards and actions related to operating and using
 self-hosted GitHub Actions runners.
 
 
