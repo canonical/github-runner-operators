@@ -11,3 +11,4 @@ Contents
 
    architecture
    charms
+   grafana-dashboards
