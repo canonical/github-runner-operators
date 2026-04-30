@@ -1,8 +1,8 @@
 # GitHub runner operators
 
-![WIP](https://img.shields.io/badge/status-WIP-yellow)
+This repository contains applications, juju charms, Grafana dashboards and actions related to operating and using
+self-hosted GitHub Actions runners.
 
-A monorepo containing charms to operate Self-Hosted GitHub Action Runners.
 
 ## Repository layout
 
@@ -17,6 +17,11 @@ charms/
 runner_grafana_dashboards/  # Grafana dashboards for runner VM host metrics
                             # (served via cos-configuration-k8s, path: runner_grafana_dashboards)
 ```
+
+## Further information
+
+Further information can be found in the `docs/` directory.
+
 
 ## Observability: Grafana dashboards
 
