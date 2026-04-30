@@ -9,7 +9,7 @@
 
 ## Conventions
 
-Dashboard JSON files should use `__inputs` to declare the datasource (type `prometheus`).
+Dashboard JSON files should use `__inputs` to declare the data source (type `prometheus`).
 Setting `"editable": false` is recommended for clarity. Metric names follow the
-[OpenTelemetry hostmetrics receiver](https://opentelemetry.io/docs/collector/components/#receiver)
+[OpenTelemetry host metrics receiver](https://opentelemetry.io/docs/collector/components/receiver/)
 Prometheus naming convention (for example, `system_cpu_time_seconds_total`).
