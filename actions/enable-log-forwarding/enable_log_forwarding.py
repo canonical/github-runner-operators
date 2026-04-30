@@ -15,7 +15,22 @@ from pathlib import Path
 from typing import Sequence
 
 CONFIG_DIR = "/etc/otelcol/config.d"
-EXPORTER_NAME = "otlp_grpc"
+EXPORTER_NAME = "otlp/github_runner_optin"
+BATCH_PROCESSOR_NAME = "batch/github_runner_optin"
+SERVICE_NAME = "self-hosted-runner"
+LOKI_RESOURCE_LABELS = (
+    "service.name",
+    "github.repository",
+    "github.runner",
+    "github.workflow",
+    "github.job",
+    "github.run.id",
+    "github.run.attempt",
+)
+LOKI_ATTRIBUTE_LABELS = (
+    "log.file.name",
+    "log.file.path",
+)
 SNAP_CMD = Path("/usr/bin/snap")
 SUDO_CMD = Path("/usr/bin/sudo")
 MKDIR_CMD = Path("/usr/bin/mkdir")
@@ -174,14 +189,27 @@ def exporter_exists_in_config_dir(
 def build_resource_attributes() -> list[dict[str, str]]:
     """Build static GitHub resource attributes attached to forwarded logs."""
     attrs = [
+        ("service.name", SERVICE_NAME),
         ("github.repository", os.getenv("GITHUB_REPOSITORY", "unknown")),
         ("github.runner", os.getenv("RUNNER_NAME", "unknown")),
         ("github.workflow", os.getenv("GITHUB_WORKFLOW", "unknown")),
         ("github.job", os.getenv("GITHUB_JOB", "unknown")),
         ("github.run.id", os.getenv("GITHUB_RUN_ID", "unknown")),
         ("github.run.attempt", os.getenv("GITHUB_RUN_ATTEMPT", "unknown")),
+        ("loki.resource.labels", ", ".join(LOKI_RESOURCE_LABELS)),
     ]
     return [{"key": key, "value": value, "action": "upsert"} for key, value in attrs]
+
+
+def build_log_attribute_actions() -> list[dict[str, str]]:
+    """Build log-attribute actions for Loki label promotion hints."""
+    return [
+        {
+            "key": "loki.attribute.labels",
+            "value": ", ".join(LOKI_ATTRIBUTE_LABELS),
+            "action": "upsert",
+        }
+    ]
 
 
 def build_config(
@@ -196,18 +224,28 @@ def build_config(
             "filelog/github_runner_optin": {
                 "include": list(files),
                 "start_at": "end",
+                "include_file_name": True,
+                "include_file_path": True,
             }
         },
         "processors": {
             "resource/github_runner_optin": {
                 "attributes": build_resource_attributes(),
-            }
+            },
+            "attributes/github_runner_optin": {
+                "actions": build_log_attribute_actions(),
+            },
+            BATCH_PROCESSOR_NAME: {},
         },
         "service": {
             "pipelines": {
                 "logs/github_runner_optin": {
                     "receivers": ["filelog/github_runner_optin"],
-                    "processors": ["resource/github_runner_optin", "batch"],
+                    "processors": [
+                        "resource/github_runner_optin",
+                        "attributes/github_runner_optin",
+                        BATCH_PROCESSOR_NAME,
+                    ],
                     "exporters": [exporter_name],
                 }
             }
@@ -217,6 +255,7 @@ def build_config(
         config["exporters"] = {
             exporter_name: {
                 "endpoint": resolved_endpoint,
+                "tls": {"insecure": True},
             }
         }
 

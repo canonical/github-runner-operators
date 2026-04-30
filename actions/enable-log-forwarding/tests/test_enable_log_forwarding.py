@@ -159,6 +159,7 @@ def test_build_config_exporter_block_is_conditionally_defined(
     assert ("exporters" in config) is has_exporters_block
     if has_exporters_block:
         assert config["exporters"][module.EXPORTER_NAME]["endpoint"] == "otel:4318"
+        assert config["exporters"][module.EXPORTER_NAME]["tls"] == {"insecure": True}
 
 
 @pytest.mark.parametrize(
