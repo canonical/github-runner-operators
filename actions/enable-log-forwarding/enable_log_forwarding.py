@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 CONFIG_DIR = "/etc/otelcol/config.d"
-EXPORTER_NAME = "otlp_grpc"
+EXPORTER_NAME = "otlp/github_runner_optin"
 SNAP_CMD = Path("/usr/bin/snap")
 SUDO_CMD = Path("/usr/bin/sudo")
 MKDIR_CMD = Path("/usr/bin/mkdir")
