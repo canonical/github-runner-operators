@@ -2,7 +2,7 @@
 
 # Changelog
 
-This changelog documents user-relevant changes to the Planner charm and Webhook gateway charm.
+This changelog documents user-relevant changes across this repository (charms, applications, GitHub Actions, and dashboards).
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
