@@ -6,6 +6,9 @@ self-hosted GitHub Actions runners.
 
 ## Repository layout
 
+The Go application code (`cmd/`, `internal/`) follows the
+[community Go project layout](https://github.com/golang-standards/project-layout).
+
 ```
 actions/
   enable-log-forwarding/    # GitHub Action: enable log forwarding on runners
@@ -29,12 +32,10 @@ runner_grafana_dashboards/  # Grafana dashboards for runner VM host metrics
 
 ## Charms
 
-- **planner-operator** (`charms/planner-operator/`): tells the GitHub runner
-  charm how many runners of each type to deploy, based on incoming workflow
-  job events.
-- **webhook-gateway-operator** (`charms/webhook-gateway-operator/`): receives
-  GitHub webhooks and forwards workflow job events to a message broker for the
-  planner to consume.
+This repository contains two charms — the **planner-operator** and the
+**webhook-gateway-operator**. See
+[Charms](https://documentation.ubuntu.com/github-runner-operators/latest/reference/charms/)
+in the documentation for their roles and integrations.
 
 ## Documentation
 
