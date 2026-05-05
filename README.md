@@ -1,41 +1,67 @@
 # GitHub runner operators
 
-![WIP](https://img.shields.io/badge/status-WIP-yellow)
+This repository contains applications, Juju charms, Grafana dashboards and actions related to operating and using
+self-hosted GitHub Actions runners.
 
-A monorepo containing charms to operate Self-Hosted GitHub Action Runners.
 
 ## Repository layout
 
+The Go application code (`cmd/`, `internal/`) follows the
+[community Go project layout](https://github.com/golang-standards/project-layout).
+
 ```
+actions/
+  enable-log-forwarding/    # GitHub Action: enable log forwarding on runners
+
 charms/
   planner-operator/         # Juju charm: GitHub runner planner
     cos_custom/
       grafana_dashboards/   # Grafana dashboards for the planner charm
-                            # (served via cos-configuration-k8s, path: charms/planner-operator/cos_custom/grafana_dashboards)
   webhook-gateway-operator/ # Juju charm: GitHub webhook gateway
 
+cmd/
+  planner/                  # Application entry point: planner
+  webhook-gateway/          # Application entry point: webhook gateway
+
+internal/                   # Shared Go packages
+
+docs/                       # Documentation
+
 runner_grafana_dashboards/  # Grafana dashboards for runner VM host metrics
-                            # (served via cos-configuration-k8s, path: runner_grafana_dashboards)
 ```
 
-## Observability: Grafana dashboards
+## Charms
 
-Dashboards in this repo are delivered to Grafana through
-[`cos-configuration-k8s`](https://charmhub.io/cos-configuration-k8s), which syncs
-JSON files from this Git repository and provisions them via the `grafana-dashboard`
-relation. Provisioned dashboards are **immutable** in Grafana regardless of user
-role — they cannot be edited or deleted through the UI.
+This repository contains two charms — the **planner-operator** and the
+**webhook-gateway-operator**. See
+[Charms](https://documentation.ubuntu.com/github-runner-operators/latest/reference/charms/)
+in the documentation for their roles and integrations.
 
-### Conventions
+## Documentation
 
-| Directory | Purpose | `grafana_dashboards_path` config value |
-|---|---|---|
-| `charms/<charm>/cos_custom/grafana_dashboards/` | Dashboards for a specific charm's workload metrics | `charms/<charm>/cos_custom/grafana_dashboards` |
-| `runner_grafana_dashboards/` | Dashboards for runner VM host-level metrics (CPU, memory, disk, network) | `runner_grafana_dashboards` |
+Our documentation is stored in the `docs` directory.
+It is based on the Canonical starter pack
+and hosted on [Read the Docs](https://documentation.ubuntu.com/github-runner-operators/latest/).
+In structuring, the documentation employs the [Diátaxis](https://diataxis.fr/) approach.
 
-Dashboard JSON files should use `__inputs` to declare the datasource (type `prometheus`).
-Setting `"editable": false` is recommended for clarity, but is not strictly required:
-dashboards delivered through `cos-configuration-k8s` are filesystem-provisioned and
-therefore read-only in Grafana regardless of the JSON flag. Metric names follow the
-[OpenTelemetry hostmetrics receiver](https://opentelemetry.io/docs/collector/components/#receiver)
-Prometheus naming convention (e.g. `system_cpu_time_seconds_total`).
+You may open a pull request with your documentation changes, or you can
+[file a bug](https://github.com/canonical/github-runner-operators/issues) to provide constructive feedback or suggestions.
+
+To run the documentation locally before submitting your changes:
+
+```bash
+cd docs
+make run
+```
+
+GitHub runs automatic checks on the documentation
+to verify spelling, validate links and style guide compliance.
+
+You can (and should) run the same checks locally:
+
+```bash
+make spelling
+make linkcheck
+make vale
+make lint-md
+```
