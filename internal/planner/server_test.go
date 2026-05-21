@@ -660,7 +660,7 @@ func TestGetFlavorPressure(t *testing.T) {
 		name:           "shouldFailWhenNameMissing",
 		method:         http.MethodGet,
 		url:            "/api/v1/flavors//pressure",
-		expectedStatus: http.StatusMovedPermanently,
+		expectedStatus: http.StatusTemporaryRedirect,
 	}, {
 		name:           "shouldFailForNonGetMethod",
 		method:         http.MethodPost,
@@ -1178,7 +1178,7 @@ func TestGetJob(t *testing.T) {
 		name:           "shouldFailWhenPlatformMissing",
 		method:         http.MethodGet,
 		url:            "/api/v1/jobs//job-1",
-		expectedStatus: http.StatusMovedPermanently,
+		expectedStatus: http.StatusTemporaryRedirect,
 	}, {
 		name:           "shouldFailOnDatabaseError",
 		listJobsErr:    errors.New("database error"),
@@ -1476,7 +1476,7 @@ func TestUpdateJob(t *testing.T) {
 		method:         http.MethodPatch,
 		url:            "/api/v1/jobs//job-7",
 		body:           fmt.Sprintf(`{"started_at":"%s"}`, newStartedAt.Format(time.RFC3339Nano)),
-		expectedStatus: http.StatusMovedPermanently,
+		expectedStatus: http.StatusTemporaryRedirect,
 	}, {
 		name: "shouldFailWhenIdMissing",
 		jobs: map[string]*database.Job{
