@@ -84,6 +84,7 @@ def _generate_garm_secrets() -> dict[str, str]:
     """
     return {
         "jwt-secret": secrets.token_hex(32),
+        # Reserved for future SQLite encryption support (scaffold placeholder)
         "db-passphrase": secrets.token_hex(32),
     }
 
@@ -116,11 +117,18 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
         self._ensure_secrets()
+        # TODO: Eliminate double-replan (ISD-5718). paas_charm calls replan()
+        # internally in super().restart(), which starts GARM with the default
+        # command momentarily before this method overrides it. Acceptable for
+        # the scaffold; resolve by contributing an upstream hook in a future story.
         super().restart(rerun_migrations=rerun_migrations)
         container = self.unit.get_container(CONTAINER_NAME)
-        if not container.can_connect():
+        try:
+            self._push_garm_config(container)
+        except ops.SecretNotFoundError:
+            logger.warning("garm-secrets not yet available; deferring config push to next event")
+            self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
             return
-        self._push_garm_config(container)
         container.add_layer(
             "garm-command",
             {
