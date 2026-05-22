@@ -21,8 +21,11 @@ commands = [["ruff", "check", "--select", "C90", "src"]]
 
 [env.static]
 description = "Run static type checks"
-deps = ["mypy", "-r requirements.txt"]
-commands = [["mypy", "src"]]
+deps = ["mypy", "bandit[toml]", "-r requirements.txt"]
+commands = [
+  ["mypy", "src"],
+  ["bandit", "-c", "pyproject.toml", "-r", "src"],
+]
 
 [env.unit]
 description = "Run unit tests"
