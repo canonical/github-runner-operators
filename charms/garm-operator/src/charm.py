@@ -7,7 +7,6 @@
 import logging
 import typing
 
-import ops
 import tomli_w
 
 logger = logging.getLogger(__name__)
@@ -62,8 +61,10 @@ def render_garm_toml(
                 "provider_type": "external",
                 "description": "OpenStack provider",
                 "external": {
+                    # Scaffold: OpenStack config path (populated in future story)
                     "config_file": "",
                     "provider_executable": OPENSTACK_PROVIDER_BINARY,
+                    # Scaffold: OpenStack environment variables (populated in future story)
                     "environment_variables": [],
                 },
             }
@@ -72,5 +73,4 @@ def render_garm_toml(
     return tomli_w.dumps(config)
 
 
-if __name__ == "__main__":
-    ops.main(GarmCharm)  # type: ignore[name-defined]  # GarmCharm defined in Task 4
+# GarmCharm class and ops.main() entrypoint are added in the next implementation step.
