@@ -5,8 +5,11 @@
 """GARM charm entrypoint."""
 
 import logging
+import secrets
 import typing
 
+import ops
+import paas_charm.go
 import tomli_w
 
 logger = logging.getLogger(__name__)
@@ -73,4 +76,97 @@ def render_garm_toml(
     return tomli_w.dumps(config)
 
 
-# GarmCharm class and ops.main() entrypoint are added in the next implementation step.
+def _generate_garm_secrets() -> dict[str, str]:
+    """Generate a fresh set of GARM secrets.
+
+    Returns:
+        Dict with keys ``jwt-secret`` and ``db-passphrase``, each a 64-char hex string.
+    """
+    return {
+        "jwt-secret": secrets.token_hex(32),
+        "db-passphrase": secrets.token_hex(32),
+    }
+
+
+class GarmCharm(paas_charm.go.Charm):
+    """GARM charm — manages the GARM service via Pebble."""
+
+    def __init__(self, *args: typing.Any) -> None:
+        """Initialize the charm.
+
+        Args:
+            args: Passed through to CharmBase.
+        """
+        super().__init__(*args)
+        self.framework.observe(self.on.install, self._on_install)
+
+    def _on_install(self, _: ops.InstallEvent) -> None:
+        """Ensure secrets exist on first install."""
+        self._ensure_secrets()
+
+    def restart(self, rerun_migrations: bool = False) -> None:
+        """Write GARM config then restart the workload.
+
+        Overrides the parent to inject the TOML config file and correct
+        Pebble command before each restart.
+
+        Args:
+            rerun_migrations: Passed through to the parent restart.
+        """
+        if not self.is_ready():
+            return
+        self._ensure_secrets()
+        super().restart(rerun_migrations=rerun_migrations)
+        container = self.unit.get_container(CONTAINER_NAME)
+        if not container.can_connect():
+            return
+        self._push_garm_config(container)
+        container.add_layer(
+            "garm-command",
+            {
+                "services": {
+                    PEBBLE_SERVICE_NAME: {
+                        "override": "merge",
+                        "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
+                    }
+                }
+            },
+            combine=True,
+        )
+        container.replan()
+
+    def _ensure_secrets(self) -> None:
+        """Create the garm-secrets juju secret on first call (leader only)."""
+        if not self.unit.is_leader():
+            return
+        try:
+            self.model.get_secret(label=GARM_SECRETS_LABEL)
+        except ops.SecretNotFoundError:
+            self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
+
+    def _get_jwt_secret(self) -> str:
+        """Retrieve the JWT secret from the juju secret store.
+
+        Returns:
+            The jwt-secret string.
+        """
+        secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
+        return secret.get_content()["jwt-secret"]
+
+    def _push_garm_config(self, container: ops.Container) -> None:
+        """Render and push the GARM TOML config into the Pebble container.
+
+        Args:
+            container: The Pebble container to push the config into.
+        """
+        toml_content = render_garm_toml(
+            listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
+            listen_port=int(self.config.get("garm-listen-port", 9997)),
+            db_path=str(self.config.get("garm-db-path", "/srv/garm/data/garm.db")),
+            jwt_secret=self._get_jwt_secret(),
+        )
+        container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
+
+
+if __name__ == "__main__":
+    ops.main(GarmCharm)

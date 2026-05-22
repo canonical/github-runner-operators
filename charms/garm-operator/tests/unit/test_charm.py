@@ -103,3 +103,37 @@ def test_render_garm_toml_provider_section():
         provider["external"]["provider_executable"]
         == "/usr/local/bin/garm-provider-openstack"
     )
+
+
+# ---------------------------------------------------------------------------
+# Secret management tests (no Harness needed — test the helper directly)
+# ---------------------------------------------------------------------------
+
+def test_generate_garm_secrets_returns_hex_strings():
+    """
+    arrange: Nothing.
+    act: Call _generate_garm_secrets().
+    assert: Returns a dict with jwt-secret and db-passphrase as 64-char hex strings.
+    """
+    from charm import _generate_garm_secrets
+
+    result = _generate_garm_secrets()
+    assert set(result.keys()) == {"jwt-secret", "db-passphrase"}
+    assert len(result["jwt-secret"]) == 64
+    assert len(result["db-passphrase"]) == 64
+    assert all(c in "0123456789abcdef" for c in result["jwt-secret"])
+    assert all(c in "0123456789abcdef" for c in result["db-passphrase"])
+
+
+def test_generate_garm_secrets_produces_unique_values():
+    """
+    arrange: Nothing.
+    act: Call _generate_garm_secrets() twice.
+    assert: The two calls return different secrets.
+    """
+    from charm import _generate_garm_secrets
+
+    first = _generate_garm_secrets()
+    second = _generate_garm_secrets()
+    assert first["jwt-secret"] != second["jwt-secret"]
+    assert first["db-passphrase"] != second["db-passphrase"]
