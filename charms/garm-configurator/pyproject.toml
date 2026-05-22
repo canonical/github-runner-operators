@@ -37,5 +37,13 @@ max-complexity = 10
 [tool.codespell]
 skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
 
-[tool.pyright]
-include = ["src/**.py"]
+[tool.mypy]
+check_untyped_defs = true
+disallow_untyped_defs = true
+explicit_package_bases = true
+ignore_missing_imports = true
+namespace_packages = true
+
+[[tool.mypy.overrides]]
+disallow_untyped_defs = false
+module = "tests.*"

@@ -21,8 +21,8 @@ commands = [["ruff", "check", "--select", "C90", "src"]]
 
 [env.static]
 description = "Run static type checks"
-deps = ["pyright", "-r requirements.txt"]
-commands = [["pyright"]]
+deps = ["mypy", "-r requirements.txt"]
+commands = [["mypy", "src"]]
 
 [env.unit]
 description = "Run unit tests"
