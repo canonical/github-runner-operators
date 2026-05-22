@@ -4,12 +4,9 @@
 
 """Charm entrypoint for the GARM configurator charm."""
 
-import logging
 import typing
 
 import ops
-
-logger = logging.getLogger(__name__)
 
 
 class GarmConfiguratorCharm(ops.CharmBase):

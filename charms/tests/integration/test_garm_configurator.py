@@ -14,13 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(name="garm_configurator_charm_file", scope="module")
-def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
+def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
     """Return the path to the built garm-configurator charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
     if not charm:
-        return None
+        pytest.skip(
+            f"missing required {CHARM_FILE_PARAM} option for garm-configurator integration tests"
+        )
     if len(charm) > 1:
         configurator_charms = [f for f in charm if "configurator" in f]
+        if not configurator_charms:
+            pytest.skip(
+                f"no garm-configurator charm file found in {CHARM_FILE_PARAM} option"
+            )
         return configurator_charms[0]
     return charm[0]
 
