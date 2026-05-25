@@ -343,7 +343,7 @@ def _pre_pull_garm_image(image: str) -> None:
     logger.info("Pre-pulling GARM ROCK image into microk8s containerd: %s", image)
     try:
         result = subprocess.run(
-            ["sudo", "microk8s.ctr", "images", "pull", image],
+            ["sudo", "microk8s.ctr", "-n", "k8s.io", "images", "pull", image],
             check=True,
             capture_output=True,
             text=True,
@@ -363,8 +363,8 @@ def _collect_debug_info(app_name: str) -> None:
     logger.error("=== Debug info for failed GARM deployment ===")
     for cmd in [
         ["sudo", "microk8s.kubectl", "get", "pods", "-A", "-o", "wide"],
-        ["sudo", "microk8s.kubectl", "describe", "pods", "-l", f"app.kubernetes.io/name={app_name}"],
-        ["sudo", "microk8s.kubectl", "get", "events", "--sort-by=.lastTimestamp"],
+        ["sudo", "microk8s.kubectl", "describe", "pods", "-A", "-l", f"app.kubernetes.io/name={app_name}"],
+        ["sudo", "microk8s.kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp"],
     ]:
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
