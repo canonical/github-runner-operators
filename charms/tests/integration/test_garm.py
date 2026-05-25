@@ -78,7 +78,7 @@ def test_garm_juju_secret_has_expected_keys(
     """
     arrange: The GARM charm is deployed and active (leader has initialised secrets).
     act: List Juju secrets and show the garm-secrets secret content.
-    assert: The garm-secrets secret contains both jwt-secret and db-passphrase keys.
+    assert: The garm-secrets secret contains the jwt-secret key.
     """
     secrets_json = juju.cli("secrets", "--format=json")
     secrets = json.loads(secrets_json)
@@ -99,7 +99,4 @@ def test_garm_juju_secret_has_expected_keys(
 
     assert "jwt-secret" in content, (
         f"Expected 'jwt-secret' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
-    )
-    assert "db-passphrase" in content, (
-        f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
     )

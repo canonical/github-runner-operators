@@ -80,12 +80,10 @@ def _generate_garm_secrets() -> dict[str, str]:
     """Generate a fresh set of GARM secrets.
 
     Returns:
-        Dict with keys ``jwt-secret`` and ``db-passphrase``, each a 64-char hex string.
+        Dict with key ``jwt-secret`` as a 64-char hex string.
     """
     return {
         "jwt-secret": secrets.token_hex(32),
-        # Reserved for future SQLite encryption support (scaffold placeholder)
-        "db-passphrase": secrets.token_hex(32),
     }
 
 

@@ -112,16 +112,14 @@ def test_generate_garm_secrets_returns_hex_strings():
     """
     arrange: Nothing.
     act: Call _generate_garm_secrets().
-    assert: Returns a dict with jwt-secret and db-passphrase as 64-char hex strings.
+    assert: Returns a dict with jwt-secret as a 64-char hex string.
     """
     from charm import _generate_garm_secrets
 
     result = _generate_garm_secrets()
-    assert set(result.keys()) == {"jwt-secret", "db-passphrase"}
+    assert set(result.keys()) == {"jwt-secret"}
     assert len(result["jwt-secret"]) == 64
-    assert len(result["db-passphrase"]) == 64
     assert all(c in "0123456789abcdef" for c in result["jwt-secret"])
-    assert all(c in "0123456789abcdef" for c in result["db-passphrase"])
 
 
 def test_generate_garm_secrets_produces_unique_values():
@@ -135,4 +133,3 @@ def test_generate_garm_secrets_produces_unique_values():
     first = _generate_garm_secrets()
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
-    assert first["db-passphrase"] != second["db-passphrase"]
