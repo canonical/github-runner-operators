@@ -4,7 +4,7 @@
 variable "app_name" {
   description = "Name of the application in the Juju model."
   type        = string
-  default     = "github-runner-garm"
+  default     = "garm"
 }
 
 variable "base" {
@@ -20,7 +20,7 @@ variable "channel" {
 }
 
 variable "config" {
-  description = "Application config. See charmhub.io/github-runner-garm/configurations."
+  description = "Application config. See charmhub.io/garm/configurations."
   type        = map(string)
   default     = {}
 }

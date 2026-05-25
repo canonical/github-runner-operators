@@ -6,7 +6,7 @@ resource "juju_application" "github_runner_garm" {
   model_uuid = var.model_uuid
 
   charm {
-    name     = "github-runner-garm"
+    name     = "garm"
     channel  = var.channel
     revision = var.revision
     base     = var.base
