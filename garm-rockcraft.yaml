@@ -19,7 +19,9 @@ parts:
     # renovate: datasource=github-releases depName=cloudbase/garm
     source-tag: v0.2.1
     build-snaps:
-      - go/1.24/stable
+      - go/1.26/stable
+    build-environment:
+      - GOTOOLCHAIN: local
     override-build: |
       cd "$CRAFT_PART_SRC"
       go build -tags osusergo,netgo,sqlite_omit_load_extension -o bin/garm ./cmd/garm
@@ -33,7 +35,9 @@ parts:
     # renovate: datasource=github-releases depName=cloudbase/garm-provider-openstack
     source-tag: v0.1.5
     build-snaps:
-      - go/1.24/stable
+      - go/1.26/stable
+    build-environment:
+      - GOTOOLCHAIN: local
     override-build: |
       cd "$CRAFT_PART_SRC"
       go build -o bin/garm-provider-openstack .
