@@ -317,6 +317,8 @@ def garm_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
         return None
     if len(charm) > 1:
         garm_charm = [file for file in charm if "garm" in file]
+        if not garm_charm:
+            raise pytest.UsageError("No GARM charm file found in --charm-file; expected a path containing 'garm'.")
         return garm_charm[0]
     return charm[0]
 
