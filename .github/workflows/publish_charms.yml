@@ -19,6 +19,7 @@ jobs:
         charm:
           - planner
           - webhook-gateway
+          - garm
     name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm }})
     runs-on: ubuntu-latest
     steps:
