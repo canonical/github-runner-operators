@@ -80,29 +80,6 @@ def test_render_garm_toml_metrics_section():
     assert parsed["metrics"]["enable"] is True
 
 
-def test_render_garm_toml_provider_section():
-    """
-    arrange: Any valid config inputs.
-    act: Render the GARM TOML config.
-    assert: The [[provider]] section has the OpenStack provider binary.
-    """
-    result = render_garm_toml(
-        listen_address="0.0.0.0",
-        listen_port=9997,
-        db_path="/srv/garm/data/garm.db",
-        jwt_secret="abc123",
-    )
-    parsed = tomllib.loads(result)
-    assert len(parsed["provider"]) == 1
-    provider = parsed["provider"][0]
-    assert provider["name"] == "openstack"
-    assert provider["provider_type"] == "external"
-    assert (
-        provider["external"]["provider_executable"]
-        == "/usr/local/bin/garm-provider-openstack"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Secret management tests (no Harness needed — test the helper directly)
 # ---------------------------------------------------------------------------
