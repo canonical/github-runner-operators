@@ -31,5 +31,5 @@ config:
       description: Port GARM API server listens on.
     garm-db-path:
       type: string
-      default: "/srv/garm/data/garm.db"
+      default: "/etc/garm/garm.db"
       description: Path to the SQLite database file.

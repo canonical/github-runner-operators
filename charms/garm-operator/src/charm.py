@@ -14,7 +14,7 @@ import tomli_w
 
 logger = logging.getLogger(__name__)
 
-GARM_CONFIG_PATH: typing.Final[str] = "/srv/garm/config/config.toml"
+GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
@@ -170,7 +170,7 @@ class GarmCharm(paas_charm.go.Charm):
         toml_content = render_garm_toml(
             listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
             listen_port=int(self.config.get("garm-listen-port", 9997)),
-            db_path=str(self.config.get("garm-db-path", "/srv/garm/data/garm.db")),
+            db_path=str(self.config.get("garm-db-path", "/etc/garm/garm.db")),
             jwt_secret=self._get_jwt_secret(),
         )
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
