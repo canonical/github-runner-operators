@@ -26,7 +26,7 @@ commands = [["pyright"]]
 
 [env.unit]
 description = "Run unit tests"
-deps = ["pytest", "coverage[toml]", "tomli; python_version < '3.11'", "-r requirements.txt"]
+deps = ["--only-binary=pluggy", "pytest", "coverage[toml]", "tomli; python_version < '3.11'", "-r requirements.txt"]
 commands = [
   [
     "coverage",
