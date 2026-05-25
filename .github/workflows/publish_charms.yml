@@ -19,7 +19,7 @@ jobs:
         charm:
           - planner
           - webhook-gateway
-          - garm
+          # - garm  # not yet functional; uncomment when ready to publish
     name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm }})
     runs-on: ubuntu-latest
     steps:
