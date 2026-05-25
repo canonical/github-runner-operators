@@ -8,8 +8,6 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-import pytest
-
 from charm import render_garm_toml
 
 
@@ -108,6 +106,7 @@ def test_render_garm_toml_provider_section():
 # ---------------------------------------------------------------------------
 # Secret management tests (no Harness needed — test the helper directly)
 # ---------------------------------------------------------------------------
+
 
 def test_generate_garm_secrets_returns_hex_strings():
     """
