@@ -5,7 +5,7 @@ name: github-runner-garm
 
 type: charm
 
-base: ubuntu@26.04
+base: ubuntu@24.04
 
 platforms:
   amd64:
