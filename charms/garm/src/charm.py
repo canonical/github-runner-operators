@@ -19,6 +19,7 @@ GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
+OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 
 
 def render_garm_toml(
@@ -57,6 +58,18 @@ def render_garm_toml(
             "disable_auth": True,
             "enable": True,
         },
+        "provider": [
+            {
+                "name": "openstack",
+                "provider_type": "external",
+                "description": "OpenStack provider",
+                "external": {
+                    "config_file": "",
+                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
+                    "environment_variables": [],
+                },
+            }
+        ],
     }
     return tomli_w.dumps(config)
 
@@ -127,12 +140,7 @@ class GarmCharm(paas_charm.go.Charm):
         container.replan()
 
     def _ensure_secrets(self) -> None:
-        """Create or refresh the garm-secrets Juju secret (leader only).
-
-        On initial deploy the secret is created. On redeploy the existing
-        secret is re-used; its content is left unchanged so GARM keeps the
-        same JWT secret across restarts.
-        """
+        """Create the garm-secrets juju secret on first call (leader only)."""
         if not self.unit.is_leader():
             return
         try:
