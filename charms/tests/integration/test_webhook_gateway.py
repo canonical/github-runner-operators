@@ -72,3 +72,30 @@ def test_webhook_gateway_grafana_dashboard(
 
     templates = poll_grafana_dashboard_templates(juju, f"{any_charm_grafana_consumer_app}/0")
     assert templates, "expected non-empty dashboard templates in grafana-dashboard relation"
+
+
+@pytest.mark.usefixtures("webhook_gateway_with_rabbitmq")
+def test_webhook_gateway_redelivery_config(
+    juju: jubilant.Juju,
+    webhook_gateway_app: str,
+):
+    """
+    arrange: The webhook gateway app deployed and active with rabbitmq.
+    act: Set redelivery-related config options on the charm.
+    assert: The charm remains active after config is applied.
+    """
+    juju.config(
+        webhook_gateway_app,
+        values={
+            "github-path": "canonical/github-runner-operators",
+            "webhook-id": 123456,
+            "redelivery-interval": 300,
+            "github-app-client-id": "Iv1.test123",
+            "github-app-installation-id": 99999,
+        },
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, webhook_gateway_app),
+        timeout=5 * 60,
+        delay=10,
+    )
