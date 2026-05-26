@@ -8,8 +8,9 @@ version: "0.1"
 summary: Minimal OCI image for garm-configurator charm
 description: |
   Minimal container image for the garm-configurator charm runtime.
-  No application services are started; the container runs Pebble
-  as its entrypoint to satisfy the Juju K8s sidecar requirement.
+  No application services are started; Pebble is automatically embedded
+  by rockcraft as the container entrypoint to satisfy the Juju K8s
+  sidecar requirement.
 platforms:
   amd64:
 

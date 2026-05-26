@@ -59,9 +59,15 @@ def webhook_gateway_app_image_fixture(pytestconfig: pytest.Config) -> str | None
 
 
 @pytest.fixture(name="garm_configurator_app_image", scope="module")
-def garm_configurator_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
+def garm_configurator_app_image_fixture(pytestconfig: pytest.Config) -> str:
     """Return the OCI image reference for the garm-configurator app."""
-    return pytestconfig.getoption(GARM_CONFIGURATOR_IMAGE_PARAM)
+    app_image = pytestconfig.getoption(GARM_CONFIGURATOR_IMAGE_PARAM)
+    if not app_image:
+        pytest.skip(
+            f"missing required {GARM_CONFIGURATOR_IMAGE_PARAM} option"
+            " for garm-configurator integration tests"
+        )
+    return app_image
 
 
 @pytest.fixture(name="keep_models", scope="module")
