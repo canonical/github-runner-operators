@@ -19,9 +19,7 @@ def _call_gen_environment(config: dict, base_env: dict | None = None) -> dict[st
     returned_mock = Mock()
 
     with (
-        patch.object(
-            type(charm), "config", new_callable=PropertyMock, return_value=config
-        ),
+        patch.object(type(charm), "config", new_callable=PropertyMock, return_value=config),
         patch(
             "paas_charm.go.Charm._create_app",
             side_effect=[original_mock, returned_mock],
@@ -32,8 +30,8 @@ def _call_gen_environment(config: dict, base_env: dict | None = None) -> dict[st
 
 
 def test_gen_environment_sets_otel_metrics():
-    """
-    arrange: A charm with metrics-port configured.
+    """arrange: A charm with metrics-port configured.
+
     act: Call gen_environment.
     assert: OTEL Prometheus exporter env vars are set.
     """
@@ -46,8 +44,8 @@ def test_gen_environment_sets_otel_metrics():
 
 
 def test_gen_environment_sets_traces_endpoint():
-    """
-    arrange: A charm with OTEL endpoint set in base environment.
+    """arrange: A charm with OTEL endpoint set in base environment.
+
     act: Call gen_environment.
     assert: Traces endpoint is derived and OTLP endpoint is removed.
     """
@@ -63,8 +61,8 @@ def test_gen_environment_sets_traces_endpoint():
 
 
 def test_gen_environment_github_path_org_only():
-    """
-    arrange: A charm with github-path set to an organisation only.
+    """arrange: A charm with github-path set to an organisation only.
+
     act: Call gen_environment.
     assert: APP_WEBHOOK_GITHUB_ORG is set; APP_WEBHOOK_GITHUB_REPO is absent.
     """
@@ -75,8 +73,8 @@ def test_gen_environment_github_path_org_only():
 
 
 def test_gen_environment_github_path_org_and_repo():
-    """
-    arrange: A charm with github-path set to org/repo.
+    """arrange: A charm with github-path set to org/repo.
+
     act: Call gen_environment.
     assert: Both APP_WEBHOOK_GITHUB_ORG and APP_WEBHOOK_GITHUB_REPO are set.
     """
@@ -89,8 +87,8 @@ def test_gen_environment_github_path_org_and_repo():
 
 
 def test_gen_environment_webhook_id():
-    """
-    arrange: A charm with webhook-id configured.
+    """arrange: A charm with webhook-id configured.
+
     act: Call gen_environment.
     assert: APP_WEBHOOK_ID is set.
     """
@@ -100,8 +98,8 @@ def test_gen_environment_webhook_id():
 
 
 def test_gen_environment_redelivery_interval():
-    """
-    arrange: A charm with redelivery-interval configured.
+    """arrange: A charm with redelivery-interval configured.
+
     act: Call gen_environment.
     assert: APP_REDELIVERY_INTERVAL_SECONDS is set.
     """
@@ -111,34 +109,30 @@ def test_gen_environment_redelivery_interval():
 
 
 def test_gen_environment_github_app_client_id():
-    """
-    arrange: A charm with github-app-client-id configured.
+    """arrange: A charm with github-app-client-id configured.
+
     act: Call gen_environment.
     assert: APP_GITHUB_APP_CLIENT_ID is set.
     """
-    env = _call_gen_environment(
-        {"metrics-port": 9464, "github-app-client-id": "Iv1.abc123"}
-    )
+    env = _call_gen_environment({"metrics-port": 9464, "github-app-client-id": "Iv1.abc123"})
 
     assert env["APP_GITHUB_APP_CLIENT_ID"] == "Iv1.abc123"
 
 
 def test_gen_environment_github_app_installation_id():
-    """
-    arrange: A charm with github-app-installation-id configured.
+    """arrange: A charm with github-app-installation-id configured.
+
     act: Call gen_environment.
     assert: APP_GITHUB_APP_INSTALLATION_ID is set.
     """
-    env = _call_gen_environment(
-        {"metrics-port": 9464, "github-app-installation-id": 12345}
-    )
+    env = _call_gen_environment({"metrics-port": 9464, "github-app-installation-id": 12345})
 
     assert env["APP_GITHUB_APP_INSTALLATION_ID"] == "12345"
 
 
 def test_gen_environment_no_redelivery_config():
-    """
-    arrange: A charm with no redelivery-related config set.
+    """arrange: A charm with no redelivery-related config set.
+
     act: Call gen_environment.
     assert: No redelivery env vars are present.
     """
@@ -153,8 +147,8 @@ def test_gen_environment_no_redelivery_config():
 
 
 def test_gen_environment_full_redelivery_config():
-    """
-    arrange: A charm with all redelivery config options set.
+    """arrange: A charm with all redelivery config options set.
+
     act: Call gen_environment.
     assert: All redelivery env vars are present with correct values.
     """

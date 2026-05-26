@@ -53,13 +53,9 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
             if charm.config.get("webhook-id"):
                 env["APP_WEBHOOK_ID"] = str(charm.config["webhook-id"])
             if charm.config.get("redelivery-interval"):
-                env["APP_REDELIVERY_INTERVAL_SECONDS"] = str(
-                    charm.config["redelivery-interval"]
-                )
+                env["APP_REDELIVERY_INTERVAL_SECONDS"] = str(charm.config["redelivery-interval"])
             if charm.config.get("github-app-client-id"):
-                env["APP_GITHUB_APP_CLIENT_ID"] = str(
-                    charm.config["github-app-client-id"]
-                )
+                env["APP_GITHUB_APP_CLIENT_ID"] = str(charm.config["github-app-client-id"])
             if charm.config.get("github-app-installation-id"):
                 env["APP_GITHUB_APP_INSTALLATION_ID"] = str(
                     charm.config["github-app-installation-id"]
