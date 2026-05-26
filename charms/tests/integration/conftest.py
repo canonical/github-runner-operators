@@ -343,7 +343,7 @@ def _pre_pull_garm_image(image: str) -> None:
     logger.info("Pre-pulling GARM ROCK image into microk8s containerd: %s", image)
     try:
         result = subprocess.run(
-            ["sudo", "microk8s.ctr", "-n", "k8s.io", "images", "pull", image],
+            ["sudo", "microk8s.ctr", "images", "pull", image],
             check=True,
             capture_output=True,
             text=True,

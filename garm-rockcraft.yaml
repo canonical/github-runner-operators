@@ -43,3 +43,17 @@ parts:
       go build -o bin/garm-provider-openstack .
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
+
+  pebble-layer:
+    plugin: nil
+    override-build: |
+      mkdir -p "$CRAFT_PART_INSTALL/var/lib/pebble/default/layers"
+      cat > "$CRAFT_PART_INSTALL/var/lib/pebble/default/layers/001-garm.yaml" << 'EOF'
+      summary: GARM service
+      services:
+        go:
+          override: replace
+          summary: GARM GitHub Actions Runner Manager
+          startup: enabled
+          command: /usr/local/bin/garm
+      EOF
