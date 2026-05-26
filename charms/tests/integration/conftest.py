@@ -12,7 +12,6 @@ import pytest
 import requests
 from tests.conftest import (
     CHARM_FILE_PARAM,
-    GARM_CONFIGURATOR_IMAGE_PARAM,
     PLANNER_IMAGE_PARAM,
     WEBHOOK_GATEWAY_IMAGE_PARAM,
 )
@@ -55,18 +54,6 @@ def webhook_gateway_charm_file_fixture(pytestconfig: pytest.Config) -> str | Non
 def webhook_gateway_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
     """Return the path to the webhook gateway app image."""
     app_image = pytestconfig.getoption(WEBHOOK_GATEWAY_IMAGE_PARAM)
-    return app_image
-
-
-@pytest.fixture(name="garm_configurator_app_image", scope="module")
-def garm_configurator_app_image_fixture(pytestconfig: pytest.Config) -> str:
-    """Return the OCI image reference for the garm-configurator app."""
-    app_image = pytestconfig.getoption(GARM_CONFIGURATOR_IMAGE_PARAM)
-    if not app_image:
-        pytest.skip(
-            f"missing required {GARM_CONFIGURATOR_IMAGE_PARAM} option"
-            " for garm-configurator integration tests"
-        )
     return app_image
 
 

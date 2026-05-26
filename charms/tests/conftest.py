@@ -8,7 +8,6 @@ from pytest import Parser
 CHARM_FILE_PARAM = "--charm-file"
 PLANNER_IMAGE_PARAM = "--planner-image"
 WEBHOOK_GATEWAY_IMAGE_PARAM = "--webhook-gateway-image"
-GARM_CONFIGURATOR_IMAGE_PARAM = "--garm-configurator-image"
 
 
 def pytest_addoption(parser: Parser) -> None:
@@ -27,9 +26,4 @@ def pytest_addoption(parser: Parser) -> None:
         WEBHOOK_GATEWAY_IMAGE_PARAM,
         action="store",
         help="Webhook gateway app image to be deployed",
-    )
-    parser.addoption(
-        GARM_CONFIGURATOR_IMAGE_PARAM,
-        action="store",
-        help="Garm configurator app image to be deployed",
     )

@@ -35,15 +35,13 @@ def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
 def deploy_garm_configurator_app_fixture(
     juju: jubilant.Juju,
     garm_configurator_charm_file: str,
-    garm_configurator_app_image: str,
 ) -> str:
     """Deploy the garm-configurator application standalone with no relations.
 
     Returns the application name once the app reaches Active.
     """
     app_name = "garm-configurator"
-    resources = {"app-image": garm_configurator_app_image}
-    juju.deploy(charm=garm_configurator_charm_file, app=app_name, resources=resources)
+    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
         timeout=5 * 60,
