@@ -25,7 +25,8 @@ jobs:
 
   test-terraform:
     needs: detect-changes
-    if: needs.detect-changes.outputs.terraform == 'true'
+    # garm-configurator is not yet published to Charmhub; enable once published.
+    if: false
     name: Test Terraform with Juju
     runs-on: self-hosted-linux-amd64-noble-edge
     env:
