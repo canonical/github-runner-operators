@@ -16,10 +16,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        charm:
-          - planner
-          - webhook-gateway
-    name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm }})
+        include:
+          - charm_dir: planner-operator
+            rockcraft_file: planner-rockcraft.yaml
+          - charm_dir: webhook-gateway-operator
+            rockcraft_file: webhook-gateway-rockcraft.yaml
+          # Uncomment when ready to publish garm-configurator:
+          # - charm_dir: garm-configurator
+          #   rockcraft_file: garm-configurator-rockcraft.yaml
+    name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm_dir }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -27,9 +32,9 @@ jobs:
         run: sudo rm -rf /usr/local/lib/android
       - name: setup lxd
         uses: canonical/setup-lxd@v1
-      - name: rename ${{ matrix.charm }}-rockcraft.yaml
+      - name: rename ${{ matrix.rockcraft_file }}
         run: |
-          mv ${{ matrix.charm }}-rockcraft.yaml rockcraft.yaml
+          mv ${{ matrix.rockcraft_file }} rockcraft.yaml
       - name: build rock
         id: rockcraft
         run: |
@@ -45,7 +50,7 @@ jobs:
           rockcraft.skopeo --insecure-policy copy --dest-tls-verify=false oci-archive:${{ steps.rockcraft.outputs.rock }} docker://localhost:5000/rock:latest
       - name: build charm
         id: charmcraft
-        working-directory: charms/${{ matrix.charm }}-operator/
+        working-directory: charms/${{ matrix.charm_dir }}/
         run: |
           sudo snap install --channel latest/stable --classic charmcraft
           charmcraft pack --verbosity trace
@@ -54,32 +59,32 @@ jobs:
           echo charmcraft pack:
           echo ${{ steps.charmcraft.outputs.charms }}
       - id: charm-name
-        working-directory: charms/${{ matrix.charm }}-operator/
+        working-directory: charms/${{ matrix.charm_dir }}/
         run: |
           echo charm-name=`yq -r .name charmcraft.yaml` >> $GITHUB_OUTPUT
       - run: |
           sudo apt update && sudo apt install python3-yaml -y
       - name: update upstream-source
-        working-directory: charms/${{ matrix.charm }}-operator/
+        working-directory: charms/${{ matrix.charm_dir }}/
         shell: python
         run: |
           import os
           import subprocess
-          
+
           import yaml
-          
+
           expanded_charmcraft_yaml = subprocess.check_output(
-            ["charmcraft", "expand-extensions"], 
+            ["charmcraft", "expand-extensions"],
             env={**os.environ, "CHARMCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS": "true"}
           )
           charmcraft_yaml = yaml.safe_load(expanded_charmcraft_yaml)
           resources = charmcraft_yaml["resources"]
           resources[list(resources)[0]]["upstream-source"] = "localhost:5000/rock:latest"
           yaml.dump(charmcraft_yaml, open("charmcraft.yaml", "w"), sort_keys=False)
-      - working-directory: charms/${{ matrix.charm }}-operator/
+      - working-directory: charms/${{ matrix.charm_dir }}/
         run: |
           echo upload charm ${{ steps.charm-name.outputs.charm-name }}
-      - working-directory: charms/${{ matrix.charm }}-operator/
+      - working-directory: charms/${{ matrix.charm_dir }}/
         run: |
           cat charmcraft.yaml
       - if: github.event_name == 'push'
@@ -90,4 +95,4 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           built-charm-path: ${{ steps.charmcraft.outputs.charms }}
           tag-prefix: ${{ steps.charm-name.outputs.charm-name }}
-          charm-path: charms/${{ matrix.charm }}-operator
+          charm-path: charms/${{ matrix.charm_dir }}

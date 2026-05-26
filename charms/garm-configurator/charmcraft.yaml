@@ -15,6 +15,15 @@ description: |
   Holds configuration for a single GARM scaleset and provider combination,
   sharing it with the GARM charm via Juju integrations.
 
+resources:
+  app-image:
+    type: oci-image
+    description: OCI image for garm-configurator
+
+containers:
+  app:
+    resource: app-image
+
 parts:
   charm:
     source: .

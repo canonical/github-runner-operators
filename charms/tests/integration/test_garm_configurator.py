@@ -22,10 +22,10 @@ def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
             f"missing required {CHARM_FILE_PARAM} option for garm-configurator integration tests"
         )
     if len(charm) > 1:
-        configurator_charms = [f for f in charm if "configurator" in f]
+        configurator_charms = [f for f in charm if "garm-configurator" in f]
         if not configurator_charms:
-            pytest.skip(
-                f"no garm-configurator charm file found in {CHARM_FILE_PARAM} option"
+            raise pytest.UsageError(
+                f"no garm-configurator charm file found among {CHARM_FILE_PARAM} values: {charm}"
             )
         return configurator_charms[0]
     return charm[0]
@@ -35,13 +35,17 @@ def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
 def deploy_garm_configurator_app_fixture(
     juju: jubilant.Juju,
     garm_configurator_charm_file: str,
+    garm_configurator_app_image: str | None,
 ) -> str:
     """Deploy the garm-configurator application standalone with no relations.
 
     Returns the application name once the app reaches Active.
     """
     app_name = "garm-configurator"
-    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
+    resources = {}
+    if garm_configurator_app_image:
+        resources["app-image"] = garm_configurator_app_image
+    juju.deploy(charm=garm_configurator_charm_file, app=app_name, resources=resources or None)
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
         timeout=5 * 60,
