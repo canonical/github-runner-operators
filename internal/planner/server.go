@@ -22,6 +22,7 @@ import (
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/server"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -83,19 +84,19 @@ func NewServer(store FlavorStore, auth AuthStore, metrics *Metrics, adminToken s
 
 	// Register routes
 	// General endpoints require either a valid general token or the admin token
-	s.mux.Handle("GET "+flavorsPattern, otelhttp.WithRouteTag(flavorsPattern, s.adminProtected(http.HandlerFunc(s.listFlavors))))
-	s.mux.Handle("POST "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.createFlavor))))
-	s.mux.Handle("GET "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.getFlavor))))
-	s.mux.Handle("PATCH "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.updateFlavor))))
-	s.mux.Handle("DELETE "+flavorPattern, otelhttp.WithRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.deleteFlavor))))
-	s.mux.Handle("GET "+getFlavorPressurePattern, otelhttp.WithRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
-	s.mux.Handle("POST "+createAuthTokenPattern, otelhttp.WithRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
-	s.mux.Handle("GET "+authTokenBasePattern, otelhttp.WithRouteTag(authTokenBasePattern, s.adminProtected(http.HandlerFunc(s.listAuthTokens))))
-	s.mux.Handle("DELETE "+deleteAuthTokenPattern, otelhttp.WithRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
-	s.mux.Handle("GET "+jobsPattern, otelhttp.WithRouteTag(jobsPattern, s.tokenProtected(http.HandlerFunc(s.listJobs))))
-	s.mux.Handle("GET "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
-	s.mux.Handle("PATCH "+jobPattern, otelhttp.WithRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.updateJob))))
-	s.mux.Handle("GET "+healthPattern, otelhttp.WithRouteTag(healthPattern, http.HandlerFunc(s.health)))
+	s.mux.Handle("GET "+flavorsPattern, withRouteTag(flavorsPattern, s.adminProtected(http.HandlerFunc(s.listFlavors))))
+	s.mux.Handle("POST "+flavorPattern, withRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.createFlavor))))
+	s.mux.Handle("GET "+flavorPattern, withRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.getFlavor))))
+	s.mux.Handle("PATCH "+flavorPattern, withRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.updateFlavor))))
+	s.mux.Handle("DELETE "+flavorPattern, withRouteTag(flavorPattern, s.tokenProtected(http.HandlerFunc(s.deleteFlavor))))
+	s.mux.Handle("GET "+getFlavorPressurePattern, withRouteTag(getFlavorPressurePattern, s.tokenProtected(http.HandlerFunc(s.getFlavorPressure))))
+	s.mux.Handle("POST "+createAuthTokenPattern, withRouteTag(createAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.createAuthToken))))
+	s.mux.Handle("GET "+authTokenBasePattern, withRouteTag(authTokenBasePattern, s.adminProtected(http.HandlerFunc(s.listAuthTokens))))
+	s.mux.Handle("DELETE "+deleteAuthTokenPattern, withRouteTag(deleteAuthTokenPattern, s.adminProtected(http.HandlerFunc(s.deleteAuthToken))))
+	s.mux.Handle("GET "+jobsPattern, withRouteTag(jobsPattern, s.tokenProtected(http.HandlerFunc(s.listJobs))))
+	s.mux.Handle("GET "+jobPattern, withRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.getJob))))
+	s.mux.Handle("PATCH "+jobPattern, withRouteTag(jobPattern, s.tokenProtected(http.HandlerFunc(s.updateJob))))
+	s.mux.Handle("GET "+healthPattern, withRouteTag(healthPattern, http.HandlerFunc(s.health)))
 	s.handler = server.LoggingHandler(logger, s.mux)
 
 	return s
@@ -570,6 +571,16 @@ func flushJSONToStream(w http.ResponseWriter, flusher http.Flusher, payload any)
 	}
 	flusher.Flush()
 	return nil
+}
+
+// withRouteTag annotates the current OTel span with the http.route attribute.
+// otelhttp.WithRouteTag was removed in otelhttp v0.65.0; use LabelerFromContext instead.
+func withRouteTag(route string, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		labeler, _ := otelhttp.LabelerFromContext(r.Context())
+		labeler.Add(attribute.String("http.route", route))
+		h.ServeHTTP(w, r)
+	})
 }
 
 func decodeFlavorInRequestBody(r *http.Request) (*flavorRequest, error) {
