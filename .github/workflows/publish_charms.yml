@@ -92,7 +92,7 @@ jobs:
           tag-prefix: ${{ steps.charm-name.outputs.charm-name }}
           charm-path: charms/${{ matrix.charm }}-operator
 
-publish-garm-configurator:
+  publish-garm-configurator:
     name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (garm-configurator)
     runs-on: ubuntu-latest
     steps:
