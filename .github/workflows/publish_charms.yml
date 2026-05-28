@@ -93,6 +93,9 @@ jobs:
           charm-path: charms/${{ matrix.charm }}-operator
 
   publish-garm-configurator:
+    permissions:
+      contents: write
+      pull-requests: write
     name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (garm-configurator)
     runs-on: ubuntu-latest
     steps:
