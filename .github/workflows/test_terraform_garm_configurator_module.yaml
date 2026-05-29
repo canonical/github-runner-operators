@@ -22,6 +22,7 @@ jobs:
           filters: |
             terraform:
               - "**/terraform/**"
+              - ".github/workflows/test_terraform_garm_configurator_module.yaml"
 
   test-terraform:
     needs: detect-changes
