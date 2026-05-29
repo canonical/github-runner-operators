@@ -46,7 +46,7 @@ resource "juju_application" "rabbitmq" {
 
   charm {
     name    = "rabbitmq-k8s"
-    channel = "3.12/edge"
+    channel = "3.12/stable"
   }
 
   trust       = true
@@ -71,7 +71,7 @@ resource "juju_application" "postgresql" {
 
   charm {
     name    = "postgresql-k8s"
-    channel = "16/edge"
+    channel = "16/stable"
   }
 
   trust       = true
