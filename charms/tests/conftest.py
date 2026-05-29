@@ -33,3 +33,9 @@ def pytest_addoption(parser: Parser) -> None:
         action="store",
         help="GARM app image to be deployed",
     )
+    parser.addoption(
+        "--keep-models",
+        action="store_true",
+        default=False,
+        help="Keep Juju models after tests",
+    )

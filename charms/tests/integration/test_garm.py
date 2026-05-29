@@ -28,11 +28,16 @@ def test_garm_rock_contains_binaries(
     """
     unit = f"{garm_app}/0"
     logger.info("Checking GARM binaries in unit %s", unit)
-    result = juju.exec(unit, ["ls", GARM_BINARY, GARM_PROVIDER_BINARY])
+    result = juju.exec(
+        f"PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble ls /usr/local/bin/",
+        unit=unit,
+    )
 
-    assert result.return_code == 0, (
-        f"Expected GARM binaries at {GARM_BINARY} and {GARM_PROVIDER_BINARY}, "
-        f"got: {result.stderr}"
+    assert GARM_BINARY.split("/")[-1] in result.stdout, (
+        f"Expected garm binary in /usr/local/bin/, got: {result.stdout}"
+    )
+    assert GARM_PROVIDER_BINARY.split("/")[-1] in result.stdout, (
+        f"Expected garm-provider-openstack binary in /usr/local/bin/, got: {result.stdout}"
     )
     logger.info("GARM binaries confirmed present: %s", result.stdout.strip())
 
@@ -65,9 +70,10 @@ def test_garm_pebble_service_command(
     """
     unit = f"{garm_app}/0"
     logger.info("Reading Pebble plan from unit %s", unit)
-    result = juju.exec(unit, ["pebble", "plan"])
-
-    assert result.return_code == 0, f"pebble plan failed: {result.stderr}"
+    result = juju.exec(
+        "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble plan",
+        unit=unit,
+    )
     plan_output = result.stdout
     logger.info("Pebble plan:\n%s", plan_output)
     assert GARM_BINARY in plan_output, (
