@@ -24,7 +24,7 @@ parts:
       - GOTOOLCHAIN: local
     override-build: |
       cd "$CRAFT_PART_SRC"
-      go build -tags osusergo,netgo,sqlite_omit_load_extension -o bin/garm ./cmd/garm
+      go build -tags osusergo,netgo,sqlite_omit_load_extension -ldflags "-extldflags -static" -o bin/garm ./cmd/garm
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm "$CRAFT_PART_INSTALL/usr/local/bin/"
 
@@ -40,7 +40,7 @@ parts:
       - GOTOOLCHAIN: local
     override-build: |
       cd "$CRAFT_PART_SRC"
-      go build -o bin/garm-provider-openstack .
+      go build -ldflags "-extldflags -static" -o bin/garm-provider-openstack .
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
 
@@ -54,6 +54,6 @@ parts:
         go:
           override: replace
           summary: GARM GitHub Actions Runner Manager
-          startup: enabled
+          startup: disabled
           command: /usr/local/bin/garm
       EOF
