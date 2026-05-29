@@ -78,10 +78,6 @@ resource "juju_application" "postgresql" {
   config      = {}
   constraints = ""
   units       = 1
-
-  timeouts {
-    destroy = "25m"
-  }
 }
 
 resource "juju_integration" "planner_postgresql" {
