@@ -23,9 +23,9 @@ const (
 )
 
 type fakeGitHubClient struct {
-	deliveries  []*github.HookDelivery
-	redelivered []int64
-	listErr     error
+	deliveries   []*github.HookDelivery
+	redelivered  []int64
+	listErr      error
 	redeliverErr error
 }
 

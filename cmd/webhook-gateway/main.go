@@ -126,10 +126,10 @@ func buildRedeliveryConfig() *redelivery.Config {
 	}
 
 	cfg := &redelivery.Config{
-		GitHubToken:     os.Getenv(githubTokenEnvVar),
-		GitHubOrg:       githubOrg,
-		GitHubRepo:      os.Getenv(webhookGitHubRepoEnvVar),
-		WebhookID:       webhookID,
+		GitHubToken: os.Getenv(githubTokenEnvVar),
+		GitHubOrg:   githubOrg,
+		GitHubRepo:  os.Getenv(webhookGitHubRepoEnvVar),
+		WebhookID:   webhookID,
 	}
 
 	if appIDStr := os.Getenv(githubAppClientIDEnvVar); appIDStr != "" {
