@@ -52,7 +52,7 @@ resource "juju_application" "rabbitmq" {
 resource "juju_integration" "webhook_rabbitmq" {
   model_uuid = data.juju_model.webhook.uuid
   application {
-    name = local.webhook_gateway_app_name
+    name = module.github_runner_webhook_gateway.app_name
   }
   application {
     name = juju_application.rabbitmq.name

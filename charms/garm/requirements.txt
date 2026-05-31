@@ -1,2 +1,3 @@
 ops==3.7.0
 paas-charm==1.11.2
+tomli-w==1.2.0
