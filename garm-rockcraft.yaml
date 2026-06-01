@@ -24,7 +24,10 @@ parts:
       - GOTOOLCHAIN: local
     override-build: |
       cd "$CRAFT_PART_SRC"
-      go build -tags osusergo,netgo,sqlite_omit_load_extension -ldflags "-extldflags -static" -o bin/garm ./cmd/garm
+      VERSION=$(git describe --tags --match='v[0-9]*' --always)
+      go build -tags osusergo,netgo,sqlite_omit_load_extension \
+        -ldflags "-extldflags -static -X github.com/cloudbase/garm/util/appdefaults.Version=${VERSION}" \
+        -o bin/garm ./cmd/garm
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm "$CRAFT_PART_INSTALL/usr/local/bin/"
 
