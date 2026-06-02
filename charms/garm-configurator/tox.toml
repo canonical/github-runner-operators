@@ -5,6 +5,14 @@ package = "skip"
 set_env = { PYTHONPATH = "{tox_root}/lib:{tox_root}/src:{tox_root}/tests", PYTHONBREAKPOINT = "pdb.set_trace", PY_COLORS = "1" }
 pass_env = ["PYTHONPATH", "CHARM_BUILD_DIR", "MODEL_SETTINGS"]
 
+[env.fmt]
+description = "Format code according to coding style standards"
+deps = ["ruff", "isort"]
+commands = [
+  ["isort", "src", "tests"],
+  ["ruff", "format", "src", "tests"],
+]
+
 [env.lint]
 description = "Check code against coding style standards"
 deps = ["ruff", "codespell"]
