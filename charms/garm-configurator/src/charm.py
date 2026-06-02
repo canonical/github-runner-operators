@@ -23,7 +23,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         super().__init__(*args)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
-        self._config_error: str | None = None
 
     def _on_config_changed(self, _event: ops.ConfigChangedEvent) -> None:
         """Validate configuration on config-changed."""
