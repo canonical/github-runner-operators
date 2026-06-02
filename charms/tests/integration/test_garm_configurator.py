@@ -67,8 +67,6 @@ def deploy_garm_configurator_app_fixture(
             "openstack-user-domain-name": "Default",
             "openstack-project-domain-name": "Default",
             "openstack-region-name": "RegionOne",
-            "openstack-interface": "public",
-            "openstack-identity-api-version": 3,
             "openstack-network": "external-net",
             "github-app-client-id": "12345",
             "github-app-installation-id": "67890",
