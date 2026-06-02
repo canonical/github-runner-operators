@@ -46,7 +46,7 @@ resource "juju_application" "rabbitmq" {
 
   charm {
     name    = "rabbitmq-k8s"
-    channel = "3.12/edge"
+    channel = "3.12/stable"
   }
 
   trust       = true
@@ -58,7 +58,7 @@ resource "juju_application" "rabbitmq" {
 resource "juju_integration" "planner_rabbitmq" {
   model_uuid = data.juju_model.planner.uuid
   application {
-    name = local.planner_app_name
+    name = module.github_runner_planner.app_name
   }
   application {
     name = juju_application.rabbitmq.name
@@ -71,7 +71,7 @@ resource "juju_application" "postgresql" {
 
   charm {
     name    = "postgresql-k8s"
-    channel = "16/edge"
+    channel = "16/stable"
   }
 
   trust       = true
@@ -83,7 +83,7 @@ resource "juju_application" "postgresql" {
 resource "juju_integration" "planner_postgresql" {
   model_uuid = data.juju_model.planner.uuid
   application {
-    name = local.planner_app_name
+    name = module.github_runner_planner.app_name
   }
   application {
     name = juju_application.postgresql.name

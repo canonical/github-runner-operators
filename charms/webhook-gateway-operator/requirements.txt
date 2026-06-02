@@ -1,3 +1,2 @@
---only-binary=pluggy
-ops==3.7.0
+ops==3.7.1
 paas-charm==1.11.2

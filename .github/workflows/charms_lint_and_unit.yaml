@@ -35,6 +35,8 @@ jobs:
         charm:
           - charms/planner-operator
           - charms/webhook-gateway-operator
+          - charms/garm
+          - charms/garm-configurator
     steps:
       - uses: actions/checkout@v6
 

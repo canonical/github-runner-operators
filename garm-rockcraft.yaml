@@ -1,0 +1,62 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: garm
+base: bare
+build-base: ubuntu@24.04
+version: "0.1"
+summary: GARM — GitHub Actions Runner Manager
+description: |
+  ROCK image containing the GARM binary and the OpenStack provider binary.
+platforms:
+  amd64:
+
+parts:
+  garm:
+    plugin: go
+    source: https://github.com/cloudbase/garm
+    source-type: git
+    # renovate: datasource=github-releases depName=cloudbase/garm
+    source-tag: v0.2.1
+    build-snaps:
+      - go/1.26/stable
+    build-environment:
+      - GOTOOLCHAIN: local
+    override-build: |
+      cd "$CRAFT_PART_SRC"
+      VERSION=$(git describe --tags --match='v[0-9]*' --always)
+      go build -tags osusergo,netgo,sqlite_omit_load_extension \
+        -ldflags "-extldflags -static -X github.com/cloudbase/garm/util/appdefaults.Version=${VERSION}" \
+        -o bin/garm ./cmd/garm
+      mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
+      cp bin/garm "$CRAFT_PART_INSTALL/usr/local/bin/"
+
+  garm-provider-openstack:
+    plugin: go
+    source: https://github.com/cloudbase/garm-provider-openstack
+    source-type: git
+    # renovate: datasource=github-releases depName=cloudbase/garm-provider-openstack
+    source-tag: v0.1.5
+    build-snaps:
+      - go/1.26/stable
+    build-environment:
+      - GOTOOLCHAIN: local
+    override-build: |
+      cd "$CRAFT_PART_SRC"
+      go build -ldflags "-extldflags -static" -o bin/garm-provider-openstack .
+      mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
+      cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
+
+  pebble-layer:
+    plugin: nil
+    override-build: |
+      mkdir -p "$CRAFT_PART_INSTALL/var/lib/pebble/default/layers"
+      cat > "$CRAFT_PART_INSTALL/var/lib/pebble/default/layers/001-garm.yaml" << 'EOF'
+      summary: GARM service
+      services:
+        go:
+          override: replace
+          summary: GARM GitHub Actions Runner Manager
+          startup: disabled
+          command: /usr/local/bin/garm
+      EOF
