@@ -68,19 +68,7 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-
-	// Start redelivery daemon if configured.
-	if cfg := buildRedeliveryConfig(); cfg != nil {
-		daemon, err := redelivery.NewDaemon(cfg)
-		if err != nil {
-			log.Fatalf("failed to create redelivery daemon: %v", err)
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			daemon.Run(ctx)
-		}()
-	}
+	startRedeliveryDaemon(ctx, &wg)
 
 	p := queue.NewAmqpProducer(uri, queue.DefaultQueueConfig())
 	handler := &webhook.Handler{
@@ -111,6 +99,22 @@ func main() {
 	}
 
 	wg.Wait()
+}
+
+func startRedeliveryDaemon(ctx context.Context, wg *sync.WaitGroup) {
+	cfg := buildRedeliveryConfig()
+	if cfg == nil {
+		return
+	}
+	daemon, err := redelivery.NewDaemon(cfg)
+	if err != nil {
+		log.Fatalf("failed to create redelivery daemon: %v", err)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		daemon.Run(ctx)
+	}()
 }
 
 func buildRedeliveryConfig() *redelivery.Config {
