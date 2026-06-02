@@ -98,13 +98,13 @@ class ProviderConfig(BaseModel):
             if not value or not str(value).strip():
                 raise CharmConfigInvalidError(f"Missing required configuration: {key}")
 
-        auth_url = str(charm.config.get(OPENSTACK_AUTH_URL_CONFIG_NAME))
+        auth_url = str(charm.config.get(OPENSTACK_AUTH_URL_CONFIG_NAME)).strip()
         if not auth_url.startswith(("http://", "https://")):
             raise CharmConfigInvalidError(
                 f"{OPENSTACK_AUTH_URL_CONFIG_NAME} must start with http:// or https://"
             )
 
-        interface = str(charm.config.get(OPENSTACK_INTERFACE_CONFIG_NAME))
+        interface = str(charm.config.get(OPENSTACK_INTERFACE_CONFIG_NAME)).strip()
         if interface not in VALID_INTERFACES:
             raise CharmConfigInvalidError(
                 f"{OPENSTACK_INTERFACE_CONFIG_NAME} must be one of: {', '.join(VALID_INTERFACES)}"
