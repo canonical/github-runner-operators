@@ -46,14 +46,6 @@ config:
       type: string
       description: |
         OpenStack region name.
-    openstack-interface:
-      type: string
-      description: |
-        OpenStack endpoint interface. Must be one of: public, internal, admin.
-    openstack-identity-api-version:
-      type: int
-      description: |
-        OpenStack Identity (Keystone) API version (e.g. 3).
     openstack-network:
       type: string
       description: |

@@ -3,12 +3,8 @@
 
 """State of the GARM configurator charm."""
 
-import typing
-
 import ops
 from pydantic import BaseModel
-
-VALID_INTERFACES = ("public", "internal", "admin")
 
 OPENSTACK_AUTH_URL_CONFIG_NAME = "openstack-auth-url"
 OPENSTACK_USERNAME_CONFIG_NAME = "openstack-username"
@@ -17,8 +13,6 @@ OPENSTACK_PROJECT_NAME_CONFIG_NAME = "openstack-project-name"
 OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME = "openstack-user-domain-name"
 OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME = "openstack-project-domain-name"
 OPENSTACK_REGION_NAME_CONFIG_NAME = "openstack-region-name"
-OPENSTACK_INTERFACE_CONFIG_NAME = "openstack-interface"
-OPENSTACK_IDENTITY_API_VERSION_CONFIG_NAME = "openstack-identity-api-version"
 OPENSTACK_NETWORK_CONFIG_NAME = "openstack-network"
 
 GITHUB_APP_CLIENT_ID_CONFIG_NAME = "github-app-client-id"
@@ -54,8 +48,6 @@ class ProviderConfig(BaseModel):
         user_domain_name: OpenStack user domain name.
         project_domain_name: OpenStack project domain name.
         region_name: OpenStack region name.
-        interface: OpenStack endpoint interface.
-        identity_api_version: OpenStack Identity API version.
         network: OpenStack network name or ID.
     """
 
@@ -66,8 +58,6 @@ class ProviderConfig(BaseModel):
     user_domain_name: str
     project_domain_name: str
     region_name: str
-    interface: str
-    identity_api_version: int
     network: str
 
     @classmethod
@@ -90,7 +80,6 @@ class ProviderConfig(BaseModel):
             OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME,
             OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME,
             OPENSTACK_REGION_NAME_CONFIG_NAME,
-            OPENSTACK_INTERFACE_CONFIG_NAME,
             OPENSTACK_NETWORK_CONFIG_NAME,
         )
         for key in required_string_configs:
@@ -102,18 +91,6 @@ class ProviderConfig(BaseModel):
         if not auth_url.startswith(("http://", "https://")):
             raise CharmConfigInvalidError(
                 f"{OPENSTACK_AUTH_URL_CONFIG_NAME} must start with http:// or https://"
-            )
-
-        interface = str(charm.config.get(OPENSTACK_INTERFACE_CONFIG_NAME)).strip()
-        if interface not in VALID_INTERFACES:
-            raise CharmConfigInvalidError(
-                f"{OPENSTACK_INTERFACE_CONFIG_NAME} must be one of: {', '.join(VALID_INTERFACES)}"
-            )
-
-        identity_api_version = charm.config.get(OPENSTACK_IDENTITY_API_VERSION_CONFIG_NAME)
-        if not identity_api_version:
-            raise CharmConfigInvalidError(
-                f"Missing required configuration: {OPENSTACK_IDENTITY_API_VERSION_CONFIG_NAME}"
             )
 
         password_secret_id = charm.config.get(OPENSTACK_PASSWORD_CONFIG_NAME)
@@ -137,8 +114,6 @@ class ProviderConfig(BaseModel):
             user_domain_name=str(charm.config.get(OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME)),
             project_domain_name=str(charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)),
             region_name=str(charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME)),
-            interface=interface,
-            identity_api_version=int(typing.cast(int, identity_api_version)),
             network=str(charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME)),
         )
 

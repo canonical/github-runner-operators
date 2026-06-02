@@ -4,6 +4,7 @@
 """Unit tests for GarmConfiguratorCharm."""
 
 import ops
+import pytest
 from scenario import Context, Secret, State
 
 from charm import GarmConfiguratorCharm
@@ -26,8 +27,6 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "openstack-user-domain-name": "Default",
         "openstack-project-domain-name": "Default",
         "openstack-region-name": "RegionOne",
-        "openstack-interface": "public",
-        "openstack-identity-api-version": 3,
         "openstack-network": "external-net",
         "github-app-client-id": "12345",
         "github-app-installation-id": "67890",
@@ -49,40 +48,49 @@ def test_charm_active_with_valid_config():
     assert out.unit_status == ops.ActiveStatus("Ready")
 
 
-def test_charm_blocked_missing_auth_url():
+# Represents a missing config value in parameterized tests below
+_MISSING_CONFIG_SENTINEL = object()
+
+
+@pytest.mark.parametrize(
+    "config_key, override_value",
+    [
+        pytest.param("openstack-auth-url", _MISSING_CONFIG_SENTINEL, id="missing-auth-url"),
+        pytest.param("openstack-username", "", id="empty-username"),
+        pytest.param("openstack-password", _MISSING_CONFIG_SENTINEL, id="missing-password"),
+        pytest.param("openstack-network", "   ", id="whitespace-only-network"),
+        pytest.param(
+            "github-app-client-id", _MISSING_CONFIG_SENTINEL, id="missing-github-app-client-id"
+        ),
+        pytest.param(
+            "github-app-installation-id",
+            _MISSING_CONFIG_SENTINEL,
+            id="missing-github-app-installation-id",
+        ),
+        pytest.param(
+            "github-app-private-key",
+            _MISSING_CONFIG_SENTINEL,
+            id="missing-github-app-private-key",
+        ),
+    ],
+)
+def test_charm_blocked_missing_or_empty_config(config_key: str, override_value: object):
     """
-    arrange: openstack-auth-url is missing.
+    arrange: A required config key is missing or empty/whitespace.
     act: Run config-changed.
-    assert: Unit status is Blocked.
+    assert: Unit status is Blocked with the expected message.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
-    del config["openstack-auth-url"]
+    if override_value is _MISSING_CONFIG_SENTINEL:
+        del config[config_key]
+    else:
+        config[config_key] = override_value
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: openstack-auth-url"
-    )
-
-
-def test_charm_blocked_empty_username():
-    """
-    arrange: openstack-username is empty string.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["openstack-username"] = ""
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: openstack-username"
-    )
+    assert out.unit_status == ops.BlockedStatus(f"Missing required configuration: {config_key}")
 
 
 def test_charm_blocked_invalid_auth_url():
@@ -100,60 +108,6 @@ def test_charm_blocked_invalid_auth_url():
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(
         "openstack-auth-url must start with http:// or https://"
-    )
-
-
-def test_charm_blocked_invalid_interface():
-    """
-    arrange: openstack-interface is not one of public, internal, admin.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["openstack-interface"] = "private"
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "openstack-interface must be one of: public, internal, admin"
-    )
-
-
-def test_charm_blocked_missing_identity_api_version():
-    """
-    arrange: openstack-identity-api-version is not set.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["openstack-identity-api-version"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: openstack-identity-api-version"
-    )
-
-
-def test_charm_blocked_missing_password_secret():
-    """
-    arrange: openstack-password config is not set.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["openstack-password"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: openstack-password"
     )
 
 
@@ -205,110 +159,6 @@ def test_charm_active_with_http_auth_url():
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
-
-
-def test_charm_active_with_internal_interface():
-    """
-    arrange: openstack-interface is 'internal'.
-    act: Run config-changed.
-    assert: Unit status is Active.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["openstack-interface"] = "internal"
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.ActiveStatus("Ready")
-
-
-def test_charm_active_with_admin_interface():
-    """
-    arrange: openstack-interface is 'admin'.
-    act: Run config-changed.
-    assert: Unit status is Active.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["openstack-interface"] = "admin"
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.ActiveStatus("Ready")
-
-
-def test_charm_blocked_whitespace_only_config():
-    """
-    arrange: openstack-network is whitespace only.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["openstack-network"] = "   "
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: openstack-network"
-    )
-
-
-def test_charm_blocked_missing_github_app_client_id():
-    """
-    arrange: github-app-client-id is missing.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["github-app-client-id"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: github-app-client-id"
-    )
-
-
-def test_charm_blocked_missing_github_app_installation_id():
-    """
-    arrange: github-app-installation-id is missing.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["github-app-installation-id"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: github-app-installation-id"
-    )
-
-
-def test_charm_blocked_missing_github_app_private_key():
-    """
-    arrange: github-app-private-key config is not set.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["github-app-private-key"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: github-app-private-key"
-    )
 
 
 def test_charm_blocked_github_app_private_key_secret_missing_value_key():
