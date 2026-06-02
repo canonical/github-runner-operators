@@ -30,10 +30,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
         try:
             CharmState.from_charm(self)
         except CharmConfigInvalidError as e:
-            self._config_error = e.msg
             self.unit.status = ops.BlockedStatus(e.msg)
             return
-        self._config_error = None
 
     def _on_collect_unit_status(self, event: ops.CollectStatusEvent) -> None:
         """Handle collect-unit-status event.
@@ -41,8 +39,10 @@ class GarmConfiguratorCharm(ops.CharmBase):
         Args:
             event: The collect status event.
         """
-        if self._config_error:
-            event.add_status(ops.BlockedStatus(self._config_error))
+        try:
+            CharmState.from_charm(self)
+        except CharmConfigInvalidError as e:
+            self.unit.status = ops.BlockedStatus(e.msg)
             return
         event.add_status(ops.ActiveStatus("Ready"))
 
