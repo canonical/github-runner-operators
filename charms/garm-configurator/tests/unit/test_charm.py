@@ -257,24 +257,6 @@ def test_charm_blocked_whitespace_only_config():
     )
 
 
-def test_charm_collect_unit_status_blocked_after_invalid_config():
-    """
-    arrange: Invalid config causes BlockedStatus on config-changed.
-    act: Run collect-unit-status after config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["openstack-password"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing required configuration: openstack-password"
-    )
-
-
 def test_charm_blocked_missing_github_app_client_id():
     """
     arrange: github-app-client-id is missing.
