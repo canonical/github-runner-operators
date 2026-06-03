@@ -15,6 +15,55 @@ description: |
   Holds configuration for a single GARM scaleset and provider combination,
   sharing it with the GARM charm via Juju integrations.
 
+config:
+  options:
+    openstack-auth-url:
+      type: string
+      description: |
+        OpenStack Keystone authentication URL.
+    openstack-username:
+      type: string
+      description: |
+        OpenStack username for authentication.
+    openstack-password:
+      type: secret
+      description: |
+        Juju secret containing the OpenStack password for authentication.
+        The secret content must have a "value" key with the password string.
+    openstack-project-name:
+      type: string
+      description: |
+        OpenStack project (tenant) name.
+    openstack-user-domain-name:
+      type: string
+      description: |
+        OpenStack user domain name.
+    openstack-project-domain-name:
+      type: string
+      description: |
+        OpenStack project domain name.
+    openstack-region-name:
+      type: string
+      description: |
+        OpenStack region name.
+    openstack-network:
+      type: string
+      description: |
+        OpenStack network name or ID to use for instances.
+    github-app-client-id:
+      type: string
+      description: |
+        GitHub App client ID.
+    github-app-installation-id:
+      type: string
+      description: |
+        GitHub App installation ID.
+    github-app-private-key:
+      type: secret
+      description: |
+        Juju secret containing the GitHub App private key (PEM format).
+        The secret content must have a "value" key with the private key string.
+
 parts:
   charm:
     source: .

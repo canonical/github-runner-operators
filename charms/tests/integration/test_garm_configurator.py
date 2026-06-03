@@ -36,12 +36,43 @@ def deploy_garm_configurator_app_fixture(
     juju: jubilant.Juju,
     garm_configurator_charm_file: str,
 ) -> str:
-    """Deploy the garm-configurator application standalone with no relations.
+    """Deploy the garm-configurator application with mock config.
 
     Returns the application name once the app reaches Active.
     """
     app_name = "garm-configurator"
     juju.deploy(charm=garm_configurator_charm_file, app=app_name)
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, app_name),
+        timeout=5 * 60,
+        delay=10,
+    )
+
+    password_secret_uri = juju.add_secret(
+        name="openstack-password", content={"value": "fake-password"}
+    )
+    private_key_secret_uri = juju.add_secret(
+        name="github-app-private-key", content={"value": "fake-private-key"}
+    )
+    juju.grant_secret(password_secret_uri, app_name)
+    juju.grant_secret(private_key_secret_uri, app_name)
+
+    juju.config(
+        app_name,
+        values={
+            "openstack-auth-url": "https://keystone.example.com:5000/v3",
+            "openstack-username": "admin",
+            "openstack-password": password_secret_uri,
+            "openstack-project-name": "myproject",
+            "openstack-user-domain-name": "Default",
+            "openstack-project-domain-name": "Default",
+            "openstack-region-name": "RegionOne",
+            "openstack-network": "external-net",
+            "github-app-client-id": "12345",
+            "github-app-installation-id": "67890",
+            "github-app-private-key": private_key_secret_uri,
+        },
+    )
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
         timeout=5 * 60,
@@ -55,7 +86,7 @@ def test_garm_configurator_deploys_active(
     garm_configurator_app: str,
 ) -> None:
     """
-    arrange: garm-configurator charm deployed with no relations wired.
+    arrange: garm-configurator charm deployed with valid mock configuration.
     act: Check the application status.
     assert: Application is in Active state.
     """
