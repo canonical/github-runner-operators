@@ -28,6 +28,9 @@ import yaml
 project = "GitHub runner operators"
 author = "Canonical Ltd."
 
+# Version
+
+version = f"{os.environ.get('READTHEDOCS_VERSION', 'local')}"
 
 # Sidebar documentation title; best kept reasonably short
 #
@@ -71,7 +74,7 @@ copyright = "2026 Canonical Ltd."
 # NOTE: The Open Graph Protocol (OGP) enhances page display in a social graph
 #       and is used by social media platforms; see https://ogp.me/
 
-ogp_site_url = "https://documentation.ubuntu.com/github-runner-operators/"
+ogp_site_url = f"https://canonical.com/juju/docs/github-runner-charms/{version}/"
 
 
 # Preview name of the documentation website
@@ -174,7 +177,7 @@ html_theme_options = {
 # TODO: If your documentation is hosted on https://docs.ubuntu.com/,
 #       uncomment and update as needed.
 
-slug = 'github-runner-operators'
+slug = 'juju/docs/github-runner-charms'
 
 #######################
 # Sitemap configuration: https://sphinx-sitemap.readthedocs.io/
@@ -182,7 +185,7 @@ slug = 'github-runner-operators'
 
 # Use RTD canonical URL to ensure duplicate pages have a specific canonical URL
 
-html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "/")
+html_baseurl = f"https://canonical.com/juju/docs/github-runner-charms/{version}/"
 
 # sphinx-sitemap uses html_baseurl to generate the full URL for each page:
 
@@ -207,8 +210,8 @@ sitemap_excludes = [
 # Template and asset locations
 #######################
 
-# html_static_path = ["_static"]
-# templates_path = ["_templates"]
+html_static_path = ["_static"]
+templates_path = ["_templates"]
 
 
 #############
@@ -309,12 +312,15 @@ exclude_patterns = [
 
 # Adds custom CSS files, located under 'html_static_path'
 
-# html_css_files = []
+html_css_files = ["https://assets.ubuntu.com/v1/d86746ef-cookie_banner.css"]
 
 
 # Adds custom JavaScript files, located under 'html_static_path'
 
-# html_js_files = []
+html_js_files = [
+    "https://assets.ubuntu.com/v1/287a5e8f-bundle.js",
+    "js/overwrite_links.js",
+    ]
 
 
 # Specifies a reST snippet to be appended to each .rst file
