@@ -31,6 +31,12 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "github-app-client-id": "12345",
         "github-app-installation-id": "67890",
         "github-app-private-key": private_key_secret.id,
+        "name": "my-scaleset",
+        "flavor": "m1.large",
+        "os-arch": "amd64",
+        "min-idle-runner": 0,
+        "max-runner": 5,
+        "repo": "myorg/myrepo",
     }
 
 
@@ -72,6 +78,9 @@ _MISSING_CONFIG_SENTINEL = object()
             _MISSING_CONFIG_SENTINEL,
             id="missing-github-app-private-key",
         ),
+        pytest.param("name", _MISSING_CONFIG_SENTINEL, id="missing-name"),
+        pytest.param("flavor", "", id="empty-flavor"),
+        pytest.param("os-arch", "   ", id="whitespace-only-os-arch"),
     ],
 )
 def test_charm_blocked_missing_or_empty_config(config_key: str, override_value: object):
@@ -193,3 +202,104 @@ def test_charm_blocked_github_app_private_key_secret_not_found():
     assert out.unit_status == ops.BlockedStatus(
         "github-app-private-key secret is invalid or missing 'value' key"
     )
+
+
+def test_charm_blocked_negative_min_idle_runner():
+    """
+    arrange: min-idle-runner is negative.
+    act: Run config-changed.
+    assert: Unit status is Blocked.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["min-idle-runner"] = -1
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.BlockedStatus("min-idle-runner must be non-negative")
+
+
+def test_charm_blocked_negative_max_runner():
+    """
+    arrange: max-runner is negative.
+    act: Run config-changed.
+    assert: Unit status is Blocked.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["max-runner"] = -5
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.BlockedStatus("max-runner must be non-negative")
+
+
+def test_charm_blocked_neither_repo_nor_org():
+    """
+    arrange: Neither repo nor org is set.
+    act: Run config-changed.
+    assert: Unit status is Blocked.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["repo"]
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.BlockedStatus(
+        "At least one of repo or org must be provided"
+    )
+
+
+def test_charm_blocked_repo_and_org_both_set():
+    """
+    arrange: Both repo and org are set.
+    act: Run config-changed.
+    assert: Unit status is Blocked.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["org"] = "myorg"
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.BlockedStatus("repo and org are mutually exclusive")
+
+
+def test_charm_active_with_org_and_runner_group():
+    """
+    arrange: org and runner-group are set (no repo).
+    act: Run config-changed.
+    assert: Unit status is Active.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["repo"]
+    config["org"] = "myorg"
+    config["runner-group"] = "my-group"
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.ActiveStatus("Ready")
+
+
+def test_charm_active_with_org_only():
+    """
+    arrange: Only org is set (no repo, no runner-group).
+    act: Run config-changed.
+    assert: Unit status is Active.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["repo"]
+    config["org"] = "myorg"
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.ActiveStatus("Ready")
