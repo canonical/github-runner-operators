@@ -421,3 +421,48 @@ def deploy_garm_app_fixture(
 
     logger.info("GARM app '%s' is active", app_name)
     return app_name
+
+
+@pytest.fixture(scope="module", name="any_charm_image_builder_app")
+def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any-charm as a fake image builder providing github_runner_image_v0.
+
+    On relation joined, the fake builder immediately writes a synthetic image UUID
+    to its unit relation data, allowing the configurator to transition to Active.
+    """
+    app_name = "fake-image-builder"
+
+    any_charm_src_overwrite = {
+        "any_charm.py": textwrap.dedent(
+            """\
+            from any_charm_base import AnyCharmBase
+
+            FAKE_IMAGE_ID = "fake-openstack-image-uuid"
+            FAKE_IMAGE_TAGS = "x64,noble"
+
+            class AnyCharm(AnyCharmBase):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.framework.observe(
+                        self.on['provide-github-runner-image-v0'].relation_joined,
+                        self._on_image_relation_joined,
+                    )
+
+                def _on_image_relation_joined(self, event):
+                    event.relation.data[self.unit]["id"] = FAKE_IMAGE_ID
+                    event.relation.data[self.unit]["tags"] = FAKE_IMAGE_TAGS
+            """
+        ),
+    }
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+        config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return app_name
