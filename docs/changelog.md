@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-03
+
+- add GARM Scaleset configurations for the GARM configurator charm.
+
 ## 2026-06-02
 
 - add OpenStack and GitHub creds/configs for the GARM configurator charm.
