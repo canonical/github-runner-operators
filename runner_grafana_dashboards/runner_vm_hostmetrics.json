@@ -1081,7 +1081,7 @@
         "query": "label_values(system_cpu_load_average_1m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\"}, github_runner)",
         "refresh": 2,
         "sort": 1,
-        "includeAll": false,
+        "includeAll": true,
         "multi": false,
         "allValue": ".*",
         "hide": 0
@@ -1094,7 +1094,7 @@
         "query": "label_values(system_cpu_load_average_1m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\"}, github_run_id)",
         "refresh": 2,
         "sort": 1,
-        "includeAll": true,
+        "includeAll": false,
         "multi": false,
         "hide": 0
       },
@@ -1106,7 +1106,7 @@
         "query": "label_values(system_cpu_load_average_1m{github_repository=~\"$github_repository\",github_workflow=~\"$github_workflow\",github_job=~\"$github_job\",github_runner=~\"$github_runner\",github_run_id=~\"$github_run_id\"}, github_run_attempt)",
         "refresh": 2,
         "sort": 1,
-        "includeAll": true,
+        "includeAll": false,
         "multi": false,
         "hide": 0
       }
