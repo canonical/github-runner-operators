@@ -253,9 +253,7 @@ class ScalesetConfig(BaseModel):
         repo = str(repo).strip() if repo else None
         org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
         org = str(org).strip() if org else None
-        runner_group = str(
-            charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "default")
-        ).strip()
+        runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "default")).strip()
 
         if repo and org:
             raise CharmConfigInvalidError(

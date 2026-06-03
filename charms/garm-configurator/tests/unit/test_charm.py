@@ -249,9 +249,7 @@ def test_charm_blocked_neither_repo_nor_org():
     del config["repo"]
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "At least one of repo or org must be provided"
-    )
+    assert out.unit_status == ops.BlockedStatus("At least one of repo or org must be provided")
 
 
 def test_charm_blocked_repo_and_org_both_set():
