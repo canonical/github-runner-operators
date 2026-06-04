@@ -248,6 +248,11 @@ class ScalesetConfig(BaseModel):
             raise CharmConfigInvalidError(
                 f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be non-negative"
             )
+        if max_runner < min_idle_runner:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be greater than or equal to "
+                f"{SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME}"
+            )
 
         repo = charm.config.get(SCALESET_REPO_CONFIG_NAME)
         repo = str(repo).strip() if repo else None

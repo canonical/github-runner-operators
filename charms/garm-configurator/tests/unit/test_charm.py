@@ -236,6 +236,25 @@ def test_charm_blocked_negative_max_runner():
     assert out.unit_status == ops.BlockedStatus("max-runner must be non-negative")
 
 
+def test_charm_blocked_max_runner_less_than_min_idle_runner():
+    """
+    arrange: max-runner is less than min-idle-runner.
+    act: Run config-changed.
+    assert: Unit status is Blocked.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["min-idle-runner"] = 5
+    config["max-runner"] = 3
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ops.BlockedStatus(
+        "max-runner must be greater than or equal to min-idle-runner"
+    )
+
+
 def test_charm_blocked_neither_repo_nor_org():
     """
     arrange: Neither repo nor org is set.
