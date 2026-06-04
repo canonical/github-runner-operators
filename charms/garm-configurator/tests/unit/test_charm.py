@@ -195,11 +195,6 @@ def test_charm_blocked_github_app_private_key_secret_not_found():
     )
 
 
-# ---------------------------------------------------------------------------
-# Image relation — credential forwarding
-# ---------------------------------------------------------------------------
-
-
 def test_reconcile_writes_openstack_credentials_to_image_relation():
     """
     arrange: Valid config and an image relation with no existing data.
@@ -286,11 +281,6 @@ def test_reconcile_does_not_write_credentials_when_config_invalid():
     out = ctx.run(ctx.on.relation_joined(image_relation), state)
     rel_out = out.get_relation(image_relation.id)
     assert "auth_url" not in rel_out.local_unit_data
-
-
-# ---------------------------------------------------------------------------
-# Image relation — unit status
-# ---------------------------------------------------------------------------
 
 
 def test_status_waiting_when_image_relation_has_no_uuid():
