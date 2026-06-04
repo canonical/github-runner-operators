@@ -5,7 +5,7 @@
 
 import ops
 import pytest
-from scenario import Context, Secret, State
+from scenario import Context, Relation, Secret, State
 
 from charm import GarmConfiguratorCharm
 
@@ -40,18 +40,18 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
     }
 
 
-def test_charm_active_with_valid_config():
+def test_charm_waiting_with_valid_config_no_relation():
     """
-    arrange: All configs are valid.
+    arrange: All configs are valid but no image builder relation.
     act: Run config-changed.
-    assert: Unit status is Active.
+    assert: Unit status is Waiting — image builder relation is required.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
 
 
 # Represents a missing config value in parameterized tests below
@@ -197,11 +197,11 @@ def test_charm_blocked_password_secret_not_found():
     )
 
 
-def test_charm_active_with_http_auth_url():
+def test_charm_not_blocked_with_http_auth_url():
     """
     arrange: openstack-auth-url uses http:// (not https://).
     act: Run config-changed.
-    assert: Unit status is Active.
+    assert: Unit status is not Blocked — http:// is a valid scheme.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -210,7 +210,7 @@ def test_charm_active_with_http_auth_url():
     config["openstack-auth-url"] = "http://keystone.local:5000/v3"
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert not isinstance(out.unit_status, ops.BlockedStatus)
 
 
 def test_charm_blocked_github_app_private_key_secret_missing_value_key():
@@ -280,3 +280,149 @@ def test_charm_active_with_org_only():
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
+
+
+def test_reconcile_writes_openstack_credentials_to_image_relation():
+    """
+    arrange: Valid config and an image relation with no existing data.
+    act: relation_joined fires (holistic reconcile).
+    assert: All six OpenStack credential fields are written to local unit data.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.relation_joined(image_relation), state)
+    rel_out = out.get_relation(image_relation.id)
+    assert rel_out.local_unit_data["auth_url"] == "https://keystone.example.com:5000/v3"
+    assert rel_out.local_unit_data["username"] == "admin"
+    assert rel_out.local_unit_data["password"] == "s3cr3t"
+    assert rel_out.local_unit_data["project_name"] == "myproject"
+    assert rel_out.local_unit_data["user_domain_name"] == "Default"
+    assert rel_out.local_unit_data["project_domain_name"] == "Default"
+
+
+def test_reconcile_writes_credentials_on_secret_changed():
+    """
+    arrange: Valid config, existing image relation, OpenStack password secret has a new revision.
+    act: secret_changed fires for the password secret.
+    assert: The rotated password (latest revision) is pushed to the relation databag.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = Secret(tracked_content={"value": "old-password"}, latest_content={"value": "new-password"})
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.secret_changed(secret), state)
+    rel_out = out.get_relation(image_relation.id)
+    assert rel_out.local_unit_data["password"] == "new-password"
+
+
+def test_reconcile_writes_credentials_on_config_changed_with_existing_relation():
+    """
+    arrange: Valid config and an existing image relation.
+    act: config-changed fires (holistic reconcile).
+    assert: Credentials are written to the relation even outside relation_joined.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.config_changed(), state)
+    rel_out = out.get_relation(image_relation.id)
+    assert rel_out.local_unit_data["auth_url"] == "https://keystone.example.com:5000/v3"
+    assert rel_out.local_unit_data["project_name"] == "myproject"
+
+
+def test_reconcile_does_not_write_credentials_when_config_invalid():
+    """
+    arrange: Missing openstack-auth-url and an image relation joined.
+    act: relation_joined fires.
+    assert: Local unit data remains empty (no credentials forwarded).
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["openstack-auth-url"]
+    image_relation = Relation(endpoint="image")
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.relation_joined(image_relation), state)
+    rel_out = out.get_relation(image_relation.id)
+    assert "auth_url" not in rel_out.local_unit_data
+
+
+def test_status_waiting_when_image_relation_has_no_uuid():
+    """
+    arrange: Valid config, image relation joined, but provider has not set an image UUID yet.
+    act: relation_changed fires (no UUID in remote data).
+    assert: Unit status is Waiting.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.relation_changed(image_relation), state)
+    assert out.unit_status == ops.WaitingStatus("Waiting for image UUID from image builder")
+
+
+def test_status_active_when_image_uuid_is_present():
+    """
+    arrange: Valid config, image relation joined, provider has set a UUID.
+    act: relation_changed fires with UUID in remote data.
+    assert: Unit status is Active.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.relation_changed(image_relation), state)
+    assert out.unit_status == ops.ActiveStatus("Ready")
+
+
+def test_status_waiting_on_relation_broken():
+    """
+    arrange: Valid config and the image relation being torn down.
+    act: relation_broken fires.
+    assert: Unit status is Waiting — ops excludes the breaking relation from model.relations,
+        so the charm correctly reflects that it has no image builder connected.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+    )
+    out = ctx.run(ctx.on.relation_broken(image_relation), state)
+    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")

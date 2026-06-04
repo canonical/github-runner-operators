@@ -108,6 +108,12 @@ config:
         A Python dict-like string containing key-value pairs of script name
         to bash script to be run prior to runner installation.
 
+requires:
+  image:
+    interface: github_runner_image_v0
+    limit: 1
+    optional: false
+
 parts:
   charm:
     source: .

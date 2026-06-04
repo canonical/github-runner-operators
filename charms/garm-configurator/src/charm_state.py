@@ -30,6 +30,8 @@ SCALESET_ORG_CONFIG_NAME = "org"
 SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
 
+IMAGE_RELATION_NAME = "image"
+
 
 class CharmConfigInvalidError(Exception):
     """Raised when charm configuration is invalid.
@@ -111,7 +113,7 @@ class ProviderConfig(BaseModel):
             )
         try:
             secret = charm.model.get_secret(id=str(password_secret_id))
-            password = secret.get_content()["value"]
+            password = secret.get_content(refresh=True)["value"]
         except (ops.SecretNotFoundError, KeyError) as e:
             raise CharmConfigInvalidError(
                 f"{OPENSTACK_PASSWORD_CONFIG_NAME} secret is invalid or missing 'value' key"
@@ -174,7 +176,7 @@ class GithubAppConfig(BaseModel):
             )
         try:
             secret = charm.model.get_secret(id=str(private_key_secret_id))
-            private_key = secret.get_content()["value"]
+            private_key = secret.get_content(refresh=True)["value"]
         except (ops.SecretNotFoundError, KeyError) as e:
             raise CharmConfigInvalidError(
                 f"{GITHUB_APP_PRIVATE_KEY_CONFIG_NAME} secret is invalid or missing 'value' key"
@@ -297,6 +299,7 @@ class CharmState:
         provider_config: OpenStack provider configuration.
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
+        image_id: OpenStack image UUID received from the image builder relation, or None.
     """
 
     def __init__(
@@ -305,6 +308,7 @@ class CharmState:
         provider_config: ProviderConfig,
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
+        image_id: str | None,
     ) -> None:
         """Initialize the charm state.
 
@@ -312,10 +316,12 @@ class CharmState:
             provider_config: The OpenStack provider configuration.
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
+            image_id: The OpenStack image UUID from the image builder relation.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
+        self.image_id = image_id
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -333,8 +339,29 @@ class CharmState:
         provider_config = ProviderConfig.from_charm(charm)
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
+        image_id = _get_image_id_from_relation(charm)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
+            image_id=image_id,
         )
+
+
+def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
+    """Return the OpenStack image UUID from the image builder relation, if available.
+
+    Args:
+        charm: The charm instance.
+
+    Returns:
+        The image UUID string, or None if the relation is absent or no UUID has been set yet.
+    """
+    relation = charm.model.get_relation(IMAGE_RELATION_NAME)
+    if relation is None:
+        return None
+    for unit in relation.units:
+        image_id = relation.data[unit].get("id")
+        if image_id:
+            return image_id
+    return None
