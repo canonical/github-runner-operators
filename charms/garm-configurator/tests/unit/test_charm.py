@@ -59,33 +59,93 @@ _MISSING_CONFIG_SENTINEL = object()
 
 
 @pytest.mark.parametrize(
-    "config_key, override_value",
+    "config_mutations, expected_message",
     [
-        pytest.param("openstack-auth-url", _MISSING_CONFIG_SENTINEL, id="missing-auth-url"),
-        pytest.param("openstack-username", "", id="empty-username"),
-        pytest.param("openstack-password", _MISSING_CONFIG_SENTINEL, id="missing-password"),
-        pytest.param("openstack-network", "   ", id="whitespace-only-network"),
         pytest.param(
-            "github-app-client-id", _MISSING_CONFIG_SENTINEL, id="missing-github-app-client-id"
+            {"openstack-auth-url": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: openstack-auth-url",
+            id="missing-auth-url",
         ),
         pytest.param(
-            "github-app-installation-id",
-            _MISSING_CONFIG_SENTINEL,
+            {"openstack-username": ""},
+            "Missing required configuration: openstack-username",
+            id="empty-username",
+        ),
+        pytest.param(
+            {"openstack-password": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: openstack-password",
+            id="missing-password",
+        ),
+        pytest.param(
+            {"openstack-network": "   "},
+            "Missing required configuration: openstack-network",
+            id="whitespace-only-network",
+        ),
+        pytest.param(
+            {"github-app-client-id": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: github-app-client-id",
+            id="missing-github-app-client-id",
+        ),
+        pytest.param(
+            {"github-app-installation-id": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: github-app-installation-id",
             id="missing-github-app-installation-id",
         ),
         pytest.param(
-            "github-app-private-key",
-            _MISSING_CONFIG_SENTINEL,
+            {"github-app-private-key": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: github-app-private-key",
             id="missing-github-app-private-key",
         ),
-        pytest.param("name", _MISSING_CONFIG_SENTINEL, id="missing-name"),
-        pytest.param("flavor", "", id="empty-flavor"),
-        pytest.param("os-arch", "   ", id="whitespace-only-os-arch"),
+        pytest.param(
+            {"name": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: name",
+            id="missing-name",
+        ),
+        pytest.param(
+            {"flavor": ""},
+            "Missing required configuration: flavor",
+            id="empty-flavor",
+        ),
+        pytest.param(
+            {"os-arch": "   "},
+            "Missing required configuration: os-arch",
+            id="whitespace-only-os-arch",
+        ),
+        pytest.param(
+            {"openstack-auth-url": "ftp://invalid.example.com"},
+            "openstack-auth-url must start with http:// or https://",
+            id="invalid-auth-url",
+        ),
+        pytest.param(
+            {"min-idle-runner": -1},
+            "min-idle-runner must be non-negative",
+            id="negative-min-idle-runner",
+        ),
+        pytest.param(
+            {"max-runner": -5},
+            "max-runner must be non-negative",
+            id="negative-max-runner",
+        ),
+        pytest.param(
+            {"min-idle-runner": 5, "max-runner": 3},
+            "max-runner must be greater than or equal to min-idle-runner",
+            id="max-runner-less-than-min-idle-runner",
+        ),
+        pytest.param(
+            {"repo": _MISSING_CONFIG_SENTINEL},
+            "At least one of repo or org must be provided",
+            id="neither-repo-nor-org",
+        ),
+        pytest.param(
+            {"org": "myorg"},
+            "repo and org are mutually exclusive",
+            id="repo-and-org-both-set",
+        ),
     ],
 )
-def test_charm_blocked_missing_or_empty_config(config_key: str, override_value: object):
+def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: str):
     """
-    arrange: A required config key is missing or empty/whitespace.
+    arrange: Config is invalid (missing, empty, or has an invalid value).
     act: Run config-changed.
     assert: Unit status is Blocked with the expected message.
     """
@@ -93,31 +153,14 @@ def test_charm_blocked_missing_or_empty_config(config_key: str, override_value: 
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
-    if override_value is _MISSING_CONFIG_SENTINEL:
-        del config[config_key]
-    else:
-        config[config_key] = override_value
+    for key, value in config_mutations.items():
+        if value is _MISSING_CONFIG_SENTINEL:
+            del config[key]
+        else:
+            config[key] = value
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(f"Missing required configuration: {config_key}")
-
-
-def test_charm_blocked_invalid_auth_url():
-    """
-    arrange: openstack-auth-url does not start with http:// or https://.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["openstack-auth-url"] = "ftp://invalid.example.com"
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "openstack-auth-url must start with http:// or https://"
-    )
+    assert out.unit_status == ops.BlockedStatus(expected_message)
 
 
 def test_charm_blocked_password_secret_missing_value_key():
@@ -202,89 +245,6 @@ def test_charm_blocked_github_app_private_key_secret_not_found():
     assert out.unit_status == ops.BlockedStatus(
         "github-app-private-key secret is invalid or missing 'value' key"
     )
-
-
-def test_charm_blocked_negative_min_idle_runner():
-    """
-    arrange: min-idle-runner is negative.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["min-idle-runner"] = -1
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus("min-idle-runner must be non-negative")
-
-
-def test_charm_blocked_negative_max_runner():
-    """
-    arrange: max-runner is negative.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["max-runner"] = -5
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus("max-runner must be non-negative")
-
-
-def test_charm_blocked_max_runner_less_than_min_idle_runner():
-    """
-    arrange: max-runner is less than min-idle-runner.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["min-idle-runner"] = 5
-    config["max-runner"] = 3
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "max-runner must be greater than or equal to min-idle-runner"
-    )
-
-
-def test_charm_blocked_neither_repo_nor_org():
-    """
-    arrange: Neither repo nor org is set.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    del config["repo"]
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus("At least one of repo or org must be provided")
-
-
-def test_charm_blocked_repo_and_org_both_set():
-    """
-    arrange: Both repo and org are set.
-    act: Run config-changed.
-    assert: Unit status is Blocked.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["org"] = "myorg"
-    state = State(config=config, secrets=[secret, pk_secret])
-    out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus("repo and org are mutually exclusive")
 
 
 def test_charm_active_with_org_and_runner_group():
