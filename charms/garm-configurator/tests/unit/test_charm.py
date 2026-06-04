@@ -260,7 +260,8 @@ def test_charm_active_with_org_and_runner_group():
     del config["repo"]
     config["org"] = "myorg"
     config["runner-group"] = "my-group"
-    state = State(config=config, secrets=[secret, pk_secret])
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
+    state = State(config=config, secrets=[secret, pk_secret], relations=[image_relation])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
 
@@ -277,7 +278,8 @@ def test_charm_active_with_org_only():
     config = _valid_config(secret, pk_secret)
     del config["repo"]
     config["org"] = "myorg"
-    state = State(config=config, secrets=[secret, pk_secret])
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
+    state = State(config=config, secrets=[secret, pk_secret], relations=[image_relation])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
 
@@ -314,7 +316,9 @@ def test_reconcile_writes_credentials_on_secret_changed():
     assert: The rotated password (latest revision) is pushed to the relation databag.
     """
     ctx = Context(GarmConfiguratorCharm)
-    secret = Secret(tracked_content={"value": "old-password"}, latest_content={"value": "new-password"})
+    secret = Secret(
+        tracked_content={"value": "old-password"}, latest_content={"value": "new-password"}
+    )
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image")
     state = State(
