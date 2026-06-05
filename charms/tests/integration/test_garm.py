@@ -46,7 +46,7 @@ def test_garm_charm_reaches_active(
     garm_app: str,
 ):
     """
-    arrange: The GARM charm is deployed with the built ROCK image and default config.
+    arrange: The GARM charm is deployed with postgresql integrated.
     act: Observe the Juju application status.
     assert: The application is in active status, confirming a successful install.
     """
@@ -91,7 +91,7 @@ def test_garm_juju_secret_has_expected_keys(
     """
     arrange: The GARM charm is deployed and active (leader has initialised secrets).
     act: List Juju secrets and show the garm-secrets secret content.
-    assert: The garm-secrets secret contains the jwt-secret key.
+    assert: The garm-secrets secret contains jwt-secret and db-passphrase keys.
     """
     logger.info("Listing Juju secrets to find '%s'", GARM_SECRETS_LABEL)
     secrets_json = juju.cli("secrets", "--format=json")
@@ -116,3 +116,78 @@ def test_garm_juju_secret_has_expected_keys(
     assert "jwt-secret" in content, (
         f"Expected 'jwt-secret' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
     )
+    assert "db-passphrase" in content, (
+        f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+    )
+
+
+def test_garm_config_uses_postgresql_backend(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed with postgresql integrated.
+    act: Read the GARM config TOML from the workload container.
+    assert: The config uses the postgresql backend with the expected fields.
+    """
+    unit = f"{garm_app}/0"
+    logger.info("Reading GARM config from unit %s", unit)
+    result = juju.exec(
+        f"PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble exec cat {GARM_CONFIG_PATH}",
+        unit=unit,
+    )
+    config_content = result.stdout
+    logger.info("GARM config:\n%s", config_content)
+
+    # Verify postgresql backend is configured
+    assert 'backend = "postgresql"' in config_content, (
+        f"Expected postgresql backend in config, got:\n{config_content}"
+    )
+    assert "[database.postgresql]" in config_content, (
+        f"Expected [database.postgresql] section in config, got:\n{config_content}"
+    )
+    # Verify no sqlite3 references
+    assert "sqlite3" not in config_content, (
+        f"Expected no sqlite3 references in config, got:\n{config_content}"
+    )
+    # Verify passphrase is present
+    assert "passphrase" in config_content, (
+        f"Expected passphrase in [database] section, got:\n{config_content}"
+    )
+
+
+def test_garm_blocks_without_postgresql(
+    juju: jubilant.Juju,
+    garm_charm_file: str,
+    garm_app_image: str,
+):
+    """
+    arrange: Deploy a second GARM unit without postgresql integration.
+    act: Observe the Juju application status after deploy.
+    assert: The application stays blocked (missing required integration).
+    """
+    app_name = "garm-no-pg"
+
+    logger.info("Deploying GARM without postgresql to verify it blocks")
+    juju.deploy(
+        charm=garm_charm_file,
+        app=app_name,
+        resources={"app-image": garm_app_image},
+    )
+
+    try:
+        juju.wait(
+            lambda status: jubilant.all_blocked(status, app_name),
+            timeout=10 * 60,
+            delay=10,
+        )
+        status = juju.status()
+        app_status = status.apps[app_name].app_status
+        logger.info(
+            "GARM without postgresql is blocked as expected: %s - %s",
+            app_status.current,
+            app_status.message,
+        )
+        assert app_status.current == "blocked"
+    finally:
+        juju.remove_application(app_name, force=True)
