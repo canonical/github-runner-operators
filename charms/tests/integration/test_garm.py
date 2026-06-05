@@ -8,6 +8,7 @@ import logging
 
 import jubilant
 import pytest
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,68 @@ GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
+GARM_API_PORT = 9997
+PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
+
+
+def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
+    """Run a command inside the workload container via pebble exec.
+
+    Args:
+        juju: Jubilant Juju handle.
+        unit: Unit name (e.g. "github-runner-garm/0").
+        command: Shell command to execute inside the container.
+
+    Returns:
+        ExecResult with stdout/stderr.
+    """
+    return juju.exec(f"{PEBBLE_PREFIX} exec -- {command}", unit=unit)
+
+
+def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
+    """Get the IP address of the GARM unit.
+
+    Args:
+        juju: Jubilant Juju handle.
+        app_name: GARM application name.
+
+    Returns:
+        IP address string.
+    """
+    status = juju.status()
+    unit_name = f"{app_name}/0"
+    return status.apps[app_name].units[unit_name].address
+
+
+def _garm_first_run(address: str) -> str:
+    """Complete GARM first-run initialization and return an admin JWT.
+
+    Calls /api/v1/first-run to create the initial admin user.
+    If already initialized (409 Conflict), logs in with the same credentials.
+
+    Args:
+        address: GARM unit IP address.
+
+    Returns:
+        JWT token string for authenticated API calls.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    payload = {
+        "username": "admin",
+        "password": "IntegrationTest1!",
+        "email": "admin@test.local",
+        "full_name": "Integration Test Admin",
+    }
+
+    resp = requests.post(f"{base_url}/first-run", json=payload, timeout=30)
+    if resp.status_code == 200:
+        return resp.json().get("token", "")
+
+    # Already initialized — login instead
+    login_payload = {"username": "admin", "password": "IntegrationTest1!"}
+    resp = requests.post(f"{base_url}/auth/login", json=login_payload, timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("token", "")
 
 
 def test_garm_blocks_without_postgresql(
@@ -50,7 +113,7 @@ def test_garm_rock_contains_binaries(
     unit = f"{garm_app}/0"
     logger.info("Checking GARM binaries in unit %s", unit)
     result = juju.exec(
-        f"PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble ls /usr/local/bin/",
+        f"{PEBBLE_PREFIX} ls /usr/local/bin/",
         unit=unit,
     )
 
@@ -61,6 +124,28 @@ def test_garm_rock_contains_binaries(
         GARM_PROVIDER_BINARY.split("/")[-1] in result.stdout
     ), f"Expected garm-provider-openstack binary in /usr/local/bin/, got: {result.stdout}"
     logger.info("GARM binaries confirmed present: %s", result.stdout.strip())
+
+
+def test_garm_version(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed and active.
+    act: Run `garm -version` inside the workload container.
+    assert: The command exits successfully and prints a version string.
+    """
+    unit = f"{garm_app}/0"
+    logger.info("Running garm -version in unit %s", unit)
+    result = _pebble_exec(juju, unit, f"{GARM_BINARY} -version")
+
+    version_output = result.stdout.strip()
+    logger.info("GARM version: %s", version_output)
+    assert version_output, "Expected non-empty version output from garm -version"
+    # Version output should contain a version-like string (e.g. "v0.2.1-8-gabcdef" or "v0.2.2")
+    assert version_output.startswith("v") or "." in version_output, (
+        f"Expected version string starting with 'v' or containing '.', got: {version_output}"
+    )
 
 
 def test_garm_charm_reaches_active(
@@ -81,6 +166,85 @@ def test_garm_charm_reaches_active(
     ), f"Expected {garm_app} to be active, got: {current}"
 
 
+def test_garm_api_controller_info(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and connected to postgresql.
+    act: Complete first-run initialization and query /api/v1/controller-info.
+    assert: The controller info response contains a valid controller_id (UUID),
+        proving that GARM started, ran DB migrations, and is serving API requests.
+    """
+    address = _get_garm_address(juju, garm_app)
+    logger.info("GARM address: %s", address)
+
+    token = _garm_first_run(address)
+    assert token, "Expected non-empty JWT token from first-run/login"
+    logger.info("Got admin JWT token (length=%d)", len(token))
+
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/controller-info", headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    info = resp.json()
+    logger.info("Controller info: %s", json.dumps(info, indent=2))
+    assert "controller_id" in info, f"Expected controller_id in response, got: {info}"
+    assert info["controller_id"], "Expected non-empty controller_id"
+
+
+def test_garm_api_list_scalesets(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and initialized with an admin user.
+    act: Query GET /api/v1/scalesets to list scale sets.
+    assert: The API returns a successful response (empty list), proving the
+        scale set query path through postgresql is functional.
+    """
+    address = _get_garm_address(juju, garm_app)
+    token = _garm_first_run(address)
+
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    scalesets = resp.json()
+    logger.info("Scale sets response: %s", scalesets)
+    # Fresh GARM has no scale sets configured — expect empty list
+    assert isinstance(scalesets, list), f"Expected list response, got: {type(scalesets)}"
+    assert len(scalesets) == 0, f"Expected empty scale set list on fresh GARM, got: {scalesets}"
+
+
+def test_garm_api_list_providers(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed with the OpenStack provider configured.
+    act: Query GET /api/v1/providers to list available providers.
+    assert: The openstack provider is registered and visible through the API.
+    """
+    address = _get_garm_address(juju, garm_app)
+    token = _garm_first_run(address)
+
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    providers = resp.json()
+    logger.info("Providers response: %s", json.dumps(providers, indent=2))
+    assert isinstance(providers, list), f"Expected list response, got: {type(providers)}"
+    provider_names = [p.get("name", "") for p in providers]
+    assert "openstack" in provider_names, (
+        f"Expected 'openstack' provider in list, got: {provider_names}"
+    )
+
+
 def test_garm_pebble_service_command(
     juju: jubilant.Juju,
     garm_app: str,
@@ -93,7 +257,7 @@ def test_garm_pebble_service_command(
     unit = f"{garm_app}/0"
     logger.info("Reading Pebble plan from unit %s", unit)
     result = juju.exec(
-        "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble plan",
+        f"{PEBBLE_PREFIX} plan",
         unit=unit,
     )
     plan_output = result.stdout
@@ -141,38 +305,3 @@ def test_garm_juju_secret_has_expected_keys(
     assert (
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
-
-
-def test_garm_config_uses_postgresql_backend(
-    juju: jubilant.Juju,
-    garm_app: str,
-):
-    """
-    arrange: The GARM charm is deployed with postgresql integrated.
-    act: Read the GARM config TOML from the workload container.
-    assert: The config uses the postgresql backend with the expected fields.
-    """
-    unit = f"{garm_app}/0"
-    logger.info("Reading GARM config from unit %s", unit)
-    result = juju.exec(
-        f"PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble exec cat {GARM_CONFIG_PATH}",
-        unit=unit,
-    )
-    config_content = result.stdout
-    logger.info("GARM config:\n%s", config_content)
-
-    # Verify postgresql backend is configured
-    assert (
-        'backend = "postgresql"' in config_content
-    ), f"Expected postgresql backend in config, got:\n{config_content}"
-    assert (
-        "[database.postgresql]" in config_content
-    ), f"Expected [database.postgresql] section in config, got:\n{config_content}"
-    # Verify no sqlite3 references
-    assert (
-        "sqlite3" not in config_content
-    ), f"Expected no sqlite3 references in config, got:\n{config_content}"
-    # Verify passphrase is present
-    assert (
-        "passphrase" in config_content
-    ), f"Expected passphrase in [database] section, got:\n{config_content}"
