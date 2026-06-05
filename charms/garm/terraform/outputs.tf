@@ -5,3 +5,10 @@ output "app_name" {
   description = "Name of the deployed application."
   value       = juju_application.github_runner_garm.name
 }
+
+output "endpoints" {
+  description = "Integration endpoints required by the GARM charm."
+  value = {
+    postgresql = "postgresql"
+  }
+}

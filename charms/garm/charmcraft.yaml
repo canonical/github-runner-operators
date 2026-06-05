@@ -14,10 +14,16 @@ summary: GARM — GitHub Actions Runner Manager charm.
 
 description: |
   Deploys and manages GARM (GitHub Actions Runner Manager) using the
-  12-factor app framework with SQLite storage and an OpenStack runner provider.
+  12-factor app framework with PostgreSQL storage and an OpenStack runner provider.
 
 extensions:
   - go-framework
+
+requires:
+  postgresql:
+    interface: postgresql_client
+    optional: false
+    limit: 1
 
 config:
   options:
@@ -29,7 +35,9 @@ config:
       type: int
       default: 9997
       description: Port GARM API server listens on.
-    garm-db-path:
+    postgresql-sslmode:
       type: string
-      default: "/etc/garm/garm.db"
-      description: Path to the SQLite database file.
+      default: "require"
+      description: |
+        PostgreSQL SSL mode. Valid values: disable, allow, prefer, require,
+        verify-ca, verify-full.

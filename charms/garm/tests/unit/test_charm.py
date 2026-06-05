@@ -3,96 +3,107 @@
 
 """Unit tests for GarmCharm."""
 
+import string
+
+import pytest
+
 try:
     import tomllib
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import render_garm_toml
+from charm import _generate_garm_secrets, render_garm_toml
+
+_DEFAULT_PG_CONFIG = {
+    "username": "u",
+    "password": "p",
+    "hostname": "h",
+    "port": 5432,
+    "database": "d",
+    "sslmode": "disable",
+}
 
 
-def test_render_garm_toml_database_section():
-    """
-    arrange: Provide a db path.
-    act: Render the GARM TOML config.
-    assert: The [database] section uses sqlite3 with the given path.
-    """
-    result = render_garm_toml(
-        listen_address="0.0.0.0",
-        listen_port=9997,
-        db_path="/srv/garm/data/garm.db",
-        jwt_secret="abc123",
+def _render(**overrides) -> dict:
+    """Helper: render TOML with defaults, return parsed dict."""
+    kwargs = {
+        "listen_address": "0.0.0.0",
+        "listen_port": 9997,
+        "jwt_secret": "test-secret",
+        "db_passphrase": "a" * 32,
+        "postgresql_config": _DEFAULT_PG_CONFIG,
+    }
+    kwargs.update(overrides)
+    return tomllib.loads(render_garm_toml(**kwargs))
+
+
+def test_render_garm_toml_postgresql_backend():
+    """The [database] section uses postgresql backend with correct fields."""
+    parsed = _render(
+        postgresql_config={
+            "username": "garm",
+            "password": "secret",
+            "hostname": "10.0.0.5",
+            "port": 5432,
+            "database": "garm_db",
+            "sslmode": "require",
+        },
     )
-    parsed = tomllib.loads(result)
-    assert parsed["database"]["backend"] == "sqlite3"
-    assert parsed["database"]["sqlite3"]["db_file"] == "/srv/garm/data/garm.db"
+    assert parsed["database"]["backend"] == "postgresql"
+    assert parsed["database"]["postgresql"]["hostname"] == "10.0.0.5"
+    assert parsed["database"]["postgresql"]["username"] == "garm"
+    assert parsed["database"]["postgresql"]["password"] == "secret"
+    assert parsed["database"]["postgresql"]["port"] == 5432
+    assert parsed["database"]["postgresql"]["database"] == "garm_db"
+    assert parsed["database"]["postgresql"]["sslmode"] == "require"
+    assert "sqlite3" not in parsed["database"]
 
 
-def test_render_garm_toml_apiserver_section():
-    """
-    arrange: Provide listen address and port.
-    act: Render the GARM TOML config.
-    assert: The [apiserver] section reflects the given address and port.
-    """
-    result = render_garm_toml(
-        listen_address="127.0.0.1",
-        listen_port=8080,
-        db_path="/srv/garm/data/garm.db",
-        jwt_secret="abc123",
-    )
-    parsed = tomllib.loads(result)
-    assert parsed["apiserver"]["bind"] == "127.0.0.1"
-    assert parsed["apiserver"]["port"] == 8080
-    assert parsed["apiserver"]["use_tls"] is False
+def test_render_garm_toml_passphrase_in_database_section():
+    """The passphrase appears in the [database] section."""
+    passphrase = "b" * 32
+    parsed = _render(db_passphrase=passphrase)
+    assert parsed["database"]["passphrase"] == passphrase
 
 
-def test_render_garm_toml_jwt_auth_section():
-    """
-    arrange: Provide a jwt_secret.
-    act: Render the GARM TOML config.
-    assert: The [jwt_auth] section contains the secret.
-    """
-    result = render_garm_toml(
-        listen_address="0.0.0.0",
-        listen_port=9997,
-        db_path="/srv/garm/data/garm.db",
-        jwt_secret="mysecret",
-    )
-    parsed = tomllib.loads(result)
-    assert parsed["jwt_auth"]["secret"] == "mysecret"
-    assert parsed["jwt_auth"]["time_to_live"] == "8760h"
+@pytest.mark.parametrize("sslmode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
+def test_render_garm_toml_sslmode_propagated(sslmode: str):
+    """The sslmode value is propagated to the postgresql section."""
+    pg_config = {**_DEFAULT_PG_CONFIG, "sslmode": sslmode}
+    parsed = _render(postgresql_config=pg_config)
+    assert parsed["database"]["postgresql"]["sslmode"] == sslmode
 
 
-def test_render_garm_toml_metrics_section():
-    """
-    arrange: Any valid config inputs.
-    act: Render the GARM TOML config.
-    assert: The [metrics] section disables auth and enables metrics.
-    """
-    result = render_garm_toml(
-        listen_address="0.0.0.0",
-        listen_port=9997,
-        db_path="/srv/garm/data/garm.db",
-        jwt_secret="abc123",
-    )
-    parsed = tomllib.loads(result)
-    assert parsed["metrics"]["disable_auth"] is True
-    assert parsed["metrics"]["enable"] is True
+@pytest.mark.parametrize(
+    "section,key,value,kwargs",
+    [
+        ("apiserver", "bind", "127.0.0.1", {"listen_address": "127.0.0.1"}),
+        ("apiserver", "port", 8080, {"listen_port": 8080}),
+        ("apiserver", "use_tls", False, {}),
+        ("jwt_auth", "secret", "mysecret", {"jwt_secret": "mysecret"}),
+        ("jwt_auth", "time_to_live", "8760h", {}),
+        ("metrics", "disable_auth", True, {}),
+        ("metrics", "enable", True, {}),
+    ],
+    ids=[
+        "apiserver-bind",
+        "apiserver-port",
+        "apiserver-use_tls",
+        "jwt_auth-secret",
+        "jwt_auth-time_to_live",
+        "metrics-disable_auth",
+        "metrics-enable",
+    ],
+)
+def test_render_garm_toml_section_fields(section: str, key: str, value, kwargs: dict):
+    """Config sections reflect the given parameters."""
+    parsed = _render(**kwargs)
+    assert parsed[section][key] == value
 
 
 def test_render_garm_toml_provider_section():
-    """
-    arrange: Any valid config inputs.
-    act: Render the GARM TOML config.
-    assert: The [[provider]] section has the OpenStack provider binary.
-    """
-    result = render_garm_toml(
-        listen_address="0.0.0.0",
-        listen_port=9997,
-        db_path="/etc/garm/garm.db",
-        jwt_secret="abc123",
-    )
-    parsed = tomllib.loads(result)
+    """The [[provider]] section has the OpenStack provider binary."""
+    parsed = _render()
     assert len(parsed["provider"]) == 1
     provider = parsed["provider"][0]
     assert provider["name"] == "openstack"
@@ -103,33 +114,21 @@ def test_render_garm_toml_provider_section():
     )
 
 
-# ---------------------------------------------------------------------------
-# Secret management tests (no Harness needed — test the helper directly)
-# ---------------------------------------------------------------------------
-
-
-def test_generate_garm_secrets_returns_hex_strings():
-    """
-    arrange: Nothing.
-    act: Call _generate_garm_secrets().
-    assert: Returns a dict with jwt-secret as a 64-char hex string.
-    """
-    from charm import _generate_garm_secrets
-
+def test_generate_garm_secrets_returns_jwt_and_passphrase():
+    """Returns a dict with jwt-secret (64-char hex) and db-passphrase (32-char alnum)."""
     result = _generate_garm_secrets()
-    assert set(result.keys()) == {"jwt-secret"}
+    assert "jwt-secret" in result
+    assert "db-passphrase" in result
     assert len(result["jwt-secret"]) == 64
     assert all(c in "0123456789abcdef" for c in result["jwt-secret"])
+    assert len(result["db-passphrase"]) == 32
+    valid_chars = string.ascii_letters + string.digits
+    assert all(c in valid_chars for c in result["db-passphrase"])
 
 
 def test_generate_garm_secrets_produces_unique_values():
-    """
-    arrange: Nothing.
-    act: Call _generate_garm_secrets() twice.
-    assert: The two calls return different secrets.
-    """
-    from charm import _generate_garm_secrets
-
+    """Two calls return different secrets."""
     first = _generate_garm_secrets()
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
+    assert first["db-passphrase"] != second["db-passphrase"]
