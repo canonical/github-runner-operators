@@ -274,8 +274,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     app_name = "github-runner"
 
     any_charm_src_overwrite = {
-        "any_charm.py": textwrap.dedent(
-            """\
+        "any_charm.py": textwrap.dedent("""\
             from any_charm_base import AnyCharmBase
 
             class AnyCharm(AnyCharmBase):
@@ -293,8 +292,7 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
                         event.relation.data[self.app]["labels"] = '["self-hosted","linux"]'
                         event.relation.data[self.app]["priority"] = "75"
                         event.relation.data[self.app]["minimum-pressure"] = "0"
-            """
-        ),
+            """),
     }
     juju.deploy(
         "any-charm",
@@ -319,7 +317,9 @@ def garm_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
     if len(charm) > 1:
         garm_charm = [file for file in charm if "garm" in file]
         if not garm_charm:
-            raise pytest.UsageError("No GARM charm file found in --charm-file; expected a path containing 'garm'.")
+            raise pytest.UsageError(
+                "No GARM charm file found in --charm-file; expected a path containing 'garm'."
+            )
         return garm_charm[0]
     return charm[0]
 
@@ -363,7 +363,15 @@ def _collect_debug_info(app_name: str) -> None:
     logger.error("=== Debug info for failed GARM deployment ===")
     for cmd in [
         ["sudo", "microk8s.kubectl", "get", "pods", "-A", "-o", "wide"],
-        ["sudo", "microk8s.kubectl", "describe", "pods", "-A", "-l", f"app.kubernetes.io/name={app_name}"],
+        [
+            "sudo",
+            "microk8s.kubectl",
+            "describe",
+            "pods",
+            "-A",
+            "-l",
+            f"app.kubernetes.io/name={app_name}",
+        ],
         ["sudo", "microk8s.kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp"],
     ]:
         try:
@@ -466,8 +474,7 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
     app_name = "fake-image-builder"
 
     any_charm_src_overwrite = {
-        "any_charm.py": textwrap.dedent(
-            """\
+        "any_charm.py": textwrap.dedent("""\
             from any_charm_base import AnyCharmBase
 
             FAKE_IMAGE_ID = "fake-openstack-image-uuid"
@@ -484,8 +491,7 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
                 def _on_image_relation_joined(self, event):
                     event.relation.data[self.unit]["id"] = FAKE_IMAGE_ID
                     event.relation.data[self.unit]["tags"] = FAKE_IMAGE_TAGS
-            """
-        ),
+            """),
     }
     juju.deploy(
         "any-charm",

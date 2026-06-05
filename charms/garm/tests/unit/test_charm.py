@@ -66,7 +66,9 @@ def test_render_garm_toml_passphrase_in_database_section():
     assert parsed["database"]["passphrase"] == passphrase
 
 
-@pytest.mark.parametrize("sslmode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"])
+@pytest.mark.parametrize(
+    "sslmode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]
+)
 def test_render_garm_toml_sslmode_propagated(sslmode: str):
     """The sslmode value is propagated to the postgresql section."""
     pg_config = {**_DEFAULT_PG_CONFIG, "sslmode": sslmode}
