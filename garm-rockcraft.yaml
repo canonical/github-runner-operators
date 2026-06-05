@@ -16,7 +16,7 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # TODO(ISD-XXXX): Pin to next release tag (>= v0.2.2) once cut.
+    # 2026/06/05: Pin to next release tag (>= v0.2.2) once cut.
     # PostgreSQL backend (PR #755) merged post-v0.2.1; tracking main until next release.
     source-branch: main
     build-snaps:
