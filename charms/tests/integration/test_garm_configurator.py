@@ -70,6 +70,10 @@ def deploy_garm_configurator_app_fixture(
             "github-app-client-id": "12345",
             "github-app-installation-id": "67890",
             "github-app-private-key": private_key_secret_uri,
+            "name": "test-scaleset",
+            "flavor": "m1.large",
+            "os-arch": "amd64",
+            "repo": "myorg/myrepo",
         },
     )
     juju.wait(
