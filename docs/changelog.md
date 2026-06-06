@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-04
+
+- add GARM Scaleset configurations for the GARM configurator charm.
+
+## 2026-06-03
+
+- update the `includeAll` setting of the `github_runner`, `github_run_id`, and `github_run_attempt` variables for a better dashboard default experience.
+
+## 2026-06-02
+
+- add OpenStack and GitHub creds/configs for the GARM configurator charm.
+
 ## 2026-05-25
 
 - add GARM (GitHub Actions Runner Manager) 12-factor charm scaffold with ROCK image, Juju secret management, and TOML config rendering.

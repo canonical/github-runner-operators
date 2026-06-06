@@ -79,3 +79,5 @@ rediraffe
 retrigger(ing)?
 Diátaxis
 hostmetrics
+configurator
+scaleset

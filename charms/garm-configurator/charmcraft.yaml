@@ -15,6 +15,105 @@ description: |
   Holds configuration for a single GARM scaleset and provider combination,
   sharing it with the GARM charm via Juju integrations.
 
+config:
+  options:
+    openstack-auth-url:
+      type: string
+      description: |
+        OpenStack Keystone authentication URL.
+    openstack-username:
+      type: string
+      description: |
+        OpenStack username for authentication.
+    openstack-password:
+      type: secret
+      description: |
+        Juju secret containing the OpenStack password for authentication.
+        The secret content must have a "value" key with the password string.
+    openstack-project-name:
+      type: string
+      description: |
+        OpenStack project (tenant) name.
+    openstack-user-domain-name:
+      type: string
+      description: |
+        OpenStack user domain name.
+    openstack-project-domain-name:
+      type: string
+      description: |
+        OpenStack project domain name.
+    openstack-region-name:
+      type: string
+      description: |
+        OpenStack region name.
+    openstack-network:
+      type: string
+      description: |
+        OpenStack network name or ID to use for instances.
+    github-app-client-id:
+      type: string
+      description: |
+        GitHub App client ID.
+    github-app-installation-id:
+      type: string
+      description: |
+        GitHub App installation ID.
+    github-app-private-key:
+      type: secret
+      description: |
+        Juju secret containing the GitHub App private key (PEM format).
+        The secret content must have a "value" key with the private key string.
+    name:
+      type: string
+      description: |
+        The name of the scaleset.
+    flavor:
+      type: string
+      description: |
+        The resource flavor to use for runners in the scaleset.
+    os-arch:
+      type: string
+      description: |
+        The CPU architecture for runners in the scaleset.
+    min-idle-runner:
+      type: int
+      default: 0
+      description: |
+        Minimum number of idle runners in the scaleset.
+    max-runner:
+      type: int
+      default: 0
+      description: |
+        Maximum number of runners in the scaleset.
+    labels:
+      type: string
+      description: |
+        Comma-separated list of labels to add to runners.
+    repo:
+      type: string
+      description: |
+        Repository to register runners to. Mutually exclusive with org.
+    org:
+      type: string
+      description: |
+        Organization to register runners to. Mutually exclusive with repo.
+    runner-group:
+      type: string
+      default: default
+      description: |
+        Runner group for org registration. Ignored when repo is set.
+    pre-install-scripts:
+      type: string
+      description: |
+        A Python dict-like string containing key-value pairs of script name
+        to bash script to be run prior to runner installation.
+
+requires:
+  image:
+    interface: github_runner_image_v0
+    limit: 1
+    optional: false
+
 parts:
   charm:
     source: .

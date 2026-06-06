@@ -8,6 +8,8 @@ import typing
 
 import ops
 
+from charm_state import IMAGE_RELATION_NAME, CharmConfigInvalidError, CharmState
+
 
 class GarmConfiguratorCharm(ops.CharmBase):
     """GARM configurator charm."""
@@ -19,15 +21,49 @@ class GarmConfiguratorCharm(ops.CharmBase):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
+        for event in [
+            self.on.config_changed,
+            self.on.secret_changed,
+            self.on[IMAGE_RELATION_NAME].relation_joined,
+            self.on[IMAGE_RELATION_NAME].relation_changed,
+            self.on[IMAGE_RELATION_NAME].relation_broken,
+        ]:
+            self.framework.observe(event, self._reconcile)
 
-    def _on_collect_unit_status(self, event: ops.CollectStatusEvent) -> None:
-        """Handle collect-unit-status event.
+    def _reconcile(self, event: ops.EventBase) -> None:
+        """Reconcile all charm state for every event.
+
+        Reads full current state and acts idempotently: forwards OpenStack
+        credentials to the image builder relation, and reports unit status.
 
         Args:
-            event: The collect status event.
+            event: The triggering event.
         """
-        event.add_status(ops.ActiveStatus("Ready"))
+        try:
+            state = CharmState.from_charm(self)
+        except CharmConfigInvalidError as e:
+            self.unit.status = ops.BlockedStatus(e.msg)
+            return
+
+        relation = self.model.get_relation(IMAGE_RELATION_NAME)
+        if relation is not None:
+            relation.data[self.unit].update(
+                {
+                    "auth_url": state.provider_config.auth_url,
+                    "password": state.provider_config.password,
+                    "project_domain_name": state.provider_config.project_domain_name,
+                    "project_name": state.provider_config.project_name,
+                    "user_domain_name": state.provider_config.user_domain_name,
+                    "username": state.provider_config.username,
+                }
+            )
+
+        if relation is None:
+            self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
+        elif state.image_id is None:
+            self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
+        else:
+            self.unit.status = ops.ActiveStatus("Ready")
 
 
 if __name__ == "__main__":
