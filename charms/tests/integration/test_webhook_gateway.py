@@ -90,7 +90,7 @@ def test_webhook_gateway_redelivery_config(
             "github-path": "canonical/github-runner-operators",
             "webhook-id": 123456,
             "redelivery-interval": 300,
-            "github-app-client-id": "Iv1.test123",
+            "github-app-id": 12345,
             "github-app-installation-id": 99999,
         },
     )

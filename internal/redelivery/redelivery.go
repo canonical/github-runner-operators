@@ -28,7 +28,7 @@ type Config struct {
 	// Mutually exclusive with app-based auth fields.
 	GitHubToken string
 
-	// GitHubAppID is the GitHub App numeric ID for app-based authentication.
+	// GitHubAppID is the GitHub App ID for app-based authentication.
 	GitHubAppID int64
 
 	// GitHubAppInstallationID is the GitHub App installation ID.

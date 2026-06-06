@@ -108,15 +108,15 @@ def test_gen_environment_redelivery_interval():
     assert env["APP_REDELIVERY_INTERVAL_SECONDS"] == "300"
 
 
-def test_gen_environment_github_app_client_id():
-    """arrange: A charm with github-app-client-id configured.
+def test_gen_environment_github_app_id():
+    """arrange: A charm with github-app-id configured.
 
     act: Call gen_environment.
-    assert: APP_GITHUB_APP_CLIENT_ID is set.
+    assert: APP_GITHUB_APP_ID is set.
     """
-    env = _call_gen_environment({"metrics-port": 9464, "github-app-client-id": "Iv1.abc123"})
+    env = _call_gen_environment({"metrics-port": 9464, "github-app-id": 12345})
 
-    assert env["APP_GITHUB_APP_CLIENT_ID"] == "Iv1.abc123"
+    assert env["APP_GITHUB_APP_ID"] == "12345"
 
 
 def test_gen_environment_github_app_installation_id():
@@ -158,7 +158,7 @@ def test_gen_environment_full_redelivery_config():
             "github-path": "canonical/github-runner-operators",
             "webhook-id": 123456,
             "redelivery-interval": 900,
-            "github-app-client-id": "Iv1.xyz",
+            "github-app-id": 12345,
             "github-app-installation-id": 99999,
         }
     )
@@ -167,5 +167,5 @@ def test_gen_environment_full_redelivery_config():
     assert env["APP_WEBHOOK_GITHUB_REPO"] == "github-runner-operators"
     assert env["APP_WEBHOOK_ID"] == "123456"
     assert env["APP_REDELIVERY_INTERVAL_SECONDS"] == "900"
-    assert env["APP_GITHUB_APP_CLIENT_ID"] == "Iv1.xyz"
+    assert env["APP_GITHUB_APP_ID"] == "12345"
     assert env["APP_GITHUB_APP_INSTALLATION_ID"] == "99999"

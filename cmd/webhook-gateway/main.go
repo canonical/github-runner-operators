@@ -31,7 +31,7 @@ const rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 const webhookSecretEnvVar = "APP_WEBHOOK_SECRET_VALUE"
 
 const githubTokenEnvVar = "APP_GITHUB_TOKEN_VALUE"
-const githubAppClientIDEnvVar = "APP_GITHUB_APP_CLIENT_ID"
+const githubAppIDEnvVar = "APP_GITHUB_APP_ID"
 const githubAppInstallationIDEnvVar = "APP_GITHUB_APP_INSTALLATION_ID"
 const githubAppPrivateKeyEnvVar = "APP_GITHUB_APP_PRIVATE_KEY_VALUE"
 const webhookGitHubOrgEnvVar = "APP_WEBHOOK_GITHUB_ORG"
@@ -68,7 +68,19 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	startRedeliveryDaemon(ctx, &wg)
+
+	// Start redelivery daemon if configured.
+	if cfg := buildRedeliveryConfig(); cfg != nil {
+		daemon, err := redelivery.NewDaemon(cfg)
+		if err != nil {
+			log.Fatalf("failed to create redelivery daemon: %v", err)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			daemon.Run(ctx)
+		}()
+	}
 
 	p := queue.NewAmqpProducer(uri, queue.DefaultQueueConfig())
 	handler := &webhook.Handler{
@@ -101,22 +113,6 @@ func main() {
 	wg.Wait()
 }
 
-func startRedeliveryDaemon(ctx context.Context, wg *sync.WaitGroup) {
-	cfg := buildRedeliveryConfig()
-	if cfg == nil {
-		return
-	}
-	daemon, err := redelivery.NewDaemon(cfg)
-	if err != nil {
-		log.Fatalf("failed to create redelivery daemon: %v", err)
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		daemon.Run(ctx)
-	}()
-}
-
 func buildRedeliveryConfig() *redelivery.Config {
 	githubOrg := os.Getenv(webhookGitHubOrgEnvVar)
 	webhookIDStr := os.Getenv(webhookIDEnvVar)
@@ -136,10 +132,10 @@ func buildRedeliveryConfig() *redelivery.Config {
 		WebhookID:   webhookID,
 	}
 
-	if appIDStr := os.Getenv(githubAppClientIDEnvVar); appIDStr != "" {
+	if appIDStr := os.Getenv(githubAppIDEnvVar); appIDStr != "" {
 		appID, err := strconv.ParseInt(appIDStr, 10, 64)
 		if err != nil {
-			log.Fatalf("invalid %s value: %v", githubAppClientIDEnvVar, err)
+			log.Fatalf("invalid %s value: %v", githubAppIDEnvVar, err)
 		}
 		cfg.GitHubAppID = appID
 
