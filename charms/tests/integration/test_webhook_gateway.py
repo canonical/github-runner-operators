@@ -82,7 +82,7 @@ def test_webhook_gateway_redelivery_config(
     """
     arrange: The webhook gateway app deployed and active with rabbitmq.
     act: Set redelivery-related config options on the charm.
-    assert: The charm remains active after config is applied.
+    assert: The charm remains active and the redelivery daemon starts.
     """
     juju.config(
         webhook_gateway_app,
@@ -99,3 +99,9 @@ def test_webhook_gateway_redelivery_config(
         timeout=5 * 60,
         delay=10,
     )
+
+    # Verify the redelivery daemon started with the configured settings
+    unit_name = f"{webhook_gateway_app}/0"
+    logs = juju.run(unit_name, ["sudo", "journalctl", "-u", "snap.webhook-gateway-operator.*", "-n", "100"])
+    assert "redelivery daemon started" in logs
+    assert "interval=5m" in logs  # redelivery-interval: 300 seconds = 5 minutes
