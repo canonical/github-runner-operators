@@ -16,9 +16,10 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # 2026/06/05: Pin to next release tag (>= v0.2.2) once cut.
-    # PostgreSQL backend (PR #755) merged post-v0.2.1; tracking main until next release.
-    source-branch: main
+    # 2026/06/08: Pin to commit with PostgreSQL backend (PR #755, merged post-v0.2.1).
+    # Switch to source-tag once v0.2.2+ is released.
+    source-commit: 47811d0046a9515085b85d88038f87ac68fd793c
+    source-depth: 1
     build-snaps:
       - go/1.26/stable
     build-environment:

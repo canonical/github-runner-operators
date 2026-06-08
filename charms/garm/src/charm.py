@@ -59,6 +59,8 @@ def render_garm_toml(
     Returns:
         TOML-formatted string ready to be written to disk.
     """
+    # Config structure validated against:
+    # https://github.com/cbartz/garm/blob/41c46766/config/config.go (Config struct)
     config: dict[str, typing.Any] = {
         "database": {
             "backend": "postgresql",
@@ -142,8 +144,8 @@ class GarmCharm(paas_charm.go.Charm):
         container = self.unit.get_container(CONTAINER_NAME)
         try:
             self._push_garm_config(container)
-        except ops.SecretNotFoundError:
-            logger.warning("garm-secrets not yet available; deferring config push to next event")
+        except (ops.SecretNotFoundError, KeyError) as exc:
+            logger.warning("garm-secrets not yet complete: %s; deferring config push", exc)
             self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
             return
         container.add_layer(
@@ -187,9 +189,16 @@ class GarmCharm(paas_charm.go.Charm):
 
         Raises:
             ops.SecretNotFoundError: If the secret doesn't exist yet.
+            KeyError: If db-passphrase is missing (leader hasn't backfilled yet).
         """
         secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
-        return secret.get_content()
+        content = secret.get_content()
+        if "db-passphrase" not in content:
+            raise KeyError(
+                "db-passphrase not yet available in garm-secrets; "
+                "waiting for leader to backfill"
+            )
+        return content
 
     def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
         """Get PostgreSQL config from relation data, or None if not available.
@@ -213,7 +222,6 @@ class GarmCharm(paas_charm.go.Charm):
             if not endpoints:
                 continue
 
-            # endpoints format from data_platform_libs: "host:port" or "host:port,host2:port2"
             # GARM only supports a single hostname in its PostgreSQL config struct
             # (no multi-host DSN or failover list), so we take the first endpoint.
             host_port = endpoints.split(",")[0]
@@ -238,9 +246,6 @@ class GarmCharm(paas_charm.go.Charm):
         """
         postgresql_config = self._get_postgresql_config()
         if not postgresql_config:
-            # Relation is required (optional: false) so paas-charm will block.
-            # If we reach here without data, just return — the parent's is_ready()
-            # check should have caught this, but guard defensively.
             logger.info("PostgreSQL relation data not yet available")
             return
 
