@@ -40,7 +40,7 @@ const webhookIDEnvVar = "APP_WEBHOOK_ID"
 const redeliveryIntervalEnvVar = "APP_REDELIVERY_INTERVAL_SECONDS"
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 
 	err := telemetry.Start(ctx, "github-runner-webhook-gateway", version.String())
