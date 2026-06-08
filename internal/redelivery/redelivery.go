@@ -13,7 +13,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 )
 
 const (
@@ -53,14 +53,24 @@ type Config struct {
 	Interval time.Duration
 }
 
-// Validate checks that the config has all required fields.
-func (c *Config) Validate() error {
+// validateAuthConfigured checks if at least one auth method is configured.
+func (c *Config) validateAuthConfigured() error {
 	if c.GitHubToken == "" && c.GitHubAppID == 0 {
 		return fmt.Errorf("github authentication not configured: set either token or app credentials")
 	}
+	return nil
+}
+
+// validateAuthNotAmbiguous checks that token and app auth methods are not mixed.
+func (c *Config) validateAuthNotAmbiguous() error {
 	if c.GitHubToken != "" && (c.GitHubAppID != 0 || c.GitHubAppInstallationID != 0 || c.GitHubAppPrivateKey != "") {
 		return fmt.Errorf("github authentication is ambiguous: set either token or app credentials, not both")
 	}
+	return nil
+}
+
+// validateAppAuth checks that app auth has all required fields.
+func (c *Config) validateAppAuth() error {
 	if c.GitHubAppID != 0 {
 		if c.GitHubAppInstallationID == 0 {
 			return fmt.Errorf("github app installation ID is required for app authentication")
@@ -68,6 +78,20 @@ func (c *Config) Validate() error {
 		if c.GitHubAppPrivateKey == "" {
 			return fmt.Errorf("github app private key is required for app authentication")
 		}
+	}
+	return nil
+}
+
+// Validate checks that the config has all required fields.
+func (c *Config) Validate() error {
+	if err := c.validateAuthConfigured(); err != nil {
+		return err
+	}
+	if err := c.validateAuthNotAmbiguous(); err != nil {
+		return err
+	}
+	if err := c.validateAppAuth(); err != nil {
+		return err
 	}
 	if c.GitHubOrg == "" {
 		return fmt.Errorf("github organisation is required")
