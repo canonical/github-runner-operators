@@ -5,10 +5,13 @@
 
 import json
 import logging
+import time
 
 import jubilant
 import pytest
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +55,11 @@ def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
 def _garm_first_run(address: str) -> str:
     """Complete GARM first-run initialization and return an admin JWT.
 
-    Calls /api/v1/first-run to create the initial admin user.
-    If already initialized (409 Conflict), logs in with the same credentials.
+    Calls /api/v1/first-run to create the initial admin user, then logs in
+    to obtain a JWT. Also configures required controller URLs so GARM will
+    serve operational API endpoints.
+
+    Retries with backoff to allow GARM time to finish starting after replan.
 
     Args:
         address: GARM unit IP address.
@@ -62,22 +68,81 @@ def _garm_first_run(address: str) -> str:
         JWT token string for authenticated API calls.
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    payload = {
+    # GARM v0.2.x requires strong passwords (min 12 chars, mixed case, digits, symbols)
+    password = "Adm1n-T3st-P4ssw0rd#Strong"
+    first_run_payload = {
         "username": "admin",
-        "password": "IntegrationTest1!",
+        "password": password,
         "email": "admin@test.local",
         "full_name": "Integration Test Admin",
     }
 
-    resp = requests.post(f"{base_url}/first-run", json=payload, timeout=30)
-    if resp.status_code == 200:
-        return resp.json().get("token", "")
+    # Retry with backoff — GARM may still be starting up after charm reports active
+    session = requests.Session()
+    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retries))
 
-    # Already initialized — login instead
-    login_payload = {"username": "admin", "password": "IntegrationTest1!"}
-    resp = requests.post(f"{base_url}/auth/login", json=login_payload, timeout=30)
+    for attempt in range(10):
+        try:
+            resp = session.post(
+                f"{base_url}/first-run", json=first_run_payload, timeout=30
+            )
+            logger.info(
+                "first-run response (attempt %d): status=%d body=%s",
+                attempt + 1,
+                resp.status_code,
+                resp.text[:500],
+            )
+            if resp.status_code in (200, 409):
+                # 200 = user created, 409 = already initialized — either way, login
+                break
+
+            # Unexpected status (e.g. 500 during startup) — retry
+            if attempt < 9:
+                wait = min(2**attempt, 30)
+                logger.info("Retrying in %ds...", wait)
+                time.sleep(wait)
+            else:
+                resp.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            if attempt < 9:
+                wait = min(2**attempt, 30)
+                logger.info(
+                    "GARM not yet listening (attempt %d/10), retrying in %ds...",
+                    attempt + 1,
+                    wait,
+                )
+                time.sleep(wait)
+            else:
+                raise
+
+    # Login to obtain JWT
+    login_payload = {"username": "admin", "password": password}
+    resp = session.post(f"{base_url}/auth/login", json=login_payload, timeout=30)
+    logger.info("login response: status=%d body=%s", resp.status_code, resp.text[:500])
     resp.raise_for_status()
-    return resp.json().get("token", "")
+    token = resp.json().get("token", "")
+    assert token, "Expected non-empty JWT token from login"
+
+    # Configure controller URLs — GARM requires metadata_url and callback_url
+    # before it will serve operational endpoints (returns 409 otherwise)
+    headers = {"Authorization": f"Bearer {token}"}
+    controller_payload = {
+        "metadata_url": f"http://{address}:{GARM_API_PORT}/api/v1/metadata",
+        "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
+        "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
+    }
+    resp = session.put(
+        f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
+    )
+    logger.info(
+        "controller setup response: status=%d body=%s",
+        resp.status_code,
+        resp.text[:300],
+    )
+    resp.raise_for_status()
+
+    return token
 
 
 def test_garm_blocks_without_postgresql(

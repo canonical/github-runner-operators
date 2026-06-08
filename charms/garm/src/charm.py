@@ -152,6 +152,7 @@ class GarmCharm(paas_charm.go.Charm):
                 "services": {
                     PEBBLE_SERVICE_NAME: {
                         "override": "merge",
+                        "startup": "enabled",
                         "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
                     }
                 }
@@ -224,7 +225,7 @@ class GarmCharm(paas_charm.go.Charm):
                 "hostname": host,
                 "port": int(port),
                 "database": data.get("database", ""),
-                "sslmode": str(self.config.get("postgresql-sslmode", "require")),
+                "sslmode": str(self.config.get("postgresql-sslmode", "prefer")),
             }
 
         return None
