@@ -14,14 +14,14 @@ import (
 
 // Environment variable names for redelivery configuration.
 const (
-	GitHubTokenEnvVar           = "APP_GITHUB_TOKEN_VALUE"
-	GitHubAppIDEnvVar           = "APP_GITHUB_APP_ID"
+	GitHubTokenEnvVar             = "APP_GITHUB_TOKEN_VALUE"
+	GitHubAppIDEnvVar             = "APP_GITHUB_APP_ID"
 	GitHubAppInstallationIDEnvVar = "APP_GITHUB_APP_INSTALLATION_ID"
-	GitHubAppPrivateKeyEnvVar   = "APP_GITHUB_APP_PRIVATE_KEY_VALUE"
-	WebhookGitHubOrgEnvVar      = "APP_WEBHOOK_GITHUB_ORG"
-	WebhookGitHubRepoEnvVar     = "APP_WEBHOOK_GITHUB_REPO"
-	WebhookIDEnvVar             = "APP_WEBHOOK_ID"
-	RedeliveryIntervalEnvVar    = "APP_REDELIVERY_INTERVAL_SECONDS"
+	GitHubAppPrivateKeyEnvVar     = "APP_GITHUB_APP_PRIVATE_KEY_VALUE"
+	WebhookGitHubOrgEnvVar        = "APP_WEBHOOK_GITHUB_ORG"
+	WebhookGitHubRepoEnvVar       = "APP_WEBHOOK_GITHUB_REPO"
+	WebhookIDEnvVar               = "APP_WEBHOOK_ID"
+	RedeliveryIntervalEnvVar      = "APP_REDELIVERY_INTERVAL_SECONDS"
 )
 
 // ConfigFromEnv builds a redelivery config from environment variables.
