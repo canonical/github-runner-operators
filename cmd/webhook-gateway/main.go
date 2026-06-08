@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -29,15 +28,6 @@ const webhookPath = "/webhook"
 const portEnvVar = "APP_PORT"
 const rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 const webhookSecretEnvVar = "APP_WEBHOOK_SECRET_VALUE"
-
-const githubTokenEnvVar = "APP_GITHUB_TOKEN_VALUE"
-const githubAppIDEnvVar = "APP_GITHUB_APP_ID"
-const githubAppInstallationIDEnvVar = "APP_GITHUB_APP_INSTALLATION_ID"
-const githubAppPrivateKeyEnvVar = "APP_GITHUB_APP_PRIVATE_KEY_VALUE"
-const webhookGitHubOrgEnvVar = "APP_WEBHOOK_GITHUB_ORG"
-const webhookGitHubRepoEnvVar = "APP_WEBHOOK_GITHUB_REPO"
-const webhookIDEnvVar = "APP_WEBHOOK_ID"
-const redeliveryIntervalEnvVar = "APP_REDELIVERY_INTERVAL_SECONDS"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
@@ -102,7 +92,7 @@ func main() {
 }
 
 func startRedeliveryDaemon(ctx context.Context, wg *sync.WaitGroup) {
-	cfg := buildRedeliveryConfig()
+	cfg := redelivery.ConfigFromEnv()
 	if cfg == nil {
 		return
 	}
@@ -115,67 +105,4 @@ func startRedeliveryDaemon(ctx context.Context, wg *sync.WaitGroup) {
 		defer wg.Done()
 		daemon.Run(ctx)
 	}()
-}
-
-func buildRedeliveryConfig() *redelivery.Config {
-	githubOrg := os.Getenv(webhookGitHubOrgEnvVar)
-	webhookIDStr := os.Getenv(webhookIDEnvVar)
-	if githubOrg == "" || webhookIDStr == "" {
-		return nil
-	}
-
-	webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
-	if err != nil {
-		log.Fatalf("invalid %s value: %v", webhookIDEnvVar, err)
-	}
-
-	cfg := &redelivery.Config{
-		GitHubOrg:  githubOrg,
-		GitHubRepo: os.Getenv(webhookGitHubRepoEnvVar),
-		WebhookID:  webhookID,
-	}
-
-	configureRedeliveryAuth(cfg)
-	configureRedeliveryInterval(cfg)
-
-	return cfg
-}
-
-func configureRedeliveryAuth(cfg *redelivery.Config) {
-	githubToken := os.Getenv(githubTokenEnvVar)
-	if githubToken != "" {
-		cfg.GitHubToken = githubToken
-	}
-
-	appIDStr := os.Getenv(githubAppIDEnvVar)
-	if appIDStr != "" {
-		appID, err := strconv.ParseInt(appIDStr, 10, 64)
-		if err != nil {
-			log.Fatalf("invalid %s value: %v", githubAppIDEnvVar, err)
-		}
-		cfg.GitHubAppID = appID
-	}
-
-	installationIDStr := os.Getenv(githubAppInstallationIDEnvVar)
-	if installationIDStr != "" {
-		installationID, err := strconv.ParseInt(installationIDStr, 10, 64)
-		if err != nil {
-			log.Fatalf("invalid %s value: %v", githubAppInstallationIDEnvVar, err)
-		}
-		cfg.GitHubAppInstallationID = installationID
-	}
-	cfg.GitHubAppPrivateKey = os.Getenv(githubAppPrivateKeyEnvVar)
-}
-
-func configureRedeliveryInterval(cfg *redelivery.Config) {
-	intervalStr := os.Getenv(redeliveryIntervalEnvVar)
-	if intervalStr == "" {
-		return
-	}
-
-	seconds, err := strconv.Atoi(intervalStr)
-	if err != nil {
-		log.Fatalf("invalid %s value: %v", redeliveryIntervalEnvVar, err)
-	}
-	cfg.Interval = time.Duration(seconds) * time.Second
 }
