@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-08
 
-- reorder the template variables in the GitHub runner VM hostmetrics dashboard and update the variable filter chains accordingly.
+- reorder the template variables in the GitHub runner VM hostmetrics dashboard.
 
 ## 2026-06-04
 
