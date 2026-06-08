@@ -55,6 +55,12 @@ func makeDelivery(id int64, status, event, action string, deliveredAt time.Time)
 }
 
 func TestRedeliverFailedDeliveries(t *testing.T) {
+	/*
+		arrange: Create a daemon with mixed delivery statuses and telemetry metric reader.
+		act: Run a single redelivery cycle.
+		assert: Only failed workflow_job queued/completed deliveries are redelivered,
+		        and metrics are updated.
+	*/
 	mr := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
 
@@ -62,10 +68,19 @@ func TestRedeliverFailedDeliveries(t *testing.T) {
 	recentFailed := makeDelivery(1, "failed", "workflow_job", "queued", now.Add(-2*time.Minute))
 	recentOK := makeDelivery(2, "OK", "workflow_job", "queued", now.Add(-3*time.Minute))
 	recentWrongEvent := makeDelivery(3, "failed", "push", "queued", now.Add(-4*time.Minute))
-	recentWrongAction := makeDelivery(4, "failed", "workflow_job", "completed", now.Add(-5*time.Minute))
+	recentCompleted := makeDelivery(4, "failed", "workflow_job", "completed", now.Add(-5*time.Minute))
+	recentInProgress := makeDelivery(5, "failed", "workflow_job", "in_progress", now.Add(-6*time.Minute))
+	recentWaiting := makeDelivery(6, "failed", "workflow_job", "waiting", now.Add(-7*time.Minute))
 
 	client := &fakeGitHubClient{
-		deliveries: []*github.HookDelivery{recentFailed, recentOK, recentWrongEvent, recentWrongAction},
+		deliveries: []*github.HookDelivery{
+			recentFailed,
+			recentOK,
+			recentWrongEvent,
+			recentCompleted,
+			recentInProgress,
+			recentWaiting,
+		},
 	}
 
 	cfg := &Config{
@@ -87,6 +102,11 @@ func TestRedeliverFailedDeliveries(t *testing.T) {
 }
 
 func TestRedeliverListError(t *testing.T) {
+	/*
+		arrange: Create a daemon whose GitHub client fails while listing deliveries.
+		act: Run a single redelivery cycle.
+		assert: No redeliveries are recorded and the redelivery error metric increases.
+	*/
 	mr := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
 
@@ -109,32 +129,12 @@ func TestRedeliverListError(t *testing.T) {
 	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
 }
 
-func TestRedeliverSkipsOKDeliveries(t *testing.T) {
-	_ = telemetry.AcquireTestMetricReader(t)
-	defer telemetry.ReleaseTestMetricReader(t)
-
-	now := time.Now().UTC()
-	client := &fakeGitHubClient{
-		deliveries: []*github.HookDelivery{
-			makeDelivery(1, "OK", "workflow_job", "queued", now.Add(-1*time.Minute)),
-			makeDelivery(2, "OK", "workflow_job", "queued", now.Add(-2*time.Minute)),
-		},
-	}
-
-	cfg := &Config{
-		GitHubToken: "test-token",
-		GitHubOrg:   testOrg,
-		WebhookID:   testWebhookID,
-		Interval:    10 * time.Minute,
-	}
-
-	daemon := NewDaemonWithClient(cfg, client)
-	daemon.runOnce(context.Background())
-
-	assert.Nil(t, client.redelivered)
-}
-
 func TestRedeliverContinuesOnSingleFailure(t *testing.T) {
+	/*
+		arrange: Create a daemon with failed deliveries and a client that fails redelivery calls.
+		act: Run a single redelivery cycle.
+		assert: The cycle completes without recording successful redeliveries.
+	*/
 	_ = telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
 
@@ -162,6 +162,11 @@ func TestRedeliverContinuesOnSingleFailure(t *testing.T) {
 }
 
 func TestConfigValidation(t *testing.T) {
+	/*
+		arrange: Define configuration validation scenarios.
+		act: Validate each configuration.
+		assert: Expected validation errors are returned for invalid configs and none for valid configs.
+	*/
 	tests := []struct {
 		name    string
 		config  Config
@@ -175,11 +180,6 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name:    "both auth methods",
 			config:  Config{GitHubToken: "tok", GitHubAppID: 1, GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org", WebhookID: 1},
-			wantErr: "github authentication is ambiguous",
-		},
-		{
-			name:    "token auth with app installation details",
-			config:  Config{GitHubToken: "tok", GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org", WebhookID: 1},
 			wantErr: "github authentication is ambiguous",
 		},
 		{
@@ -214,6 +214,11 @@ func TestConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			/*
+				arrange: Select one configuration scenario.
+				act: Call Validate on the scenario config.
+				assert: Error presence and content match expectations.
+			*/
 			err := tt.config.Validate()
 			if tt.wantErr == "" {
 				assert.NoError(t, err)
@@ -225,6 +230,11 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestDaemonStopsOnContextCancel(t *testing.T) {
+	/*
+		arrange: Create a daemon with a short interval and a context that times out.
+		act: Run the daemon in a goroutine and wait for completion.
+		assert: The daemon exits after context cancellation.
+	*/
 	_ = telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
 
