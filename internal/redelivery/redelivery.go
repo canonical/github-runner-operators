@@ -58,7 +58,7 @@ func (c *Config) Validate() error {
 	if c.GitHubToken == "" && c.GitHubAppID == 0 {
 		return fmt.Errorf("github authentication not configured: set either token or app credentials")
 	}
-	if c.GitHubToken != "" && c.GitHubAppID != 0 {
+	if c.GitHubToken != "" && (c.GitHubAppID != 0 || c.GitHubAppInstallationID != 0 || c.GitHubAppPrivateKey != "") {
 		return fmt.Errorf("github authentication is ambiguous: set either token or app credentials, not both")
 	}
 	if c.GitHubAppID != 0 {

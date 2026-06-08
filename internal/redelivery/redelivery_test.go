@@ -82,7 +82,7 @@ func TestRedeliverFailedDeliveries(t *testing.T) {
 	assert.Equal(t, []int64{1, 4}, client.redelivered)
 
 	m := mr.Collect(t)
-	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
+	assert.Equal(t, 2.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
 	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
 }
 
@@ -174,7 +174,12 @@ func TestConfigValidation(t *testing.T) {
 		},
 		{
 			name:    "both auth methods",
-			config:  Config{GitHubToken: "tok", GitHubAppID: 1, GitHubOrg: "org", WebhookID: 1},
+			config:  Config{GitHubToken: "tok", GitHubAppID: 1, GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org", WebhookID: 1},
+			wantErr: "github authentication is ambiguous",
+		},
+		{
+			name:    "token auth with app installation details",
+			config:  Config{GitHubToken: "tok", GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org", WebhookID: 1},
 			wantErr: "github authentication is ambiguous",
 		},
 		{

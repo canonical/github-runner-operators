@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-08
+
+- Implement the webhook redelivery service.
+
 ## 2026-06-04
 
 - add GARM Scaleset configurations for the GARM configurator charm.
