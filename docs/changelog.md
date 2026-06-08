@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-08
+
+- reorder the template variables in the GitHub runner VM hostmetrics dashboard and update the variable filter chains accordingly.
+
 ## 2026-06-04
 
 - add GARM Scaleset configurations for the GARM configurator charm.
