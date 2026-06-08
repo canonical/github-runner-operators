@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/go-github/v86/github"
@@ -18,9 +19,10 @@ import (
 const (
 	defaultInterval = 10 * time.Minute
 	supportedEvent  = "workflow_job"
-	routableAction  = "queued"
 	okStatus        = "OK"
 )
+
+var redeliverableActions = []string{"queued", "completed"}
 
 // Config holds the configuration for the redelivery daemon.
 type Config struct {
@@ -191,8 +193,5 @@ func isFailedRoutableDelivery(d *github.HookDelivery) bool {
 	if d.GetEvent() != supportedEvent {
 		return false
 	}
-	if d.GetAction() != routableAction {
-		return false
-	}
-	return true
+	return slices.Contains(redeliverableActions, d.GetAction())
 }

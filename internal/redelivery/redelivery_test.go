@@ -79,7 +79,7 @@ func TestRedeliverFailedDeliveries(t *testing.T) {
 	daemon := NewDaemonWithClient(cfg, client)
 	daemon.runOnce(context.Background())
 
-	assert.Equal(t, []int64{1}, client.redelivered)
+	assert.Equal(t, []int64{1, 4}, client.redelivered)
 
 	m := mr.Collect(t)
 	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
