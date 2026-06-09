@@ -141,9 +141,7 @@ class GarmCharm(paas_charm.go.Charm):
         # GARM cannot start without a database connection.
         if not self._get_postgresql_config():
             logger.info("PostgreSQL relation data not yet available; blocking")
-            self.unit.status = ops.BlockedStatus(
-                "Waiting for postgresql relation"
-            )
+            self.unit.status = ops.BlockedStatus("Waiting for postgresql relation")
             return
 
         # TODO: Eliminate double-replan (ISD-5718). paas_charm calls replan()
