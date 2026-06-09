@@ -14,7 +14,6 @@ import (
 
 // Environment variable names for redelivery configuration.
 const (
-	GitHubTokenEnvVar             = "APP_GITHUB_TOKEN_VALUE"
 	GitHubAppIDEnvVar             = "APP_GITHUB_APP_ID"
 	GitHubAppInstallationIDEnvVar = "APP_GITHUB_APP_INSTALLATION_ID"
 	GitHubAppPrivateKeyEnvVar     = "APP_GITHUB_APP_PRIVATE_KEY_VALUE"
@@ -51,11 +50,6 @@ func ConfigFromEnv() *Config {
 }
 
 func configureAuth(cfg *Config) {
-	githubToken := os.Getenv(GitHubTokenEnvVar)
-	if githubToken != "" {
-		cfg.GitHubToken = githubToken
-	}
-
 	appIDStr := os.Getenv(GitHubAppIDEnvVar)
 	if appIDStr != "" {
 		appID, err := strconv.ParseInt(appIDStr, 10, 64)

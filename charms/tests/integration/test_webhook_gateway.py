@@ -94,14 +94,19 @@ def test_webhook_gateway_redelivery_config(
             "github-app-installation-id": 99999,
         },
     )
+
     juju.wait(
         lambda status: jubilant.all_active(status, webhook_gateway_app),
+        error=lambda status: jubilant.any_error(status, webhook_gateway_app),
         timeout=5 * 60,
         delay=10,
     )
 
     # Verify the redelivery daemon started with the configured settings
     unit_name = f"{webhook_gateway_app}/0"
-    logs = juju.run(unit_name, ["sudo", "journalctl", "-u", "snap.webhook-gateway-operator.*", "-n", "100"])
-    assert "redelivery daemon started" in logs
-    assert "interval=5m" in logs  # redelivery-interval: 300 seconds = 5 minutes
+    result = juju.exec(
+        "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble logs",
+        unit=unit_name,
+    )
+    assert "redelivery daemon started" in result.stdout
+    assert "interval=5m" in result.stdout

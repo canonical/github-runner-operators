@@ -26,10 +26,6 @@ var redeliverableActions = []string{"queued", "completed"}
 
 // Config holds the configuration for the redelivery daemon.
 type Config struct {
-	// GitHubToken is the personal access token for GitHub API authentication.
-	// Mutually exclusive with app-based auth fields.
-	GitHubToken string
-
 	// GitHubAppID is the GitHub App ID for app-based authentication.
 	GitHubAppID int64
 
@@ -53,43 +49,22 @@ type Config struct {
 	Interval time.Duration
 }
 
-// validateAuthConfigured checks if at least one auth method is configured.
-func (c *Config) validateAuthConfigured() error {
-	if c.GitHubToken == "" && c.GitHubAppID == 0 {
-		return fmt.Errorf("github authentication not configured: set either token or app credentials")
-	}
-	return nil
-}
-
-// validateAuthNotAmbiguous checks that token and app auth methods are not mixed.
-func (c *Config) validateAuthNotAmbiguous() error {
-	if c.GitHubToken != "" && (c.GitHubAppID != 0 || c.GitHubAppInstallationID != 0 || c.GitHubAppPrivateKey != "") {
-		return fmt.Errorf("github authentication is ambiguous: set either token or app credentials, not both")
-	}
-	return nil
-}
-
-// validateAppAuth checks that app auth has all required fields.
+// validateAppAuth checks that all app auth fields are provided.
 func (c *Config) validateAppAuth() error {
-	if c.GitHubAppID != 0 {
-		if c.GitHubAppInstallationID == 0 {
-			return fmt.Errorf("github app installation ID is required for app authentication")
-		}
-		if c.GitHubAppPrivateKey == "" {
-			return fmt.Errorf("github app private key is required for app authentication")
-		}
+	if c.GitHubAppID == 0 {
+		return fmt.Errorf("github app ID is required")
+	}
+	if c.GitHubAppInstallationID == 0 {
+		return fmt.Errorf("github app installation ID is required")
+	}
+	if c.GitHubAppPrivateKey == "" {
+		return fmt.Errorf("github app private key is required")
 	}
 	return nil
 }
 
 // Validate checks that the config has all required fields.
 func (c *Config) Validate() error {
-	if err := c.validateAuthConfigured(); err != nil {
-		return err
-	}
-	if err := c.validateAuthNotAmbiguous(); err != nil {
-		return err
-	}
 	if err := c.validateAppAuth(); err != nil {
 		return err
 	}

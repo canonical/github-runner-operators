@@ -26,33 +26,19 @@ type githubClient struct {
 }
 
 func newGitHubClient(cfg *Config) (GitHubClient, error) {
-	var client *github.Client
-	var err error
-
-	switch {
-	case cfg.GitHubToken != "":
-		client, err = github.NewClient(github.WithAuthToken(cfg.GitHubToken))
-		if err != nil {
-			return nil, fmt.Errorf("cannot create github client: %w", err)
-		}
-	case cfg.GitHubAppID != 0:
-		itr, err := ghinstallation.New(
-			http.DefaultTransport,
-			cfg.GitHubAppID,
-			cfg.GitHubAppInstallationID,
-			[]byte(cfg.GitHubAppPrivateKey),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create github app installation transport: %w", err)
-		}
-		client, err = github.NewClient(github.WithHTTPClient(&http.Client{Transport: itr}))
-		if err != nil {
-			return nil, fmt.Errorf("cannot create github client: %w", err)
-		}
-	default:
-		return nil, fmt.Errorf("no github authentication method configured")
+	itr, err := ghinstallation.New(
+		http.DefaultTransport,
+		cfg.GitHubAppID,
+		cfg.GitHubAppInstallationID,
+		[]byte(cfg.GitHubAppPrivateKey),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create github app installation transport: %w", err)
 	}
-
+	client, err := github.NewClient(github.WithHTTPClient(&http.Client{Transport: itr}))
+	if err != nil {
+		return nil, fmt.Errorf("cannot create github client: %w", err)
+	}
 	return &githubClient{client: client}, nil
 }
 
