@@ -207,10 +207,15 @@ def test_garm_version(
     version_output = result.stdout.strip()
     logger.info("GARM version: %s", version_output)
     assert version_output, "Expected non-empty version output from garm -version"
-    # Version output should contain a version-like string (e.g. "v0.2.1-8-gabcdef" or "v0.2.2")
+    # TODO: Once garm-rockcraft.yaml switches from source-commit to source-tag (>= v0.2.2),
+    # tighten this assertion to require version_output.startswith("v").
+    # Currently the ROCK is built from a shallow clone of a pinned commit, so git describe
+    # falls back to an abbreviated SHA (e.g. "47811d0") instead of a semver tag.
+    is_semver = version_output.startswith("v") or "." in version_output
+    is_commit_sha = all(c in "0123456789abcdef" for c in version_output)
     assert (
-        version_output.startswith("v") or "." in version_output
-    ), f"Expected version string starting with 'v' or containing '.', got: {version_output}"
+        is_semver or is_commit_sha
+    ), f"Expected version string (semver or commit SHA), got: {version_output}"
 
 
 def test_garm_charm_reaches_active(
