@@ -3,3 +3,4 @@ ops
 pytest
 pytest-asyncio
 requests
+tenacity
