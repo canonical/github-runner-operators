@@ -59,8 +59,6 @@ def render_garm_toml(
     Returns:
         TOML-formatted string ready to be written to disk.
     """
-    # Config structure validated against:
-    # https://github.com/cbartz/garm/blob/41c46766/config/config.go (Config struct)
     config: dict[str, typing.Any] = {
         "database": {
             "backend": "postgresql",
@@ -154,7 +152,9 @@ class GarmCharm(paas_charm.go.Charm):
             self._push_garm_config(container)
         except ops.SecretNotFoundError:
             logger.warning("garm-secrets not yet available; deferring config push")
-            self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
+            self.unit.status = ops.WaitingStatus(
+                "Waiting for leader to initialise garm-secrets"
+            )
             return
         container.add_layer(
             "garm-command",
