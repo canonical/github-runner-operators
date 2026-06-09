@@ -5,6 +5,7 @@
 
 import json
 import logging
+import secrets
 import time
 
 import jubilant
@@ -21,6 +22,11 @@ GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
 GARM_API_PORT = 9997
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
+
+# Generated once per session so all test functions that call _garm_first_run use
+# the same credentials. Format guarantees GARM's strong-password requirements:
+# uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
+_GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 
 
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
@@ -69,7 +75,7 @@ def _garm_first_run(address: str) -> str:
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     # GARM v0.2.x requires strong passwords (min 12 chars, mixed case, digits, symbols)
-    password = "Adm1n-T3st-P4ssw0rd#Strong"
+    password = _GARM_ADMIN_PASSWORD
     first_run_payload = {
         "username": "admin",
         "password": password,
