@@ -136,6 +136,16 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
         self._ensure_secrets()
+
+        # Short-circuit if postgresql relation data is not yet available.
+        # GARM cannot start without a database connection.
+        if not self._get_postgresql_config():
+            logger.info("PostgreSQL relation data not yet available; blocking")
+            self.unit.status = ops.BlockedStatus(
+                "Waiting for postgresql relation"
+            )
+            return
+
         # TODO: Eliminate double-replan (ISD-5718). paas_charm calls replan()
         # internally in super().restart(), which starts GARM with the default
         # command momentarily before this method overrides it. Acceptable for
