@@ -21,7 +21,8 @@ jobs:
         with:
           filters: |
             terraform:
-              - "**/terraform/**"
+              - "charms/garm-configurator/terraform/**"
+              - ".github/workflows/lint_terraform_garm_configurator.yaml"
 
   validate:
     needs: detect-changes

@@ -11,6 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-06-08
 
 - reorder the template variables in the GitHub runner VM hostmetrics dashboard.
+- add PostgreSQL relation support for persistent storage.
 
 ## 2026-06-04
 
