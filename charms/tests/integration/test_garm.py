@@ -6,12 +6,17 @@
 import json
 import logging
 import secrets
-import time
 
 import jubilant
 import pytest
 import requests
 from requests.adapters import HTTPAdapter
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
@@ -83,44 +88,33 @@ def _garm_first_run(address: str) -> str:
         "full_name": "Integration Test Admin",
     }
 
-    # Retry with backoff — GARM may still be starting up after charm reports active
     session = requests.Session()
     retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
     session.mount("http://", HTTPAdapter(max_retries=retries))
 
-    for attempt in range(10):
-        try:
-            resp = session.post(
-                f"{base_url}/first-run", json=first_run_payload, timeout=30
-            )
-            logger.info(
-                "first-run response (attempt %d): status=%d body=%s",
-                attempt + 1,
-                resp.status_code,
-                resp.text[:500],
-            )
-            if resp.status_code in (200, 409):
-                # 200 = user created, 409 = already initialized — either way, login
-                break
+    class _FirstRunRetryable(Exception):
+        pass
 
-            # Unexpected status (e.g. 500 during startup) — retry
-            if attempt < 9:
-                wait = min(2**attempt, 30)
-                logger.info("Retrying in %ds...", wait)
-                time.sleep(wait)
-            else:
-                resp.raise_for_status()
-        except requests.exceptions.ConnectionError:
-            if attempt < 9:
-                wait = min(2**attempt, 30)
-                logger.info(
-                    "GARM not yet listening (attempt %d/10), retrying in %ds...",
-                    attempt + 1,
-                    wait,
-                )
-                time.sleep(wait)
-            else:
-                raise
+    @retry(
+        retry=retry_if_exception_type(
+            (requests.exceptions.ConnectionError, _FirstRunRetryable)
+        ),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(10),
+        reraise=True,
+    )
+    def _post_first_run() -> None:
+        resp = session.post(f"{base_url}/first-run", json=first_run_payload, timeout=30)
+        logger.info(
+            "first-run response: status=%d body=%s", resp.status_code, resp.text[:500]
+        )
+        if resp.status_code not in (200, 409):
+            # 200 = user created, 409 = already initialized — either way, done
+            raise _FirstRunRetryable(
+                f"Unexpected status {resp.status_code}: {resp.text[:200]}"
+            )
+
+    _post_first_run()
 
     # Login to obtain JWT
     login_payload = {"username": "admin", "password": password}
@@ -214,9 +208,9 @@ def test_garm_version(
     logger.info("GARM version: %s", version_output)
     assert version_output, "Expected non-empty version output from garm -version"
     # Version output should contain a version-like string (e.g. "v0.2.1-8-gabcdef" or "v0.2.2")
-    assert version_output.startswith("v") or "." in version_output, (
-        f"Expected version string starting with 'v' or containing '.', got: {version_output}"
-    )
+    assert (
+        version_output.startswith("v") or "." in version_output
+    ), f"Expected version string starting with 'v' or containing '.', got: {version_output}"
 
 
 def test_garm_charm_reaches_active(
@@ -286,8 +280,12 @@ def test_garm_api_list_scalesets(
     scalesets = resp.json()
     logger.info("Scale sets response: %s", scalesets)
     # Fresh GARM has no scale sets configured — expect empty list
-    assert isinstance(scalesets, list), f"Expected list response, got: {type(scalesets)}"
-    assert len(scalesets) == 0, f"Expected empty scale set list on fresh GARM, got: {scalesets}"
+    assert isinstance(
+        scalesets, list
+    ), f"Expected list response, got: {type(scalesets)}"
+    assert (
+        len(scalesets) == 0
+    ), f"Expected empty scale set list on fresh GARM, got: {scalesets}"
 
 
 def test_garm_api_list_providers(
@@ -309,11 +307,13 @@ def test_garm_api_list_providers(
 
     providers = resp.json()
     logger.info("Providers response: %s", json.dumps(providers, indent=2))
-    assert isinstance(providers, list), f"Expected list response, got: {type(providers)}"
+    assert isinstance(
+        providers, list
+    ), f"Expected list response, got: {type(providers)}"
     provider_names = [p.get("name", "") for p in providers]
-    assert "openstack" in provider_names, (
-        f"Expected 'openstack' provider in list, got: {provider_names}"
-    )
+    assert (
+        "openstack" in provider_names
+    ), f"Expected 'openstack' provider in list, got: {provider_names}"
 
 
 def test_garm_pebble_service_command(

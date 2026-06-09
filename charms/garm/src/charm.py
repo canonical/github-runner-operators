@@ -152,9 +152,7 @@ class GarmCharm(paas_charm.go.Charm):
             self._push_garm_config(container)
         except ops.SecretNotFoundError:
             logger.warning("garm-secrets not yet available; deferring config push")
-            self.unit.status = ops.WaitingStatus(
-                "Waiting for leader to initialise garm-secrets"
-            )
+            self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
             return
         container.add_layer(
             "garm-command",
