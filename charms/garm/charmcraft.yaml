@@ -35,9 +35,3 @@ config:
       type: int
       default: 9997
       description: Port GARM API server listens on.
-    postgresql-sslmode:
-      type: string
-      default: "prefer"
-      description: |
-        PostgreSQL SSL mode. Valid values: disable, allow, prefer, require,
-        verify-ca, verify-full.

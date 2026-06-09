@@ -144,8 +144,8 @@ class GarmCharm(paas_charm.go.Charm):
         container = self.unit.get_container(CONTAINER_NAME)
         try:
             self._push_garm_config(container)
-        except (ops.SecretNotFoundError, KeyError) as exc:
-            logger.warning("garm-secrets not yet complete: %s; deferring config push", exc)
+        except ops.SecretNotFoundError:
+            logger.warning("garm-secrets not yet available; deferring config push")
             self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
             return
         container.add_layer(
@@ -164,20 +164,11 @@ class GarmCharm(paas_charm.go.Charm):
         container.replan()
 
     def _ensure_secrets(self) -> None:
-        """Create the garm-secrets juju secret on first call (leader only).
-
-        For existing deployments upgrading to postgresql support, this also
-        backfills the db-passphrase key if it's missing from the secret.
-        """
+        """Create the garm-secrets juju secret on first call (leader only)."""
         if not self.unit.is_leader():
             return
         try:
-            secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
-            # Backfill db-passphrase for existing deployments
-            content = secret.get_content()
-            if "db-passphrase" not in content:
-                content["db-passphrase"] = _generate_passphrase()
-                secret.set_content(content)
+            self.model.get_secret(label=GARM_SECRETS_LABEL)
         except ops.SecretNotFoundError:
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
 
@@ -189,16 +180,9 @@ class GarmCharm(paas_charm.go.Charm):
 
         Raises:
             ops.SecretNotFoundError: If the secret doesn't exist yet.
-            KeyError: If db-passphrase is missing (leader hasn't backfilled yet).
         """
         secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
-        content = secret.get_content()
-        if "db-passphrase" not in content:
-            raise KeyError(
-                "db-passphrase not yet available in garm-secrets; "
-                "waiting for leader to backfill"
-            )
-        return content
+        return secret.get_content()
 
     def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
         """Get PostgreSQL config from relation data, or None if not available.
@@ -233,7 +217,7 @@ class GarmCharm(paas_charm.go.Charm):
                 "hostname": host,
                 "port": int(port),
                 "database": data.get("database", ""),
-                "sslmode": str(self.config.get("postgresql-sslmode", "prefer")),
+                "sslmode": "prefer",
             }
 
         return None
