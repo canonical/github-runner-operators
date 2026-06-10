@@ -5,6 +5,7 @@
 
 import jubilant
 import pytest
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 from tests.integration.helpers import (
     GITHUB_APP_ID_ENV_VAR,
     GITHUB_APP_INSTALLATION_ID_ENV_VAR,
@@ -15,6 +16,21 @@ from tests.integration.helpers import (
 
 GITHUB_PATH = "canonical/github-runner-operators"
 
+
+@retry(
+    retry=retry_if_exception_type(AssertionError),
+    stop=stop_after_attempt(5),
+    wait=wait_fixed(20),
+    reraise=True,
+)
+def assert_redelivery_logged(juju: jubilant.Juju, unit_name: str) -> None:
+    """Assert successful webhook redelivery appears in webhook gateway logs."""
+    result = juju.exec(
+        "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble logs -n all",
+        unit=unit_name,
+    )
+    assert "redelivered failed webhooks" in result.stdout
+
 @pytest.mark.usefixtures("webhook_gateway_with_rabbitmq")
 def test_webhook_gateway_redelivery_daemon_start(
     juju: jubilant.Juju,
@@ -24,7 +40,8 @@ def test_webhook_gateway_redelivery_daemon_start(
     """
     arrange: A test GitHub webhook is created for the configured repository.
     act: Configure redelivery daemon settings with GitHub App credentials.
-    assert: The charm remains active and the redelivery daemon starts.
+    assert: The charm remains active, the redelivery daemon starts,
+        and a redelivery cycle succeeds.
     """
     github_app_private_key_secret_uri = juju.add_secret(
         name="github-app-private-key",
@@ -37,7 +54,7 @@ def test_webhook_gateway_redelivery_daemon_start(
         values={
             "github-path": GITHUB_PATH,
             "webhook-id": github_test_hook.id,
-            "redelivery-interval": 300,
+            "redelivery-interval": 30,
             "github-app-id": required_int_env(GITHUB_APP_ID_ENV_VAR),
             "github-app-installation-id": required_int_env(
                 GITHUB_APP_INSTALLATION_ID_ENV_VAR
@@ -59,5 +76,6 @@ def test_webhook_gateway_redelivery_daemon_start(
         unit=unit_name,
     )
     assert "redelivery daemon started" in result.stdout
-    assert "5m0s" in result.stdout
     assert str(github_test_hook.id) in result.stdout
+
+    assert_redelivery_logged(juju, unit_name)
