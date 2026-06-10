@@ -34,7 +34,7 @@ var (
 	redeliveryErrors = must(
 		meter.Int64Counter(
 			"github-runner.webhook.redelivery.errors",
-			metric.WithDescription("number of redelivery cycle failures"),
+			metric.WithDescription("number of webhook redelivery failures"),
 			metric.WithUnit("{error}"),
 		),
 	)

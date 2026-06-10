@@ -22,8 +22,9 @@ func TestConfigFromEnvReturnsNilWhenMissingRequiredFields(t *testing.T) {
 	t.Setenv(WebhookGitHubOrgEnvVar, "")
 	t.Setenv(WebhookIDEnvVar, "")
 
-	cfg := ConfigFromEnv()
+	cfg, err := ConfigFromEnv()
 
+	require.NoError(t, err)
 	assert.Nil(t, cfg)
 }
 
@@ -39,12 +40,28 @@ func TestConfigFromEnvParsesAppAuthFields(t *testing.T) {
 	t.Setenv(GitHubAppInstallationIDEnvVar, "100")
 	t.Setenv(GitHubAppPrivateKeyEnvVar, "private-key")
 
-	cfg := ConfigFromEnv()
+	cfg, err := ConfigFromEnv()
 
+	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	assert.Equal(t, int64(99), cfg.GitHubAppID)
 	assert.Equal(t, int64(100), cfg.GitHubAppInstallationID)
 	assert.Equal(t, "private-key", cfg.GitHubAppPrivateKey)
+}
+
+func TestConfigFromEnvReturnsErrorOnInvalidWebhookID(t *testing.T) {
+	/*
+		arrange: Set required env vars with non-numeric webhook ID.
+		act: Build config from environment.
+		assert: Parsing error is returned.
+	*/
+	t.Setenv(WebhookGitHubOrgEnvVar, "test-org")
+	t.Setenv(WebhookIDEnvVar, "not-a-number")
+
+	cfg, err := ConfigFromEnv()
+
+	assert.Nil(t, cfg)
+	assert.ErrorContains(t, err, "invalid "+WebhookIDEnvVar+" value")
 }
 
 func TestIntervalDefaultsToConfiguredValue(t *testing.T) {

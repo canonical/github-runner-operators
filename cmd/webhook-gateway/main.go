@@ -92,7 +92,10 @@ func main() {
 }
 
 func startRedeliveryDaemon(ctx context.Context, wg *sync.WaitGroup) {
-	cfg := redelivery.ConfigFromEnv()
+	cfg, err := redelivery.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("failed to parse redelivery config from environment: %v", err)
+	}
 	if cfg == nil {
 		return
 	}

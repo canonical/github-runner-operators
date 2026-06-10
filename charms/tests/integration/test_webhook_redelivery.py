@@ -5,7 +5,13 @@
 
 import jubilant
 import pytest
-from tests.integration.helpers import required_env, required_int_env
+from tests.integration.helpers import (
+    GITHUB_APP_ID_ENV_VAR,
+    GITHUB_APP_INSTALLATION_ID_ENV_VAR,
+    GITHUB_APP_PRIVATE_KEY_ENV_VAR,
+    required_env,
+    required_int_env,
+)
 
 GITHUB_PATH = "canonical/github-runner-operators"
 
@@ -22,7 +28,7 @@ def test_webhook_gateway_redelivery_daemon_start(
     """
     github_app_private_key_secret_uri = juju.add_secret(
         name="github-app-private-key",
-        content={"value": required_env("TEST_GITHUB_APP_PRIVATE_KEY")},
+        content={"value": required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR)},
     )
     juju.grant_secret(github_app_private_key_secret_uri, webhook_gateway_app)
 
@@ -32,9 +38,9 @@ def test_webhook_gateway_redelivery_daemon_start(
             "github-path": GITHUB_PATH,
             "webhook-id": github_test_hook.id,
             "redelivery-interval": 300,
-            "github-app-id": required_int_env("TEST_GITHUB_APP_ID"),
+            "github-app-id": required_int_env(GITHUB_APP_ID_ENV_VAR),
             "github-app-installation-id": required_int_env(
-                "TEST_GITHUB_APP_INSTALLATION_ID"
+                GITHUB_APP_INSTALLATION_ID_ENV_VAR
             ),
             "github-app-private-key": github_app_private_key_secret_uri,
         },

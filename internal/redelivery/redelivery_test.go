@@ -7,6 +7,10 @@ package redelivery
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"testing"
 	"time"
@@ -22,8 +26,23 @@ const (
 	testWebhookID = int64(12345)
 	testAppID     = int64(123)
 	testInstallID = int64(456)
-	testAppKey    = "test-private-key"
 )
+
+var testAppKey = generateTestAppKey()
+
+func generateTestAppKey() string {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(fmt.Sprintf("cannot generate test private key: %v", err))
+	}
+
+	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		panic(fmt.Sprintf("cannot encode test private key: %v", err))
+	}
+
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER}))
+}
 
 type fakeGitHubClient struct {
 	deliveries   []*github.HookDelivery
@@ -55,6 +74,16 @@ func makeDelivery(id int64, status, event, action string, deliveredAt time.Time)
 		Action:      github.Ptr(action),
 		DeliveredAt: &github.Timestamp{Time: deliveredAt},
 	}
+}
+
+func newTestDaemon(t *testing.T, cfg *Config, client GitHubClient) *Daemon {
+	t.Helper()
+
+	daemon, err := NewDaemon(cfg)
+	assert.NoError(t, err)
+	daemon.client = client
+
+	return daemon
 }
 
 func TestRedeliverFailedDeliveries(t *testing.T) {
@@ -96,7 +125,7 @@ func TestRedeliverFailedDeliveries(t *testing.T) {
 		Interval:                10 * time.Minute,
 	}
 
-	daemon := NewDaemonWithClient(cfg, client)
+	daemon := newTestDaemon(t, cfg, client)
 	daemon.runOnce(context.Background())
 
 	assert.Equal(t, []int64{1, 4}, client.redelivered)
@@ -110,7 +139,7 @@ func TestRedeliverListError(t *testing.T) {
 	/*
 		arrange: Create a daemon whose GitHub client fails while listing deliveries.
 		act: Run a single redelivery cycle.
-		assert: No redeliveries are recorded and the redelivery error metric increases.
+		assert: No redeliveries are recorded and no per-webhook redelivery error is counted.
 	*/
 	mr := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
@@ -128,21 +157,22 @@ func TestRedeliverListError(t *testing.T) {
 		Interval:                10 * time.Minute,
 	}
 
-	daemon := NewDaemonWithClient(cfg, client)
+	daemon := newTestDaemon(t, cfg, client)
 	daemon.runOnce(context.Background())
 
 	m := mr.Collect(t)
 	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
-	assert.Equal(t, 1.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
 }
 
 func TestRedeliverContinuesOnSingleFailure(t *testing.T) {
 	/*
 		arrange: Create a daemon with failed deliveries and a client that fails redelivery calls.
 		act: Run a single redelivery cycle.
-		assert: The cycle completes without recording successful redeliveries.
+		assert: The cycle completes without recording successful redeliveries,
+		        and each failed redelivery increments the error metric.
 	*/
-	_ = telemetry.AcquireTestMetricReader(t)
+	mr := telemetry.AcquireTestMetricReader(t)
 	defer telemetry.ReleaseTestMetricReader(t)
 
 	now := time.Now().UTC()
@@ -163,11 +193,15 @@ func TestRedeliverContinuesOnSingleFailure(t *testing.T) {
 		Interval:                10 * time.Minute,
 	}
 
-	daemon := NewDaemonWithClient(cfg, client)
+	daemon := newTestDaemon(t, cfg, client)
 	daemon.runOnce(context.Background())
 
 	// Redelivery errors for individual deliveries are logged but don't stop the cycle.
 	assert.Nil(t, client.redelivered)
+
+	m := mr.Collect(t)
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
+	assert.Equal(t, 2.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
 }
 
 func TestConfigValidation(t *testing.T) {
@@ -248,7 +282,7 @@ func TestDaemonStopsOnContextCancel(t *testing.T) {
 		Interval:                50 * time.Millisecond,
 	}
 
-	daemon := NewDaemonWithClient(cfg, client)
+	daemon := newTestDaemon(t, cfg, client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()

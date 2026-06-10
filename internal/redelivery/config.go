@@ -6,7 +6,7 @@
 package redelivery
 
 import (
-	"log"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -25,16 +25,16 @@ const (
 
 // ConfigFromEnv builds a redelivery config from environment variables.
 // Returns nil if redelivery is not configured (missing org or webhook ID).
-func ConfigFromEnv() *Config {
+func ConfigFromEnv() (*Config, error) {
 	githubOrg := os.Getenv(WebhookGitHubOrgEnvVar)
 	webhookIDStr := os.Getenv(WebhookIDEnvVar)
 	if githubOrg == "" || webhookIDStr == "" {
-		return nil
+		return nil, nil
 	}
 
 	webhookID, err := strconv.ParseInt(webhookIDStr, 10, 64)
 	if err != nil {
-		log.Fatalf("invalid %s value: %v", WebhookIDEnvVar, err)
+		return nil, fmt.Errorf("invalid %s value: %w", WebhookIDEnvVar, err)
 	}
 
 	cfg := &Config{
@@ -43,18 +43,22 @@ func ConfigFromEnv() *Config {
 		WebhookID:  webhookID,
 	}
 
-	configureAuth(cfg)
-	configureInterval(cfg)
+	if err := configureAuth(cfg); err != nil {
+		return nil, err
+	}
+	if err := configureInterval(cfg); err != nil {
+		return nil, err
+	}
 
-	return cfg
+	return cfg, nil
 }
 
-func configureAuth(cfg *Config) {
+func configureAuth(cfg *Config) error {
 	appIDStr := os.Getenv(GitHubAppIDEnvVar)
 	if appIDStr != "" {
 		appID, err := strconv.ParseInt(appIDStr, 10, 64)
 		if err != nil {
-			log.Fatalf("invalid %s value: %v", GitHubAppIDEnvVar, err)
+			return fmt.Errorf("invalid %s value: %w", GitHubAppIDEnvVar, err)
 		}
 		cfg.GitHubAppID = appID
 	}
@@ -63,22 +67,26 @@ func configureAuth(cfg *Config) {
 	if installationIDStr != "" {
 		installationID, err := strconv.ParseInt(installationIDStr, 10, 64)
 		if err != nil {
-			log.Fatalf("invalid %s value: %v", GitHubAppInstallationIDEnvVar, err)
+			return fmt.Errorf("invalid %s value: %w", GitHubAppInstallationIDEnvVar, err)
 		}
 		cfg.GitHubAppInstallationID = installationID
 	}
 	cfg.GitHubAppPrivateKey = os.Getenv(GitHubAppPrivateKeyEnvVar)
+
+	return nil
 }
 
-func configureInterval(cfg *Config) {
+func configureInterval(cfg *Config) error {
 	intervalStr := os.Getenv(RedeliveryIntervalEnvVar)
 	if intervalStr == "" {
-		return
+		return nil
 	}
 
 	seconds, err := strconv.Atoi(intervalStr)
 	if err != nil {
-		log.Fatalf("invalid %s value: %v", RedeliveryIntervalEnvVar, err)
+		return fmt.Errorf("invalid %s value: %w", RedeliveryIntervalEnvVar, err)
 	}
 	cfg.Interval = time.Duration(seconds) * time.Second
+
+	return nil
 }

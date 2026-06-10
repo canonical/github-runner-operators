@@ -107,14 +107,6 @@ func NewDaemon(cfg *Config) (*Daemon, error) {
 	}, nil
 }
 
-// NewDaemonWithClient creates a daemon with an injected client (for testing).
-func NewDaemonWithClient(cfg *Config, client GitHubClient) *Daemon {
-	return &Daemon{
-		config: cfg,
-		client: client,
-	}
-}
-
 // Run starts the periodic redelivery loop. It blocks until the context is cancelled.
 func (d *Daemon) Run(ctx context.Context) {
 	interval := d.config.interval()
@@ -146,7 +138,6 @@ func (d *Daemon) runOnce(ctx context.Context) {
 	count, err := d.redeliverFailedDeliveries(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "redelivery cycle failed", "error", err)
-		redeliveryErrors.Add(ctx, 1)
 		span.RecordError(err)
 		return
 	}
@@ -173,6 +164,7 @@ func (d *Daemon) redeliverFailedDeliveries(ctx context.Context) (int, error) {
 
 		err := d.client.RedeliverDelivery(ctx, d.config.GitHubOrg, d.config.GitHubRepo, d.config.WebhookID, delivery.GetID())
 		if err != nil {
+			redeliveryErrors.Add(ctx, 1)
 			logger.ErrorContext(ctx, "cannot redeliver webhook",
 				slog.Int64("delivery_id", delivery.GetID()),
 				"error", err,

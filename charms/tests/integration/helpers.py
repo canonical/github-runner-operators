@@ -10,6 +10,10 @@ import pytest
 from github import Github
 from github.Auth import AppAuth, AppInstallationAuth
 
+GITHUB_APP_ID_ENV_VAR = "TEST_GITHUB_APP_ID"
+GITHUB_APP_INSTALLATION_ID_ENV_VAR = "TEST_GITHUB_APP_INSTALLATION_ID"
+GITHUB_APP_PRIVATE_KEY_ENV_VAR = "TEST_GITHUB_APP_PRIVATE_KEY"
+
 
 def poll_grafana_dashboard_templates(
     juju: jubilant.Juju, consumer_unit: str, attempts: int = 24, interval: int = 5
@@ -36,10 +40,10 @@ def poll_grafana_dashboard_templates(
 
 
 def required_env(name: str) -> str:
-    """Return a required environment variable or skip the running test."""
+    """Return a required environment variable or fail the running test."""
     value = os.environ.get(name)
     if not value:
-        pytest.skip(f"{name} is required for webhook redelivery integration test")
+        pytest.fail(f"{name} is required for webhook redelivery integration test")
     return value
 
 
@@ -55,11 +59,11 @@ def required_int_env(name: str) -> int:
 def create_github_app_client() -> Github:
     """Create a GitHub client authenticated as the test app installation."""
     app_auth = AppAuth(
-        app_id=required_int_env("TEST_GITHUB_APP_ID"),
-        private_key=required_env("TEST_GITHUB_APP_PRIVATE_KEY"),
+        app_id=required_int_env(GITHUB_APP_ID_ENV_VAR),
+        private_key=required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR),
     )
     installation_auth = AppInstallationAuth(
         app_auth=app_auth,
-        installation_id=required_int_env("TEST_GITHUB_APP_INSTALLATION_ID"),
+        installation_id=required_int_env(GITHUB_APP_INSTALLATION_ID_ENV_VAR),
     )
     return Github(auth=installation_auth)
