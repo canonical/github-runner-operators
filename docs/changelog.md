@@ -10,6 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-08
 
+- Implement the webhook redelivery service.
 - reorder the template variables in the GitHub runner VM hostmetrics dashboard.
 - add PostgreSQL relation support for persistent storage.
 

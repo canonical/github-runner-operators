@@ -11,8 +11,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/canonical/github-runner-operators/internal/queue"
+	"github.com/canonical/github-runner-operators/internal/redelivery"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
 	"github.com/canonical/github-runner-operators/internal/version"
 	"github.com/canonical/github-runner-operators/internal/webhook"
@@ -25,7 +30,9 @@ const rabbitMQUriEnvVar = "RABBITMQ_CONNECT_STRING"
 const webhookSecretEnvVar = "APP_WEBHOOK_SECRET_VALUE"
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
+
 	err := telemetry.Start(ctx, "github-runner-webhook-gateway", version.String())
 	if err != nil {
 		log.Fatalf("failed to start telemetry: %v", err)
@@ -50,6 +57,9 @@ func main() {
 		log.Fatalln(webhookSecretEnvVar + " environment variable not set")
 	}
 
+	var wg sync.WaitGroup
+	startRedeliveryDaemon(ctx, &wg)
+
 	p := queue.NewAmqpProducer(uri, queue.DefaultQueueConfig())
 	handler := &webhook.Handler{
 		WebhookSecret: webhookSecret,
@@ -59,5 +69,43 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc(webhookPath, handler.Webhook)
 
-	log.Fatal(http.ListenAndServe(":"+port, otelhttp.NewHandler(mux, "", otelhttp.WithServerName(""))))
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: otelhttp.NewHandler(mux, "", otelhttp.WithServerName("")),
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.ErrorContext(ctx, "http server shutdown error", "error", err)
+		}
+	}()
+
+	slog.InfoContext(ctx, "starting webhook gateway", "port", port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("http server failed: %v", err)
+	}
+
+	wg.Wait()
+}
+
+func startRedeliveryDaemon(ctx context.Context, wg *sync.WaitGroup) {
+	cfg, err := redelivery.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("failed to parse redelivery config from environment: %v", err)
+	}
+	if cfg == nil {
+		return
+	}
+	daemon, err := redelivery.NewDaemon(cfg)
+	if err != nil {
+		log.Fatalf("failed to create redelivery daemon: %v", err)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		daemon.Run(ctx)
+	}()
 }

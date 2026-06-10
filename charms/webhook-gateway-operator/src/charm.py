@@ -25,7 +25,7 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         super().__init__(*args)
 
     def _create_app(self):
-        """Patch _create_app to add OpenTelemetry environment variables."""
+        """Patch _create_app to add OpenTelemetry and redelivery environment variables."""
         original_app = super()._create_app()
         charm = self
 
@@ -43,6 +43,24 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
                 del env["OTEL_EXPORTER_OTLP_ENDPOINT"]
                 env["OTEL_TRACES_EXPORTER"] = "otlp"
                 env["OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"] = "http/protobuf"
+
+            if charm.config.get("github-path"):
+                github_path = str(charm.config["github-path"])
+                parts = github_path.split("/", 1)
+                env["APP_WEBHOOK_GITHUB_ORG"] = parts[0]
+                if len(parts) > 1:
+                    env["APP_WEBHOOK_GITHUB_REPO"] = parts[1]
+            if charm.config.get("webhook-id"):
+                env["APP_WEBHOOK_ID"] = str(charm.config["webhook-id"])
+            if charm.config.get("redelivery-interval"):
+                env["APP_REDELIVERY_INTERVAL_SECONDS"] = str(charm.config["redelivery-interval"])
+            if charm.config.get("github-app-id"):
+                env["APP_GITHUB_APP_ID"] = str(charm.config["github-app-id"])
+            if charm.config.get("github-app-installation-id"):
+                env["APP_GITHUB_APP_INSTALLATION_ID"] = str(
+                    charm.config["github-app-installation-id"]
+                )
+
             return env
 
         app = super()._create_app()
