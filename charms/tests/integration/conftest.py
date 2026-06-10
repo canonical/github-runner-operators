@@ -6,11 +6,14 @@ import secrets
 import string
 import subprocess
 import textwrap
+from contextlib import suppress
 from typing import Iterator
+from uuid import uuid4
 
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import create_github_app_client
 from tests.conftest import (
     CHARM_FILE_PARAM,
     GARM_IMAGE_PARAM,
@@ -216,6 +219,26 @@ def integrate_webhook_gateway_rabbitmq_fixture(
         delay=30,
     )
     return webhook_gateway_app
+
+
+@pytest.fixture(name="github_test_hook")
+def github_test_hook_fixture():
+    """Create and cleanup a temporary webhook in the test repository."""
+    github_client = create_github_app_client()
+    repo = github_client.get_repo("canonical/github-runner-operators")
+    hook = repo.create_hook(
+        name="web",
+        events=["workflow_job"],
+        config={
+            # Unreachable URL is intentional; deliveries can fail and become redeliverable.
+            "url": f"http://192.168.0.1:8080/{uuid4().hex}",
+            "content_type": "json",
+            "insecure_ssl": "0",
+        },
+    )
+    yield hook
+    with suppress(Exception):
+        hook.delete()
 
 
 @pytest.fixture(scope="module", name="postgresql")

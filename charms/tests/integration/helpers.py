@@ -1,10 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 import json
+import os
 import time
 from typing import Any
 
 import jubilant
+import pytest
+from github import Github
+from github.Auth import AppAuth, AppInstallationAuth
 
 
 def poll_grafana_dashboard_templates(
@@ -29,3 +33,33 @@ def poll_grafana_dashboard_templates(
                         return templates
         time.sleep(interval)
     return {}
+
+
+def required_env(name: str) -> str:
+    """Return a required environment variable or skip the running test."""
+    value = os.environ.get(name)
+    if not value:
+        pytest.skip(f"{name} is required for webhook redelivery integration test")
+    return value
+
+
+def required_int_env(name: str) -> int:
+    """Return a required integer environment variable or fail with context."""
+    value = required_env(name)
+    try:
+        return int(value)
+    except ValueError:
+        pytest.fail(f"{name} must be an integer")
+
+
+def create_github_app_client() -> Github:
+    """Create a GitHub client authenticated as the test app installation."""
+    app_auth = AppAuth(
+        app_id=required_int_env("TEST_GITHUB_APP_ID"),
+        private_key=required_env("TEST_GITHUB_APP_PRIVATE_KEY"),
+    )
+    installation_auth = AppInstallationAuth(
+        app_auth=app_auth,
+        installation_id=required_int_env("TEST_GITHUB_APP_INSTALLATION_ID"),
+    )
+    return Github(auth=installation_auth)
