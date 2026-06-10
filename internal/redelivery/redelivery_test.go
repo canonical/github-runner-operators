@@ -20,6 +20,9 @@ const (
 	testOrg       = "test-org"
 	testRepo      = "test-repo"
 	testWebhookID = int64(12345)
+	testAppID     = int64(123)
+	testInstallID = int64(456)
+	testAppKey    = "test-private-key"
 )
 
 type fakeGitHubClient struct {
@@ -84,11 +87,13 @@ func TestRedeliverFailedDeliveries(t *testing.T) {
 	}
 
 	cfg := &Config{
-		GitHubToken: "test-token",
-		GitHubOrg:   testOrg,
-		GitHubRepo:  testRepo,
-		WebhookID:   testWebhookID,
-		Interval:    10 * time.Minute,
+		GitHubAppID:             testAppID,
+		GitHubAppInstallationID: testInstallID,
+		GitHubAppPrivateKey:     testAppKey,
+		GitHubOrg:               testOrg,
+		GitHubRepo:              testRepo,
+		WebhookID:               testWebhookID,
+		Interval:                10 * time.Minute,
 	}
 
 	daemon := NewDaemonWithClient(cfg, client)
@@ -115,10 +120,12 @@ func TestRedeliverListError(t *testing.T) {
 	}
 
 	cfg := &Config{
-		GitHubToken: "test-token",
-		GitHubOrg:   testOrg,
-		WebhookID:   testWebhookID,
-		Interval:    10 * time.Minute,
+		GitHubAppID:             testAppID,
+		GitHubAppInstallationID: testInstallID,
+		GitHubAppPrivateKey:     testAppKey,
+		GitHubOrg:               testOrg,
+		WebhookID:               testWebhookID,
+		Interval:                10 * time.Minute,
 	}
 
 	daemon := NewDaemonWithClient(cfg, client)
@@ -148,10 +155,12 @@ func TestRedeliverContinuesOnSingleFailure(t *testing.T) {
 	}
 
 	cfg := &Config{
-		GitHubToken: "test-token",
-		GitHubOrg:   testOrg,
-		WebhookID:   testWebhookID,
-		Interval:    10 * time.Minute,
+		GitHubAppID:             testAppID,
+		GitHubAppInstallationID: testInstallID,
+		GitHubAppPrivateKey:     testAppKey,
+		GitHubOrg:               testOrg,
+		WebhookID:               testWebhookID,
+		Interval:                10 * time.Minute,
 	}
 
 	daemon := NewDaemonWithClient(cfg, client)
@@ -173,14 +182,9 @@ func TestConfigValidation(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "missing auth",
-			config:  Config{GitHubOrg: "org", WebhookID: 1},
-			wantErr: "github authentication not configured",
-		},
-		{
-			name:    "both auth methods",
-			config:  Config{GitHubToken: "tok", GitHubAppID: 1, GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org", WebhookID: 1},
-			wantErr: "github authentication is ambiguous",
+			name:    "missing app id",
+			config:  Config{GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org", WebhookID: 1},
+			wantErr: "github app ID is required",
 		},
 		{
 			name:    "app auth missing installation ID",
@@ -194,17 +198,13 @@ func TestConfigValidation(t *testing.T) {
 		},
 		{
 			name:    "missing org",
-			config:  Config{GitHubToken: "tok", WebhookID: 1},
+			config:  Config{GitHubAppID: 1, GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", WebhookID: 1},
 			wantErr: "github organisation is required",
 		},
 		{
 			name:    "missing webhook ID",
-			config:  Config{GitHubToken: "tok", GitHubOrg: "org"},
+			config:  Config{GitHubAppID: 1, GitHubAppInstallationID: 1, GitHubAppPrivateKey: "key", GitHubOrg: "org"},
 			wantErr: "webhook ID is required",
-		},
-		{
-			name:   "valid token auth",
-			config: Config{GitHubToken: "tok", GitHubOrg: "org", WebhookID: 1},
 		},
 		{
 			name:   "valid app auth",
@@ -240,10 +240,12 @@ func TestDaemonStopsOnContextCancel(t *testing.T) {
 
 	client := &fakeGitHubClient{}
 	cfg := &Config{
-		GitHubToken: "test-token",
-		GitHubOrg:   testOrg,
-		WebhookID:   testWebhookID,
-		Interval:    50 * time.Millisecond,
+		GitHubAppID:             testAppID,
+		GitHubAppInstallationID: testInstallID,
+		GitHubAppPrivateKey:     testAppKey,
+		GitHubOrg:               testOrg,
+		WebhookID:               testWebhookID,
+		Interval:                50 * time.Millisecond,
 	}
 
 	daemon := NewDaemonWithClient(cfg, client)
