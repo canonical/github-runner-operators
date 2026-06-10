@@ -21,7 +21,8 @@ jobs:
         with:
           filters: |
             terraform:
-              - "**/terraform/**"
+              - "charms/planner-operator/terraform/**"
+              - ".github/workflows/test_terraform_planner_module.yaml"
 
   test-terraform:
     needs: detect-changes

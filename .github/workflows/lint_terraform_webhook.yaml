@@ -21,7 +21,8 @@ jobs:
         with:
           filters: |
             terraform:
-              - "**/terraform/**"
+              - "charms/webhook-gateway-operator/terraform/**"
+              - ".github/workflows/lint_terraform_webhook.yaml"
 
   validate:
     needs: detect-changes

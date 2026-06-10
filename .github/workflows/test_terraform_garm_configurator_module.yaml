@@ -21,7 +21,7 @@ jobs:
         with:
           filters: |
             terraform:
-              - "**/terraform/**"
+              - "charms/garm-configurator/terraform/**"
               - ".github/workflows/test_terraform_garm_configurator_module.yaml"
 
   test-terraform:
