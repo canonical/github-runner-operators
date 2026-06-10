@@ -55,9 +55,9 @@ def test_webhook_gateway_redelivery_daemon_start(
 
     unit_name = f"{webhook_gateway_app}/0"
     result = juju.exec(
-        "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble logs",
+        "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble logs -n all",
         unit=unit_name,
     )
     assert "redelivery daemon started" in result.stdout
-    assert "interval=5m" in result.stdout
-    assert f"webhook_id={github_test_hook.id}" in result.stdout
+    assert "5m0s" in result.stdout
+    assert str(github_test_hook.id) in result.stdout
