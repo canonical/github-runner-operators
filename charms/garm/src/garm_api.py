@@ -126,7 +126,5 @@ class GarmApiClient:
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"GARM first-run failed ({exc.status}): {exc.body}"
-                ) from exc
+                raise GarmApiError(f"GARM first-run failed ({exc.status}): {exc.body}") from exc
         logger.info("GARM first-run initialisation complete for user '%s'", username)
