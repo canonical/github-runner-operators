@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-12
+
+- add GARM HTTP API client to the GARM charm: auto-generates admin credentials on first install, calls the GARM `/first-run` endpoint automatically on startup, and stores credentials in a Juju secret (`garm-admin-credentials`).
+
 ## 2026-06-08
 
 - reorder the template variables in the GitHub runner VM hostmetrics dashboard.

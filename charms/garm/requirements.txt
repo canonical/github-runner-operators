@@ -1,3 +1,7 @@
 ops==3.7.1
 paas-charm==1.11.3
 tomli-w==1.2.0
+urllib3>=2.0.0
+python-dateutil>=2.8.0
+pydantic>=2.0.0
+typing-extensions>=4.0.0

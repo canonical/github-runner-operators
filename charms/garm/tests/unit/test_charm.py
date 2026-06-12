@@ -12,7 +12,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import _generate_garm_secrets, render_garm_toml
+from charm import _generate_admin_password, _generate_garm_secrets, render_garm_toml
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -110,10 +110,7 @@ def test_render_garm_toml_provider_section():
     provider = parsed["provider"][0]
     assert provider["name"] == "openstack"
     assert provider["provider_type"] == "external"
-    assert (
-        provider["external"]["provider_executable"]
-        == "/usr/local/bin/garm-provider-openstack"
-    )
+    assert provider["external"]["provider_executable"] == "/usr/local/bin/garm-provider-openstack"
 
 
 def test_generate_garm_secrets_returns_jwt_and_passphrase():
@@ -134,3 +131,19 @@ def test_generate_garm_secrets_produces_unique_values():
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
     assert first["db-passphrase"] != second["db-passphrase"]
+
+
+def test_generate_admin_password_meets_garm_policy():
+    """Generated password satisfies GARM's strong-password requirements."""
+    password = _generate_admin_password()
+    assert len(password) >= 12
+    assert any(c.isupper() for c in password)
+    assert any(c.islower() for c in password)
+    assert any(c.isdigit() for c in password)
+    symbols = set(password) - set(string.ascii_letters + string.digits)
+    assert len(symbols) > 0
+
+
+def test_generate_admin_password_produces_unique_values():
+    """Two calls return different passwords."""
+    assert _generate_admin_password() != _generate_admin_password()
