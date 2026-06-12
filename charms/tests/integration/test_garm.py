@@ -381,3 +381,46 @@ def test_garm_juju_secret_has_expected_keys(
     assert (
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+
+
+def test_garm_metrics_endpoint_reachable_without_auth(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and metrics are enabled.
+    act: Send an unauthenticated GET request to the /metrics endpoint.
+    assert: The endpoint returns 200 OK, proving JWT authentication is disabled.
+    """
+    address = _get_garm_address(juju, garm_app)
+    resp = requests.get(f"http://{address}:{GARM_API_PORT}/metrics", timeout=30)
+    logger.info(
+        "Metrics endpoint response: status=%d len=%d", resp.status_code, len(resp.text)
+    )
+    assert resp.status_code == 200, (
+        f"Expected 200 from /metrics without auth, got {resp.status_code}: {resp.text[:200]}"
+    )
+
+
+def test_garm_metrics_endpoint_has_expected_names(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and serving Prometheus metrics.
+    act: Scrape the /metrics endpoint without authentication.
+    assert: The response body contains expected GARM metric families.
+    """
+    address = _get_garm_address(juju, garm_app)
+    resp = requests.get(f"http://{address}:{GARM_API_PORT}/metrics", timeout=30)
+    resp.raise_for_status()
+    text = resp.text
+
+    # GARM snapshot metrics that should be present on a freshly started instance
+    expected_metrics = [
+        "garm_health",  # fundamental health gauge
+        "garm_provider_info",  # openstack provider is configured by the charm
+        "promhttp_metric_handler_requests_total",  # prometheus HTTP handler itself
+    ]
+    for name in expected_metrics:
+        assert name in text, f"Expected metric '{name}' not found in /metrics response"

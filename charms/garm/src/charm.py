@@ -109,6 +109,28 @@ def _generate_garm_secrets() -> dict[str, str]:
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
+    @property
+    def _workload_config(self):  # type: ignore[override]
+        """Return a WorkloadConfig with GARM-specific metrics target."""
+        # GARM serves metrics on the same port as the API by default.
+        # The go-framework extension provides metrics-port (default 8080) and
+        # metrics-path (/metrics) config options. We want metrics to be scraped
+        # on the garm-listen-port unless the operator has explicitly overridden
+        # metrics-port to a value other than the framework default.
+        garm_listen_port = int(self.config.get("garm-listen-port", 9997))
+        metrics_port = int(self.config.get("metrics-port", 8080))
+        # If metrics-port is still the framework default (8080) assume the
+        # operator has not customised it and fall back to the API port.
+        if metrics_port == 8080:
+            metrics_port = garm_listen_port
+        metrics_path = str(self.config.get("metrics-path", "/metrics"))
+        # Build a new WorkloadConfig from the parent so we can patch metrics fields.
+        original = super()._workload_config
+        # Use object.__setattr__ to mutate frozen dataclass fields
+        object.__setattr__(original, "metrics_target", f"*:{metrics_port}")
+        object.__setattr__(original, "metrics_path", metrics_path)
+        return original
+
     def __init__(self, *args: typing.Any) -> None:
         """Initialize the charm.
 

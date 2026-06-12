@@ -3,7 +3,10 @@
 
 """Unit tests for GarmCharm."""
 
+import dataclasses
+import pathlib
 import string
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,7 +15,10 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import _generate_garm_secrets, render_garm_toml
+import ops
+from scenario import Container, Context, State
+
+from charm import GarmCharm, _generate_garm_secrets, render_garm_toml
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -134,3 +140,65 @@ def test_generate_garm_secrets_produces_unique_values():
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
     assert first["db-passphrase"] != second["db-passphrase"]
+
+
+# ---------------------------------------------------------------------------
+# _workload_config (scenario-based)
+# ---------------------------------------------------------------------------
+
+_original_init = GarmCharm.__init__
+
+
+def _capture_init(self, *args, **kwargs):
+    """Monkey-patched __init__ that records *self* on a global hook."""
+    _capture_init.charm = self
+    _original_init(self, *args, **kwargs)
+
+
+_capture_init.charm: GarmCharm | None = None
+
+
+def _workload_config_with_config(charm_config: dict) -> tuple[str | None, str | None]:
+    """Run GarmCharm.install through Scenario and return (metrics_target, metrics_path)."""
+    from unittest.mock import MagicMock, patch
+
+    _capture_init.charm = None
+    GarmCharm.__init__ = _capture_init
+    ctx = Context(GarmCharm)
+    try:
+        ctx.run(
+            ctx.on.install(),
+            State(
+                config=charm_config,
+                containers=[Container(name="app", can_connect=True)],
+            ),
+        )
+    finally:
+        GarmCharm.__init__ = _original_init
+    assert _capture_init.charm is not None
+    cfg = _capture_init.charm._workload_config
+    return cfg.metrics_target, cfg.metrics_path
+
+
+def test_workload_config_defaults_to_garm_listen_port():
+    """When metrics-port is the framework default (8080) it falls back to garm-listen-port."""
+    target, path = _workload_config_with_config({"garm-listen-port": 9997})
+    assert target == "*:9997"
+    assert path == "/metrics"
+
+
+def test_workload_config_explicit_metrics_port_overrides():
+    """When metrics-port is set to a non-default value, it is used as-is."""
+    target, path = _workload_config_with_config({
+        "garm-listen-port": 9997,
+        "metrics-port": 9464,
+    })
+    assert target == "*:9464"
+    assert path == "/metrics"
+
+
+def test_workload_config_custom_garm_port():
+    """When garm-listen-port is changed and metrics-port is default, metrics use the API port."""
+    target, path = _workload_config_with_config({"garm-listen-port": 8888})
+    assert target == "*:8888"
+    assert path == "/metrics"
