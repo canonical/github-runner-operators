@@ -12,9 +12,11 @@ from tests.integration.helpers import (
     GITHUB_APP_PRIVATE_KEY_ENV_VAR,
     required_env,
     required_int_env,
+    trigger_failed_workflow_job_delivery,
 )
 
 GITHUB_PATH = "canonical/github-runner-operators"
+DISPATCH_WORKFLOW_PATH = "copilot-collections-update.yml"
 
 
 @retry(
@@ -78,4 +80,5 @@ def test_webhook_gateway_redelivery_daemon_start(
     assert "redelivery daemon started" in result.stdout
     assert str(github_test_hook.id) in result.stdout
 
+    trigger_failed_workflow_job_delivery(GITHUB_PATH, DISPATCH_WORKFLOW_PATH)
     assert_redelivery_logged(juju, unit_name)

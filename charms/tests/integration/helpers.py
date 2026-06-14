@@ -67,3 +67,14 @@ def create_github_app_client() -> Github:
         installation_id=required_int_env(GITHUB_APP_INSTALLATION_ID_ENV_VAR),
     )
     return Github(auth=installation_auth)
+
+
+def trigger_failed_workflow_job_delivery(
+    repo_path: str,
+    workflow_path: str,
+) -> None:
+    """Dispatch a workflow run to emit a workflow_job event for webhook redelivery tests."""
+    github_client = create_github_app_client()
+    repo = github_client.get_repo(repo_path)
+    workflow = repo.get_workflow(workflow_path)
+    workflow.create_dispatch(ref=repo.default_branch)
