@@ -27,7 +27,6 @@ _DEFAULT_PG_CONFIG = {
 def _render(**overrides) -> dict:
     """Helper: render TOML with defaults, return parsed dict."""
     kwargs = {
-        "listen_address": "0.0.0.0",
         "listen_port": 9997,
         "jwt_secret": "test-secret",
         "db_passphrase": "a" * 32,
@@ -79,7 +78,7 @@ def test_render_garm_toml_sslmode_propagated(sslmode: str):
 @pytest.mark.parametrize(
     "section,key,value,kwargs",
     [
-        ("apiserver", "bind", "127.0.0.1", {"listen_address": "127.0.0.1"}),
+        ("apiserver", "bind", "0.0.0.0", {}),
         ("apiserver", "port", 8080, {"listen_port": 8080}),
         ("apiserver", "use_tls", False, {}),
         ("jwt_auth", "secret", "mysecret", {"jwt_secret": "mysecret"}),

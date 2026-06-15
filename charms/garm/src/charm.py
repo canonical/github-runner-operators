@@ -40,7 +40,6 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
 
 def render_garm_toml(
     *,
-    listen_address: str,
     listen_port: int,
     jwt_secret: str,
     db_passphrase: str,
@@ -49,7 +48,6 @@ def render_garm_toml(
     """Render GARM's TOML configuration file content.
 
     Args:
-        listen_address: IP address for the GARM API server to bind on.
         listen_port: Port for the GARM API server.
         jwt_secret: Secret string used to sign GARM JWT tokens.
         db_passphrase: 32-character passphrase for AES-256 encryption of secrets in the DB.
@@ -66,7 +64,7 @@ def render_garm_toml(
             "postgresql": postgresql_config,
         },
         "apiserver": {
-            "bind": listen_address,
+            "bind": "0.0.0.0",
             "port": listen_port,
             "use_tls": False,
         },
@@ -246,8 +244,7 @@ class GarmCharm(paas_charm.go.Charm):
             postgresql_config["port"],
         )
         toml_content = render_garm_toml(
-            listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
-            listen_port=int(self.config.get("garm-listen-port", 9997)),
+            listen_port=int(self.config.get("app-port", 8080)),
             jwt_secret=secrets["jwt-secret"],
             db_passphrase=secrets["db-passphrase"],
             postgresql_config=postgresql_config,

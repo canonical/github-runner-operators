@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-15
+
+- export GARM Prometheus metrics via the `metrics-endpoint` integration, with JWT authentication disabled on the `/metrics` endpoint.
+
 ## 2026-06-08
 
 - reorder the template variables in the GitHub runner VM hostmetrics dashboard.

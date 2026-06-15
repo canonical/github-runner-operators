@@ -25,13 +25,3 @@ requires:
     optional: false
     limit: 1
 
-config:
-  options:
-    garm-listen-address:
-      type: string
-      default: "0.0.0.0"
-      description: Address GARM API server listens on.
-    garm-listen-port:
-      type: int
-      default: 9997
-      description: Port GARM API server listens on.
