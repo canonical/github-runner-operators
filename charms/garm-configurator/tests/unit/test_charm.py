@@ -450,6 +450,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation, garm_relation],
+        leader=True,
     )
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
@@ -459,7 +460,8 @@ def test_reconcile_writes_full_config_to_garm_relation():
         "https://keystone.example.com:5000/v3"
     )
     assert garm_out.local_unit_data["openstack_username"] == "admin"
-    assert garm_out.local_unit_data["openstack_password"] == "s3cr3t"
+    assert "openstack_password" not in garm_out.local_unit_data
+    assert "openstack_password_secret_uri" in garm_out.local_unit_data
     assert garm_out.local_unit_data["openstack_project_name"] == "myproject"
     assert garm_out.local_unit_data["openstack_user_domain_name"] == "Default"
     assert garm_out.local_unit_data["openstack_project_domain_name"] == "Default"
@@ -469,7 +471,8 @@ def test_reconcile_writes_full_config_to_garm_relation():
     # GitHub config
     assert garm_out.local_unit_data["github_client_id"] == "12345"
     assert garm_out.local_unit_data["github_installation_id"] == "67890"
-    assert garm_out.local_unit_data["github_private_key"] == "random-secret"
+    assert "github_private_key" not in garm_out.local_unit_data
+    assert "github_private_key_secret_uri" in garm_out.local_unit_data
 
     # Scaleset config
     assert garm_out.local_unit_data["scaleset_name"] == "my-scaleset"
@@ -528,6 +531,7 @@ def test_reconcile_writes_garm_data_on_relation_joined():
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation, garm_relation],
+        leader=True,
     )
     out = ctx.run(ctx.on.relation_joined(garm_relation), state)
     garm_out = out.get_relation(garm_relation.id)
@@ -561,6 +565,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         config=config,
         secrets=[secret, pk_secret],
         relations=[image_relation, garm_relation],
+        leader=True,
     )
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)

@@ -512,7 +512,10 @@ def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str | N
     """Return the path to the built garm-configurator charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
     if not charm:
-        return None
+        pytest.skip(
+            f"missing required {CHARM_FILE_PARAM} option for garm-configurator "
+            "integration tests"
+        )
     if len(charm) > 1:
         configurator_charm = [file for file in charm if "garm-configurator" in file]
         if not configurator_charm:
