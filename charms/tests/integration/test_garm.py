@@ -381,3 +381,77 @@ def test_garm_juju_secret_has_expected_keys(
     assert (
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+
+
+def test_garm_toml_has_configurator_provider(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: Configurator with OpenStack config is integrated with GARM.
+    act: Read the GARM TOML config file from the workload container.
+    assert: The TOML contains a [[provider]] block matching the configurator
+        unit, with OPENSTACK_* environment variables set.
+    """
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        import tomli as tomllib  # backport for Python 3.10
+
+    garm_unit = f"{configurator_garm}/0"
+
+    # Read the GARM TOML config from inside the container
+    result = juju.exec(
+        f"{PEBBLE_PREFIX} exec -- cat {GARM_CONFIG_PATH}",
+        unit=garm_unit,
+    )
+    logger.info("GARM TOML config:\n%s", result.stdout)
+
+    # Parse the TOML
+    config = tomllib.loads(result.stdout)
+
+    # There should be at least one provider
+    providers = config.get("provider", [])
+    assert len(providers) >= 1, (
+        f"Expected at least 1 provider in GARM TOML, got {len(providers)}"
+    )
+
+    # Find a provider named after the configurator unit
+    configurator_providers = [
+        p for p in providers
+        if p.get("name", "").startswith("garm-configurator")
+    ]
+    assert len(configurator_providers) >= 1, (
+        f"Expected a provider named 'garm-configurator-*' in TOML, "
+        f"got provider names: {[p.get('name') for p in providers]}"
+    )
+
+    # Verify the configurator provider has OpenStack env vars
+    provider = configurator_providers[0]
+    assert provider["provider_type"] == "external"
+    assert provider["external"]["provider_executable"] == (
+        "/usr/local/bin/garm-provider-openstack"
+    )
+
+    env_vars = provider["external"]["environment_variables"]
+    assert any(
+        v.startswith("OPENSTACK_AUTH_URL=") for v in env_vars
+    ), f"Expected OPENSTACK_AUTH_URL in env vars, got: {env_vars}"
+    assert any(
+        v.startswith("OPENSTACK_USERNAME=") for v in env_vars
+    ), f"Expected OPENSTACK_USERNAME in env vars, got: {env_vars}"
+    assert any(
+        v.startswith("OPENSTACK_PASSWORD=") for v in env_vars
+    ), f"Expected OPENSTACK_PASSWORD in env vars, got: {env_vars}"
+    assert any(
+        v.startswith("OPENSTACK_PROJECT_NAME=") for v in env_vars
+    ), f"Expected OPENSTACK_PROJECT_NAME in env vars, got: {env_vars}"
+    assert any(
+        v.startswith("OPENSTACK_IMAGE_ID=") for v in env_vars
+    ), f"Expected OPENSTACK_IMAGE_ID in env vars, got: {env_vars}"
+
+    logger.info(
+        "Verified configurator provider '%s' in GARM TOML with %d env vars",
+        provider["name"],
+        len(env_vars),
+    )
