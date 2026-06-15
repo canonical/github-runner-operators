@@ -8,7 +8,12 @@ import typing
 
 import ops
 
-from charm_state import GARM_RELATION_NAME, IMAGE_RELATION_NAME, CharmConfigInvalidError, CharmState
+from charm_state import (
+    GARM_RELATION_NAME,
+    IMAGE_RELATION_NAME,
+    CharmConfigInvalidError,
+    CharmState,
+)
 
 
 class GarmConfiguratorCharm(ops.CharmBase):
