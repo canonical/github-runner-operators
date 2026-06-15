@@ -100,6 +100,8 @@ def _build_provider_list(
                 "credentials": {
                     "clouds": clouds_yaml_path,
                 },
+                # 2025/07/24 - This option is set to mitigate CVE-2024-6174
+                "use_config_drive": True,
             }
         )
 
