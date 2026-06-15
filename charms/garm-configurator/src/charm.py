@@ -133,7 +133,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         if password_secret is None or github_key_secret is None:
             return
-        
+
         for key, value in {
             "scaleset_repo": state.scaleset_config.repo,
             "scaleset_org": state.scaleset_config.org,
