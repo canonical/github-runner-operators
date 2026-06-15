@@ -8,7 +8,7 @@ import typing
 
 import ops
 
-from charm_state import IMAGE_RELATION_NAME, CharmConfigInvalidError, CharmState
+from charm_state import GARM_RELATION_NAME, IMAGE_RELATION_NAME, CharmConfigInvalidError, CharmState
 
 
 class GarmConfiguratorCharm(ops.CharmBase):
@@ -27,6 +27,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.on[IMAGE_RELATION_NAME].relation_joined,
             self.on[IMAGE_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_broken,
+            self.on[GARM_RELATION_NAME].relation_joined,
+            self.on[GARM_RELATION_NAME].relation_changed,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -57,6 +59,46 @@ class GarmConfiguratorCharm(ops.CharmBase):
                     "username": state.provider_config.username,
                 }
             )
+
+        # Only write to garm relation when image UUID is available (per AC:
+        # "Information should only be populated AFTER an image has been created").
+        if state.image_id is not None:
+            garm_relation = self.model.get_relation(GARM_RELATION_NAME)
+            if garm_relation is not None:
+                pc = state.provider_config
+                gc = state.github_app_config
+                sc = state.scaleset_config
+                garm_relation.data[self.unit].update(
+                    {
+                        "openstack_auth_url": pc.auth_url,
+                        "openstack_username": pc.username,
+                        "openstack_password": pc.password,
+                        "openstack_project_name": pc.project_name,
+                        "openstack_user_domain_name": pc.user_domain_name,
+                        "openstack_project_domain_name": pc.project_domain_name,
+                        "openstack_region_name": pc.region_name,
+                        "openstack_network": pc.network,
+                        "github_client_id": gc.client_id,
+                        "github_installation_id": gc.installation_id,
+                        "github_private_key": gc.private_key,
+                        "scaleset_name": sc.name,
+                        "scaleset_flavor": sc.flavor,
+                        "scaleset_os_arch": sc.os_arch,
+                        "scaleset_min_idle_runner": str(sc.min_idle_runner),
+                        "scaleset_max_runner": str(sc.max_runner),
+                        "scaleset_labels": sc.labels,
+                        "scaleset_runner_group": sc.runner_group,
+                        "image_id": state.image_id,
+                    }
+                )
+                if sc.repo is not None:
+                    garm_relation.data[self.unit]["scaleset_repo"] = sc.repo
+                if sc.org is not None:
+                    garm_relation.data[self.unit]["scaleset_org"] = sc.org
+                if sc.pre_install_scripts is not None:
+                    garm_relation.data[self.unit][
+                        "scaleset_pre_install_scripts"
+                    ] = sc.pre_install_scripts
 
         if relation is None:
             self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
