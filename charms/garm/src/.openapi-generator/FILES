@@ -1,4 +1,3 @@
-.openapi-generator-ignore
 garm_client/__init__.py
 garm_client/api/__init__.py
 garm_client/api/controller_api.py
