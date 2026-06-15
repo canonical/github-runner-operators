@@ -18,6 +18,7 @@ from tenacity import (
     wait_exponential,
 )
 from urllib3.util.retry import Retry
+import tomllib
 
 logger = logging.getLogger(__name__)
 
@@ -389,15 +390,12 @@ def test_garm_toml_has_configurator_provider(
 ):
     """
     arrange: Configurator with OpenStack config is integrated with GARM.
-    act: Read the GARM TOML config file from the workload container.
+    act: Read the GARM TOML config file from the workload container and query
+        the GARM API.
     assert: The TOML contains a [[provider]] block matching the configurator
-        unit, with OPENSTACK_* environment variables set.
+        unit, with OPENSTACK_* environment variables set. Additionally, the
+        provider is registered and visible via the GARM REST API.
     """
-    try:
-        import tomllib  # Python 3.11+
-    except ImportError:
-        import tomli as tomllib  # backport for Python 3.10
-
     garm_unit = f"{configurator_garm}/0"
 
     # Read the GARM TOML config from inside the container
@@ -449,6 +447,23 @@ def test_garm_toml_has_configurator_provider(
     assert any(
         v.startswith("OPENSTACK_IMAGE_ID=") for v in env_vars
     ), f"Expected OPENSTACK_IMAGE_ID in env vars, got: {env_vars}"
+
+    # Verify the provider is also registered via the GARM API
+    address = _get_garm_address(juju, configurator_garm)
+    token = _garm_first_run(address)
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
+    resp.raise_for_status()
+    api_providers = resp.json()
+    logger.info("Providers response: %s", json.dumps(api_providers, indent=2))
+    assert isinstance(
+        api_providers, list
+    ), f"Expected list response from GARM API, got: {type(api_providers)}"
+    api_provider_names = [p.get("name", "") for p in api_providers]
+    assert any(
+        n.startswith("garm-configurator") for n in api_provider_names
+    ), f"Expected a 'garm-configurator-*' provider in GARM API, got: {api_provider_names}"
 
     logger.info(
         "Verified configurator provider '%s' in GARM TOML with %d env vars",
