@@ -23,6 +23,7 @@ CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
+GARM_PORT: typing.Final[int] = 8080
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -124,14 +125,16 @@ class GarmCharm(paas_charm.go.Charm):
 
     @property
     def _workload_config(self) -> WorkloadConfig:
-        """Disable the framework's default metrics-port scrape job.
+        """Pin GARM to a fixed port and disable the default metrics scrape job.
 
-        GARM serves /metrics on its single API port and the scrape target is
-        declared explicitly in paas-config.yaml. Setting metrics_target to None
-        stops paas-charm from also emitting a default job for metrics-port, which
-        would otherwise scrape /metrics a second time.
+        GARM serves its API and /metrics on a single fixed port (GARM_PORT);
+        the framework's app-port is unsupported, so we force the workload port
+        (used for ingress, opened ports, and the service URL) to GARM_PORT
+        rather than reading app-port. The scrape target is declared in
+        paas-config.yaml, so metrics_target is set to None to suppress the
+        framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(super()._workload_config, metrics_target=None)
+        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -145,6 +148,18 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
         self._ensure_secrets()
+
+        # app-port is injected by the go-framework extension but is unsupported:
+        # GARM always serves its API and metrics on GARM_PORT. Warn rather than
+        # block, and tolerate the option being absent (it may be removed from the
+        # framework in future).
+        configured_port = self.config.get("app-port")
+        if configured_port is not None and int(configured_port) != GARM_PORT:
+            logger.warning(
+                "app-port=%s is not supported; GARM always serves its API and metrics on port %d",
+                configured_port,
+                GARM_PORT,
+            )
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
@@ -257,7 +272,7 @@ class GarmCharm(paas_charm.go.Charm):
             postgresql_config["port"],
         )
         toml_content = render_garm_toml(
-            listen_port=int(self.config.get("app-port", 8080)),
+            listen_port=GARM_PORT,
             jwt_secret=secrets["jwt-secret"],
             db_passphrase=secrets["db-passphrase"],
             postgresql_config=postgresql_config,
