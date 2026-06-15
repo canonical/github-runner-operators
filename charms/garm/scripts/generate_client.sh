@@ -28,7 +28,7 @@ echo "Running openapi-generator-cli via Docker..."
 docker run --rm \
     -v /tmp/garm_swagger.yaml:/swagger.yaml:ro \
     -v "${OUTPUT_DIR}":/output \
-    openapitools/openapi-generator-cli:7.24.0-SNAPSHOT generate \
+    openapitools/openapi-generator-cli:v7.23.0 generate \
     --input-spec /swagger.yaml \
     --generator-name python \
     --output /output \
