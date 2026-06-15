@@ -9,7 +9,7 @@ pass_env = ["PYTHONPATH", "CHARM_BUILD_DIR", "MODEL_SETTINGS"]
 description = "Format code according to coding style standards"
 deps = ["ruff", "isort"]
 commands = [
-  ["isort", "--skip-glob=src/garm_client/*", "src", "tests"],
+  ["isort", "--skip-glob=src/garm_client/**", "src", "tests"],
   ["ruff", "format", "src", "tests"],
 ]
 
