@@ -272,9 +272,7 @@ class GarmCharm(paas_charm.go.Charm):
             secret = self.model.get_secret(label=TOML_HASH_LABEL)
             secret.set_content({"sha256": hash_value})
         except ops.SecretNotFoundError:
-            self.app.add_secret(
-                {"sha256": hash_value}, label=TOML_HASH_LABEL
-            )
+            self.app.add_secret({"sha256": hash_value}, label=TOML_HASH_LABEL)
 
     def _ensure_secrets(self) -> None:
         """Create the garm-secrets juju secret on first call (leader only)."""
@@ -370,9 +368,7 @@ class GarmCharm(paas_charm.go.Charm):
                     "password": data.get("openstack_password", ""),
                     "project_name": data.get("openstack_project_name", ""),
                     "user_domain_name": data.get("openstack_user_domain_name", ""),
-                    "project_domain_name": data.get(
-                        "openstack_project_domain_name", ""
-                    ),
+                    "project_domain_name": data.get("openstack_project_domain_name", ""),
                     "region_name": data.get("openstack_region_name", ""),
                     "network": data.get("openstack_network", ""),
                     "image_id": data.get("image_id", ""),
