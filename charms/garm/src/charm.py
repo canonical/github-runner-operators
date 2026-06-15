@@ -140,8 +140,8 @@ class GarmCharm(paas_charm.go.Charm):
         metrics_port = int(self.config.get("metrics-port", 8080))
         if app_port != metrics_port:
             self.unit.status = ops.BlockedStatus(
-                f"app-port ({app_port}) and metrics-port ({metrics_port}) must be equal: "
-                "GARM serves its API and metrics on a single port"
+                f"metrics-port ({metrics_port}) must equal app-port ({app_port}): "
+                "GARM does not support serving metrics on a different port"
             )
             return
 
