@@ -12,7 +12,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import _generate_garm_secrets, render_garm_toml
+from charm import _generate_garm_secrets, _validate_ports, render_garm_toml
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -133,3 +133,18 @@ def test_generate_garm_secrets_produces_unique_values():
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
     assert first["db-passphrase"] != second["db-passphrase"]
+
+
+def test_validate_ports_equal_returns_none():
+    """Matching ports return None (no error)."""
+    assert _validate_ports(8080, 8080) is None
+    assert _validate_ports(9000, 9000) is None
+
+
+def test_validate_ports_mismatch_returns_message():
+    """Mismatched ports return a string mentioning both port numbers."""
+    result = _validate_ports(8080, 9000)
+    assert isinstance(result, str)
+    assert result
+    assert "8080" in result
+    assert "9000" in result

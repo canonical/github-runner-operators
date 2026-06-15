@@ -133,6 +133,14 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._ensure_secrets()
 
+        port_error = _validate_ports(
+            int(self.config.get("app-port", 8080)),
+            int(self.config.get("metrics-port", 8080)),
+        )
+        if port_error:
+            self.unit.status = ops.BlockedStatus(port_error)
+            return
+
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
         if not self._get_postgresql_config():
@@ -250,6 +258,28 @@ class GarmCharm(paas_charm.go.Charm):
             postgresql_config=postgresql_config,
         )
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
+
+
+def _validate_ports(app_port: int, metrics_port: int) -> str | None:
+    """Return a blocked-status message if the port config is inconsistent, else None.
+
+    GARM serves its API and /metrics on a single port, so the framework's
+    app-port and metrics-port must match; otherwise Prometheus would scrape a
+    port GARM is not listening on.
+
+    Args:
+        app_port: The port GARM's API server (and /metrics) listens on.
+        metrics_port: The port the framework configures Prometheus to scrape.
+
+    Returns:
+        A human-readable blocked-status message when the ports differ, else None.
+    """
+    if app_port != metrics_port:
+        return (
+            f"app-port ({app_port}) and metrics-port ({metrics_port}) must be equal: "
+            "GARM serves its API and metrics on a single port"
+        )
+    return None
 
 
 if __name__ == "__main__":
