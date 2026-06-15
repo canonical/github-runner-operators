@@ -4,6 +4,7 @@
 
 """GARM charm entrypoint."""
 
+import dataclasses
 import logging
 import secrets
 import string
@@ -12,6 +13,7 @@ import typing
 import ops
 import paas_charm.go
 import tomli_w
+from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +122,17 @@ class GarmCharm(paas_charm.go.Charm):
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
 
+    @property
+    def _workload_config(self) -> WorkloadConfig:
+        """Disable the framework's default metrics-port scrape job.
+
+        GARM serves /metrics on its single API port and the scrape target is
+        declared explicitly in paas-config.yaml. Setting metrics_target to None
+        stops paas-charm from also emitting a default job for metrics-port, which
+        would otherwise scrape /metrics a second time.
+        """
+        return dataclasses.replace(super()._workload_config, metrics_target=None)
+
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
 
@@ -132,18 +145,6 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
         self._ensure_secrets()
-
-        # GARM serves its API and /metrics on a single port, so the framework's
-        # app-port and metrics-port must match; otherwise Prometheus would scrape
-        # a port GARM is not listening on.
-        app_port = int(self.config.get("app-port", 8080))
-        metrics_port = int(self.config.get("metrics-port", 8080))
-        if app_port != metrics_port:
-            self.unit.status = ops.BlockedStatus(
-                f"metrics-port ({metrics_port}) must equal app-port ({app_port}): "
-                "GARM does not support serving metrics on a different port"
-            )
-            return
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.

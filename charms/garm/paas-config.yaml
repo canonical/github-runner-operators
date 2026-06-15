@@ -1,0 +1,14 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# Prometheus scrape configuration for GARM.
+#
+# GARM serves its API and /metrics on a single port (the framework app-port,
+# default 8080). The framework's default metrics-port scrape job is disabled in
+# the charm (see GarmCharm._workload_config), so this is the sole scrape target.
+prometheus:
+  scrape_configs:
+    - job_name: garm
+      metrics_path: /metrics
+      static_configs:
+        - targets: ["*:8080"]
