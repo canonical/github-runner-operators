@@ -12,7 +12,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import _generate_garm_secrets, render_garm_toml
+from charm import _build_provider_list, _generate_garm_secrets, render_garm_toml
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -134,3 +134,87 @@ def test_generate_garm_secrets_produces_unique_values():
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
     assert first["db-passphrase"] != second["db-passphrase"]
+
+
+def test_render_garm_toml_default_provider_when_no_providers_given():
+    """
+    arrange: No providers argument passed (defaults to None).
+    act: render_garm_toml is called without providers.
+    assert: The default "openstack" provider is rendered.
+    """
+    parsed = _render()
+    assert len(parsed["provider"]) == 1
+    assert parsed["provider"][0]["name"] == "openstack"
+
+
+def test_render_garm_toml_with_configurator_providers():
+    """
+    arrange: Two Configurator units provided provider configs.
+    act: render_garm_toml is called with providers list.
+    assert: Two [[provider]] blocks are rendered with correct names and env vars.
+    """
+    providers = [
+        {
+            "unit_name": "garm-configurator-0",
+            "auth_url": "https://ks1.example.com:5000/v3",
+            "username": "admin1",
+            "password": "pass1",
+            "project_name": "proj1",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionOne",
+            "network": "net1",
+            "image_id": "img-1",
+        },
+        {
+            "unit_name": "garm-configurator-1",
+            "auth_url": "https://ks2.example.com:5000/v3",
+            "username": "admin2",
+            "password": "pass2",
+            "project_name": "proj2",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionTwo",
+            "network": "net2",
+            "image_id": "img-2",
+        },
+    ]
+    parsed = _render(providers=providers)
+    assert len(parsed["provider"]) == 2
+
+    p0 = parsed["provider"][0]
+    assert p0["name"] == "garm-configurator-0"
+    assert p0["external"]["provider_executable"] == "/usr/local/bin/garm-provider-openstack"
+    env_vars = p0["external"]["environment_variables"]
+    assert "OPENSTACK_AUTH_URL=https://ks1.example.com:5000/v3" in env_vars
+    assert "OPENSTACK_USERNAME=admin1" in env_vars
+    assert "OPENSTACK_PASSWORD=pass1" in env_vars
+    assert "OPENSTACK_PROJECT_NAME=proj1" in env_vars
+    assert "OPENSTACK_IMAGE_ID=img-1" in env_vars
+
+    p1 = parsed["provider"][1]
+    assert p1["name"] == "garm-configurator-1"
+    env_vars_1 = p1["external"]["environment_variables"]
+    assert "OPENSTACK_USERNAME=admin2" in env_vars_1
+
+
+def test_build_provider_list_returns_default_when_empty():
+    """
+    arrange: An empty list is passed.
+    act: _build_provider_list is called.
+    assert: Returns the default single-entry list with "openstack" provider.
+    """
+    result = _build_provider_list([])
+    assert len(result) == 1
+    assert result[0]["name"] == "openstack"
+
+
+def test_build_provider_list_returns_default_when_none():
+    """
+    arrange: None is passed.
+    act: _build_provider_list is called with None.
+    assert: Returns the default single-entry list.
+    """
+    result = _build_provider_list(None)
+    assert len(result) == 1
+    assert result[0]["name"] == "openstack"
