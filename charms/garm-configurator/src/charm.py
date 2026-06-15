@@ -133,6 +133,16 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         if password_secret is None or github_key_secret is None:
             return
+        
+        for key, value in {
+            "scaleset_repo": state.scaleset_config.repo,
+            "scaleset_org": state.scaleset_config.org,
+            "scaleset_pre_install_scripts": state.scaleset_config.pre_install_scripts,
+        }.items():
+            if value is not None:
+                garm_relation.data[self.unit][key] = value
+            else:
+                garm_relation.data[self.unit].pop(key, None)
 
         garm_relation.data[self.unit].update(
             {
@@ -157,14 +167,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "image_id": state.image_id,
             }
         )
-
-        for key, value in {
-            "scaleset_repo": state.scaleset_config.repo,
-            "scaleset_org": state.scaleset_config.org,
-            "scaleset_pre_install_scripts": state.scaleset_config.pre_install_scripts,
-        }.items():
-            if value is not None:
-                garm_relation.data[self.unit][key] = value
 
 
 if __name__ == "__main__":
