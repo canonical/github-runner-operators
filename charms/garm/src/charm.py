@@ -21,6 +21,7 @@ CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
+GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -227,6 +228,51 @@ class GarmCharm(paas_charm.go.Charm):
             }
 
         return None
+
+    def _get_configurator_provider_configs(
+        self,
+    ) -> list[dict[str, str]]:
+        """Read OpenStack provider configs from all Configurator units.
+
+        Each Configurator unit writes its provider config to unit-level
+        relation data on the ``garm-configurator`` endpoint. This method
+        collects all such configs, keyed by unit name for TOML provider
+        naming.
+
+        Returns:
+            A list of dicts, each containing the provider config fields
+            (auth_url, username, password, project_name, user_domain_name,
+            project_domain_name, region_name, network, image_id) plus a
+            ``unit_name`` key for the provider's TOML name. Returns an
+            empty list if no Configurator units are connected.
+        """
+        relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
+        if relation is None:
+            return []
+
+        configs: list[dict[str, str]] = []
+        for unit in relation.units:
+            data = relation.data[unit]
+            # Only include units that have sent the full provider config
+            if "openstack_auth_url" not in data:
+                continue
+            configs.append(
+                {
+                    "unit_name": unit.name.replace("/", "-"),
+                    "auth_url": data.get("openstack_auth_url", ""),
+                    "username": data.get("openstack_username", ""),
+                    "password": data.get("openstack_password", ""),
+                    "project_name": data.get("openstack_project_name", ""),
+                    "user_domain_name": data.get("openstack_user_domain_name", ""),
+                    "project_domain_name": data.get(
+                        "openstack_project_domain_name", ""
+                    ),
+                    "region_name": data.get("openstack_region_name", ""),
+                    "network": data.get("openstack_network", ""),
+                    "image_id": data.get("image_id", ""),
+                }
+            )
+        return configs
 
     def _push_garm_config(self, container: ops.Container) -> None:
         """Render and push the GARM TOML config into the Pebble container.
