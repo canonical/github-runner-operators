@@ -27,7 +27,7 @@ _DEFAULT_PG_CONFIG = {
 def _render(**overrides) -> dict:
     """Helper: render TOML with defaults, return parsed dict."""
     kwargs = {
-        "listen_port": 9997,
+        "listen_port": 8080,
         "jwt_secret": "test-secret",
         "db_passphrase": "a" * 32,
         "postgresql_config": _DEFAULT_PG_CONFIG,
