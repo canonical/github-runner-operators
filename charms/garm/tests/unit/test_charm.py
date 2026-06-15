@@ -218,3 +218,54 @@ def test_build_provider_list_returns_default_when_none():
     result = _build_provider_list(None)
     assert len(result) == 1
     assert result[0]["name"] == "openstack"
+
+
+def test_build_provider_list_skips_plaintext_password_when_secret_uri_provided():
+    """
+    arrange: Two providers are given, one with a secret URI.
+    act: _build_provider_list is called with provider_password_secrets
+         mapping the first provider to a secret URI.
+    assert: The first provider has NO OPENSTACK_PASSWORD in env vars,
+            while the second provider (no secret URI) does have it.
+    """
+    providers = [
+        {
+            "unit_name": "garm-configurator-0",
+            "auth_url": "https://ks1.example.com:5000/v3",
+            "username": "admin1",
+            "password": "pass1",
+            "project_name": "proj1",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionOne",
+            "network": "net1",
+            "image_id": "img-1",
+        },
+        {
+            "unit_name": "garm-configurator-1",
+            "auth_url": "https://ks2.example.com:5000/v3",
+            "username": "admin2",
+            "password": "pass2",
+            "project_name": "proj2",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionTwo",
+            "network": "net2",
+            "image_id": "img-2",
+        },
+    ]
+    password_secrets = {
+        "garm-configurator-0": "juju-secret:abc-123",
+    }
+    result = _build_provider_list(providers, password_secrets)
+    assert len(result) == 2
+
+    env0 = result[0]["external"]["environment_variables"]
+    assert not any("OPENSTACK_PASSWORD=" in v for v in env0), (
+        f"Expected NO OPENSTACK_PASSWORD for provider with secret URI, "
+        f"got: {env0}"
+    )
+    assert "OPENSTACK_USERNAME=admin1" in env0
+
+    env1 = result[1]["external"]["environment_variables"]
+    assert "OPENSTACK_PASSWORD=pass2" in env1
