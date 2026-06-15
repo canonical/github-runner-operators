@@ -403,10 +403,11 @@ def test_garm_toml_has_configurator_provider(
         f"{PEBBLE_PREFIX} exec -- cat {GARM_CONFIG_PATH}",
         unit=garm_unit,
     )
-    logger.info("GARM TOML config:\n%s", result.stdout)
-
     # Parse the TOML
     config = tomllib.loads(result.stdout)
+    logger.info(
+        "GARM TOML providers: %s", [p.get("name") for p in config.get("provider", [])]
+    )
 
     # There should be at least one provider
     providers = config.get("provider", [])
