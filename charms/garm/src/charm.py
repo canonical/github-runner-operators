@@ -149,17 +149,26 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._ensure_secrets()
 
-        # app-port is injected by the go-framework extension but is unsupported:
-        # GARM always serves its API and metrics on GARM_PORT. Warn rather than
-        # block, and tolerate the option being absent (it may be removed from the
-        # framework in future).
-        configured_port = self.config.get("app-port")
-        if configured_port is not None and int(configured_port) != GARM_PORT:
-            logger.warning(
-                "app-port=%s is not supported; GARM always serves its API and metrics on port %d",
-                configured_port,
-                GARM_PORT,
-            )
+        # The go-framework extension injects app-port, metrics-port and
+        # metrics-path, but GARM supports none of them: it serves its API and
+        # metrics on a fixed port (GARM_PORT) and declares its Prometheus scrape
+        # target in paas-config.yaml. Warn rather than block when an operator sets
+        # any to a non-default value, tolerating their absence (the framework may
+        # drop them in future).
+        for option, default in (
+            ("app-port", GARM_PORT),
+            ("metrics-port", GARM_PORT),
+            ("metrics-path", "/metrics"),
+        ):
+            value = self.config.get(option)
+            if value is not None and str(value) != str(default):
+                logger.warning(
+                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
+                    "declares its Prometheus scrape config in paas-config.yaml",
+                    option,
+                    value,
+                    GARM_PORT,
+                )
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
