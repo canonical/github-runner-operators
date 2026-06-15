@@ -65,52 +65,106 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 }
             )
 
-        # Only write to garm relation when image UUID is available (per AC:
-        # "Information should only be populated AFTER an image has been created").
-        if state.image_id is not None:
-            garm_relation = self.model.get_relation(GARM_RELATION_NAME)
-            if garm_relation is not None:
-                pc = state.provider_config
-                gc = state.github_app_config
-                sc = state.scaleset_config
-                garm_relation.data[self.unit].update(
-                    {
-                        "openstack_auth_url": pc.auth_url,
-                        "openstack_username": pc.username,
-                        "openstack_password": pc.password,
-                        "openstack_project_name": pc.project_name,
-                        "openstack_user_domain_name": pc.user_domain_name,
-                        "openstack_project_domain_name": pc.project_domain_name,
-                        "openstack_region_name": pc.region_name,
-                        "openstack_network": pc.network,
-                        "github_client_id": gc.client_id,
-                        "github_installation_id": gc.installation_id,
-                        "github_private_key": gc.private_key,
-                        "scaleset_name": sc.name,
-                        "scaleset_flavor": sc.flavor,
-                        "scaleset_os_arch": sc.os_arch,
-                        "scaleset_min_idle_runner": str(sc.min_idle_runner),
-                        "scaleset_max_runner": str(sc.max_runner),
-                        "scaleset_labels": sc.labels,
-                        "scaleset_runner_group": sc.runner_group,
-                        "image_id": state.image_id,
-                    }
-                )
-                if sc.repo is not None:
-                    garm_relation.data[self.unit]["scaleset_repo"] = sc.repo
-                if sc.org is not None:
-                    garm_relation.data[self.unit]["scaleset_org"] = sc.org
-                if sc.pre_install_scripts is not None:
-                    garm_relation.data[self.unit]["scaleset_pre_install_scripts"] = (
-                        sc.pre_install_scripts
-                    )
-
         if relation is None:
             self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
+            return
         elif state.image_id is None:
             self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
-        else:
-            self.unit.status = ops.ActiveStatus("Ready")
+            return
+        self._configure_garm_relation(state)
+        self.unit.status = ops.ActiveStatus("Ready")
+
+    def _ensure_relation_secret(
+        self,
+        relation: ops.Relation,
+        secret_name: str,
+        value: str,
+    ) -> ops.Secret | None:
+        """Ensure a Juju secret exists for the given value and grant it to the related app.
+
+        Creates a new secret if none exists on this unit for ``secret_name``,
+        updates its content if it exists, and grants read access to the
+        related application so it can retrieve the secret via its URI.
+
+        Args:
+            relation: The garm-configurator relation.
+            secret_name: A per-unit name for the secret (used as Juju label).
+            value: The secret value to store.
+
+        Returns:
+            The (possibly newly-created) Juju Secret object, or None if this
+            unit is not the leader.
+        """
+        if not self.unit.is_leader():
+            return None
+
+        try:
+            secret = self.model.get_secret(label=secret_name)
+            secret.set_content({"value": value})
+        except ops.SecretNotFoundError:
+            secret = self.app.add_secret({"value": value}, label=secret_name)
+
+        secret.grant(relation)
+
+        return secret
+
+    def _configure_garm_relation(self, state: CharmState) -> None:
+        """Populate the garm-configurator relation data when image_id is present.
+
+        Reads the garm relation, creates or updates the required secrets,
+        and writes all configuration fields. Returns silently if the garm
+        relation or secrets are not yet available — status reporting is
+        handled by the caller (_reconcile).
+        """
+        garm_relation = self.model.get_relation(GARM_RELATION_NAME)
+        if garm_relation is None:
+            return
+
+        password_secret = self._ensure_relation_secret(
+            garm_relation,
+            "configurator-password",
+            state.provider_config.password,
+        )
+        github_key_secret = self._ensure_relation_secret(
+            garm_relation,
+            "configurator-github-key",
+            state.github_app_config.private_key,
+        )
+
+        if password_secret is None or github_key_secret is None:
+            return
+
+        garm_relation.data[self.unit].update(
+            {
+                "openstack_auth_url": state.provider_config.auth_url,
+                "openstack_username": state.provider_config.username,
+                "openstack_password_secret_uri": str(password_secret),
+                "openstack_project_name": state.provider_config.project_name,
+                "openstack_user_domain_name": state.provider_config.user_domain_name,
+                "openstack_project_domain_name": state.provider_config.project_domain_name,
+                "openstack_region_name": state.provider_config.region_name,
+                "openstack_network": state.provider_config.network,
+                "github_client_id": state.github_app_config.client_id,
+                "github_installation_id": state.github_app_config.installation_id,
+                "github_private_key_secret_uri": str(github_key_secret),
+                "scaleset_name": state.scaleset_config.name,
+                "scaleset_flavor": state.scaleset_config.flavor,
+                "scaleset_os_arch": state.scaleset_config.os_arch,
+                "scaleset_min_idle_runner": str(state.scaleset_config.min_idle_runner),
+                "scaleset_max_runner": str(state.scaleset_config.max_runner),
+                "scaleset_labels": state.scaleset_config.labels,
+                "scaleset_runner_group": state.scaleset_config.runner_group,
+                "image_id": state.image_id,
+            }
+        )
+
+        for key, value in {
+            "scaleset_repo": state.scaleset_config.repo,
+            "scaleset_org": state.scaleset_config.org,
+            "scaleset_pre_install_scripts": state.scaleset_config.pre_install_scripts,
+        }.items():
+            if value is not None:
+                garm_relation.data[self.unit][key] = value
 
 
 if __name__ == "__main__":
