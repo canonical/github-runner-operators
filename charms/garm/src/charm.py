@@ -110,16 +110,29 @@ def _generate_garm_secrets() -> dict[str, str]:
 
 
 def _generate_admin_password() -> str:
-    """Generate a random password that satisfies GARM's strong-password policy.
+    """Generate a random password satisfying GARM's strong-password policy.
 
-    Policy requires: min 12 chars, at least one uppercase, one lowercase,
-    one digit, and one symbol.
+    Policy: min 12 chars, at least one uppercase, one lowercase, one digit,
+    one symbol.  Full entropy is distributed across all 20 positions via a
+    Fisher-Yates shuffle so the structure is not predictable from the source.
 
     Returns:
         A 20-character password guaranteed to meet GARM's requirements.
     """
-    # Fixed suffix ensures policy compliance regardless of the random part.
-    return f"Admin-{secrets.token_hex(6)}-X1!"
+    _SYMBOLS = "!@#$%-_=+"
+    alphabet = string.ascii_letters + string.digits + _SYMBOLS
+    mandatory = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(_SYMBOLS),
+    ]
+    filler = [secrets.choice(alphabet) for _ in range(16)]
+    chars = mandatory + filler
+    for i in range(len(chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        chars[i], chars[j] = chars[j], chars[i]
+    return "".join(chars)
 
 
 class GarmCharm(paas_charm.go.Charm):
@@ -138,6 +151,11 @@ class GarmCharm(paas_charm.go.Charm):
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
 
+    @property
+    def _listen_port(self) -> int:
+        """GARM API listen port from charm config."""
+        return int(self.config.get("garm-listen-port", 9997))
+
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
 
@@ -153,23 +171,31 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
-        if not self._get_postgresql_config():
+        pg_config = self._get_postgresql_config()
+        if not pg_config:
             logger.info("PostgreSQL relation data not yet available; blocking")
             self.unit.status = ops.BlockedStatus("Waiting for postgresql relation")
             return
 
-        # TODO: Eliminate double-replan (ISD-5718). paas_charm calls replan()
-        # internally in super().restart(), which starts GARM with the default
-        # command momentarily before this method overrides it. Acceptable for
-        # the scaffold; resolve by contributing an upstream hook in a future story.
-        super().restart(rerun_migrations=rerun_migrations)
         container = self.unit.get_container(CONTAINER_NAME)
+
+        # Push the TOML config and set the command layer BEFORE calling
+        # super().restart() so that GARM never starts with a missing config file.
+        # If secrets are unavailable we return early before touching the service.
         try:
-            self._push_garm_config(container)
+            self._push_garm_config(container, pg_config)
         except ops.SecretNotFoundError:
             logger.warning("garm-secrets not yet available; deferring config push")
             self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
             return
+
+        # TODO: Eliminate double-replan (ISD-5718). On first deployment, paas_charm
+        # adds its Pebble layer inside super().restart() at a higher stack position
+        # than "garm-command", temporarily overriding the command. The add_layer +
+        # replan below re-establishes the correct command. On subsequent restarts
+        # "garm-command" is already above the paas_charm layer so that replan is a
+        # no-op. Fix properly by contributing an upstream hook to paas_charm.
+        super().restart(rerun_migrations=rerun_migrations)
         container.add_layer(
             "garm-command",
             {
@@ -278,14 +304,31 @@ class GarmCharm(paas_charm.go.Charm):
 
     def _maybe_first_run(self) -> None:
         """Call GARM first-run initialisation if GARM is not yet initialised."""
+        if not self.unit.is_leader():
+            return
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
             logger.warning("Admin credentials secret not yet available; skipping first-run check")
             return
 
+        try:
+            username = admin_creds["username"]
+            password = admin_creds["password"]
+            email = admin_creds["email"]
+            full_name = admin_creds["full-name"]
+        except KeyError as exc:
+            logger.error(
+                "Admin credentials secret is missing required key %s; cannot initialise GARM",
+                exc,
+            )
+            return
+
+        # Always connect via loopback. If the operator has configured a specific
+        # non-wildcard listen address, use that instead (0.0.0.0 and :: bind all
+        # interfaces including loopback so 127.0.0.1 always works for those).
         listen_address = str(self.config.get("garm-listen-address", "0.0.0.0"))
-        listen_port = int(self.config.get("garm-listen-port", 9997))
-        base_url = f"http://{listen_address}:{listen_port}/api/v1"
+        api_address = "127.0.0.1" if listen_address in ("0.0.0.0", "::") else listen_address
+        base_url = f"http://{api_address}:{self._listen_port}/api/v1"
         client = GarmApiClient(base_url)
 
         try:
@@ -293,26 +336,33 @@ class GarmCharm(paas_charm.go.Charm):
                 return
             logger.info("GARM not yet initialised; running first-run setup")
             client.first_run(
-                username=admin_creds["username"],
-                password=admin_creds["password"],
-                email=admin_creds["email"],
-                full_name=admin_creds["full-name"],
+                username=username,
+                password=password,
+                email=email,
+                full_name=full_name,
             )
         except GarmApiError as exc:
             logger.warning("GARM first-run check failed (will retry on next event): %s", exc)
 
-    def _push_garm_config(self, container: ops.Container) -> None:
+    def _push_garm_config(
+        self,
+        container: ops.Container,
+        postgresql_config: dict[str, typing.Any] | None = None,
+    ) -> None:
         """Render and push the GARM TOML config into the Pebble container.
 
         Args:
             container: The Pebble container to push the config into.
+            postgresql_config: Pre-fetched PostgreSQL connection parameters.
+                If None, fetches from the relation data (adds a round-trip).
         """
-        postgresql_config = self._get_postgresql_config()
+        if postgresql_config is None:
+            postgresql_config = self._get_postgresql_config()
         if not postgresql_config:
             logger.info("PostgreSQL relation data not yet available")
             return
 
-        secrets = self._get_secrets()
+        garm_secrets = self._get_secrets()
         logger.info(
             "Configuring GARM with PostgreSQL backend at %s:%s",
             postgresql_config["hostname"],
@@ -320,9 +370,9 @@ class GarmCharm(paas_charm.go.Charm):
         )
         toml_content = render_garm_toml(
             listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
-            listen_port=int(self.config.get("garm-listen-port", 9997)),
-            jwt_secret=secrets["jwt-secret"],
-            db_passphrase=secrets["db-passphrase"],
+            listen_port=self._listen_port,
+            jwt_secret=garm_secrets["jwt-secret"],
+            db_passphrase=garm_secrets["db-passphrase"],
             postgresql_config=postgresql_config,
         )
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)

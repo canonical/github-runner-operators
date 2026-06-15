@@ -5,14 +5,14 @@
 
 import logging
 
+import urllib3.exceptions
+
 from garm_client.api.controller_info_api import ControllerInfoApi
 from garm_client.api.first_run_api import FirstRunApi
-from garm_client.api.login_api import LoginApi
 from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
 from garm_client.models.new_user_params import NewUserParams
-from garm_client.models.password_login_params import PasswordLoginParams
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,8 @@ class GarmApiError(Exception):
 class GarmApiClient:
     """HTTP client for the GARM REST API.
 
-    Handles login (JWT acquisition) and the small set of API calls the charm
-    needs: initialisation check and first-run admin user creation.
+    Covers the two unauthenticated endpoints the charm needs: initialisation
+    check and first-run admin user creation.
     """
 
     def __init__(self, base_url: str) -> None:
@@ -39,36 +39,9 @@ class GarmApiClient:
         """
         self._base_url = base_url
 
-    def _api_client(self, jwt_token: str | None = None) -> ApiClient:
-        """Build an ApiClient, optionally with a Bearer token."""
-        cfg = Configuration(host=self._base_url)
-        if jwt_token:
-            cfg.api_key = {"Bearer": jwt_token}
-        return ApiClient(configuration=cfg)
-
-    def login(self, username: str, password: str) -> str:
-        """Authenticate against GARM and return a JWT token.
-
-        Args:
-            username: Admin username.
-            password: Admin password.
-
-        Returns:
-            JWT token string.
-
-        Raises:
-            GarmApiError: If authentication fails.
-        """
-        with self._api_client() as client:
-            api = LoginApi(api_client=client)
-            try:
-                response = api.login(
-                    body=PasswordLoginParams(username=username, password=password),
-                    _request_timeout=_REQUEST_TIMEOUT,
-                )
-            except ApiException as exc:
-                raise GarmApiError(f"GARM login failed ({exc.status}): {exc.body}") from exc
-        return response.token
+    def _api_client(self) -> ApiClient:
+        """Build an unauthenticated ApiClient."""
+        return ApiClient(configuration=Configuration(host=self._base_url))
 
     def is_initialized(self) -> bool:
         """Return True if GARM has already been initialised (first-run done).
@@ -93,6 +66,8 @@ class GarmApiClient:
                 raise GarmApiError(
                     f"Unexpected response from GARM controller-info ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmApiError(f"GARM connection error: {exc}") from exc
 
     def first_run(
         self,
@@ -127,4 +102,6 @@ class GarmApiClient:
                 )
             except ApiException as exc:
                 raise GarmApiError(f"GARM first-run failed ({exc.status}): {exc.body}") from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmApiError(f"GARM connection error: {exc}") from exc
         logger.info("GARM first-run initialisation complete for user '%s'", username)
