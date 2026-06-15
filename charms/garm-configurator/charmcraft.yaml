@@ -114,6 +114,12 @@ requires:
     limit: 1
     optional: false
 
+provides:
+  garm-configurator:
+    interface: garm_configurator_v0
+    limit: 1
+    optional: true
+
 parts:
   charm:
     source: .
