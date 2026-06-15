@@ -73,59 +73,37 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 pc = state.provider_config
                 gc = state.github_app_config
                 sc = state.scaleset_config
-
-                # Remove stale optional keys before writing — old config values
-                # (e.g. scaleset_repo when switching to scaleset_org) must not
-                # linger in the relation databag alongside the new ones.
-                for stale_key in ("scaleset_repo", "scaleset_org"):
-                    garm_relation.data[self.unit].pop(stale_key, None)
-                garm_relation.data[self.unit].pop("scaleset_pre_install_scripts", None)
-
-                # Only write secret URI if we managed to create the secret
-                # (i.e. this unit is the leader). Non-leader units skip.
-                password_secret = self._ensure_relation_secret(
-                    garm_relation,
-                    "configurator-password",
-                    pc.password,
+                garm_relation.data[self.unit].update(
+                    {
+                        "openstack_auth_url": pc.auth_url,
+                        "openstack_username": pc.username,
+                        "openstack_password": pc.password,
+                        "openstack_project_name": pc.project_name,
+                        "openstack_user_domain_name": pc.user_domain_name,
+                        "openstack_project_domain_name": pc.project_domain_name,
+                        "openstack_region_name": pc.region_name,
+                        "openstack_network": pc.network,
+                        "github_client_id": gc.client_id,
+                        "github_installation_id": gc.installation_id,
+                        "github_private_key": gc.private_key,
+                        "scaleset_name": sc.name,
+                        "scaleset_flavor": sc.flavor,
+                        "scaleset_os_arch": sc.os_arch,
+                        "scaleset_min_idle_runner": str(sc.min_idle_runner),
+                        "scaleset_max_runner": str(sc.max_runner),
+                        "scaleset_labels": sc.labels,
+                        "scaleset_runner_group": sc.runner_group,
+                        "image_id": state.image_id,
+                    }
                 )
-                github_key_secret = self._ensure_relation_secret(
-                    garm_relation,
-                    "configurator-github-key",
-                    gc.private_key,
-                )
-
-                if password_secret is not None and github_key_secret is not None:
-                    garm_relation.data[self.unit].update(
-                        {
-                            "openstack_auth_url": pc.auth_url,
-                            "openstack_username": pc.username,
-                            "openstack_password_secret_uri": str(password_secret),
-                            "openstack_project_name": pc.project_name,
-                            "openstack_user_domain_name": pc.user_domain_name,
-                            "openstack_project_domain_name": pc.project_domain_name,
-                            "openstack_region_name": pc.region_name,
-                            "openstack_network": pc.network,
-                            "github_client_id": gc.client_id,
-                            "github_installation_id": gc.installation_id,
-                            "github_private_key_secret_uri": str(github_key_secret),
-                            "scaleset_name": sc.name,
-                            "scaleset_flavor": sc.flavor,
-                            "scaleset_os_arch": sc.os_arch,
-                            "scaleset_min_idle_runner": str(sc.min_idle_runner),
-                            "scaleset_max_runner": str(sc.max_runner),
-                            "scaleset_labels": sc.labels,
-                            "scaleset_runner_group": sc.runner_group,
-                            "image_id": state.image_id,
-                        }
+                if sc.repo is not None:
+                    garm_relation.data[self.unit]["scaleset_repo"] = sc.repo
+                if sc.org is not None:
+                    garm_relation.data[self.unit]["scaleset_org"] = sc.org
+                if sc.pre_install_scripts is not None:
+                    garm_relation.data[self.unit]["scaleset_pre_install_scripts"] = (
+                        sc.pre_install_scripts
                     )
-                    if sc.repo is not None:
-                        garm_relation.data[self.unit]["scaleset_repo"] = sc.repo
-                    if sc.org is not None:
-                        garm_relation.data[self.unit]["scaleset_org"] = sc.org
-                    if sc.pre_install_scripts is not None:
-                        garm_relation.data[self.unit]["scaleset_pre_install_scripts"] = (
-                            sc.pre_install_scripts
-                        )
 
         if relation is None:
             self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
@@ -133,44 +111,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
         else:
             self.unit.status = ops.ActiveStatus("Ready")
-
-    def _ensure_relation_secret(
-        self,
-        relation: ops.Relation,
-        secret_name: str,
-        value: str,
-    ) -> ops.Secret | None:
-        """Ensure a Juju secret exists for the given value and grant it to the related app.
-
-        Creates a new secret if none exists on this unit for ``secret_name``,
-        updates its content if it exists, and grants read access to the
-        related application so it can retrieve the secret via its URI.
-
-        Args:
-            relation: The garm-configurator relation.
-            secret_name: A per-unit name for the secret (used as Juju label).
-            value: The secret value to store.
-
-        Returns:
-            The (possibly newly-created) Juju Secret object, or None if this
-            unit is not the leader.
-        """
-        if not self.unit.is_leader():
-            # Non-leader units cannot create secrets; skip silently.
-            # The leader unit will handle secret creation on the next reconcile.
-            return None
-
-        # Try to find or create the secret.
-        try:
-            secret = self.model.get_secret(label=secret_name)
-            secret.set_content({"value": value})
-        except ops.SecretNotFoundError:
-            secret = self.app.add_secret({"value": value}, label=secret_name)
-
-        # Grant the secret to the related application so it can read it.
-        secret.grant(relation)
-
-        return secret
 
 
 if __name__ == "__main__":
