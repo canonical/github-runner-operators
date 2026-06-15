@@ -149,12 +149,12 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._ensure_secrets()
 
-        # The go-framework extension injects app-port, metrics-port and
-        # metrics-path, but GARM supports none of them: it serves its API and
-        # metrics on a fixed port (GARM_PORT) and declares its Prometheus scrape
-        # target in paas-config.yaml. Warn rather than block when an operator sets
-        # any to a non-default value, tolerating their absence (the framework may
-        # drop them in future).
+        # GARM serves its API and metrics on the same port (it has no separate
+        # metrics listener), so the go-framework's app-port/metrics-port/metrics-path
+        # settings don't apply and this charm doesn't use them: the port is fixed to
+        # GARM_PORT and the scrape target is declared in paas-config.yaml. Warn rather
+        # than block when an operator sets any to a non-default value, tolerating
+        # their absence (the framework may drop them in future).
         for option, default in (
             ("app-port", GARM_PORT),
             ("metrics-port", GARM_PORT),
