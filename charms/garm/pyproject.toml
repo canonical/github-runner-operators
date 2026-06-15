@@ -40,3 +40,4 @@ skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage,src/
 
 [tool.pyright]
 include = ["src/**.py"]
+exclude = ["src/garm_client"]
