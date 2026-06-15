@@ -149,12 +149,14 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._ensure_secrets()
 
-        # GARM serves its API and metrics on the same port (it has no separate
-        # metrics listener), so the go-framework's app-port/metrics-port/metrics-path
-        # settings don't apply and this charm doesn't use them: the port is fixed to
-        # GARM_PORT and the scrape target is declared in paas-config.yaml. Warn rather
-        # than block when an operator sets any to a non-default value, tolerating
-        # their absence (the framework may drop them in future).
+        # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
+        # no separate metrics listener — and declares its scrape target in
+        # paas-config.yaml, so the go-framework's app-port/metrics-port/metrics-path
+        # settings don't apply. _workload_config also pins the workload port to
+        # GARM_PORT, so app-port has no effect on ingress, the opened ports, or the
+        # service URL (they can't drift from GARM's actual port). Warn rather than
+        # block when an operator sets any to a non-default value, tolerating their
+        # absence (the framework may drop them in future).
         for option, default in (
             ("app-port", GARM_PORT),
             ("metrics-port", GARM_PORT),
