@@ -17,6 +17,7 @@ import tomli_w
 logger = logging.getLogger(__name__)
 
 GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
+GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 TOML_HASH_LABEL: typing.Final[str] = "garm-toml-hash"
 CONTAINER_NAME: typing.Final[str] = "app"
@@ -43,9 +44,15 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
 
 def _build_provider_list(
     providers: list[dict[str, str]] | None,
-    provider_password_secrets: dict[str, str] | None = None,
-) -> list[dict[str, typing.Any]]:
-    """Build the list of [[provider]] TOML entries.
+) -> tuple[list[dict[str, typing.Any]], dict[str, str]]:
+    r"""Build the list of [[provider]] TOML entries and provider config files.
+
+    The garm-provider-openstack binary reads its credentials from a
+    provider-specific TOML config file that references a clouds.yaml file
+    -- it does NOT read OPENSTACK_* environment variables.
+
+    This function generates both the GARM provider entries and the
+    provider config file contents that must be pushed to the container.
 
     If no providers are given, returns a default single-entry list with
     the hardcoded "openstack" provider for backward compatibility.
@@ -54,13 +61,14 @@ def _build_provider_list(
         providers: List of provider config dicts from Configurator units,
             each with keys: unit_name, auth_url, username, password,
             project_name, user_domain_name, project_domain_name,
-            region_name, network, image_id.
-        provider_password_secrets: Dict mapping provider unit names to
-            Juju secret URIs. When present for a provider, the password
-            is not written as plaintext in the TOML.
+            region_name, network.
 
     Returns:
-        A list of provider dicts suitable for TOML rendering.
+        A tuple of (provider_entries, provider_files):
+        - provider_entries: List of provider dicts for the GARM TOML
+          [[provider]] section, with config_file paths set.
+        - provider_files: Dict mapping container file paths to their
+          contents (provider TOML + clouds.yaml for each provider).
     """
     if not providers:
         return [
@@ -71,39 +79,44 @@ def _build_provider_list(
                 "external": {
                     "config_file": "",
                     "provider_executable": OPENSTACK_PROVIDER_BINARY,
-                    "environment_variables": [],
                 },
             }
-        ]
+        ], {}
 
-    password_secrets = provider_password_secrets or {}
     result: list[dict[str, typing.Any]] = []
+    provider_files: dict[str, str] = {}
+
     for provider in providers:
         unit_name = provider["unit_name"]
-        has_secret_uri = unit_name in password_secrets and password_secrets[unit_name]
-        env_vars: list[str] = []
-        for key in (
-            "auth_url",
-            "username",
-            "password",
-            "project_name",
-            "user_domain_name",
-            "project_domain_name",
-            "region_name",
-            "network",
-            "image_id",
-        ):
-            prefix = f"OPENSTACK_{key.upper()}"
-            env_vars.append(f"{prefix}={provider[key]}")
-        if has_secret_uri:
-            env_vars.remove(f"OPENSTACK_PASSWORD={provider.get('password', '')}")
-            logger.warning(
-                "Provider '%s' has a password secret URI; "
-                "OPENSTACK_PASSWORD not set in TOML environment variables. "
-                "The provider binary must resolve the secret via "
-                "Juju secrets at runtime.",
-                unit_name,
-            )
+
+        provider_toml_path = f"{GARM_PROVIDER_CONFIG_DIR}/provider-{unit_name}.toml"
+        clouds_yaml_path = f"{GARM_PROVIDER_CONFIG_DIR}/clouds-{unit_name}.yaml"
+
+        # Build the provider-specific TOML config that garm-provider-openstack reads.
+        provider_toml = tomli_w.dumps(
+            {
+                "cloud": unit_name,
+                "network_id": provider["network"],
+                "credentials": {
+                    "clouds": clouds_yaml_path,
+                },
+            }
+        )
+
+        # Build the clouds.yaml that gophercloud reads for OpenStack credentials.
+        auth_block = {
+            "auth_url": provider["auth_url"],
+            "username": provider["username"],
+            "password": provider["password"],
+            "project_name": provider["project_name"],
+            "user_domain_name": provider["user_domain_name"],
+            "project_domain_name": provider["project_domain_name"],
+        }
+
+        clouds_yaml = _render_clouds_yaml(unit_name, auth_block, provider["region_name"])
+
+        provider_files[provider_toml_path] = provider_toml
+        provider_files[clouds_yaml_path] = clouds_yaml
 
         result.append(
             {
@@ -111,13 +124,41 @@ def _build_provider_list(
                 "provider_type": "external",
                 "description": f"OpenStack provider ({unit_name})",
                 "external": {
-                    "config_file": "",
+                    "config_file": provider_toml_path,
                     "provider_executable": OPENSTACK_PROVIDER_BINARY,
-                    "environment_variables": env_vars,
                 },
             }
         )
-    return result
+    return result, provider_files
+
+
+def _render_clouds_yaml(cloud_name: str, auth: dict[str, str], region_name: str) -> str:
+    """Render a minimal clouds.yaml for gophercloud.
+
+    Since PyYAML is not a charm dependency, we render the YAML manually.
+
+    Args:
+        cloud_name: The cloud name in the ``clouds`` dict.
+        auth: Auth parameters (auth_url, username, password, project_name,
+            user_domain_name, project_domain_name).
+        region_name: OpenStack region name.
+
+    Returns:
+        YAML-formatted string.
+    """
+    lines = [
+        "clouds:",
+        f"  {cloud_name}:",
+        "    auth:",
+        f"      auth_url: {auth['auth_url']}",
+        f"      username: {auth['username']}",
+        f"      project_name: {auth['project_name']}",
+        f"      user_domain_name: {auth['user_domain_name']}",
+        f"      project_domain_name: {auth['project_domain_name']}",
+        f"      password: {auth['password']}",
+        f"    region_name: {region_name}",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def render_garm_toml(
@@ -128,8 +169,7 @@ def render_garm_toml(
     db_passphrase: str,
     postgresql_config: dict[str, typing.Any],
     providers: list[dict[str, str]] | None = None,
-    provider_password_secrets: dict[str, str] | None = None,
-) -> str:
+) -> tuple[str, dict[str, str]]:
     """Render GARM's TOML configuration file content.
 
     Args:
@@ -142,13 +182,14 @@ def render_garm_toml(
         providers: Optional list of provider config dicts from Configurator
             units. If None or empty, a default single "openstack" provider
             is used for backward compatibility.
-        provider_password_secrets: Optional dict mapping provider unit names
-            to Juju secret URIs. When a provider has a secret URI, its
-            password is not written as plaintext in the TOML.
 
     Returns:
-        TOML-formatted string ready to be written to disk.
+        A tuple of (toml_content, provider_files):
+        - toml_content: TOML-formatted string ready to be written to disk.
+        - provider_files: Dict mapping container file paths to their
+          contents (provider config TOML + clouds.yaml for each provider).
     """
+    provider_entries, provider_files = _build_provider_list(providers)
     config: dict[str, typing.Any] = {
         "database": {
             "backend": "postgresql",
@@ -168,9 +209,9 @@ def render_garm_toml(
             "disable_auth": True,
             "enable": True,
         },
-        "provider": _build_provider_list(providers, provider_password_secrets or {}),
+        "provider": provider_entries,
     }
-    return tomli_w.dumps(config)
+    return tomli_w.dumps(config), provider_files
 
 
 def _generate_garm_secrets() -> dict[str, str]:
@@ -227,15 +268,14 @@ class GarmCharm(paas_charm.go.Charm):
             return
 
         # Render TOML including dynamic providers from Configurator relation
-        provider_configs, password_secrets = self._get_configurator_provider_configs()
-        toml_content = render_garm_toml(
+        provider_configs = self._get_configurator_provider_configs()
+        toml_content, provider_files = render_garm_toml(
             listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
             listen_port=int(self.config.get("garm-listen-port", 9997)),
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
             postgresql_config=postgresql_config,
             providers=provider_configs if provider_configs else None,
-            provider_password_secrets=password_secrets,
         )
 
         new_hash = self._hash_toml(toml_content)
@@ -254,6 +294,8 @@ class GarmCharm(paas_charm.go.Charm):
 
         container = self.unit.get_container(CONTAINER_NAME)
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
+        for path, content in provider_files.items():
+            container.push(path, content, make_dirs=True)
         self._store_toml_hash(new_hash)
 
         container.add_layer(
@@ -378,7 +420,7 @@ class GarmCharm(paas_charm.go.Charm):
 
     def _get_configurator_provider_configs(
         self,
-    ) -> tuple[list[dict[str, str]], dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """Read OpenStack provider configs from all Configurator units.
 
         Each Configurator unit writes its provider config to unit-level
@@ -386,27 +428,20 @@ class GarmCharm(paas_charm.go.Charm):
         collects all such configs, keyed by unit name for TOML provider
         naming.
 
-        Sensitive fields (password, private key) may be stored as Juju
-        secret URIs (``*_secret_uri``) rather than plaintext values.
-        When a secret URI is provided, the password is NOT resolved;
-        instead, the URI is returned so that the TOML can reference it
-        and avoid writing the plaintext password.
+        Passwords stored as Juju secret URIs are resolved at this point
+        so that the plaintext value is available for the provider's
+        clouds.yaml file.
 
         Returns:
-            A tuple of (configs, password_secrets):
-            - configs: A list of dicts, each containing the provider config
-              fields (auth_url, username, password, project_name, etc.)
-              plus a ``unit_name`` key for the provider's TOML name.
-            - password_secrets: A dict mapping provider unit names to their
-              Juju secret URIs. When present, the password for that
-              provider should not be written as plaintext in the TOML.
+            A list of dicts, each containing the provider config fields
+            (auth_url, username, password, project_name, etc.) plus a
+            ``unit_name`` key for the provider's TOML name.
         """
         relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
         if relation is None:
-            return [], {}
+            return []
 
         configs: list[dict[str, str]] = []
-        password_secrets: dict[str, str] = {}
         for unit in relation.units:
             data = relation.data[unit]
             # Only include units that have sent the full provider config
@@ -419,11 +454,6 @@ class GarmCharm(paas_charm.go.Charm):
             password_secret_uri = data.get("openstack_password_secret_uri", "")
             if not password and password_secret_uri:
                 password = self._resolve_secret_value(str(password_secret_uri))
-
-            # Track secret URIs — when a provider uses a secret URI,
-            # _build_provider_list will skip the plaintext password.
-            if password_secret_uri and password_secret_uri != password:
-                password_secrets[unit_name] = str(password_secret_uri)
 
             # Resolve private key similarly.
             private_key = data.get("github_private_key", "")
@@ -443,7 +473,6 @@ class GarmCharm(paas_charm.go.Charm):
                     "project_domain_name": data.get("openstack_project_domain_name", ""),
                     "region_name": data.get("openstack_region_name", ""),
                     "network": data.get("openstack_network", ""),
-                    "image_id": data.get("image_id", ""),
                 }
             )
 
@@ -451,7 +480,7 @@ class GarmCharm(paas_charm.go.Charm):
             if private_key:
                 configs[-1]["github_private_key"] = private_key
 
-        return configs, password_secrets
+        return configs
 
     def _resolve_secret_value(self, secret_uri: str) -> str:
         """Resolve a secret URI and return its ``value`` content.

@@ -34,7 +34,8 @@ def _render(**overrides) -> dict:
         "postgresql_config": _DEFAULT_PG_CONFIG,
     }
     kwargs.update(overrides)
-    return tomllib.loads(render_garm_toml(**kwargs))
+    toml_content, _ = render_garm_toml(**kwargs)
+    return tomllib.loads(toml_content)
 
 
 def test_render_garm_toml_postgresql_backend():
@@ -114,6 +115,7 @@ def test_render_garm_toml_provider_section():
         provider["external"]["provider_executable"]
         == "/usr/local/bin/garm-provider-openstack"
     )
+    assert provider["external"]["config_file"] == ""
 
 
 def test_generate_garm_secrets_returns_jwt_and_passphrase():
@@ -151,7 +153,10 @@ def test_render_garm_toml_with_configurator_providers():
     """
     arrange: Two Configurator units provided provider configs.
     act: render_garm_toml is called with providers list.
-    assert: Two [[provider]] blocks are rendered with correct names and env vars.
+    assert: Two [[provider]] blocks are rendered with correct names and
+            config_file paths pointing to provider TOML files.  The
+            returned provider_files dict contains the provider TOML and
+            clouds.yaml for each provider.
     """
     providers = [
         {
@@ -164,7 +169,6 @@ def test_render_garm_toml_with_configurator_providers():
             "project_domain_name": "Default",
             "region_name": "RegionOne",
             "network": "net1",
-            "image_id": "img-1",
         },
         {
             "unit_name": "garm-configurator-1",
@@ -176,26 +180,42 @@ def test_render_garm_toml_with_configurator_providers():
             "project_domain_name": "Default",
             "region_name": "RegionTwo",
             "network": "net2",
-            "image_id": "img-2",
         },
     ]
-    parsed = _render(providers=providers)
+    toml_content, provider_files = render_garm_toml(
+        listen_address="0.0.0.0",
+        listen_port=9997,
+        jwt_secret="test-secret",
+        db_passphrase="a" * 32,
+        postgresql_config=_DEFAULT_PG_CONFIG,
+        providers=providers,
+    )
+    parsed = tomllib.loads(toml_content)
     assert len(parsed["provider"]) == 2
 
     p0 = parsed["provider"][0]
     assert p0["name"] == "garm-configurator-0"
     assert p0["external"]["provider_executable"] == "/usr/local/bin/garm-provider-openstack"
-    env_vars = p0["external"]["environment_variables"]
-    assert "OPENSTACK_AUTH_URL=https://ks1.example.com:5000/v3" in env_vars
-    assert "OPENSTACK_USERNAME=admin1" in env_vars
-    assert "OPENSTACK_PASSWORD=pass1" in env_vars
-    assert "OPENSTACK_PROJECT_NAME=proj1" in env_vars
-    assert "OPENSTACK_IMAGE_ID=img-1" in env_vars
+    assert p0["external"]["config_file"] == "/etc/garm/provider-garm-configurator-0.toml"
+    assert "environment_variables" not in p0["external"]
 
     p1 = parsed["provider"][1]
     assert p1["name"] == "garm-configurator-1"
-    env_vars_1 = p1["external"]["environment_variables"]
-    assert "OPENSTACK_USERNAME=admin2" in env_vars_1
+    assert p1["external"]["config_file"] == "/etc/garm/provider-garm-configurator-1.toml"
+
+    # Verify provider_files contains the expected paths and content.
+    provider_toml_0 = provider_files["/etc/garm/provider-garm-configurator-0.toml"]
+    assert "network_id = \"net1\"" in provider_toml_0
+    assert 'cloud = "garm-configurator-0"' in provider_toml_0
+
+    clouds_yaml_0 = provider_files["/etc/garm/clouds-garm-configurator-0.yaml"]
+    assert "username: admin1" in clouds_yaml_0
+    assert "password: pass1" in clouds_yaml_0
+    assert "region_name: RegionOne" in clouds_yaml_0
+
+    clouds_yaml_1 = provider_files["/etc/garm/clouds-garm-configurator-1.yaml"]
+    assert "username: admin2" in clouds_yaml_1
+    assert "password: pass2" in clouds_yaml_1
 
 
 def test_build_provider_list_returns_default_when_empty():
@@ -204,9 +224,10 @@ def test_build_provider_list_returns_default_when_empty():
     act: _build_provider_list is called.
     assert: Returns the default single-entry list with "openstack" provider.
     """
-    result = _build_provider_list([])
-    assert len(result) == 1
-    assert result[0]["name"] == "openstack"
+    entries, files = _build_provider_list([])
+    assert len(entries) == 1
+    assert entries[0]["name"] == "openstack"
+    assert files == {}
 
 
 def test_build_provider_list_returns_default_when_none():
@@ -215,18 +236,20 @@ def test_build_provider_list_returns_default_when_none():
     act: _build_provider_list is called with None.
     assert: Returns the default single-entry list.
     """
-    result = _build_provider_list(None)
-    assert len(result) == 1
-    assert result[0]["name"] == "openstack"
+    entries, files = _build_provider_list(None)
+    assert len(entries) == 1
+    assert entries[0]["name"] == "openstack"
+    assert files == {}
 
 
-def test_build_provider_list_skips_plaintext_password_when_secret_uri_provided():
+def test_build_provider_list_password_in_clouds_yaml():
     """
-    arrange: Two providers are given, one with a secret URI.
-    act: _build_provider_list is called with provider_password_secrets
-         mapping the first provider to a secret URI.
-    assert: The first provider has NO OPENSTACK_PASSWORD in env vars,
-            while the second provider (no secret URI) does have it.
+    arrange: Two provider configs with passwords.
+    act: _build_provider_list is called.
+    assert: Both providers have their password rendered in clouds.yaml.
+            The password is resolved from Juju secrets in
+            _get_configurator_provider_configs before reaching
+            _build_provider_list, so it's always available as plaintext.
     """
     providers = [
         {
@@ -239,7 +262,6 @@ def test_build_provider_list_skips_plaintext_password_when_secret_uri_provided()
             "project_domain_name": "Default",
             "region_name": "RegionOne",
             "network": "net1",
-            "image_id": "img-1",
         },
         {
             "unit_name": "garm-configurator-1",
@@ -251,21 +273,18 @@ def test_build_provider_list_skips_plaintext_password_when_secret_uri_provided()
             "project_domain_name": "Default",
             "region_name": "RegionTwo",
             "network": "net2",
-            "image_id": "img-2",
         },
     ]
-    password_secrets = {
-        "garm-configurator-0": "juju-secret:abc-123",
-    }
-    result = _build_provider_list(providers, password_secrets)
-    assert len(result) == 2
+    entries, provider_files = _build_provider_list(providers)
+    assert len(entries) == 2
 
-    env0 = result[0]["external"]["environment_variables"]
-    assert not any("OPENSTACK_PASSWORD=" in v for v in env0), (
-        f"Expected NO OPENSTACK_PASSWORD for provider with secret URI, "
-        f"got: {env0}"
-    )
-    assert "OPENSTACK_USERNAME=admin1" in env0
+    clouds_yaml_0 = provider_files["/etc/garm/clouds-garm-configurator-0.yaml"]
+    assert "password: pass1" in clouds_yaml_0
+    assert "username: admin1" in clouds_yaml_0
+    assert "region_name: RegionOne" in clouds_yaml_0
 
-    env1 = result[1]["external"]["environment_variables"]
-    assert "OPENSTACK_PASSWORD=pass2" in env1
+    clouds_yaml_1 = provider_files["/etc/garm/clouds-garm-configurator-1.yaml"]
+    assert "password: pass2" in clouds_yaml_1
+
+    assert entries[0]["external"]["config_file"] == "/etc/garm/provider-garm-configurator-0.toml"
+    assert entries[1]["external"]["config_file"] == "/etc/garm/provider-garm-configurator-1.toml"
