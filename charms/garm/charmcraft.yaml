@@ -28,4 +28,6 @@ requires:
     interface: postgresql_client
     optional: false
     limit: 1
+  garm-configurator:
+    interface: garm_configurator_v0
 
