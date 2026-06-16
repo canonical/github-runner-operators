@@ -256,11 +256,11 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.unit.is_leader():
             return
         try:
-            self.model.get_secret(label=GARM_SECRETS_LABEL)
+            self.model.get_secret(label=GARM_SECRETS_LABEL, refresh=True)
         except ops.SecretNotFoundError:
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
         try:
-            self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
+            self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL, refresh=True)
         except ops.SecretNotFoundError:
             self.app.add_secret(
                 {
