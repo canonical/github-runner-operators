@@ -120,13 +120,13 @@ def _generate_admin_password() -> str:
     Returns:
         A 20-character password guaranteed to meet GARM's requirements.
     """
-    _SYMBOLS = "!@#$%-_=+"
-    alphabet = string.ascii_letters + string.digits + _SYMBOLS
+    symbols = "!@#$%-_=+"
+    alphabet = string.ascii_letters + string.digits + symbols
     mandatory = [
         secrets.choice(string.ascii_uppercase),
         secrets.choice(string.ascii_lowercase),
         secrets.choice(string.digits),
-        secrets.choice(_SYMBOLS),
+        secrets.choice(symbols),
     ]
     filler = [secrets.choice(alphabet) for _ in range(16)]
     chars = mandatory + filler
@@ -153,7 +153,9 @@ class GarmCharm(paas_charm.go.Charm):
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
 
-    def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
+    # Changed parameter type from ops.UpdateStatusEvent to ops.HookEvent to match the base class
+    # PaasCharm signature, as overrides cannot narrow parameter types (Liskov substitution).
+    def _on_update_status(self, _: ops.HookEvent) -> None:
         """Retry GARM first-run initialization if it has not completed yet."""
         self._maybe_first_run()
 
