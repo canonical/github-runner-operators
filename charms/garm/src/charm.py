@@ -17,6 +17,7 @@ import tomli_w
 from paas_charm.app import WorkloadConfig
 
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from garm_api import GarmApiError, GarmClient
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)

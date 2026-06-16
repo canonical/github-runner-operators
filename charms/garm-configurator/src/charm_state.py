@@ -357,6 +357,7 @@ class CharmState:
         """Derived GARM credentials name for scalesets."""
         return f"github-app-{self.github_app_config.client_id}"
 
+
 def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
     """Return the OpenStack image UUID from the image builder relation, if available.
 
