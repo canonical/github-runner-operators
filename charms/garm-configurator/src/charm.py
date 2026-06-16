@@ -10,6 +10,8 @@ import ops
 
 from charm_state import IMAGE_RELATION_NAME, CharmConfigInvalidError, CharmState
 
+GARM_CONFIGURATOR_RELATION_NAME = "garm-configurator"
+
 
 class GarmConfiguratorCharm(ops.CharmBase):
     """GARM configurator charm."""
@@ -24,6 +26,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         for event in [
             self.on.config_changed,
             self.on.secret_changed,
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_joined,
             self.on[IMAGE_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_broken,
@@ -57,6 +60,26 @@ class GarmConfiguratorCharm(ops.CharmBase):
                     "username": state.provider_config.username,
                 }
             )
+
+        relation_data = {
+            "name": state.scaleset_config.name,
+            "provider_name": state.provider_name,
+            "credentials_name": state.credentials_name,
+            "image_id": str(state.image_id),
+            "flavor": state.scaleset_config.flavor,
+            "os_arch": state.scaleset_config.os_arch,
+            "min_idle_runner": str(state.scaleset_config.min_idle_runner),
+            "max_runner": str(state.scaleset_config.max_runner),
+            "labels": (
+                state.scaleset_config.labels
+                if isinstance(state.scaleset_config.labels, str)
+                else ",".join(state.scaleset_config.labels)
+            ),
+            "runner_group": state.scaleset_config.runner_group,
+            "pre_install_scripts": str(state.scaleset_config.pre_install_scripts),
+        }
+        for garm_relation in self.model.relations[GARM_CONFIGURATOR_RELATION_NAME]:
+            garm_relation.data[self.unit].update(relation_data)
 
         if relation is None:
             self.unit.status = ops.WaitingStatus("Waiting for image builder relation")

@@ -18,6 +18,10 @@ def _make_private_key_secret():
     return Secret(tracked_content={"value": "random-secret"})
 
 
+def _make_garm_configurator_relation():
+    return Relation(endpoint="garm-configurator")
+
+
 def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
     return {
         "openstack-auth-url": "https://keystone.example.com:5000/v3",
@@ -430,3 +434,106 @@ def test_status_waiting_on_relation_broken():
     )
     out = ctx.run(ctx.on.relation_broken(image_relation), state)
     assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+
+
+def test_garm_configurator_relation_data_written_on_reconcile():
+    """
+    arrange: Valid config and an active garm-configurator relation.
+    act: Run config-changed.
+    assert: The charm writes all expected scaleset fields to local unit relation data.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["labels"] = "self-hosted,linux"
+    config["pre-install-scripts"] = "echo hello"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    rel_out = out.get_relation(garm_relation.id)
+    expected_relation_data = {
+        "name": "my-scaleset",
+        "provider_name": "openstack-myproject",
+        "credentials_name": "github-app-12345",
+        "image_id": "None",
+        "flavor": "m1.large",
+        "os_arch": "amd64",
+        "min_idle_runner": "0",
+        "max_runner": "5",
+        "labels": "self-hosted,linux",
+        "runner_group": "default",
+        "pre_install_scripts": "echo hello",
+    }
+    for key, value in expected_relation_data.items():
+        assert rel_out.local_unit_data[key] == value
+
+
+def test_garm_configurator_relation_data_reflects_charm_state():
+    """
+    arrange: Valid config with project and client identifiers plus a garm-configurator relation.
+    act: Run config-changed.
+    assert: Derived provider and credentials names are written from CharmState.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["openstack-project-name"] = "demo-project"
+    config["github-app-client-id"] = "abc123"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    rel_out = out.get_relation(garm_relation.id)
+    assert rel_out.local_unit_data["provider_name"] == "openstack-demo-project"
+    assert rel_out.local_unit_data["credentials_name"] == "github-app-abc123"
+
+
+def test_garm_configurator_no_error_when_no_relation():
+    """
+    arrange: Valid config with no garm-configurator relation.
+    act: Run config-changed.
+    assert: Reconcile completes and preserves the existing waiting status behavior.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+
+
+def test_garm_configurator_relation_changed_triggers_reconcile():
+    """
+    arrange: Valid config and a garm-configurator relation with no existing local unit data.
+    act: Run garm-configurator relation-changed.
+    assert: Reconcile writes relation data for the local unit.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+    )
+
+    out = ctx.run(ctx.on.relation_changed(garm_relation), state)
+
+    rel_out = out.get_relation(garm_relation.id)
+    assert rel_out.local_unit_data["name"] == "my-scaleset"
