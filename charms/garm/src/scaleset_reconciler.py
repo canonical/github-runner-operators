@@ -88,13 +88,19 @@ class ScalesetReconciler:
             else:
                 self._create(spec, template_id)
 
+            if not template_id:
+                # Runner options were cleared (or the system template is
+                # unavailable): the scaleset has been reverted to the default
+                # template above, so drop any now-unreferenced custom template.
+                self._delete_custom_template(spec.name, templates)
+
         for name, scaleset in observed.items():
             if name not in all_desired_names:
                 logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset["id"])
                 self._client.delete_scaleset(scaleset["id"])
                 self._delete_custom_template(name, templates)
 
-    def _ensure_template(self, spec: ScalesetSpec, templates: dict[str, dict]) -> int | None:
+    def _ensure_template(self, spec: ScalesetSpec, templates: dict[str, dict]) -> int:
         """Ensure the scaleset's runner template reflects its runner options.
 
         Copies the system ``github_linux`` template, injects the runner options,
@@ -107,12 +113,13 @@ class ScalesetReconciler:
             templates: Observed templates keyed by name.
 
         Returns:
-            The template id to reference from the scaleset, or None to keep the
-            default template (no runner options set, or the system template is
-            unavailable).
+            The custom template id to reference from the scaleset, or ``0`` to use
+            GARM's default template (no runner options set, or the system template
+            is unavailable). Returning ``0`` for a scaleset that previously had a
+            custom template detaches it (reverts to the default).
         """
         if not spec.runner_config.has_config():
-            return None
+            return 0
 
         base = templates.get(SYSTEM_TEMPLATE_NAME)
         if base is None:
@@ -121,7 +128,7 @@ class ScalesetReconciler:
                 SYSTEM_TEMPLATE_NAME,
                 spec.name,
             )
-            return None
+            return 0
 
         new_data = build_template_data(self._template_bytes(base), spec.runner_config)
         custom_name = f"{SYSTEM_TEMPLATE_NAME}-{spec.name}"
@@ -166,7 +173,7 @@ class ScalesetReconciler:
             logger.info("Deleting orphaned runner template %s", custom["name"])
             self._client.delete_template(custom["id"])
 
-    def _create(self, spec: ScalesetSpec, template_id: int | None) -> None:
+    def _create(self, spec: ScalesetSpec, template_id: int) -> None:
         extra_specs: dict[str, object] = {}
         if spec.pre_install_scripts:
             extra_specs["pre_install_scripts"] = spec.pre_install_scripts
@@ -184,13 +191,14 @@ class ScalesetReconciler:
             "runner_group": spec.runner_group,
             "extra_specs": extra_specs,
         }
-        if template_id is not None:
+        if template_id:
             payload["template_id"] = template_id
         logger.info("Creating scaleset %s", spec.name)
         self._client.create_scaleset(payload)
 
-    def _maybe_update(self, observed: dict, spec: ScalesetSpec, template_id: int | None) -> None:
-        template_changed = template_id is not None and observed.get("template_id") != template_id
+    def _maybe_update(self, observed: dict, spec: ScalesetSpec, template_id: int) -> None:
+        observed_template_id = observed.get("template_id") or 0
+        template_changed = observed_template_id != template_id
         if not self._needs_update(observed, spec) and not template_changed:
             logger.debug("Scaleset %s is up to date", spec.name)
             return
@@ -208,7 +216,10 @@ class ScalesetReconciler:
             "runner_group": spec.runner_group,
             "extra_specs": extra_specs,
         }
-        if template_id is not None:
+        # Send template_id when the scaleset has, or had, a custom template — a 0
+        # value detaches it (reverts to the default); omit it otherwise so an
+        # unrelated update never spuriously sets the field.
+        if template_id or observed_template_id:
             payload["template_id"] = template_id
         logger.info("Updating scaleset %s (id=%s)", spec.name, observed["id"])
         self._client.update_scaleset(observed["id"], payload)

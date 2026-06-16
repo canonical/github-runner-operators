@@ -114,7 +114,7 @@ config:
     runner-http-proxy:
       type: string
       description: |
-        HTTP proxy that aproxy forwards to.
+        HTTP proxy that aproxy forwards to. Must be a valid http(s) URL.
     aproxy-exclude-addresses:
       type: string
       description: |
@@ -126,7 +126,7 @@ config:
     otel-collector-endpoint:
       type: string
       description: |
-        The OTEL exporter address for the otel-collector to connect to. Must be a valid address.
+        The OTEL exporter address for the otel-collector to connect to. Must be a valid http(s) URL.
     pre-job-script:
       type: string
       description: |

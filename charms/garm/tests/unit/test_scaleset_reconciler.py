@@ -325,3 +325,33 @@ def test_orphan_scaleset_deletes_custom_template():
 
     client.delete_scaleset.assert_called_once_with("uuid-stale")
     client.delete_template.assert_called_once_with(9)
+
+
+# Clearing the runner options reverts the scaleset to GARM's default template
+# (template_id -> 0) and removes the now-unreferenced custom template.
+def test_template_detached_when_runner_config_cleared():
+    existing_scaleset = {
+        "id": "uuid-1",
+        "name": "my-scaleset",
+        "image_id": "ubuntu-22.04",
+        "flavor": "m1.small",
+        "max_runners": 5,
+        "min_idle_runners": 0,
+        "tags": [],
+        "runner_group": "default",
+        "extra_specs": {},
+        "template_id": 7,
+    }
+    custom_template = {"id": 7, "name": "github_linux-my-scaleset", "data": _b64("#!/bin/bash\n")}
+    client = _mock_client(
+        providers=[{"name": "openstack-demo"}],
+        credentials=[{"name": "github-app-12345"}],
+        scalesets=[existing_scaleset],
+        templates=[_SYSTEM_TEMPLATE, custom_template],
+    )
+    reconciler = ScalesetReconciler(client)
+    reconciler.reconcile([_spec()])  # default spec has no runner options
+
+    client.update_scaleset.assert_called_once()
+    assert client.update_scaleset.call_args[0][1]["template_id"] == 0
+    client.delete_template.assert_called_once_with(7)

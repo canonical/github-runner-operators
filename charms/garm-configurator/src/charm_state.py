@@ -3,7 +3,6 @@
 
 """State of the GARM configurator charm."""
 
-import contextlib
 import ipaddress
 import urllib.parse
 
@@ -371,13 +370,16 @@ class RunnerConfig(BaseModel):
             tokens = [t.strip() for t in str(raw_exclude).split(",")]
             # Reject empty tokens (e.g. trailing comma) as they signal a misconfiguration.
             for token in tokens:
-                if not token:
-                    raise CharmConfigInvalidError(
-                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} contains an empty address token"
-                    )
-                with contextlib.suppress(ValueError):
-                    # Non-IP tokens (hostnames) are accepted on a best-effort basis.
+                # Each token must be a valid IP address or CIDR: the values are
+                # rendered into an nft ruleset, where a hostname would fail at
+                # runtime (and the failure would be swallowed by ``|| true``).
+                try:
                     ipaddress.ip_network(token, strict=False)
+                except ValueError as exc:
+                    raise CharmConfigInvalidError(
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
+                        f"of IP addresses or CIDRs; got invalid token: {token!r}"
+                    ) from exc
             aproxy_exclude_addresses = ",".join(tokens)
 
         raw_ports = charm.config.get(APROXY_REDIRECT_PORTS_CONFIG_NAME)

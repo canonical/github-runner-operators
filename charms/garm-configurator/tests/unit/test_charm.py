@@ -583,6 +583,12 @@ def test_garm_configurator_relation_changed_triggers_reconcile():
             "aproxy-redirect-ports must be a comma-separated list of ports or N-M ranges in 1..65535",
             id="aproxy-redirect-ports-inverted-range",
         ),
+        pytest.param(
+            "aproxy-exclude-addresses",
+            "10.0.0.1,not-an-ip",
+            "aproxy-exclude-addresses must be a comma-separated list of IP addresses or CIDRs",
+            id="aproxy-exclude-addresses-non-ip",
+        ),
     ],
 )
 def test_charm_blocked_invalid_runner_config(
