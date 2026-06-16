@@ -314,6 +314,7 @@ class GarmCharm(paas_charm.go.Charm):
             combine=True,
         )
         container.replan()
+        self.update_app_and_unit_status(ops.ActiveStatus())
 
     @staticmethod
     def _hash_toml(toml_content: str) -> str:
