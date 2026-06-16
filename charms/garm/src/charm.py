@@ -362,7 +362,7 @@ class GarmCharm(paas_charm.go.Charm):
                             for label in data.get("labels", "").split(",")
                             if label.strip()
                         ],
-                        runner_group=data.get("runner_group", "default"),
+                runner_group=data.get("runner_group", ""),
                         pre_install_scripts=_parse_pre_install_scripts(
                             data.get("pre_install_scripts", "")
                         ),
