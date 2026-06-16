@@ -337,8 +337,10 @@ class GarmCharm(paas_charm.go.Charm):
             providers=provider_configs if provider_configs else None,
         )
 
-        hash_input = toml_content + "\n" + "\n".join(
-            f"{path}\n{content}" for path, content in sorted(provider_files.items())
+        hash_input = (
+            toml_content
+            + "\n"
+            + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
         new_hash = self._hash_toml(hash_input)
         previous_hash = self._get_stored_toml_hash()
