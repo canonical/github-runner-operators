@@ -13,7 +13,10 @@ import urllib.request
 import jubilant
 import pytest
 import requests
-from charms.tests.integration.conftest import garm_login_from_secret
+from charms.tests.integration.conftest import (
+    garm_login_from_secret,
+    get_garm_admin_creds_from_secret,
+)
 from requests.adapters import HTTPAdapter
 from tenacity import (
     retry,
@@ -81,18 +84,6 @@ def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
     return status.apps[app_name].units[unit_name].address
 
 
-def _get_charm_admin_creds(juju: jubilant.Juju) -> tuple[str, str]:
-    """Return the (username, password) the charm stored in the garm-secrets secret."""
-    all_secrets = json.loads(juju.cli("secrets", "--format=json"))
-    uri = next(
-        (u for u, info in all_secrets.items() if info.get("label") == GARM_SECRETS_LABEL), None
-    )
-    assert uri, f"{GARM_SECRETS_LABEL} secret not found"
-    content = json.loads(juju.cli("show-secret", "--reveal", "--format=json", uri))
-    data = content[uri]["content"]["Data"]
-    return data["admin-username"], data["admin-password"]
-
-
 def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
     """Initialize GARM with the charm-managed admin credentials and return a JWT.
 
@@ -111,7 +102,7 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
         JWT token string for authenticated API calls.
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    username, password = _get_charm_admin_creds(juju)
+    username, password = get_garm_admin_creds_from_secret(juju)
     first_run_payload = {
         "username": username,
         "password": password,

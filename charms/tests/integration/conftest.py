@@ -351,21 +351,23 @@ def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
     return configurator_charms[0]
 
 
-def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
-    """Log into the GARM API using admin credentials stored in Juju secrets."""
-    secrets_json = juju.cli("secrets", "--format=json")
-    secrets = json.loads(secrets_json)
+def get_garm_admin_creds_from_secret(juju: jubilant.Juju) -> tuple[str, str]:
+    """Return the (admin-username, admin-password) the GARM charm stored in garm-secrets."""
+    secrets = json.loads(juju.cli("secrets", "--format=json"))
     garm_secret_uri = next(
         (uri for uri, info in secrets.items() if info.get("label") == GARM_SECRETS_LABEL),
         None,
     )
-    assert garm_secret_uri, f"{GARM_SECRETS_LABEL} not found for {garm_app_name}"
+    assert garm_secret_uri, f"{GARM_SECRETS_LABEL} secret not found"
+    content = json.loads(juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri))[
+        garm_secret_uri
+    ]["content"]["Data"]
+    return content["admin-username"], content["admin-password"]
 
-    secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
-    secret_data = json.loads(secret_json)
-    content = secret_data[garm_secret_uri]["content"]["Data"]
-    admin_username = content["admin-username"]
-    admin_password = content["admin-password"]
+
+def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
+    """Log into the GARM API using admin credentials stored in Juju secrets."""
+    admin_username, admin_password = get_garm_admin_creds_from_secret(juju)
 
     base_url = garm_url.rstrip("/")
     if not base_url.endswith("/api/v1"):

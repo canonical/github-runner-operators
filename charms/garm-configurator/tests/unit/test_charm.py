@@ -616,6 +616,23 @@ def test_charm_blocked_invalid_runner_config(
     assert expected_fragment in out.unit_status.message
 
 
+def test_runner_config_aproxy_options_require_proxy():
+    """
+    arrange: aproxy options set without runner-http-proxy.
+    act: Run config-changed.
+    assert: Unit is Blocked — the aproxy options would otherwise silently no-op.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["aproxy-redirect-ports"] = "80,443"
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert "require runner-http-proxy to be set" in out.unit_status.message
+
+
 def test_runner_config_fields_written_to_garm_configurator_relation():
     """
     arrange: Valid config with all six runner config options set.

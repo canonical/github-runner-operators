@@ -396,6 +396,17 @@ class RunnerConfig(BaseModel):
                 _validate_port_token(token)
             aproxy_redirect_ports = ",".join(tokens_ports)
 
+        # The aproxy options only take effect alongside a proxy: the runner
+        # template renders the aproxy block solely when runner-http-proxy is set,
+        # so reject these options on their own rather than letting them no-op.
+        if (aproxy_exclude_addresses or aproxy_redirect_ports) and not url_values[
+            RUNNER_HTTP_PROXY_CONFIG_NAME
+        ]:
+            raise CharmConfigInvalidError(
+                f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} and {APROXY_REDIRECT_PORTS_CONFIG_NAME} "
+                f"require {RUNNER_HTTP_PROXY_CONFIG_NAME} to be set"
+            )
+
         raw_script = charm.config.get(PRE_JOB_SCRIPT_CONFIG_NAME)
         pre_job_script = str(raw_script).strip() if raw_script else None
 
