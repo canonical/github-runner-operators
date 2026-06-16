@@ -405,22 +405,19 @@ def test_garm_pebble_service_command(
     ), f"Expected '-config {GARM_CONFIG_PATH}' in pebble plan, got: {plan_output}"
 
 
-def test_garm_juju_secret_has_expected_keys(
+def test_garm_secrets_juju_secret_has_expected_keys(
     juju: jubilant.Juju,
     garm_app: str,
 ):
     """
     arrange: The GARM charm is deployed and active (leader has initialised secrets).
-    act: List Juju secrets and show the content of garm-secrets and
-        garm-admin-credentials secrets.
-    assert: garm-secrets contains jwt-secret and db-passphrase keys;
-        garm-admin-credentials contains username, password, email, and full-name keys.
+    act: List Juju secrets and show the garm-secrets secret content.
+    assert: The garm-secrets secret contains jwt-secret and db-passphrase keys.
     """
     logger.info("Listing Juju secrets")
     secrets_json = juju.cli("secrets", "--format=json")
     all_secrets = json.loads(secrets_json)
 
-    # --- garm-secrets ---
     garm_secret_uri = None
     for uri, info in all_secrets.items():
         if info.get("label") == GARM_SECRETS_LABEL:
@@ -444,7 +441,21 @@ def test_garm_juju_secret_has_expected_keys(
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
 
-    # --- garm-admin-credentials ---
+
+def test_garm_admin_credentials_juju_secret_has_expected_keys(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed and active (leader has initialised secrets).
+    act: List Juju secrets and show the garm-admin-credentials secret content.
+    assert: The garm-admin-credentials secret contains username, password, email,
+        and full-name keys.
+    """
+    logger.info("Listing Juju secrets")
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+
     admin_creds_uri = None
     for uri, info in all_secrets.items():
         if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:

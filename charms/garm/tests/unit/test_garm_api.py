@@ -6,6 +6,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import urllib3.exceptions
 
 from garm_api import GarmApiClient, GarmApiError
 from garm_client.exceptions import ApiException
@@ -76,4 +77,28 @@ def test_first_run_raises_on_api_error(client):
     with patch("garm_api.FirstRunApi") as mock_cls:
         mock_cls.return_value.first_run.side_effect = ApiException(status=400)
         with pytest.raises(GarmApiError, match="400"):
+            client.first_run("admin", "Password-123!", "admin@test.local", "Admin User")
+
+
+def test_is_initialized_raises_on_connection_error(client):
+    """
+    arrange: ControllerInfoApi.controller_info raises urllib3 HTTPError.
+    act: Call client.is_initialized().
+    assert: Raises GarmApiError wrapping the connection error.
+    """
+    with patch("garm_api.ControllerInfoApi") as mock_cls:
+        mock_cls.return_value.controller_info.side_effect = urllib3.exceptions.HTTPError("refused")
+        with pytest.raises(GarmApiError, match="connection error"):
+            client.is_initialized()
+
+
+def test_first_run_raises_on_connection_error(client):
+    """
+    arrange: FirstRunApi.first_run raises urllib3 HTTPError.
+    act: Call client.first_run().
+    assert: Raises GarmApiError wrapping the connection error.
+    """
+    with patch("garm_api.FirstRunApi") as mock_cls:
+        mock_cls.return_value.first_run.side_effect = urllib3.exceptions.HTTPError("refused")
+        with pytest.raises(GarmApiError, match="connection error"):
             client.first_run("admin", "Password-123!", "admin@test.local", "Admin User")

@@ -4,7 +4,9 @@
 """Unit tests for GarmCharm."""
 
 import string
+from unittest.mock import MagicMock, patch
 
+import ops
 import pytest
 
 try:
@@ -12,7 +14,16 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import _generate_admin_password, _generate_garm_secrets, render_garm_toml
+from garm_api import GarmApiError
+
+from charm import (
+    GARM_ADMIN_CREDENTIALS_LABEL,
+    GARM_SECRETS_LABEL,
+    GarmCharm,
+    _generate_admin_password,
+    _generate_garm_secrets,
+    render_garm_toml,
+)
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -133,7 +144,11 @@ def test_generate_garm_secrets_produces_unique_values():
 
 
 def test_generate_admin_password_meets_garm_policy():
-    """Generated password satisfies GARM's strong-password requirements."""
+    """
+    arrange: No setup required.
+    act: Call _generate_admin_password().
+    assert: The result satisfies GARM's strong-password requirements.
+    """
     password = _generate_admin_password()
     assert len(password) >= 12
     assert any(c.isupper() for c in password)
@@ -144,5 +159,194 @@ def test_generate_admin_password_meets_garm_policy():
 
 
 def test_generate_admin_password_produces_unique_values():
-    """Two calls return different passwords."""
+    """
+    arrange: No setup required.
+    act: Call _generate_admin_password() twice.
+    assert: The two passwords are different.
+    """
     assert _generate_admin_password() != _generate_admin_password()
+
+
+_MOCK_ADMIN_CREDS = {
+    "username": "admin",
+    "password": "TestPass-123!",
+    "email": "admin@garm.local",
+    "full-name": "GARM Admin",
+}
+
+
+def test_get_admin_credentials_returns_content_when_secret_exists():
+    """
+    arrange: garm-admin-credentials secret exists in Juju.
+    act: Call _get_admin_credentials().
+    assert: Returns the secret content dict.
+    """
+    charm = MagicMock()
+    mock_secret = MagicMock()
+    mock_secret.get_content.return_value = _MOCK_ADMIN_CREDS
+    charm.model.get_secret.return_value = mock_secret
+
+    result = GarmCharm._get_admin_credentials(charm)
+
+    assert result == _MOCK_ADMIN_CREDS
+
+
+def test_get_admin_credentials_returns_none_when_secret_not_found():
+    """
+    arrange: garm-admin-credentials secret does not exist in Juju.
+    act: Call _get_admin_credentials().
+    assert: Returns None.
+    """
+    charm = MagicMock()
+    charm.model.get_secret.side_effect = ops.SecretNotFoundError("not found")
+
+    result = GarmCharm._get_admin_credentials(charm)
+
+    assert result is None
+
+
+def test_ensure_secrets_skips_when_not_leader():
+    """
+    arrange: Unit is not the Juju leader.
+    act: Call _ensure_secrets().
+    assert: No secrets are created.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = False
+
+    GarmCharm._ensure_secrets(charm)
+
+    charm.app.add_secret.assert_not_called()
+
+
+def test_ensure_secrets_creates_both_secrets_on_first_run():
+    """
+    arrange: Leader unit; neither garm-secrets nor garm-admin-credentials exist.
+    act: Call _ensure_secrets().
+    assert: Both secrets are created, labelled correctly.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm.model.get_secret.side_effect = ops.SecretNotFoundError("not found")
+
+    GarmCharm._ensure_secrets(charm)
+
+    assert charm.app.add_secret.call_count == 2
+    labels = {c.kwargs["label"] for c in charm.app.add_secret.call_args_list}
+    assert GARM_SECRETS_LABEL in labels
+    assert GARM_ADMIN_CREDENTIALS_LABEL in labels
+
+
+def test_ensure_secrets_skips_creation_when_secrets_exist():
+    """
+    arrange: Leader unit; both secrets already exist in Juju.
+    act: Call _ensure_secrets().
+    assert: No secrets are created.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+
+    GarmCharm._ensure_secrets(charm)
+
+    charm.app.add_secret.assert_not_called()
+
+
+def test_maybe_first_run_skips_when_not_leader():
+    """
+    arrange: Unit is not the Juju leader.
+    act: Call _maybe_first_run().
+    assert: No GARM API call is made.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = False
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        GarmCharm._maybe_first_run(charm)
+
+    mock_client_cls.assert_not_called()
+
+
+def test_maybe_first_run_skips_when_credentials_unavailable():
+    """
+    arrange: Leader unit; admin credentials secret does not exist yet.
+    act: Call _maybe_first_run().
+    assert: No GARM API call is made.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = None
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        GarmCharm._maybe_first_run(charm)
+
+    mock_client_cls.assert_not_called()
+
+
+def test_maybe_first_run_skips_when_already_initialized():
+    """
+    arrange: Leader unit with valid credentials; GarmApiClient.is_initialized returns True.
+    act: Call _maybe_first_run().
+    assert: first_run is not called on the client.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        mock_client_cls.return_value.is_initialized.return_value = True
+        GarmCharm._maybe_first_run(charm)
+
+    mock_client_cls.return_value.first_run.assert_not_called()
+
+
+def test_maybe_first_run_calls_first_run_when_not_initialized():
+    """
+    arrange: Leader unit with valid credentials; GarmApiClient.is_initialized returns False.
+    act: Call _maybe_first_run().
+    assert: first_run is called with the admin credentials.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        mock_client_cls.return_value.is_initialized.return_value = False
+        GarmCharm._maybe_first_run(charm)
+
+    mock_client_cls.return_value.first_run.assert_called_once_with(
+        username="admin",
+        password="TestPass-123!",
+        email="admin@garm.local",
+        full_name="GARM Admin",
+    )
+
+
+def test_maybe_first_run_does_not_raise_on_api_error():
+    """
+    arrange: Leader unit; GarmApiClient.is_initialized raises GarmApiError.
+    act: Call _maybe_first_run().
+    assert: The error is caught and does not propagate.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        mock_client_cls.return_value.is_initialized.side_effect = GarmApiError("refused")
+        GarmCharm._maybe_first_run(charm)  # must not raise
+
+
+def test_maybe_first_run_skips_on_missing_credential_key():
+    """
+    arrange: Leader unit; admin credentials secret is missing required keys.
+    act: Call _maybe_first_run().
+    assert: No GARM API call is made.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = {"username": "admin"}  # missing password etc.
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        GarmCharm._maybe_first_run(charm)
+
+    mock_client_cls.assert_not_called()

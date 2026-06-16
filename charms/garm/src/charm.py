@@ -147,10 +147,15 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(self.on.update_status, self._on_update_status)
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
+
+    def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
+        """Retry GARM first-run initialization if it has not completed yet."""
+        self._maybe_first_run()
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -355,14 +360,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
-        # Always connect via loopback. If the operator has configured a specific
-        # non-wildcard listen address, use that instead (0.0.0.0 and :: bind all
-        # interfaces including loopback so 127.0.0.1 always works for those).
-        listen_address = str(self.config.get("garm-listen-address", "0.0.0.0"))
-        api_address = "127.0.0.1" if listen_address in ("0.0.0.0", "::") else listen_address
-        api_host = f"[{api_address}]" if ":" in api_address and not api_address.startswith("[") else api_address
-        base_url = f"http://{api_host}:{GARM_PORT}/api/v1"
-        client = GarmApiClient(base_url)
+        client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
 
         try:
             if client.is_initialized():
