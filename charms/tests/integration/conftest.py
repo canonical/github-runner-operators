@@ -19,6 +19,8 @@ from tests.conftest import (
 )
 
 logger = logging.getLogger(__name__)
+GARM_API_PORT = 9997
+GARM_SECRETS_LABEL = "garm-secrets"
 
 
 @pytest.fixture(name="planner_charm_file", scope="module")
@@ -332,6 +334,54 @@ def garm_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
     return image
 
 
+@pytest.fixture(name="garm_configurator_charm_file", scope="module")
+def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
+    """Return the path to the built garm-configurator charm file."""
+    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if not charm:
+        pytest.skip(
+            f"missing required {CHARM_FILE_PARAM} option for garm-configurator integration tests"
+        )
+    configurator_charms = [file for file in charm if "garm-configurator" in file]
+    if not configurator_charms:
+        pytest.skip(
+            "scaleset integration tests require a garm-configurator charm path in "
+            f"{CHARM_FILE_PARAM}"
+        )
+    return configurator_charms[0]
+
+
+def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
+    """Log into the GARM API using admin credentials stored in Juju secrets."""
+    secrets_json = juju.cli("secrets", "--format=json")
+    secrets = json.loads(secrets_json)
+    garm_secret_uri = next(
+        (uri for uri, info in secrets.items() if info.get("label") == GARM_SECRETS_LABEL),
+        None,
+    )
+    assert garm_secret_uri, f"{GARM_SECRETS_LABEL} not found for {garm_app_name}"
+
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
+    secret_data = json.loads(secret_json)
+    content = secret_data[garm_secret_uri]["content"]["Data"]
+    admin_username = content["admin-username"]
+    admin_password = content["admin-password"]
+
+    base_url = garm_url.rstrip("/")
+    if not base_url.endswith("/api/v1"):
+        base_url = f"{base_url}/api/v1"
+
+    resp = requests.post(
+        f"{base_url}/auth/login",
+        json={"username": admin_username, "password": admin_password},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    token = resp.json().get("token", "")
+    assert token, "Expected non-empty JWT token from GARM login"
+    return token
+
+
 def _pre_pull_garm_image(image: str) -> None:
     """Pre-pull the GARM ROCK image into microk8s containerd.
 
@@ -502,6 +552,66 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
     juju.wait(
         lambda status: jubilant.all_active(status, app_name),
         timeout=10 * 60,
+        delay=10,
+    )
+    return app_name
+
+
+@pytest.fixture(scope="module", name="garm_configurator_for_scaleset_tests")
+def garm_configurator_for_scaleset_tests_fixture(
+    juju: jubilant.Juju,
+    garm_configurator_charm_file: str,
+    any_charm_image_builder_app: str,
+) -> str:
+    """Deploy garm-configurator for GARM scaleset-sync integration tests."""
+    app_name = "garm-configurator-scaleset-test"
+    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, app_name),
+        timeout=5 * 60,
+        delay=10,
+    )
+
+    password_secret_uri = juju.add_secret(name="os-pw-scaleset", content={"value": "fake-password"})
+    private_key_secret_uri = juju.add_secret(
+        name="gh-key-scaleset", content={"value": "fake-private-key"}
+    )
+    juju.grant_secret(password_secret_uri, app_name)
+    juju.grant_secret(private_key_secret_uri, app_name)
+
+    juju.config(
+        app_name,
+        values={
+            "openstack-auth-url": "https://keystone.example.com:5000/v3",
+            "openstack-username": "admin",
+            "openstack-password": password_secret_uri,
+            "openstack-project-name": "myproject",
+            "openstack-user-domain-name": "Default",
+            "openstack-project-domain-name": "Default",
+            "openstack-region-name": "RegionOne",
+            "openstack-network": "external-net",
+            "github-app-client-id": "12345",
+            "github-app-installation-id": "67890",
+            "github-app-private-key": private_key_secret_uri,
+            "name": "test-scaleset",
+            "flavor": "m1.large",
+            "os-arch": "amd64",
+            "repo": "myorg/myrepo",
+        },
+    )
+    juju.wait(
+        lambda status: jubilant.all_waiting(status, app_name),
+        timeout=5 * 60,
+        delay=10,
+    )
+
+    juju.integrate(
+        f"{app_name}:image",
+        f"{any_charm_image_builder_app}:provide-github-runner-image-v0",
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=5 * 60,
         delay=10,
     )
     return app_name
