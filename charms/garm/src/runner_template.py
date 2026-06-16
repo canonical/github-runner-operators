@@ -276,15 +276,27 @@ def _render_static_host_prep() -> str:
 
 
 def _valid_port_tokens(spec: str) -> list[str]:
-    """Return only the well-formed port / N-M range tokens from a comma list.
+    """Return only the in-range port / N-M range tokens from a comma list.
+
+    A token is kept only if it is ``N`` or ``N-M`` with every port in 1..65535
+    and ``N <= M`` — out-of-range or inverted tokens are dropped so they can't
+    break the nft ruleset.
 
     Args:
         spec: A comma-separated ports string (possibly empty or untrusted).
 
     Returns:
-        The subset of tokens matching ``N`` or ``N-M`` (digits only).
+        The subset of well-formed, in-range tokens.
     """
-    return [token.strip() for token in spec.split(",") if _PORT_TOKEN_RE.match(token.strip())]
+    valid: list[str] = []
+    for raw in spec.split(","):
+        token = raw.strip()
+        if not _PORT_TOKEN_RE.match(token):
+            continue
+        ports = [int(part) for part in token.split("-")]
+        if all(1 <= port <= 65535 for port in ports) and ports == sorted(ports):
+            valid.append(token)
+    return valid
 
 
 def _valid_ipv4_tokens(spec: str) -> list[str]:

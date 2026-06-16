@@ -102,13 +102,15 @@ def test_build_template_data_per_option(config, present, absent):
 def test_aproxy_render_drops_malformed_tokens():
     config = RunnerConfig(
         runner_http_proxy="http://p.test:3128",
-        aproxy_redirect_ports="80,not-a-port,8000-9000,99 rm",
+        aproxy_redirect_ports="80,not-a-port,8000-9000,99 rm,99999,443-80",
         aproxy_exclude_addresses="10.0.0.0/8,evil;,2001:db8::1",
     )
     result = build_template_data(SAMPLE_BASE, config).decode()
 
     assert "{ 80, 8000-9000 }" in result
     assert "not-a-port" not in result
+    assert "99999" not in result  # out of range
+    assert "443-80" not in result  # inverted range
     assert "10.0.0.0/8" in result
     assert "evil" not in result
     assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
