@@ -14,7 +14,6 @@ import urllib.request
 import jubilant
 import pytest
 import requests
-from charms.tests.integration.conftest import garm_login_from_secret
 from requests.adapters import HTTPAdapter
 from tenacity import (
     retry,
@@ -165,6 +164,37 @@ def _garm_first_run(address: str) -> str:
     )
     resp.raise_for_status()
 
+    return token
+
+
+def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
+    """Log into the GARM API using admin credentials stored in Juju secrets."""
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+    garm_secret_uri = next(
+        (uri for uri, info in all_secrets.items() if info.get("label") == GARM_SECRETS_LABEL),
+        None,
+    )
+    assert garm_secret_uri, f"{GARM_SECRETS_LABEL} not found for {garm_app_name}"
+
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
+    secret_data = json.loads(secret_json)
+    content = secret_data[garm_secret_uri]["content"]["Data"]
+    admin_username = content["admin-username"]
+    admin_password = content["admin-password"]
+
+    base_url = garm_url.rstrip("/")
+    if not base_url.endswith("/api/v1"):
+        base_url = f"{base_url}/api/v1"
+
+    resp = requests.post(
+        f"{base_url}/auth/login",
+        json={"username": admin_username, "password": admin_password},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    token = resp.json().get("token", "")
+    assert token, "Expected non-empty JWT token from GARM login"
     return token
 
 
