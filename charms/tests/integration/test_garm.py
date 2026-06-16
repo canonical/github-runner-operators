@@ -445,7 +445,7 @@ def test_garm_metrics_endpoint_no_auth(
     )
 
 
-def test_garm_toml_has_configurator_provider(
+def test_garm_api_has_configurator_provider(
     juju: jubilant.Juju,
     configurator_garm: str,
 ):
