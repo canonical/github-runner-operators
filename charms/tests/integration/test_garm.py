@@ -24,12 +24,8 @@ GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
-<<<<<<< HEAD
 GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
-GARM_API_PORT = 9997
-=======
 GARM_API_PORT = 8080
->>>>>>> origin/main
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 
 
@@ -448,7 +444,6 @@ def test_garm_juju_secret_has_expected_keys(
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
 
-<<<<<<< HEAD
     # --- garm-admin-credentials ---
     admin_creds_uri = None
     for uri, info in all_secrets.items():
@@ -471,7 +466,7 @@ def test_garm_juju_secret_has_expected_keys(
             f"Expected '{expected_key}' key in {GARM_ADMIN_CREDENTIALS_LABEL},"
             f" got keys: {list(admin_content)}"
         )
-=======
+
 
 def test_garm_metrics_endpoint_no_auth(
     juju: jubilant.Juju,
@@ -492,4 +487,3 @@ def test_garm_metrics_endpoint_no_auth(
         "Expected the garm_health metric in the /metrics response; "
         f"got first 500 chars: {resp.text[:500]}"
     )
->>>>>>> origin/main

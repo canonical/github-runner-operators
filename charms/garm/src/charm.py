@@ -153,11 +153,6 @@ class GarmCharm(paas_charm.go.Charm):
         self._ensure_secrets()
 
     @property
-<<<<<<< HEAD
-    def _listen_port(self) -> int:
-        """GARM API listen port from charm config."""
-        return int(self.config.get("garm-listen-port", 9997))
-=======
     def _workload_config(self) -> WorkloadConfig:
         """Pin GARM to a fixed port and disable the default metrics scrape job.
 
@@ -169,7 +164,6 @@ class GarmCharm(paas_charm.go.Charm):
         framework's default metrics-port scrape job.
         """
         return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
->>>>>>> origin/main
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -367,7 +361,7 @@ class GarmCharm(paas_charm.go.Charm):
         listen_address = str(self.config.get("garm-listen-address", "0.0.0.0"))
         api_address = "127.0.0.1" if listen_address in ("0.0.0.0", "::") else listen_address
         api_host = f"[{api_address}]" if ":" in api_address and not api_address.startswith("[") else api_address
-        base_url = f"http://{api_host}:{self._listen_port}/api/v1"
+        base_url = f"http://{api_host}:{GARM_PORT}/api/v1"
         client = GarmApiClient(base_url)
 
         try:
@@ -408,16 +402,9 @@ class GarmCharm(paas_charm.go.Charm):
             postgresql_config["port"],
         )
         toml_content = render_garm_toml(
-<<<<<<< HEAD
-            listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
-            listen_port=self._listen_port,
+            listen_port=GARM_PORT,
             jwt_secret=garm_secrets["jwt-secret"],
             db_passphrase=garm_secrets["db-passphrase"],
-=======
-            listen_port=GARM_PORT,
-            jwt_secret=secrets["jwt-secret"],
-            db_passphrase=secrets["db-passphrase"],
->>>>>>> origin/main
             postgresql_config=postgresql_config,
         )
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
