@@ -4,6 +4,7 @@
 
 """GARM charm entrypoint."""
 
+import dataclasses
 import logging
 import secrets
 import string
@@ -12,6 +13,7 @@ import typing
 import ops
 import paas_charm.go
 import tomli_w
+from paas_charm.app import WorkloadConfig
 
 from garm_api import GarmApiClient, GarmApiError
 
@@ -24,6 +26,7 @@ CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
+GARM_PORT: typing.Final[int] = 8080
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -43,7 +46,6 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
 
 def render_garm_toml(
     *,
-    listen_address: str,
     listen_port: int,
     jwt_secret: str,
     db_passphrase: str,
@@ -52,7 +54,6 @@ def render_garm_toml(
     """Render GARM's TOML configuration file content.
 
     Args:
-        listen_address: IP address for the GARM API server to bind on.
         listen_port: Port for the GARM API server.
         jwt_secret: Secret string used to sign GARM JWT tokens.
         db_passphrase: 32-character passphrase for AES-256 encryption of secrets in the DB.
@@ -69,7 +70,7 @@ def render_garm_toml(
             "postgresql": postgresql_config,
         },
         "apiserver": {
-            "bind": listen_address,
+            "bind": "0.0.0.0",
             "port": listen_port,
             "use_tls": False,
         },
@@ -152,9 +153,23 @@ class GarmCharm(paas_charm.go.Charm):
         self._ensure_secrets()
 
     @property
+<<<<<<< HEAD
     def _listen_port(self) -> int:
         """GARM API listen port from charm config."""
         return int(self.config.get("garm-listen-port", 9997))
+=======
+    def _workload_config(self) -> WorkloadConfig:
+        """Pin GARM to a fixed port and disable the default metrics scrape job.
+
+        GARM serves its API and /metrics on a single fixed port (GARM_PORT);
+        the framework's app-port is unsupported, so we force the workload port
+        (used for ingress, opened ports, and the service URL) to GARM_PORT
+        rather than reading app-port. The scrape target is declared in
+        paas-config.yaml, so metrics_target is set to None to suppress the
+        framework's default metrics-port scrape job.
+        """
+        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
+>>>>>>> origin/main
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -168,6 +183,29 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
         self._ensure_secrets()
+
+        # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
+        # no separate metrics listener — and declares its scrape target in
+        # paas-config.yaml, so the go-framework's app-port/metrics-port/metrics-path
+        # settings don't apply. _workload_config also pins the workload port to
+        # GARM_PORT, so app-port has no effect on ingress, the opened ports, or the
+        # service URL (they can't drift from GARM's actual port). Warn rather than
+        # block when an operator sets any to a non-default value, tolerating their
+        # absence (the framework may drop them in future).
+        for option, default in (
+            ("app-port", GARM_PORT),
+            ("metrics-port", GARM_PORT),
+            ("metrics-path", "/metrics"),
+        ):
+            value = self.config.get(option)
+            if value is not None and str(value) != str(default):
+                logger.warning(
+                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
+                    "declares its Prometheus scrape config in paas-config.yaml",
+                    option,
+                    value,
+                    GARM_PORT,
+                )
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
@@ -370,10 +408,16 @@ class GarmCharm(paas_charm.go.Charm):
             postgresql_config["port"],
         )
         toml_content = render_garm_toml(
+<<<<<<< HEAD
             listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
             listen_port=self._listen_port,
             jwt_secret=garm_secrets["jwt-secret"],
             db_passphrase=garm_secrets["db-passphrase"],
+=======
+            listen_port=GARM_PORT,
+            jwt_secret=secrets["jwt-secret"],
+            db_passphrase=secrets["db-passphrase"],
+>>>>>>> origin/main
             postgresql_config=postgresql_config,
         )
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
