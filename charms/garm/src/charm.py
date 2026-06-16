@@ -330,6 +330,7 @@ class GarmCharm(paas_charm.go.Charm):
         api_address = "127.0.0.1" if listen_address in ("0.0.0.0", "::") else listen_address
         api_host = f"[{api_address}]" if ":" in api_address and not api_address.startswith("[") else api_address
         base_url = f"http://{api_host}:{self._listen_port}/api/v1"
+        client = GarmApiClient(base_url)
 
         try:
             if client.is_initialized():

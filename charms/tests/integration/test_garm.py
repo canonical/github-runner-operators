@@ -5,7 +5,6 @@
 
 import json
 import logging
-import secrets
 
 import jubilant
 import pytest
@@ -25,13 +24,9 @@ GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
+GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 GARM_API_PORT = 9997
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
-
-# Generated once per session so all test functions that call _garm_first_run use
-# the same credentials. Format guarantees GARM's strong-password requirements:
-# uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
-_GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 
 
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
@@ -63,66 +58,89 @@ def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
     return status.apps[app_name].units[unit_name].address
 
 
-def _garm_first_run(address: str) -> str:
-    """Complete GARM first-run initialization and return an admin JWT.
-
-    Calls /api/v1/first-run to create the initial admin user, then logs in
-    to obtain a JWT. Also configures required controller URLs so GARM will
-    serve operational API endpoints.
-
-    Retries with backoff to allow GARM time to finish starting after replan.
+def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
+    """Retrieve GARM admin credentials from the garm-admin-credentials Juju secret.
 
     Args:
+        juju: Jubilant Juju handle.
+
+    Returns:
+        Dict with at least ``username`` and ``password`` keys as stored by the charm.
+    """
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+    admin_creds_uri = None
+    for uri, info in all_secrets.items():
+        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
+            admin_creds_uri = uri
+            break
+    assert admin_creds_uri is not None, (
+        f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
+    )
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
+    secret = json.loads(secret_json)
+    content = secret[admin_creds_uri]["content"]["Data"]
+    for key in ("username", "password"):
+        assert key in content, (
+            f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
+        )
+    return content
+
+
+def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
+    """Log in to GARM with charm-managed credentials and return an admin JWT.
+
+    The charm creates the admin user automatically via _maybe_first_run().
+    This function reads credentials from the garm-admin-credentials Juju secret,
+    logs in to obtain a JWT, and configures required controller URLs so GARM will
+    serve operational API endpoints.
+
+    Retries with backoff to allow GARM time to finish starting and the charm's
+    first-run initialization to complete.
+
+    Args:
+        juju: Jubilant Juju handle (used to read admin credentials from Juju secret).
         address: GARM unit IP address.
 
     Returns:
         JWT token string for authenticated API calls.
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    # GARM v0.2.x requires strong passwords (min 12 chars, mixed case, digits, symbols)
-    password = _GARM_ADMIN_PASSWORD
-    first_run_payload = {
-        "username": "admin",
-        "password": password,
-        "email": "admin@test.local",
-        "full_name": "Integration Test Admin",
-    }
+    creds = _get_admin_credentials(juju)
 
     session = requests.Session()
     retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
     session.mount("http://", HTTPAdapter(max_retries=retries))
 
-    class _FirstRunRetryable(Exception):
+    class _LoginRetryable(Exception):
         pass
 
     @retry(
         retry=retry_if_exception_type(
-            (requests.exceptions.ConnectionError, _FirstRunRetryable)
+            (requests.exceptions.ConnectionError, _LoginRetryable)
         ),
         wait=wait_exponential(multiplier=1, min=1, max=30),
         stop=stop_after_attempt(10),
         reraise=True,
     )
-    def _post_first_run() -> None:
-        resp = session.post(f"{base_url}/first-run", json=first_run_payload, timeout=30)
-        logger.info(
-            "first-run response: status=%d body=%s", resp.status_code, resp.text[:500]
+    def _do_login() -> str:
+        resp = session.post(
+            f"{base_url}/auth/login",
+            json={"username": creds["username"], "password": creds["password"]},
+            timeout=30,
         )
-        if resp.status_code not in (200, 409):
-            # 200 = user created, 409 = already initialized — either way, done
-            raise _FirstRunRetryable(
-                f"Unexpected status {resp.status_code}: {resp.text[:200]}"
+        logger.info(
+            "login response: status=%d body=%s", resp.status_code, resp.text[:500]
+        )
+        if resp.status_code != 200:
+            raise _LoginRetryable(
+                f"Unexpected login status {resp.status_code}: {resp.text[:200]}"
             )
+        token = resp.json().get("token", "")
+        assert token, "Expected non-empty JWT token from login"
+        return token
 
-    _post_first_run()
-
-    # Login to obtain JWT
-    login_payload = {"username": "admin", "password": password}
-    resp = session.post(f"{base_url}/auth/login", json=login_payload, timeout=30)
-    logger.info("login response: status=%d body=%s", resp.status_code, resp.text[:500])
-    resp.raise_for_status()
-    token = resp.json().get("token", "")
-    assert token, "Expected non-empty JWT token from login"
+    token = _do_login()
 
     # Configure controller URLs — GARM requires metadata_url and callback_url
     # before it will serve operational endpoints (returns 409 otherwise)
@@ -249,7 +267,7 @@ def test_garm_api_controller_info(
     address = _get_garm_address(juju, garm_app)
     logger.info("GARM address: %s", address)
 
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
     assert token, "Expected non-empty JWT token from first-run/login"
     logger.info("Got admin JWT token (length=%d)", len(token))
 
@@ -275,7 +293,7 @@ def test_garm_api_list_scalesets(
         scale set query path through postgresql is functional.
     """
     address = _get_garm_address(juju, garm_app)
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
@@ -303,7 +321,7 @@ def test_garm_api_list_providers(
     assert: The openstack provider is registered and visible through the API.
     """
     address = _get_garm_address(juju, garm_app)
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
@@ -352,15 +370,18 @@ def test_garm_juju_secret_has_expected_keys(
 ):
     """
     arrange: The GARM charm is deployed and active (leader has initialised secrets).
-    act: List Juju secrets and show the garm-secrets secret content.
-    assert: The garm-secrets secret contains jwt-secret and db-passphrase keys.
+    act: List Juju secrets and show the content of garm-secrets and
+        garm-admin-credentials secrets.
+    assert: garm-secrets contains jwt-secret and db-passphrase keys;
+        garm-admin-credentials contains username, password, email, and full-name keys.
     """
-    logger.info("Listing Juju secrets to find '%s'", GARM_SECRETS_LABEL)
+    logger.info("Listing Juju secrets")
     secrets_json = juju.cli("secrets", "--format=json")
-    secrets = json.loads(secrets_json)
+    all_secrets = json.loads(secrets_json)
 
+    # --- garm-secrets ---
     garm_secret_uri = None
-    for uri, info in secrets.items():
+    for uri, info in all_secrets.items():
         if info.get("label") == GARM_SECRETS_LABEL:
             garm_secret_uri = uri
             break
@@ -381,3 +402,26 @@ def test_garm_juju_secret_has_expected_keys(
     assert (
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+
+    # --- garm-admin-credentials ---
+    admin_creds_uri = None
+    for uri, info in all_secrets.items():
+        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
+            admin_creds_uri = uri
+            break
+
+    logger.info("Found admin credentials secret URI: %s", admin_creds_uri)
+    assert (
+        admin_creds_uri is not None
+    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
+
+    admin_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
+    admin_secret = json.loads(admin_json)
+    admin_content = admin_secret[admin_creds_uri]["content"]["Data"]
+    logger.info("GARM admin credentials keys: %s", list(admin_content))
+
+    for expected_key in ("username", "password", "email", "full-name"):
+        assert expected_key in admin_content, (
+            f"Expected '{expected_key}' key in {GARM_ADMIN_CREDENTIALS_LABEL},"
+            f" got keys: {list(admin_content)}"
+        )
