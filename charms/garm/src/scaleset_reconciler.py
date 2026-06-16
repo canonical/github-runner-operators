@@ -115,14 +115,28 @@ class ScalesetReconciler:
         Returns:
             The custom template id to reference from the scaleset, or ``0`` to use
             GARM's default template (no runner options set, or the system template
-            is unavailable). Returning ``0`` for a scaleset that previously had a
-            custom template detaches it (reverts to the default).
+            is unavailable and no custom template already exists). Returning ``0``
+            for a scaleset that previously had a custom template detaches it.
         """
+        custom_name = f"{SYSTEM_TEMPLATE_NAME}-{spec.name}"
+        existing = templates.get(custom_name)
+
         if not spec.runner_config.has_config():
             return 0
 
         base = templates.get(SYSTEM_TEMPLATE_NAME)
         if base is None:
+            # The system template is not listed (transient/compat). Don't destroy
+            # an existing custom template over it — keep the last-rendered one
+            # rather than detaching and losing the runner config; only fall back
+            # to the default when there is nothing to keep.
+            if existing is not None:
+                logger.warning(
+                    "System template %s not found; keeping existing custom template for %s",
+                    SYSTEM_TEMPLATE_NAME,
+                    spec.name,
+                )
+                return existing["id"]
             logger.warning(
                 "System template %s not found; scaleset %s will use the default template",
                 SYSTEM_TEMPLATE_NAME,
@@ -131,8 +145,6 @@ class ScalesetReconciler:
             return 0
 
         new_data = build_template_data(self._template_bytes(base), spec.runner_config)
-        custom_name = f"{SYSTEM_TEMPLATE_NAME}-{spec.name}"
-        existing = templates.get(custom_name)
         if existing is not None:
             if self._template_bytes(existing) != new_data:
                 logger.info("Updating runner template %s", custom_name)
