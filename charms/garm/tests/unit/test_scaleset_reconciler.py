@@ -385,3 +385,17 @@ def test_existing_custom_template_kept_when_system_template_missing():
     client.delete_template.assert_not_called()
     client.update_template.assert_not_called()
     client.update_scaleset.assert_not_called()
+
+
+# A template returned without its data is fetched once and cached back.
+def test_template_bytes_caches_fetched_data():
+    client = MagicMock()
+    client.get_template.return_value = {"data": _b64("hello")}
+    reconciler = ScalesetReconciler(client)
+    template = {"id": 5}  # no 'data' field
+
+    assert reconciler._template_bytes(template) == b"hello"
+    assert reconciler._template_bytes(template) == b"hello"
+
+    client.get_template.assert_called_once_with(5)
+    assert template["data"] == _b64("hello")

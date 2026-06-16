@@ -171,6 +171,9 @@ class ScalesetReconciler:
         data = template.get("data")
         if not data:
             data = self._client.get_template(template["id"]).get("data", "")
+            # Cache it back so repeated lookups (e.g. the system template reused
+            # across specs in one reconcile) don't re-fetch it.
+            template["data"] = data
         return base64.b64decode(data) if data else b""
 
     def _delete_custom_template(self, scaleset_name: str, templates: dict[str, dict]) -> None:

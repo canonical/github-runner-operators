@@ -370,16 +370,22 @@ class RunnerConfig(BaseModel):
             tokens = [t.strip() for t in str(raw_exclude).split(",")]
             # Reject empty tokens (e.g. trailing comma) as they signal a misconfiguration.
             for token in tokens:
-                # Each token must be a valid IP address or CIDR: the values are
-                # rendered into an nft ruleset, where a hostname would fail at
-                # runtime (and the failure would be swallowed by ``|| true``).
+                # Each token must be a valid IPv4 address or CIDR: the values are
+                # rendered into an nft IPv4 (`table ip`) ruleset, so a hostname or
+                # IPv6 address would pass validation but fail at runtime (and the
+                # failure would be swallowed by ``|| true``).
                 try:
-                    ipaddress.ip_network(token, strict=False)
+                    network = ipaddress.ip_network(token, strict=False)
                 except ValueError as exc:
                     raise CharmConfigInvalidError(
                         f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
-                        f"of IP addresses or CIDRs; got invalid token: {token!r}"
+                        f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
                     ) from exc
+                if network.version != 4:
+                    raise CharmConfigInvalidError(
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
+                        f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
+                    )
             aproxy_exclude_addresses = ",".join(tokens)
 
         raw_ports = charm.config.get(APROXY_REDIRECT_PORTS_CONFIG_NAME)

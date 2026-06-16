@@ -586,8 +586,14 @@ def test_garm_configurator_relation_changed_triggers_reconcile():
         pytest.param(
             "aproxy-exclude-addresses",
             "10.0.0.1,not-an-ip",
-            "aproxy-exclude-addresses must be a comma-separated list of IP addresses or CIDRs",
+            "aproxy-exclude-addresses must be a comma-separated list of IPv4 addresses or CIDRs",
             id="aproxy-exclude-addresses-non-ip",
+        ),
+        pytest.param(
+            "aproxy-exclude-addresses",
+            "2001:db8::1",
+            "aproxy-exclude-addresses only supports IPv4",
+            id="aproxy-exclude-addresses-ipv6",
         ),
     ],
 )

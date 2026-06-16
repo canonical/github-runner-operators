@@ -118,7 +118,7 @@ config:
     aproxy-exclude-addresses:
       type: string
       description: |
-        Comma-separated IP addresses/CIDRs to exclude from aproxy forwarding.
+        Comma-separated IPv4 addresses/CIDRs to exclude from aproxy forwarding.
     aproxy-redirect-ports:
       type: string
       description: |
