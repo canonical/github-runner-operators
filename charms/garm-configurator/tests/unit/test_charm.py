@@ -595,6 +595,12 @@ def test_garm_configurator_relation_changed_triggers_reconcile():
             "aproxy-exclude-addresses only supports IPv4",
             id="aproxy-exclude-addresses-ipv6",
         ),
+        pytest.param(
+            "runner-http-proxy",
+            "http://pro xy.example.com",
+            "runner-http-proxy must be a valid http(s) URL",
+            id="runner-http-proxy-embedded-whitespace",
+        ),
     ],
 )
 def test_charm_blocked_invalid_runner_config(

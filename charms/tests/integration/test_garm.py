@@ -715,7 +715,7 @@ def test_scaleset_creation_deferred_when_provider_missing(
     _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
     address = _get_garm_address(juju, garm_app)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
+    token = garm_login_from_secret(juju, base_url)
     _create_test_credential(base_url, token)
     _set_scaleset_relation_data(
         juju,
@@ -744,7 +744,7 @@ def test_scalesets_created_from_relation_data(
     _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
     address = _get_garm_address(juju, garm_app)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
+    token = garm_login_from_secret(juju, base_url)
     _create_test_credential(base_url, token)
     relation_data = _get_scaleset_relation_data(
         juju, garm_app, garm_configurator_for_scaleset_tests
@@ -779,7 +779,7 @@ def test_scaleset_updated_on_relation_change(
     _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
     address = _get_garm_address(juju, garm_app)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
+    token = garm_login_from_secret(juju, base_url)
     _create_test_credential(base_url, token)
     relation_data = _get_scaleset_relation_data(
         juju, garm_app, garm_configurator_for_scaleset_tests
@@ -829,7 +829,7 @@ def test_scaleset_deleted_when_relation_removed(
     _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
     address = _get_garm_address(juju, garm_app)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
+    token = garm_login_from_secret(juju, base_url)
     _create_test_credential(base_url, token)
     relation_data = _get_scaleset_relation_data(
         juju, garm_app, garm_configurator_for_scaleset_tests
@@ -874,7 +874,7 @@ def test_runner_options_render_into_scaleset_template(
     _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
     address = _get_garm_address(juju, garm_app)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
+    token = garm_login_from_secret(juju, base_url)
     _create_test_credential(base_url, token)
     relation_data = _get_scaleset_relation_data(
         juju, garm_app, garm_configurator_for_scaleset_tests

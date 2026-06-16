@@ -365,7 +365,7 @@ def get_garm_admin_creds_from_secret(juju: jubilant.Juju) -> tuple[str, str]:
     return content["admin-username"], content["admin-password"]
 
 
-def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
+def garm_login_from_secret(juju: jubilant.Juju, garm_url: str) -> str:
     """Log into the GARM API using admin credentials stored in Juju secrets."""
     admin_username, admin_password = get_garm_admin_creds_from_secret(juju)
 

@@ -155,7 +155,10 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
 
     env_entries = [f"ACTIONS_RUNNER_HOOK_JOB_STARTED={PRE_JOB_HOOK_PATH}"]
     if config.otel_collector_endpoint:
-        env_entries.append(f"OTEL_EXPORTER_OTLP_ENDPOINT={config.otel_collector_endpoint}")
+        # Strip CR/LF so a databag value can't inject extra env entries (the
+        # databag is a trust boundary, regardless of configurator validation).
+        otel_endpoint = config.otel_collector_endpoint.replace("\r", "").replace("\n", "")
+        env_entries.append(f"OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
 
     return "\n".join(
         [

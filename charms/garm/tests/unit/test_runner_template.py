@@ -116,6 +116,15 @@ def test_aproxy_render_drops_malformed_tokens():
     assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
 
 
+# A CR/LF in the otel endpoint must not inject extra lines into the env file.
+def test_otel_endpoint_newline_stripped():
+    config = RunnerConfig(otel_collector_endpoint="http://o.test:4318\nMALICIOUS=1")
+    result = build_template_data(SAMPLE_BASE, config).decode()
+
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT=http://o.test:4318MALICIOUS=1" in result
+    assert "\nMALICIOUS=1" not in result
+
+
 # from_databag maps each contract key into the config and ignores absent keys;
 # has_config reflects whether any option is set.
 def test_runner_config_from_databag_and_has_config():

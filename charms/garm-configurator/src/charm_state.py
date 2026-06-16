@@ -310,8 +310,13 @@ def _validate_http_url(config_name: str, value: str) -> None:
         value: URL string to validate.
 
     Raises:
-        CharmConfigInvalidError: When the URL scheme is not http/https or netloc is empty.
+        CharmConfigInvalidError: When the URL has whitespace, a non-http(s) scheme,
+            or an empty netloc.
     """
+    # Reject embedded whitespace/control characters: the value is later rendered
+    # into scripts and env files, where a newline could inject extra lines.
+    if any(char.isspace() for char in value):
+        raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
     parsed = urllib.parse.urlparse(value)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
