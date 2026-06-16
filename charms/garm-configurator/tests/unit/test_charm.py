@@ -601,6 +601,12 @@ def test_garm_configurator_relation_changed_triggers_reconcile():
             "runner-http-proxy must be a valid http(s) URL",
             id="runner-http-proxy-embedded-whitespace",
         ),
+        pytest.param(
+            "runner-http-proxy",
+            "http://proxy.example.com:bad",
+            "runner-http-proxy must be a valid http(s) URL",
+            id="runner-http-proxy-invalid-port",
+        ),
     ],
 )
 def test_charm_blocked_invalid_runner_config(

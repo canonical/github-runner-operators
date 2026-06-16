@@ -318,7 +318,13 @@ def _validate_http_url(config_name: str, value: str) -> None:
     if any(char.isspace() for char in value):
         raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
     parsed = urllib.parse.urlparse(value)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    try:
+        # Accessing .port raises ValueError on a non-numeric / out-of-range port,
+        # which urlparse otherwise accepts silently.
+        port = parsed.port
+    except ValueError as exc:
+        raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL") from exc
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or port == 0:
         raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
 
 
