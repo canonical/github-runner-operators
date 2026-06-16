@@ -15,6 +15,7 @@ import ops
 import paas_charm.go
 import tomli_w
 from paas_charm.app import WorkloadConfig
+
 from garm_api import GarmApiError, GarmClient
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
