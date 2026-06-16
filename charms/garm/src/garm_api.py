@@ -104,7 +104,7 @@ class GarmClient:
                 auth=False,
             )
         except GarmApiError as exc:
-            if "409" in str(exc):
+            if "status 409" in str(exc):
                 logger.debug("GARM first-run already completed (409)")
                 return
             raise
