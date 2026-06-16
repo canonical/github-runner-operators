@@ -330,9 +330,13 @@ class GarmCharm(paas_charm.go.Charm):
                 name = data.get("name", "")
                 if not name:
                     continue
+                max_runner_raw = data.get("max_runner", "")
+                if not max_runner_raw:
+                    logger.warning("Skipping scaleset %s: max_runner not set in relation data", name)
+                    continue
                 try:
                     min_idle = int(data.get("min_idle_runner", "0"))
-                    max_runners = int(data.get("max_runner", "5"))
+                    max_runners = int(max_runner_raw)
                 except ValueError:
                     continue
                 specs.append(
