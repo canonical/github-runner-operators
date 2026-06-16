@@ -6,7 +6,7 @@
 
 import dataclasses
 import logging
-import secrets
+import secrets as _secrets
 import string
 import typing
 
@@ -14,11 +14,14 @@ import ops
 import paas_charm.go
 import tomli_w
 from paas_charm.app import WorkloadConfig
+from garm_api import GarmApiError, GarmClient
+from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
 
 GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
+GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -38,7 +41,7 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
         Random alphanumeric string of the given length.
     """
     alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+    return "".join(_secrets.choice(alphabet) for _ in range(length))
 
 
 def render_garm_toml(
@@ -102,9 +105,24 @@ def _generate_garm_secrets() -> dict[str, str]:
         Dict with ``jwt-secret`` (64-char hex) and ``db-passphrase`` (32-char alnum).
     """
     return {
-        "jwt-secret": secrets.token_hex(32),
+        "jwt-secret": _secrets.token_hex(32),
         "db-passphrase": _generate_passphrase(),
+        "admin-username": "admin",
+        "admin-password": f"Admin-{_secrets.token_hex(8)}-Gx1!",
     }
+
+
+def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
+    """Parse pre_install_scripts from relation data string."""
+    if not raw:
+        return {}
+    try:
+        result = ast.literal_eval(raw)
+        if isinstance(result, dict):
+            return result
+    except (ValueError, SyntaxError):
+        pass
+    return {}
 
 
 class GarmCharm(paas_charm.go.Charm):
@@ -118,6 +136,14 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
+            self._on_configurator_changed,
+        )
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_departed,
+            self._on_configurator_changed,
+        )
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
@@ -135,6 +161,10 @@ class GarmCharm(paas_charm.go.Charm):
         framework's default metrics-port scrape job.
         """
         return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
+
+    def _on_configurator_changed(self, _: typing.Any) -> None:
+        """Handle garm-configurator relation changes."""
+        self._reconcile_scalesets()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -210,10 +240,26 @@ class GarmCharm(paas_charm.go.Charm):
         """Create the garm-secrets juju secret on first call (leader only)."""
         if not self.unit.is_leader():
             return
-        try:
-            self.model.get_secret(label=GARM_SECRETS_LABEL)
-        except ops.SecretNotFoundError:
+        secret = self._get_garm_secrets()
+        if secret is None:
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
+            return
+
+        secret_content = secret.get_content(refresh=True)
+        missing_secret_content = {}
+        if "admin-username" not in secret_content:
+            missing_secret_content["admin-username"] = "admin"
+        if "admin-password" not in secret_content:
+            missing_secret_content["admin-password"] = f"Admin-{_secrets.token_hex(8)}-Gx1!"
+        if missing_secret_content:
+            secret.set_content({**secret_content, **missing_secret_content})
+
+    def _get_garm_secrets(self) -> ops.Secret | None:
+        """Return the GARM secret object when available."""
+        try:
+            return self.model.get_secret(label=GARM_SECRETS_LABEL)
+        except ops.SecretNotFoundError:
+            return None
 
     def _get_secrets(self) -> dict[str, str]:
         """Retrieve secrets from the juju secret store.
@@ -226,6 +272,14 @@ class GarmCharm(paas_charm.go.Charm):
         """
         secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
         return secret.get_content()
+
+    def _get_garm_url(self) -> str:
+        """Build the local GARM API URL from charm configuration."""
+        listen_address = str(self.config.get("garm-listen-address", ""))
+        listen_port = self.config.get("garm-listen-port", 9997)
+        if not listen_address:
+            return ""
+        return f"http://{listen_address}:{listen_port}"
 
     def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
         """Get PostgreSQL config from relation data, or None if not available.
@@ -264,6 +318,71 @@ class GarmCharm(paas_charm.go.Charm):
             }
 
         return None
+
+    def _build_desired_scalesets(self) -> list[ScalesetSpec]:
+        """Build the desired scaleset list from all garm-configurator relation units."""
+        specs = []
+        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
+            for unit in relation.units:
+                data = relation.data[unit]
+                name = data.get("name", "")
+                if not name:
+                    continue
+                try:
+                    min_idle = int(data.get("min_idle_runner", "0"))
+                    max_runners = int(data.get("max_runner", "5"))
+                except ValueError:
+                    continue
+                specs.append(
+                    ScalesetSpec(
+                        name=name,
+                        provider_name=data.get("provider_name", ""),
+                        credentials_name=data.get("credentials_name", ""),
+                        image_id=data.get("image_id", ""),
+                        flavor=data.get("flavor", ""),
+                        os_arch=data.get("os_arch", "x64"),
+                        min_idle_runners=min_idle,
+                        max_runners=max_runners,
+                        labels=[
+                            label.strip()
+                            for label in data.get("labels", "").split(",")
+                            if label.strip()
+                        ],
+                        runner_group=data.get("runner_group", "default"),
+                        pre_install_scripts=_parse_pre_install_scripts(
+                            data.get("pre_install_scripts", "")
+                        ),
+                    )
+                )
+        return specs
+
+    def _reconcile_scalesets(self) -> None:
+        """Sync GARM scalesets against garm-configurator relation data."""
+        secret = self._get_garm_secrets()
+        if not secret:
+            logger.warning("GARM secrets not yet available; deferring scaleset reconcile")
+            return
+
+        secret_content = secret.get_content(refresh=True)
+        admin_username = secret_content.get("admin-username", "admin")
+        admin_password = secret_content.get("admin-password", "")
+        if not admin_password:
+            logger.warning("admin-password not in GARM secrets; deferring scaleset reconcile")
+            return
+
+        garm_url = self._get_garm_url()
+        if not garm_url:
+            logger.warning("GARM URL not yet available; deferring scaleset reconcile")
+            return
+
+        try:
+            client = GarmClient(f"{garm_url}/api/v1")
+            client.token = client.login(admin_username, admin_password)
+            desired = self._build_desired_scalesets()
+            reconciler = ScalesetReconciler(client)
+            reconciler.reconcile(desired)
+        except GarmApiError as exc:
+            logger.warning("GARM API error during scaleset reconcile: %s", exc)
 
     def _push_garm_config(self, container: ops.Container) -> None:
         """Render and push the GARM TOML config into the Pebble container.

@@ -4,6 +4,7 @@
 """Unit tests for GarmCharm."""
 
 import string
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -12,7 +13,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from charm import _generate_garm_secrets, render_garm_toml
+from charm import GARM_SECRETS_LABEL, GarmCharm, _generate_garm_secrets, render_garm_toml
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -133,3 +134,136 @@ def test_generate_garm_secrets_produces_unique_values():
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
     assert first["db-passphrase"] != second["db-passphrase"]
+
+
+def test_generate_garm_secrets_includes_admin_username():
+    """Generated secrets include the fixed admin username."""
+    result = _generate_garm_secrets()
+    assert result["admin-username"] == "admin"
+
+
+def test_generate_garm_secrets_includes_admin_password():
+    """Generated secrets include a strong admin password with the expected wrapper."""
+    result = _generate_garm_secrets()
+    password = result["admin-password"]
+    assert password.startswith("Admin-")
+    assert password.endswith("-Gx1!")
+
+
+def test_admin_password_format_is_strong():
+    """Generated admin passwords satisfy the expected strength constraints."""
+    for _ in range(5):
+        password = _generate_garm_secrets()["admin-password"]
+        assert len(password) >= 12
+        assert any(char.isupper() for char in password)
+        assert any(char.islower() for char in password)
+        assert any(char.isdigit() for char in password)
+        assert any(not char.isalnum() for char in password)
+
+
+def test_admin_username_is_always_admin():
+    """Generated admin username remains stable across calls."""
+    for _ in range(5):
+        assert _generate_garm_secrets()["admin-username"] == "admin"
+
+
+def test_generate_garm_secrets_does_not_overwrite_existing():
+    """Existing garm-secrets are preserved when the charm ensures secrets."""
+    charm = object.__new__(GarmCharm)
+    mock_unit = MagicMock()
+    mock_unit.is_leader.return_value = True
+    existing_secret = MagicMock()
+    existing_secret.get_content.return_value = {
+        "jwt-secret": "existing-jwt",
+        "db-passphrase": "existing-passphrase",
+        "admin-username": "admin",
+        "admin-password": "Admin-deadbeefcafebabe-Gx1!",
+    }
+    mock_model = MagicMock()
+    mock_model.get_secret.return_value = existing_secret
+    mock_app = MagicMock()
+
+    with (
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock, return_value=mock_unit),
+        patch.object(GarmCharm, "model", new_callable=PropertyMock, return_value=mock_model),
+        patch.object(GarmCharm, "app", new_callable=PropertyMock, return_value=mock_app),
+    ):
+        charm._ensure_secrets()
+
+    mock_model.get_secret.assert_called_once_with(label=GARM_SECRETS_LABEL)
+    mock_app.add_secret.assert_not_called()
+    existing_secret.set_content.assert_not_called()
+
+
+def test_ensure_secrets_backfills_missing_admin_credentials():
+    """Existing secrets gain admin credentials without changing current values."""
+    charm = object.__new__(GarmCharm)
+    mock_unit = MagicMock()
+    mock_unit.is_leader.return_value = True
+    existing_secret = MagicMock()
+    existing_secret.get_content.return_value = {
+        "jwt-secret": "existing-jwt",
+        "db-passphrase": "existing-passphrase",
+    }
+    mock_model = MagicMock()
+    mock_model.get_secret.return_value = existing_secret
+    mock_app = MagicMock()
+
+    with (
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock, return_value=mock_unit),
+        patch.object(GarmCharm, "model", new_callable=PropertyMock, return_value=mock_model),
+        patch.object(GarmCharm, "app", new_callable=PropertyMock, return_value=mock_app),
+    ):
+        charm._ensure_secrets()
+
+    existing_secret.set_content.assert_called_once()
+    updated = existing_secret.set_content.call_args[0][0]
+    assert updated["jwt-secret"] == "existing-jwt"
+    assert updated["db-passphrase"] == "existing-passphrase"
+    assert updated["admin-username"] == "admin"
+    assert updated["admin-password"].startswith("Admin-")
+    assert updated["admin-password"].endswith("-Gx1!")
+
+
+def test_admin_password_is_unique_across_calls():
+    """Separate generated secret payloads use different admin passwords."""
+    first = _generate_garm_secrets()
+    second = _generate_garm_secrets()
+    assert first["admin-password"] != second["admin-password"]
+
+
+def test_reconcile_scalesets_skips_when_no_secrets():
+    """Scaleset reconciliation exits early when GARM secrets are unavailable."""
+    charm = object.__new__(GarmCharm)
+    charm._get_garm_secrets = MagicMock(return_value=None)
+
+    with patch("charm.GarmClient") as mock_client:
+        charm._reconcile_scalesets()
+
+    mock_client.assert_not_called()
+
+
+def test_reconcile_scalesets_skips_restart():
+    """Scaleset reconciliation must not restart the workload."""
+    charm = object.__new__(GarmCharm)
+    secret = MagicMock()
+    secret.get_content.return_value = {
+        "admin-username": "admin",
+        "admin-password": "Admin-deadbeefcafebabe-Gx1!",
+    }
+    charm._get_garm_secrets = MagicMock(return_value=secret)
+    charm._get_garm_url = MagicMock(return_value="http://garm")
+    charm._build_desired_scalesets = MagicMock(return_value=[])
+    charm.restart = MagicMock()
+    charm._restart_service = MagicMock()
+
+    with patch("charm.GarmClient") as mock_client_cls, patch("charm.ScalesetReconciler") as mock_reconciler_cls:
+        mock_client = mock_client_cls.return_value
+        mock_client.login.return_value = "token"
+
+        charm._reconcile_scalesets()
+
+    mock_client.login.assert_called_once_with("admin", "Admin-deadbeefcafebabe-Gx1!")
+    mock_reconciler_cls.return_value.reconcile.assert_called_once_with([])
+    charm.restart.assert_not_called()
+    charm._restart_service.assert_not_called()
