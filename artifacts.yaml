@@ -1,0 +1,45 @@
+version: 1
+rocks:
+- name: garm
+  rockcraft-yaml: garm-rockcraft.yaml
+  platforms:
+  - arch: amd64
+- name: planner
+  rockcraft-yaml: planner-rockcraft.yaml
+  platforms:
+  - arch: amd64
+- name: webhook-gateway
+  rockcraft-yaml: webhook-gateway-rockcraft.yaml
+  platforms:
+  - arch: amd64
+charms:
+- name: garm
+  charmcraft-yaml: charms/garm/charmcraft.yaml
+  resources:
+    app-image:
+      type: oci-image
+      rock: garm
+  platforms:
+  - arch: amd64
+- name: garm-configurator
+  charmcraft-yaml: charms/garm-configurator/charmcraft.yaml
+  resources: {}
+  platforms:
+  - arch: amd64
+- name: github-runner-planner
+  charmcraft-yaml: charms/planner-operator/charmcraft.yaml
+  resources:
+    app-image:
+      type: oci-image
+      rock: planner
+  platforms:
+  - arch: amd64
+- name: github-runner-webhook-gateway
+  charmcraft-yaml: charms/webhook-gateway-operator/charmcraft.yaml
+  resources:
+    app-image:
+      type: oci-image
+      rock: webhook-gateway
+  platforms:
+  - arch: amd64
+snaps: []

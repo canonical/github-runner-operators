@@ -8,26 +8,6 @@ import json
 import jubilant
 import pytest
 
-from tests.conftest import CHARM_FILE_PARAM
-
-
-@pytest.fixture(name="garm_configurator_charm_file", scope="module")
-def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
-    """Return the path to the built garm-configurator charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        pytest.skip(
-            f"missing required {CHARM_FILE_PARAM} option for garm-configurator integration tests"
-        )
-    if len(charm) > 1:
-        configurator_charms = [f for f in charm if "garm-configurator" in f]
-        if not configurator_charms:
-            raise pytest.UsageError(
-                f"no garm-configurator charm file found among {CHARM_FILE_PARAM} values: {charm}"
-            )
-        return configurator_charms[0]
-    return charm[0]
-
 
 @pytest.fixture(name="garm_configurator_app", scope="module")
 def deploy_garm_configurator_app_fixture(

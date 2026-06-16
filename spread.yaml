@@ -1,0 +1,29 @@
+project: github-runner-operators
+path: /home/ubuntu/proj
+kill-timeout: 60m
+warn-timeout: 1m
+backends:
+  integration-test:
+    type: integration-test
+    systems:
+      - ubuntu-24.04:
+          runner: [self-hosted, edge, noble]
+          cpu: 4
+          memory: 8
+          disk: 20
+environment:
+  CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
+  OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'
+exclude:
+- .git
+- .tox
+- .venv
+- .*_cache
+integration-suites:
+  charms/tests/integration/:
+    summary: charm integration tests
+    working-dir: ./
+    backends:
+    - integration-test
+    environment:
+      TOX_ENV: charms-integration
