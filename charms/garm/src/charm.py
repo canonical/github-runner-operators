@@ -4,6 +4,7 @@
 
 """GARM charm entrypoint."""
 
+import dataclasses
 import hashlib
 import logging
 import secrets
@@ -13,6 +14,7 @@ import typing
 import ops
 import paas_charm.go
 import tomli_w
+from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
+GARM_PORT: typing.Final[int] = 8080
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -256,6 +259,19 @@ class GarmCharm(paas_charm.go.Charm):
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
 
+    @property
+    def _workload_config(self) -> WorkloadConfig:
+        """Pin GARM to a fixed port and disable the default metrics scrape job.
+
+        GARM serves its API and /metrics on a single fixed port (GARM_PORT);
+        the framework's app-port is unsupported, so we force the workload port
+        (used for ingress, opened ports, and the service URL) to GARM_PORT
+        rather than reading app-port. The scrape target is declared in
+        paas-config.yaml, so metrics_target is set to None to suppress the
+        framework's default metrics-port scrape job.
+        """
+        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
+
     def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
         """Handle configurator relation joined/changed/broken by re-rendering TOML."""
         self.restart()
@@ -273,6 +289,31 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._ensure_secrets()
 
+        # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
+        # no separate metrics listener — and declares its scrape target in
+        # paas-config.yaml, so the go-framework's app-port/metrics-port/metrics-path
+        # settings don't apply. _workload_config also pins the workload port to
+        # GARM_PORT, so app-port has no effect on ingress, the opened ports, or the
+        # service URL (they can't drift from GARM's actual port). Warn rather than
+        # block when an operator sets any to a non-default value, tolerating their
+        # absence (the framework may drop them in future).
+        for option, default in (
+            ("app-port", GARM_PORT),
+            ("metrics-port", GARM_PORT),
+            ("metrics-path", "/metrics"),
+        ):
+            value = self.config.get(option)
+            if value is not None and str(value) != str(default):
+                logger.warning(
+                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
+                    "declares its Prometheus scrape config in paas-config.yaml",
+                    option,
+                    value,
+                    GARM_PORT,
+                )
+
+        # Short-circuit if postgresql relation data is not yet available.
+        # GARM cannot start without a database connection.
         postgresql_config = self._get_postgresql_config()
         if not postgresql_config:
             logger.info("PostgreSQL relation data not yet available; blocking")
@@ -289,7 +330,7 @@ class GarmCharm(paas_charm.go.Charm):
         provider_configs = self._get_configurator_provider_configs()
         toml_content, provider_files = render_garm_toml(
             listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
-            listen_port=int(self.config.get("garm-listen-port", 9997)),
+            listen_port=int(self.config.get("garm-listen-port", GARM_PORT)),
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
             postgresql_config=postgresql_config,

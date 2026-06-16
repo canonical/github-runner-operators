@@ -28,7 +28,7 @@ def _render(**overrides) -> dict:
     """Helper: render TOML with defaults, return parsed dict."""
     kwargs = {
         "listen_address": "0.0.0.0",
-        "listen_port": 9997,
+        "listen_port": 8080,
         "jwt_secret": "test-secret",
         "db_passphrase": "a" * 32,
         "postgresql_config": _DEFAULT_PG_CONFIG,
@@ -80,8 +80,9 @@ def test_render_garm_toml_sslmode_propagated(sslmode: str):
 @pytest.mark.parametrize(
     "section,key,value,kwargs",
     [
-        ("apiserver", "bind", "127.0.0.1", {"listen_address": "127.0.0.1"}),
+        ("apiserver", "bind", "0.0.0.0", {}),
         ("apiserver", "port", 8080, {"listen_port": 8080}),
+        ("apiserver", "bind", "127.0.0.1", {"listen_address": "127.0.0.1"}),
         ("apiserver", "use_tls", False, {}),
         ("jwt_auth", "secret", "mysecret", {"jwt_secret": "mysecret"}),
         ("jwt_auth", "time_to_live", "8760h", {}),
@@ -91,6 +92,7 @@ def test_render_garm_toml_sslmode_propagated(sslmode: str):
     ids=[
         "apiserver-bind",
         "apiserver-port",
+        "apiserver-bind-address",
         "apiserver-use_tls",
         "jwt_auth-secret",
         "jwt_auth-time_to_live",
@@ -111,10 +113,7 @@ def test_render_garm_toml_provider_section():
     provider = parsed["provider"][0]
     assert provider["name"] == "openstack"
     assert provider["provider_type"] == "external"
-    assert (
-        provider["external"]["provider_executable"]
-        == "/usr/local/bin/garm-provider-openstack"
-    )
+    assert provider["external"]["provider_executable"] == "/usr/local/bin/garm-provider-openstack"
     assert provider["external"]["config_file"] == ""
 
 
@@ -184,7 +183,7 @@ def test_render_garm_toml_with_configurator_providers():
     ]
     toml_content, provider_files = render_garm_toml(
         listen_address="0.0.0.0",
-        listen_port=9997,
+        listen_port=8080,
         jwt_secret="test-secret",
         db_passphrase="a" * 32,
         postgresql_config=_DEFAULT_PG_CONFIG,
@@ -205,7 +204,7 @@ def test_render_garm_toml_with_configurator_providers():
 
     # Verify provider_files contains the expected paths and content.
     provider_toml_0 = provider_files["/etc/garm/provider-garm-configurator-0.toml"]
-    assert "network_id = \"net1\"" in provider_toml_0
+    assert 'network_id = "net1"' in provider_toml_0
     assert 'cloud = "garm-configurator-0"' in provider_toml_0
 
     clouds_yaml_0 = provider_files["/etc/garm/clouds-garm-configurator-0.yaml"]

@@ -25,7 +25,7 @@ GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
-GARM_API_PORT = 9997
+GARM_API_PORT = 8080
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 
 # Generated once per session so all test functions that call _garm_first_run use
@@ -143,6 +143,47 @@ def _garm_first_run(address: str) -> str:
     resp.raise_for_status()
 
     return token
+
+
+class _MetricsNotReady(Exception):
+    """Raised while GARM's /metrics is still warming up (retryable)."""
+
+
+@retry(
+    retry=retry_if_exception_type((requests.exceptions.ConnectionError, _MetricsNotReady)),
+    wait=wait_exponential(multiplier=1, min=1, max=30),
+    stop=stop_after_attempt(10),
+    reraise=True,
+)
+def _scrape_metrics_until_ready(metrics_url: str) -> requests.Response:
+    """Scrape GARM's /metrics (no auth) and retry until the metrics are populated.
+
+    garm_health is the reliable signal that GARM's own metrics (not just the Go
+    runtime metrics) are exported: it is populated by an immediate collection at
+    startup and refreshed every tick, so retry briefly to absorb that startup
+    window. Other metric names are documented in GARM's monitoring spec.
+
+    Args:
+        metrics_url: Full URL of GARM's /metrics endpoint.
+
+    Returns:
+        The successful (HTTP 200) response, which contains garm_health.
+    """
+    # No Authorization header: a 200 proves JWT auth is disabled on /metrics.
+    response = requests.get(metrics_url, timeout=30)
+    # A 5xx may occur briefly while GARM is still warming up, so retry it. A 4xx
+    # (e.g. 401/403 if auth were required, 404 for a wrong path) is a real
+    # regression and must surface immediately rather than being masked as a
+    # metrics-warm-up timeout.
+    if response.status_code >= 500:
+        raise _MetricsNotReady()
+    assert response.status_code == requests.codes.ok, (
+        f"Expected 200 without a JWT token, got {response.status_code}: "
+        f"{response.text[:200]}"
+    )
+    if "garm_health" not in response.text:
+        raise _MetricsNotReady()
+    return response
 
 
 def test_garm_blocks_without_postgresql(
@@ -381,6 +422,27 @@ def test_garm_juju_secret_has_expected_keys(
     assert (
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+
+
+def test_garm_metrics_endpoint_no_auth(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and connected to postgresql.
+    act: GET /metrics with no Authorization header.
+    assert: The endpoint responds 200 (JWT auth disabled) and exposes GARM metrics.
+    """
+    address = _get_garm_address(juju, garm_app)
+    metrics_url = f"http://{address}:{GARM_API_PORT}/metrics"
+    logger.info("Scraping GARM metrics (no auth) at %s", metrics_url)
+
+    resp = _scrape_metrics_until_ready(metrics_url)
+    # _scrape_metrics_until_ready only returns on a 200 response containing garm_health.
+    assert "garm_health" in resp.text, (
+        "Expected the garm_health metric in the /metrics response; "
+        f"got first 500 chars: {resp.text[:500]}"
+    )
 
 
 def test_garm_toml_has_configurator_provider(
