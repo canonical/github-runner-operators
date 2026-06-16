@@ -14,6 +14,7 @@ except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
 from charm import GARM_SECRETS_LABEL, GarmCharm, _generate_garm_secrets, render_garm_toml
+from garm_api import GarmApiError
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -287,11 +288,35 @@ def test_maybe_first_run_registers_admin_from_secret():
         patch("charm.GarmClient") as mock_client_cls,
     ):
         mock_unit.return_value.is_leader.return_value = True
+        # Login fails => GARM is not initialised yet => first-run is attempted.
+        mock_client_cls.return_value.login.side_effect = GarmApiError("not initialised")
         charm._maybe_first_run()
 
     mock_client_cls.return_value.first_run.assert_called_once_with(
         "admin", "Admin-deadbeefcafebabe-Gx1!", "admin@garm.local", "GARM Admin"
     )
+
+
+def test_maybe_first_run_skips_first_run_when_login_succeeds():
+    """When the admin can already log in, GARM is initialised and first-run is skipped."""
+    charm = object.__new__(GarmCharm)
+    secret = MagicMock()
+    secret.get_content.return_value = {
+        "admin-username": "admin",
+        "admin-password": "Admin-deadbeefcafebabe-Gx1!",
+    }
+    charm._get_garm_secrets = MagicMock(return_value=secret)
+    charm._get_garm_url = MagicMock(return_value="http://127.0.0.1:8080")
+
+    with (
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch("charm.GarmClient") as mock_client_cls,
+    ):
+        mock_unit.return_value.is_leader.return_value = True
+        mock_client_cls.return_value.login.return_value = "token"
+        charm._maybe_first_run()
+
+    mock_client_cls.return_value.first_run.assert_not_called()
 
 
 def test_maybe_first_run_skips_when_not_leader():

@@ -251,11 +251,12 @@ class GarmCharm(paas_charm.go.Charm):
         """Register the GARM admin user if it does not exist yet (leader only).
 
         GARM needs an initial admin (POST /first-run) before its API accepts
-        authenticated calls. GarmClient.first_run is idempotent — a 409
-        "already initialised" is ignored — so this is safe to call on every
-        event; a failure (e.g. GARM not yet accepting connections right after a
-        restart) is logged and retried on the next event (update-status, relation
-        change, or scaleset reconcile).
+        authenticated calls. We log in first: if that succeeds GARM is already
+        initialised and we do nothing, which avoids calling /first-run (and the
+        409s it logs) on every update-status tick. Only when login fails do we
+        attempt first-run, so the call also self-heals if GARM's database is ever
+        reset. Failures (e.g. GARM not yet accepting connections after a restart)
+        are logged and retried on the next event.
         """
         if not self.unit.is_leader():
             return
@@ -267,8 +268,13 @@ class GarmCharm(paas_charm.go.Charm):
         admin_password = content.get("admin-password")
         if not admin_username or not admin_password:
             return
+        client = GarmClient(f"{self._get_garm_url()}/api/v1")
         try:
-            client = GarmClient(f"{self._get_garm_url()}/api/v1")
+            client.login(admin_username, admin_password)
+            return
+        except GarmApiError:
+            logger.info("GARM admin login failed; attempting first-run initialisation")
+        try:
             client.first_run(
                 admin_username, admin_password, GARM_ADMIN_EMAIL, GARM_ADMIN_FULL_NAME
             )

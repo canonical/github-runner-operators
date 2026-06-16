@@ -61,7 +61,13 @@ class ScalesetReconciler:
         providers = {provider["name"] for provider in self._client.list_providers()}
         credentials = {credential["name"] for credential in self._client.list_credentials()}
         observed = {scaleset["name"]: scaleset for scaleset in self._client.list_scalesets()}
-        templates = {template["name"]: template for template in self._client.list_templates()}
+        # Only the system github_linux template and our per-scaleset
+        # github_linux-<name> copies are relevant, so filter by partial name
+        # rather than pulling every template on the controller.
+        templates = {
+            template["name"]: template
+            for template in self._client.list_templates(partial_name=SYSTEM_TEMPLATE_NAME)
+        }
 
         all_desired_names: set[str] = {spec.name for spec in desired}
 
