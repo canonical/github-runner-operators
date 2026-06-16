@@ -355,9 +355,9 @@ class GarmCharm(paas_charm.go.Charm):
         logger.info("Updating GARM config for providers: %s", provider_names)
 
         container = self.unit.get_container(CONTAINER_NAME)
-        container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
+        container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
         for path, content in provider_files.items():
-            container.push(path, content, make_dirs=True)
+            container.push(path, content, permissions=0o600, make_dirs=True)
         self._store_toml_hash(new_hash)
 
         container.add_layer(
