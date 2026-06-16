@@ -330,31 +330,35 @@ class GarmCharm(paas_charm.go.Charm):
                 name = data.get("name", "")
                 if not name:
                     continue
-                max_runner_raw = data.get("max_runner", "")
-                if not max_runner_raw:
+                required = {
+                    "provider_name": data.get("provider_name", ""),
+                    "credentials_name": data.get("credentials_name", ""),
+                    "image_id": data.get("image_id", ""),
+                    "flavor": data.get("flavor", ""),
+                    "os_arch": data.get("os_arch", ""),
+                    "max_runner": data.get("max_runner", ""),
+                }
+                missing = [k for k, v in required.items() if not v]
+                if missing:
                     logger.warning(
-                        "Skipping scaleset %s: max_runner not set in relation data", name
-                    )
-                    continue
-                os_arch = data.get("os_arch", "")
-                if not os_arch:
-                    logger.warning(
-                        "Skipping scaleset %s: os_arch not set in relation data", name
+                        "Skipping scaleset %s: missing required fields %s",
+                        name,
+                        missing,
                     )
                     continue
                 try:
                     min_idle = int(data.get("min_idle_runner", "0"))
-                    max_runners = int(max_runner_raw)
+                    max_runners = int(required["max_runner"])
                 except ValueError:
                     continue
                 specs.append(
                     ScalesetSpec(
                         name=name,
-                        provider_name=data.get("provider_name", ""),
-                        credentials_name=data.get("credentials_name", ""),
-                        image_id=data.get("image_id", ""),
-                        flavor=data.get("flavor", ""),
-                        os_arch=os_arch,
+                        provider_name=required["provider_name"],
+                        credentials_name=required["credentials_name"],
+                        image_id=required["image_id"],
+                        flavor=required["flavor"],
+                        os_arch=required["os_arch"],
                         min_idle_runners=min_idle,
                         max_runners=max_runners,
                         labels=[
@@ -362,7 +366,7 @@ class GarmCharm(paas_charm.go.Charm):
                             for label in data.get("labels", "").split(",")
                             if label.strip()
                         ],
-                runner_group=data.get("runner_group", ""),
+                        runner_group=data.get("runner_group", ""),
                         pre_install_scripts=_parse_pre_install_scripts(
                             data.get("pre_install_scripts", "")
                         ),
