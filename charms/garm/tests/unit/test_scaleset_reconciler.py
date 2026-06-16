@@ -312,6 +312,7 @@ def test_orphan_scaleset_deletes_custom_template():
         "tags": [],
         "runner_group": "default",
         "extra_specs": {},
+        "template_id": 9,  # a scaleset with a custom template references it
     }
     stale_template = {"id": 9, "name": "github_linux-stale-scaleset", "data": _b64("x")}
     client = _mock_client(

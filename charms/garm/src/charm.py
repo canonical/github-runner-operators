@@ -155,9 +155,16 @@ class GarmCharm(paas_charm.go.Charm):
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
 
+    # Typed HookEvent (not UpdateStatusEvent) to match the PaasCharm base method
+    # signature — overrides cannot narrow parameter types (Liskov substitution).
     def _on_update_status(self, _: ops.HookEvent) -> None:
-        """Retry GARM admin first-run until it succeeds."""
-        self._maybe_first_run()
+        """Retry GARM admin first-run, but only once the workload is ready.
+
+        Skipping when not ready avoids the GARM client's 30s network timeout
+        hanging the periodic update-status hook while GARM is still starting.
+        """
+        if self.is_ready():
+            self._maybe_first_run()
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -172,9 +179,14 @@ class GarmCharm(paas_charm.go.Charm):
         """
         return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
 
-    def _on_configurator_changed(self, _: typing.Any) -> None:
-        """Handle garm-configurator relation changes."""
-        self._reconcile_scalesets()
+    def _on_configurator_changed(self, _: ops.RelationEvent) -> None:
+        """Reconcile scalesets on garm-configurator relation changes, when ready.
+
+        Skipping when not ready avoids the GARM client's 30s network timeout
+        hanging the relation hook while GARM is still starting.
+        """
+        if self.is_ready():
+            self._reconcile_scalesets()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.

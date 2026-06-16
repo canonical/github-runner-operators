@@ -319,6 +319,17 @@ def test_maybe_first_run_skips_first_run_when_login_succeeds():
     mock_client_cls.return_value.first_run.assert_not_called()
 
 
+def test_on_update_status_skips_first_run_when_not_ready():
+    """update-status does not touch GARM while the workload is not ready."""
+    charm = object.__new__(GarmCharm)
+    charm.is_ready = MagicMock(return_value=False)
+    charm._maybe_first_run = MagicMock()
+
+    charm._on_update_status(MagicMock())
+
+    charm._maybe_first_run.assert_not_called()
+
+
 def test_maybe_first_run_skips_when_not_leader():
     """Non-leader units do not attempt GARM first-run."""
     charm = object.__new__(GarmCharm)

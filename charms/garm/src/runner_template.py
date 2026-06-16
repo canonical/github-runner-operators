@@ -160,22 +160,45 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
         otel_endpoint = config.otel_collector_endpoint.replace("\r", "").replace("\n", "")
         env_entries.append(f"OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
 
+    # Pick delimiters that don't collide with the (operator-controlled) content,
+    # so a pre-job-script containing the literal delimiter can't terminate the
+    # heredoc early. Deterministic for a given content, keeping the rendered
+    # template stable across reconciles.
+    prejob_delim = _heredoc_delimiter(hook_body, "GARM_CHARM_PREJOB")
+    env_delim = _heredoc_delimiter("\n".join(env_entries), "GARM_CHARM_ENV")
     return "\n".join(
         [
             "",
             "# ===== charm-injected runner job hooks =====",
             f"mkdir -p {RUNNER_HOME}",
-            f"cat > {PRE_JOB_HOOK_PATH} <<'GARM_CHARM_PREJOB'",
+            f"cat > {PRE_JOB_HOOK_PATH} <<'{prejob_delim}'",
             hook_body,
-            "GARM_CHARM_PREJOB",
+            prejob_delim,
             f"chmod 0755 {PRE_JOB_HOOK_PATH}",
-            f"cat >> {RUNNER_ENV_PATH} <<'GARM_CHARM_ENV'",
+            f"cat >> {RUNNER_ENV_PATH} <<'{env_delim}'",
             *env_entries,
-            "GARM_CHARM_ENV",
+            env_delim,
             f"chown -R {RUNNER_USER}:{RUNNER_USER} {RUNNER_HOME} 2>/dev/null || true",
             "# ===== end charm-injected runner job hooks =====\n",
         ]
     )
+
+
+def _heredoc_delimiter(content: str, base: str) -> str:
+    """Return a heredoc delimiter that does not appear as a line in *content*.
+
+    Args:
+        content: The heredoc body the delimiter must not collide with.
+        base: The preferred delimiter; extended only if it collides.
+
+    Returns:
+        ``base``, suffixed with underscores until no line of *content* matches it.
+    """
+    lines = content.splitlines()
+    delimiter = base
+    while delimiter in lines:
+        delimiter += "_"
+    return delimiter
 
 
 # The production github-runner charm pins the proxy IP once per job so it cannot

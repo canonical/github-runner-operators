@@ -61,13 +61,19 @@ class ScalesetReconciler:
         providers = {provider["name"] for provider in self._client.list_providers()}
         credentials = {credential["name"] for credential in self._client.list_credentials()}
         observed = {scaleset["name"]: scaleset for scaleset in self._client.list_scalesets()}
-        # Only the system github_linux template and our per-scaleset
-        # github_linux-<name> copies are relevant, so filter by partial name
-        # rather than pulling every template on the controller.
-        templates = {
-            template["name"]: template
-            for template in self._client.list_templates(partial_name=SYSTEM_TEMPLATE_NAME)
-        }
+        # Templates are only needed when a spec carries runner options or an
+        # existing scaleset already references a custom template (to update or
+        # detach it); skip the API call entirely otherwise. When fetched, filter
+        # by partial name so we only pull the system github_linux template and our
+        # per-scaleset github_linux-<name> copies.
+        templates: dict[str, dict] = {}
+        if any(spec.runner_config.has_config() for spec in desired) or any(
+            scaleset.get("template_id") for scaleset in observed.values()
+        ):
+            templates = {
+                template["name"]: template
+                for template in self._client.list_templates(partial_name=SYSTEM_TEMPLATE_NAME)
+            }
 
         all_desired_names: set[str] = {spec.name for spec in desired}
 
