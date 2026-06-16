@@ -349,12 +349,12 @@ class CharmState:
 
     @property
     def provider_name(self) -> str:
-        """Return the provider name derived from the OpenStack project."""
+        """Derived GARM provider name for scalesets."""
         return f"openstack-{self.provider_config.project_name}"
 
     @property
     def credentials_name(self) -> str:
-        """Return the credentials name derived from the GitHub App client ID."""
+        """Derived GARM credentials name for scalesets."""
         return f"github-app-{self.github_app_config.client_id}"
 
 def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
