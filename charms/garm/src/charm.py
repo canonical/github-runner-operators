@@ -330,6 +330,7 @@ class GarmCharm(paas_charm.go.Charm):
             combine=True,
         )
         container.replan()
+        container.restart(PEBBLE_SERVICE_NAME)
         self.update_app_and_unit_status(ops.ActiveStatus())
 
     @staticmethod
