@@ -336,6 +336,12 @@ class GarmCharm(paas_charm.go.Charm):
                         "Skipping scaleset %s: max_runner not set in relation data", name
                     )
                     continue
+                os_arch = data.get("os_arch", "")
+                if not os_arch:
+                    logger.warning(
+                        "Skipping scaleset %s: os_arch not set in relation data", name
+                    )
+                    continue
                 try:
                     min_idle = int(data.get("min_idle_runner", "0"))
                     max_runners = int(max_runner_raw)
@@ -348,7 +354,7 @@ class GarmCharm(paas_charm.go.Charm):
                         credentials_name=data.get("credentials_name", ""),
                         image_id=data.get("image_id", ""),
                         flavor=data.get("flavor", ""),
-                        os_arch=data.get("os_arch", "x64"),
+                        os_arch=os_arch,
                         min_idle_runners=min_idle,
                         max_runners=max_runners,
                         labels=[
