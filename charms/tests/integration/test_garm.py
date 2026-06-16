@@ -381,3 +381,34 @@ def test_garm_juju_secret_has_expected_keys(
     assert (
         "db-passphrase" in content
     ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+
+
+def test_garm_toml_has_configurator_provider(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: Configurator with OpenStack config is integrated with GARM.
+    act: Query the GARM REST API for registered providers.
+    assert: A provider named 'garm-configurator-*' is registered and visible
+        via the GARM API, confirming the configurator relation data was
+        consumed and the provider was loaded.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    token = _garm_first_run(address)
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
+    resp.raise_for_status()
+    api_providers = resp.json()
+    logger.info("Providers response: %s", json.dumps(api_providers, indent=2))
+    assert isinstance(
+        api_providers, list
+    ), f"Expected list response from GARM API, got: {type(api_providers)}"
+    api_provider_names = [p.get("name", "") for p in api_providers]
+    assert any(
+        n.startswith("garm-configurator") for n in api_provider_names
+    ), (
+        f"Expected a 'garm-configurator-*' provider in GARM API, "
+        f"got: {api_provider_names}"
+    )

@@ -592,3 +592,28 @@ def deploy_configurator_with_image_fixture(
     )
 
     return app_name
+
+
+@pytest.fixture(scope="module", name="configurator_garm")
+def integrate_configurator_with_garm_fixture(
+    juju: jubilant.Juju,
+    configurator_with_image: str,
+    garm_app: str,
+) -> str:
+    """Integrate the configurator with GARM and wait for both to be active.
+
+    The configurator should remain Active after integration. GARM may
+    restart when it receives the relation data (TOML change detection),
+    so we wait for GARM to settle back to active.
+
+    Returns the garm app name.
+    """
+    juju.integrate(configurator_with_image, garm_app)
+    # Wait for both apps to settle. GARM may restart (TOML hash change).
+    juju.wait(
+        lambda status: jubilant.all_active(status, garm_app)
+        and jubilant.all_active(status, configurator_with_image),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return garm_app
