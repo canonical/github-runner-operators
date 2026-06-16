@@ -359,3 +359,54 @@ def test_maybe_first_run_skips_on_missing_credential_key():
         GarmCharm._maybe_first_run(charm)
 
     mock_client_cls.assert_not_called()
+
+def test_reconcile_scalesets_skips_when_no_admin_credentials():
+    """Scaleset reconciliation exits early when admin credentials are unavailable."""
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(return_value=None)
+
+    with patch("charm.GarmApiClient") as mock_client:
+        charm._reconcile_scalesets()
+
+    mock_client.assert_not_called()
+
+
+def test_reconcile_scalesets_skips_restart():
+    """Scaleset reconciliation must not restart the workload."""
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(return_value={
+        "username": "admin",
+        "password": "TestPass-123!",
+    })
+    charm._get_garm_url = MagicMock(return_value="http://127.0.0.1:9997")
+    charm._build_desired_scalesets = MagicMock(return_value=[])
+    charm.restart = MagicMock()
+
+    with (
+        patch("charm.GarmApiClient") as mock_client_cls,
+        patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
+        patch("charm.ScalesetReconciler") as mock_reconciler_cls,
+    ):
+        mock_client_cls.return_value.login.return_value = "test-token"
+
+        charm._reconcile_scalesets()
+
+    mock_client_cls.return_value.login.assert_called_once_with("admin", "TestPass-123!")
+    mock_auth_cls.assert_called_once_with("http://127.0.0.1:9997/api/v1", "test-token")
+    mock_reconciler_cls.return_value.reconcile.assert_called_once_with([])
+    charm.restart.assert_not_called()
+
+
+def test_reconcile_scalesets_skips_when_garm_url_unavailable():
+    """Scaleset reconciliation exits early when the GARM URL is not configured."""
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(return_value={
+        "username": "admin",
+        "password": "TestPass-123!",
+    })
+    charm._get_garm_url = MagicMock(return_value="")
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        charm._reconcile_scalesets()
+
+    mock_client_cls.assert_not_called()
