@@ -25,7 +25,7 @@ class ScalesetSpec:
     min_idle_runners: int
     max_runners: int
     labels: list[str] = field(default_factory=list)
-    runner_group: str = "default"
+    runner_group: str = ""
     pre_install_scripts: dict[str, str] = field(default_factory=dict)
 
 
