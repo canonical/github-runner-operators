@@ -347,6 +347,15 @@ class CharmState:
             image_id=image_id,
         )
 
+    @property
+    def provider_name(self) -> str:
+        """Return the provider name derived from the OpenStack project."""
+        return f"openstack-{self.provider_config.project_name}"
+
+    @property
+    def credentials_name(self) -> str:
+        """Return the credentials name derived from the GitHub App client ID."""
+        return f"github-app-{self.github_app_config.client_id}"
 
 def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
     """Return the OpenStack image UUID from the image builder relation, if available.
