@@ -54,7 +54,8 @@ class ScalesetReconciler:
         credentials = {credential["name"] for credential in self._client.list_credentials()}
         observed = {scaleset["name"]: scaleset for scaleset in self._client.list_scalesets()}
 
-        desired_names: set[str] = set()
+        all_desired_names: set[str] = {spec.name for spec in desired}
+        ready_names: set[str] = set()
 
         for spec in desired:
             if spec.provider_name not in providers:
@@ -72,7 +73,7 @@ class ScalesetReconciler:
                 )
                 continue
 
-            desired_names.add(spec.name)
+            ready_names.add(spec.name)
 
             if spec.name in observed:
                 self._maybe_update(observed[spec.name], spec)
@@ -80,7 +81,7 @@ class ScalesetReconciler:
                 self._create(spec)
 
         for name, scaleset in observed.items():
-            if name not in desired_names:
+            if name not in all_desired_names:
                 logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset["id"])
                 self._client.delete_scaleset(scaleset["id"])
 

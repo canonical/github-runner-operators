@@ -5,6 +5,7 @@
 """GARM charm entrypoint."""
 
 import dataclasses
+import json
 import logging
 import secrets as _secrets
 import string
@@ -113,14 +114,14 @@ def _generate_garm_secrets() -> dict[str, str]:
 
 
 def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
-    """Parse pre_install_scripts from relation data string."""
+    """Parse pre_install_scripts from JSON relation data string."""
     if not raw:
         return {}
     try:
-        result = ast.literal_eval(raw)
+        result = json.loads(raw)
         if isinstance(result, dict):
             return result
-    except (ValueError, SyntaxError):
+    except (ValueError, json.JSONDecodeError):
         pass
     return {}
 

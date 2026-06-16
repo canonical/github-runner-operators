@@ -177,7 +177,28 @@ def test_pre_install_scripts_included_in_create():
     assert payload["extra_specs"]["pre_install_scripts"] == scripts
 
 
-def test_labels_sorted_for_comparison():
+def test_existing_scaleset_not_deleted_when_provider_temporarily_missing():
+    existing = {
+        "id": "uuid-1",
+        "name": "my-scaleset",
+        "image_id": "ubuntu-22.04",
+        "flavor": "m1.small",
+        "max_runners": 5,
+        "min_idle_runners": 0,
+        "tags": [],
+        "runner_group": "default",
+        "extra_specs": {},
+    }
+    client = _mock_client(
+        providers=[],
+        credentials=[{"name": "github-app-12345"}],
+        scalesets=[existing],
+    )
+    reconciler = ScalesetReconciler(client)
+    reconciler.reconcile([_spec()])
+    client.delete_scaleset.assert_not_called()
+    client.create_scaleset.assert_not_called()
+
     existing = {
         "id": "uuid-1",
         "name": "my-scaleset",

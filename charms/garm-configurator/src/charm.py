@@ -4,6 +4,7 @@
 
 """Charm entrypoint for the GARM configurator charm."""
 
+import json
 import typing
 
 import ops
@@ -76,7 +77,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 else ",".join(state.scaleset_config.labels)
             ),
             "runner_group": state.scaleset_config.runner_group,
-            "pre_install_scripts": str(state.scaleset_config.pre_install_scripts),
+            "pre_install_scripts": json.dumps(
+                {"pre_install.sh": state.scaleset_config.pre_install_scripts}
+                if state.scaleset_config.pre_install_scripts
+                else {}
+            ),
         }
         for garm_relation in self.model.relations[GARM_CONFIGURATOR_RELATION_NAME]:
             garm_relation.data[self.unit].update(relation_data)
