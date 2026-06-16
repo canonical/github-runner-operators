@@ -6,7 +6,6 @@
 import base64
 import json
 import logging
-import secrets
 import shlex
 import urllib.error
 import urllib.request
@@ -32,10 +31,6 @@ GARM_SECRETS_LABEL = "garm-secrets"
 GARM_API_PORT = 8080
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 
-# Generated once per session so all test functions that call _garm_first_run use
-# the same credentials. Format guarantees GARM's strong-password requirements:
-# uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
-_GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 _SCALESET_TEST_NAME = "test-scaleset"
 _SCALESET_TEST_CREDENTIAL_NAME = "github-app-12345"
 
@@ -85,29 +80,42 @@ def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
     return status.apps[app_name].units[unit_name].address
 
 
-def _garm_first_run(address: str) -> str:
-    """Complete GARM first-run initialization and return an admin JWT.
+def _get_charm_admin_creds(juju: jubilant.Juju) -> tuple[str, str]:
+    """Return the (username, password) the charm stored in the garm-secrets secret."""
+    all_secrets = json.loads(juju.cli("secrets", "--format=json"))
+    uri = next(
+        (u for u, info in all_secrets.items() if info.get("label") == GARM_SECRETS_LABEL), None
+    )
+    assert uri, f"{GARM_SECRETS_LABEL} secret not found"
+    content = json.loads(juju.cli("show-secret", "--reveal", "--format=json", uri))
+    data = content[uri]["content"]["Data"]
+    return data["admin-username"], data["admin-password"]
 
-    Calls /api/v1/first-run to create the initial admin user, then logs in
-    to obtain a JWT. Also configures required controller URLs so GARM will
-    serve operational API endpoints.
 
-    Retries with backoff to allow GARM time to finish starting after replan.
+def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
+    """Initialize GARM with the charm-managed admin credentials and return a JWT.
+
+    Reads the admin username/password the charm generated (garm-secrets Juju
+    secret) and uses them for first-run + login, so GARM's admin matches what the
+    charm itself authenticates with during scaleset reconcile. Idempotent: a 409
+    means the charm (or an earlier test) already initialized GARM with the same
+    credentials. Also configures the controller URLs so GARM serves operational
+    endpoints. Retries with backoff to allow GARM time to start after replan.
 
     Args:
+        juju: Jubilant Juju handle (used to read the admin credentials secret).
         address: GARM unit IP address.
 
     Returns:
         JWT token string for authenticated API calls.
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    # GARM v0.2.x requires strong passwords (min 12 chars, mixed case, digits, symbols)
-    password = _GARM_ADMIN_PASSWORD
+    username, password = _get_charm_admin_creds(juju)
     first_run_payload = {
-        "username": "admin",
+        "username": username,
         "password": password,
-        "email": "admin@test.local",
-        "full_name": "Integration Test Admin",
+        "email": "admin@garm.local",
+        "full_name": "GARM Admin",
     }
 
     session = requests.Session()
@@ -139,7 +147,7 @@ def _garm_first_run(address: str) -> str:
     _post_first_run()
 
     # Login to obtain JWT
-    login_payload = {"username": "admin", "password": password}
+    login_payload = {"username": username, "password": password}
     resp = session.post(f"{base_url}/auth/login", json=login_payload, timeout=30)
     logger.info("login response: status=%d body=%s", resp.status_code, resp.text[:500])
     resp.raise_for_status()
@@ -264,6 +272,16 @@ def _list_providers(base_url: str, token: str) -> list[dict]:
     providers = resp.json()
     assert isinstance(providers, list), f"Expected list response, got: {type(providers)}"
     return providers
+
+
+def _get_template_data(base_url: str, token: str, template_id: int) -> str:
+    """Fetch a GARM template and return its decoded (base64) script content."""
+    resp = requests.get(
+        f"{base_url}/templates/{template_id}", headers=_garm_auth_headers(token), timeout=30
+    )
+    resp.raise_for_status()
+    data = resp.json().get("data", "")
+    return base64.b64decode(data).decode() if data else ""
 
 
 def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
@@ -568,7 +586,7 @@ def test_garm_api_controller_info(
     address = _get_garm_address(juju, garm_app)
     logger.info("GARM address: %s", address)
 
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
     assert token, "Expected non-empty JWT token from first-run/login"
     logger.info("Got admin JWT token (length=%d)", len(token))
 
@@ -594,7 +612,7 @@ def test_garm_api_list_scalesets(
         scale set query path through postgresql is functional.
     """
     address = _get_garm_address(juju, garm_app)
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
@@ -622,7 +640,7 @@ def test_garm_api_list_providers(
     assert: The openstack provider is registered and visible through the API.
     """
     address = _get_garm_address(juju, garm_app)
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
@@ -877,3 +895,62 @@ def test_scaleset_deleted_when_relation_removed(
     )
 
     _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
+
+
+def test_runner_options_render_into_scaleset_template(
+    juju: jubilant.Juju,
+    garm_app: str,
+    garm_configurator_for_scaleset_tests: str,
+):
+    """
+    arrange: GARM is active with the test configurator related and a credential created.
+    act: Set the runner-behaviour options on the relation, pointing the scaleset at the
+         built-in 'openstack' provider so a scaleset (and its custom runner template) is
+         created via the GARM REST API.
+    assert: The scaleset references a custom template whose rendered content reflects each
+            runner option — proving the options reach GARM via live reconcile (no upgrade).
+    """
+    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
+    address = _get_garm_address(juju, garm_app)
+    base_url = _garm_api_base_url(address)
+    token = garm_login_from_secret(juju, garm_app, base_url)
+    _create_test_credential(base_url, token)
+    relation_data = _get_scaleset_relation_data(
+        juju, garm_app, garm_configurator_for_scaleset_tests
+    )
+    provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
+    provider_name = relation_data["provider_name"]
+    if provider_name not in provider_names:
+        # The provider is registered from the configurator's OpenStack config
+        # (rendered into GARM's TOML); without that chain the reconciler cannot
+        # create the scaleset, so the template cannot be observed here. Same
+        # guard as the sibling scaleset-creation tests.
+        pytest.skip(
+            f"requires GARM provider {provider_name!r}; available providers: {sorted(provider_names)}"
+        )
+
+    _set_scaleset_relation_data(
+        juju,
+        garm_app,
+        garm_configurator_for_scaleset_tests,
+        min_idle_runner="1",
+        dockerhub_mirror="https://mirror.example.com",
+        runner_http_proxy="http://proxy.example.com:3128",
+        aproxy_redirect_ports="80,443",
+        otel_collector_endpoint="http://otel.example.com:4318",
+        pre_job_script="echo integration-marker",
+    )
+
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    template_id = scaleset.get("template_id")
+    assert template_id, f"Expected scaleset to reference a custom template, got: {scaleset}"
+
+    rendered = _get_template_data(base_url, token, template_id)
+    for expected in (
+        "registry-mirrors",
+        "https://mirror.example.com",
+        "http://proxy.example.com:3128",
+        "OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
+        "echo integration-marker",
+    ):
+        assert expected in rendered, f"Expected {expected!r} in rendered template, got:\n{rendered}"

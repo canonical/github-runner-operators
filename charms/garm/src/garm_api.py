@@ -4,9 +4,11 @@
 
 """GARM REST API client."""
 
+import base64
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -231,3 +233,130 @@ class GarmClient:
             GarmApiError: On API error.
         """
         self._request("DELETE", f"/scalesets/{scaleset_id}")
+
+    def list_templates(
+        self,
+        os_type: str | None = None,
+        forge_type: str | None = None,
+        partial_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List runner templates, optionally filtered by type or name.
+
+        Args:
+            os_type: Optional OS type filter (e.g. "linux", "windows").
+            forge_type: Optional forge type filter (e.g. "github", "gitea").
+            partial_name: Optional substring to filter template names.
+
+        Raises:
+            GarmApiError: On API error.
+
+        Returns:
+            List of template dicts, each containing at minimum 'id' and 'name'.
+        """
+        params = {
+            k: v
+            for k, v in {
+                "os_type": os_type,
+                "forge_type": forge_type,
+                "partial_name": partial_name,
+            }.items()
+            if v is not None
+        }
+        path = "/templates"
+        if params:
+            path = f"{path}?{urllib.parse.urlencode(params)}"
+        return self._request("GET", path) or []
+
+    def get_template(self, template_id: int) -> dict[str, Any]:
+        """Fetch a single template by ID.
+
+        Args:
+            template_id: Numeric template ID.
+
+        Raises:
+            GarmApiError: On API error.
+
+        Returns:
+            Template dict with at minimum 'id', 'name', 'os_type', 'forge_type', and 'data'.
+        """
+        return self._request("GET", f"/templates/{template_id}")
+
+    def create_template(
+        self,
+        *,
+        name: str,
+        data: bytes,
+        os_type: str = "linux",
+        forge_type: str = "github",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Create a new runner template.
+
+        The ``data`` bytes are base64-encoded before sending because GARM stores
+        template scripts as a Go ``[]byte``, which serialises to base64 in JSON.
+
+        Args:
+            name: Template name.
+            data: Raw script bytes to store in the template.
+            os_type: OS type (default: "linux").
+            forge_type: Forge type (default: "github").
+            description: Optional human-readable description.
+
+        Raises:
+            GarmApiError: On API error.
+
+        Returns:
+            Created template dict.
+        """
+        payload = {
+            "name": name,
+            "data": base64.b64encode(data).decode(),
+            "os_type": os_type,
+            "forge_type": forge_type,
+            "description": description,
+        }
+        return self._request("POST", "/templates", payload)
+
+    def update_template(
+        self,
+        template_id: int,
+        *,
+        data: bytes,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing template's data and optionally its name or description.
+
+        Only ``data`` is always sent; ``name`` and ``description`` are included
+        only when explicitly provided, leaving unspecified fields unchanged on
+        the server.
+
+        Args:
+            template_id: Numeric template ID.
+            data: New raw script bytes (required by the GARM API).
+            name: New template name, or None to leave unchanged.
+            description: New description, or None to leave unchanged.
+
+        Raises:
+            GarmApiError: On API error.
+
+        Returns:
+            Updated template dict.
+        """
+        payload: dict[str, Any] = {"data": base64.b64encode(data).decode()}
+        if name is not None:
+            payload["name"] = name
+        if description is not None:
+            payload["description"] = description
+        return self._request("PUT", f"/templates/{template_id}", payload)
+
+    def delete_template(self, template_id: int) -> None:
+        """Delete a template by ID.
+
+        Args:
+            template_id: Numeric template ID.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        self._request("DELETE", f"/templates/{template_id}")

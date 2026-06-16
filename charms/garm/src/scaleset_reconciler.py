@@ -4,12 +4,18 @@
 
 """Scaleset reconciler: diffs desired vs observed GARM scalesets and applies changes."""
 
+import base64
 import logging
 from dataclasses import dataclass, field
 
 from garm_api import GarmClient
+from runner_template import RunnerConfig, build_template_data
 
 logger = logging.getLogger(__name__)
+
+# GARM seeds a non-editable system template per forge/OS; we copy this one to
+# build per-scaleset runner templates carrying the operator's runner options.
+SYSTEM_TEMPLATE_NAME = "github_linux"
 
 
 @dataclass
@@ -27,6 +33,7 @@ class ScalesetSpec:
     labels: list[str] = field(default_factory=list)
     runner_group: str = ""
     pre_install_scripts: dict[str, str] = field(default_factory=dict)
+    runner_config: RunnerConfig = field(default_factory=RunnerConfig)
 
 
 class ScalesetReconciler:
@@ -43,9 +50,10 @@ class ScalesetReconciler:
     def reconcile(self, desired: list[ScalesetSpec]) -> None:
         """Sync GARM scalesets to match *desired*.
 
-        Performs the minimum set of CREATE / UPDATE / DELETE operations.
-        If a referenced provider or credential is missing for a spec, that
-        spec is skipped silently (deferred creation) — no error state is set.
+        Performs the minimum set of CREATE / UPDATE / DELETE operations, and
+        maintains a per-scaleset runner-install template carrying the runner
+        options. If a referenced provider or credential is missing for a spec,
+        that spec is skipped silently (deferred creation) — no error state is set.
 
         Args:
             desired: The full desired set of scalesets.
@@ -53,9 +61,15 @@ class ScalesetReconciler:
         providers = {provider["name"] for provider in self._client.list_providers()}
         credentials = {credential["name"] for credential in self._client.list_credentials()}
         observed = {scaleset["name"]: scaleset for scaleset in self._client.list_scalesets()}
+        # Only the system github_linux template and our per-scaleset
+        # github_linux-<name> copies are relevant, so filter by partial name
+        # rather than pulling every template on the controller.
+        templates = {
+            template["name"]: template
+            for template in self._client.list_templates(partial_name=SYSTEM_TEMPLATE_NAME)
+        }
 
         all_desired_names: set[str] = {spec.name for spec in desired}
-        ready_names: set[str] = set()
 
         for spec in desired:
             if spec.provider_name not in providers:
@@ -73,19 +87,114 @@ class ScalesetReconciler:
                 )
                 continue
 
-            ready_names.add(spec.name)
+            template_id = self._ensure_template(spec, templates)
 
             if spec.name in observed:
-                self._maybe_update(observed[spec.name], spec)
+                self._maybe_update(observed[spec.name], spec, template_id)
             else:
-                self._create(spec)
+                self._create(spec, template_id)
+
+            if not template_id:
+                # Runner options were cleared (or the system template is
+                # unavailable): the scaleset has been reverted to the default
+                # template above, so drop any now-unreferenced custom template.
+                self._delete_custom_template(spec.name, templates)
 
         for name, scaleset in observed.items():
             if name not in all_desired_names:
                 logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset["id"])
                 self._client.delete_scaleset(scaleset["id"])
+                self._delete_custom_template(name, templates)
 
-    def _create(self, spec: ScalesetSpec) -> None:
+    def _ensure_template(self, spec: ScalesetSpec, templates: dict[str, dict]) -> int:
+        """Ensure the scaleset's runner template reflects its runner options.
+
+        Copies the system ``github_linux`` template, injects the runner options,
+        and creates or updates the per-scaleset template. The template content is
+        refreshed in place (same id) on every reconcile, so an option change is
+        applied without touching the scaleset itself.
+
+        Args:
+            spec: The desired scaleset.
+            templates: Observed templates keyed by name.
+
+        Returns:
+            The custom template id to reference from the scaleset, or ``0`` to use
+            GARM's default template (no runner options set, or the system template
+            is unavailable and no custom template already exists). Returning ``0``
+            for a scaleset that previously had a custom template detaches it.
+        """
+        custom_name = f"{SYSTEM_TEMPLATE_NAME}-{spec.name}"
+        existing = templates.get(custom_name)
+
+        if not spec.runner_config.has_config():
+            return 0
+
+        base = templates.get(SYSTEM_TEMPLATE_NAME)
+        if base is None:
+            # The system template is not listed (transient/compat). Don't destroy
+            # an existing custom template over it — keep the last-rendered one
+            # rather than detaching and losing the runner config; only fall back
+            # to the default when there is nothing to keep.
+            if existing is not None:
+                logger.warning(
+                    "System template %s not found; keeping existing custom template for %s",
+                    SYSTEM_TEMPLATE_NAME,
+                    spec.name,
+                )
+                return existing["id"]
+            logger.warning(
+                "System template %s not found; scaleset %s will use the default template",
+                SYSTEM_TEMPLATE_NAME,
+                spec.name,
+            )
+            return 0
+
+        new_data = build_template_data(self._template_bytes(base), spec.runner_config)
+        if existing is not None:
+            if self._template_bytes(existing) != new_data:
+                logger.info("Updating runner template %s", custom_name)
+                self._client.update_template(existing["id"], data=new_data)
+            return existing["id"]
+
+        logger.info("Creating runner template %s", custom_name)
+        created = self._client.create_template(
+            name=custom_name,
+            data=new_data,
+            description=f"Runner template for scaleset {spec.name}",
+        )
+        return created["id"]
+
+    def _template_bytes(self, template: dict) -> bytes:
+        """Return a template's raw bytes, fetching the full object if needed.
+
+        Args:
+            template: A template dict, possibly without its ``data`` field populated.
+
+        Returns:
+            The decoded template bytes.
+        """
+        data = template.get("data")
+        if not data:
+            data = self._client.get_template(template["id"]).get("data", "")
+            # Cache it back so repeated lookups (e.g. the system template reused
+            # across specs in one reconcile) don't re-fetch it.
+            template["data"] = data
+        return base64.b64decode(data) if data else b""
+
+    def _delete_custom_template(self, scaleset_name: str, templates: dict[str, dict]) -> None:
+        """Delete a scaleset's custom runner template if one exists.
+
+        Args:
+            scaleset_name: The name of the scaleset being removed.
+            templates: Observed templates keyed by name.
+        """
+        custom = templates.get(f"{SYSTEM_TEMPLATE_NAME}-{scaleset_name}")
+        if custom is not None:
+            logger.info("Deleting orphaned runner template %s", custom["name"])
+            self._client.delete_template(custom["id"])
+
+    def _create(self, spec: ScalesetSpec, template_id: int) -> None:
         extra_specs: dict[str, object] = {}
         if spec.pre_install_scripts:
             extra_specs["pre_install_scripts"] = spec.pre_install_scripts
@@ -103,11 +212,15 @@ class ScalesetReconciler:
             "runner_group": spec.runner_group,
             "extra_specs": extra_specs,
         }
+        if template_id:
+            payload["template_id"] = template_id
         logger.info("Creating scaleset %s", spec.name)
         self._client.create_scaleset(payload)
 
-    def _maybe_update(self, observed: dict, spec: ScalesetSpec) -> None:
-        if not self._needs_update(observed, spec):
+    def _maybe_update(self, observed: dict, spec: ScalesetSpec, template_id: int) -> None:
+        observed_template_id = observed.get("template_id") or 0
+        template_changed = observed_template_id != template_id
+        if not self._needs_update(observed, spec) and not template_changed:
             logger.debug("Scaleset %s is up to date", spec.name)
             return
 
@@ -124,6 +237,11 @@ class ScalesetReconciler:
             "runner_group": spec.runner_group,
             "extra_specs": extra_specs,
         }
+        # Send template_id when the scaleset has, or had, a custom template — a 0
+        # value detaches it (reverts to the default); omit it otherwise so an
+        # unrelated update never spuriously sets the field.
+        if template_id or observed_template_id:
+            payload["template_id"] = template_id
         logger.info("Updating scaleset %s (id=%s)", spec.name, observed["id"])
         self._client.update_scaleset(observed["id"], payload)
 

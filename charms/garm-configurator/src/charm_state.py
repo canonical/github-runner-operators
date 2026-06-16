@@ -3,6 +3,9 @@
 
 """State of the GARM configurator charm."""
 
+import ipaddress
+import urllib.parse
+
 import ops
 from pydantic import BaseModel
 
@@ -29,6 +32,13 @@ SCALESET_REPO_CONFIG_NAME = "repo"
 SCALESET_ORG_CONFIG_NAME = "org"
 SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
+
+DOCKERHUB_MIRROR_CONFIG_NAME = "dockerhub-mirror"
+RUNNER_HTTP_PROXY_CONFIG_NAME = "runner-http-proxy"
+APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME = "aproxy-exclude-addresses"
+APROXY_REDIRECT_PORTS_CONFIG_NAME = "aproxy-redirect-ports"
+OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
+PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 IMAGE_RELATION_NAME = "image"
 
@@ -292,6 +302,143 @@ class ScalesetConfig(BaseModel):
         )
 
 
+def _validate_http_url(config_name: str, value: str) -> None:
+    """Raise CharmConfigInvalidError if value is not a valid http(s) URL.
+
+    Args:
+        config_name: Config option name used in the error message.
+        value: URL string to validate.
+
+    Raises:
+        CharmConfigInvalidError: When the URL scheme is not http/https or netloc is empty.
+    """
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
+
+
+class RunnerConfig(BaseModel):
+    """Optional runner-level configuration forwarded to the GARM scaleset.
+
+    Attributes:
+        dockerhub_mirror: Optional Docker registry mirror URL.
+        runner_http_proxy: HTTP proxy address for aproxy to forward to.
+        aproxy_exclude_addresses: Comma-separated IPs/CIDRs excluded from aproxy forwarding.
+        aproxy_redirect_ports: Comma-separated ports or N-M ranges forwarded to aproxy.
+        otel_collector_endpoint: OTEL exporter address for the otel-collector.
+        pre_job_script: Bash snippet appended to the runner pre-job script.
+    """
+
+    dockerhub_mirror: str | None = None
+    runner_http_proxy: str | None = None
+    aproxy_exclude_addresses: str | None = None
+    aproxy_redirect_ports: str | None = None
+    otel_collector_endpoint: str | None = None
+    pre_job_script: str | None = None
+
+    @classmethod
+    def from_charm(cls, charm: ops.CharmBase) -> "RunnerConfig":
+        """Initialize the runner config from charm, applying best-effort validation.
+
+        All options are optional; unset or empty values result in None fields.
+
+        Args:
+            charm: The charm instance.
+
+        Raises:
+            CharmConfigInvalidError: If a set option fails validation.
+
+        Returns:
+            The parsed runner configuration.
+        """
+        url_options = (
+            DOCKERHUB_MIRROR_CONFIG_NAME,
+            RUNNER_HTTP_PROXY_CONFIG_NAME,
+            OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME,
+        )
+        url_values: dict[str, str | None] = {}
+        for config_name in url_options:
+            raw = charm.config.get(config_name)
+            value = str(raw).strip() if raw else None
+            if value:
+                _validate_http_url(config_name, value)
+            url_values[config_name] = value or None
+
+        raw_exclude = charm.config.get(APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME)
+        aproxy_exclude_addresses: str | None = None
+        if raw_exclude:
+            tokens = [t.strip() for t in str(raw_exclude).split(",")]
+            # Reject empty tokens (e.g. trailing comma) as they signal a misconfiguration.
+            for token in tokens:
+                # Each token must be a valid IPv4 address or CIDR: the values are
+                # rendered into an nft IPv4 (`table ip`) ruleset, so a hostname or
+                # IPv6 address would pass validation but fail at runtime (and the
+                # failure would be swallowed by ``|| true``).
+                try:
+                    network = ipaddress.ip_network(token, strict=False)
+                except ValueError as exc:
+                    raise CharmConfigInvalidError(
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
+                        f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
+                    ) from exc
+                if network.version != 4:
+                    raise CharmConfigInvalidError(
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
+                        f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
+                    )
+            aproxy_exclude_addresses = ",".join(tokens)
+
+        raw_ports = charm.config.get(APROXY_REDIRECT_PORTS_CONFIG_NAME)
+        aproxy_redirect_ports: str | None = None
+        if raw_ports:
+            tokens_ports = [t.strip() for t in str(raw_ports).split(",")]
+            for token in tokens_ports:
+                _validate_port_token(token)
+            aproxy_redirect_ports = ",".join(tokens_ports)
+
+        raw_script = charm.config.get(PRE_JOB_SCRIPT_CONFIG_NAME)
+        pre_job_script = str(raw_script).strip() if raw_script else None
+
+        return cls(
+            dockerhub_mirror=url_values[DOCKERHUB_MIRROR_CONFIG_NAME],
+            runner_http_proxy=url_values[RUNNER_HTTP_PROXY_CONFIG_NAME],
+            aproxy_exclude_addresses=aproxy_exclude_addresses,
+            aproxy_redirect_ports=aproxy_redirect_ports,
+            otel_collector_endpoint=url_values[OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME],
+            pre_job_script=pre_job_script or None,
+        )
+
+
+def _validate_port_token(token: str) -> None:
+    """Raise CharmConfigInvalidError if token is not a valid port or N-M range.
+
+    Args:
+        token: A single comma-split token from the aproxy-redirect-ports config.
+
+    Raises:
+        CharmConfigInvalidError: When the token is not a valid port or N<=M range in 1..65535.
+    """
+    error_msg = (
+        f"{APROXY_REDIRECT_PORTS_CONFIG_NAME} must be a comma-separated list of "
+        "ports or N-M ranges in 1..65535"
+    )
+    if "-" in token:
+        parts = token.split("-", 1)
+        try:
+            low, high = int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            raise CharmConfigInvalidError(error_msg)
+        if not (1 <= low <= 65535 and 1 <= high <= 65535 and low <= high):
+            raise CharmConfigInvalidError(error_msg)
+    else:
+        try:
+            port = int(token)
+        except ValueError:
+            raise CharmConfigInvalidError(error_msg)
+        if not 1 <= port <= 65535:
+            raise CharmConfigInvalidError(error_msg)
+
+
 class CharmState:
     """The charm state.
 
@@ -299,6 +446,7 @@ class CharmState:
         provider_config: OpenStack provider configuration.
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
+        runner_config: Optional runner-level configuration.
         image_id: OpenStack image UUID received from the image builder relation, or None.
     """
 
@@ -308,6 +456,7 @@ class CharmState:
         provider_config: ProviderConfig,
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
+        runner_config: RunnerConfig,
         image_id: str | None,
     ) -> None:
         """Initialize the charm state.
@@ -316,11 +465,13 @@ class CharmState:
             provider_config: The OpenStack provider configuration.
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
+            runner_config: The optional runner configuration.
             image_id: The OpenStack image UUID from the image builder relation.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
+        self.runner_config = runner_config
         self.image_id = image_id
 
     @classmethod
@@ -339,11 +490,13 @@ class CharmState:
         provider_config = ProviderConfig.from_charm(charm)
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
+        runner_config = RunnerConfig.from_charm(charm)
         image_id = _get_image_id_from_relation(charm)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
+            runner_config=runner_config,
             image_id=image_id,
         )
 
