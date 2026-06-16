@@ -3,7 +3,13 @@
 
 """Unit tests for charm_state."""
 
-from charm_state import CharmState, GithubAppConfig, ProviderConfig, ScalesetConfig
+from charm_state import (
+    CharmState,
+    GithubAppConfig,
+    ProviderConfig,
+    RunnerConfig,
+    ScalesetConfig,
+)
 
 
 def test_provider_name_derived_from_project_name():
@@ -34,6 +40,7 @@ def test_provider_name_derived_from_project_name():
             repo="myorg/myrepo",
         ),
         image_id=None,
+        runner_config=RunnerConfig(),
     )
 
     assert state.provider_name == f"openstack-{project_name}"
@@ -67,6 +74,7 @@ def test_credentials_name_derived_from_client_id():
             repo="myorg/myrepo",
         ),
         image_id=None,
+        runner_config=RunnerConfig(),
     )
 
     assert state.credentials_name == f"github-app-{client_id}"

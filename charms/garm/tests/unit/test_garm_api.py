@@ -3,6 +3,7 @@
 
 """Unit tests for the GARM REST API client."""
 
+import base64
 import json
 from io import BytesIO
 from unittest.mock import MagicMock, patch
@@ -182,3 +183,157 @@ def test_configure_controller_sends_put():
     assert req.get_method() == "PUT"
     body = json.loads(req.data)
     assert body["metadata_url"] == "http://1.2.3.4:9997/api/v1/metadata"
+
+
+# ---------------------------------------------------------------------------
+# Template API tests
+# ---------------------------------------------------------------------------
+
+
+def test_list_templates_returns_parsed_list():
+    expected = [{"id": 1, "name": "my-template", "os_type": "linux", "forge_type": "github"}]
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response(expected)
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        result = client.list_templates()
+    assert result == expected
+    req = mock_open.call_args[0][0]
+    assert req.get_method() == "GET"
+    assert req.full_url == "http://localhost:9997/api/v1/templates"
+
+
+def test_list_templates_returns_empty_on_null_body():
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = b""
+        mock_open.return_value = mock_resp
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        result = client.list_templates()
+    assert result == []
+
+
+def test_list_templates_builds_query_params():
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response([])
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        client.list_templates(os_type="linux", forge_type="github", partial_name="runner")
+    req = mock_open.call_args[0][0]
+    assert "os_type=linux" in req.full_url
+    assert "forge_type=github" in req.full_url
+    assert "partial_name=runner" in req.full_url
+
+
+def test_list_templates_omits_none_params():
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response([])
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        client.list_templates(os_type="linux")
+    req = mock_open.call_args[0][0]
+    assert "os_type=linux" in req.full_url
+    assert "forge_type" not in req.full_url
+    assert "partial_name" not in req.full_url
+
+
+def test_get_template_returns_parsed_dict():
+    expected = {"id": 1, "name": "my-template", "data": "aGVsbG8="}
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response(expected)
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        result = client.get_template(1)
+    assert result == expected
+    req = mock_open.call_args[0][0]
+    assert req.get_method() == "GET"
+    assert req.full_url.endswith("/templates/1")
+
+
+def test_create_template_base64_encodes_data():
+    raw = b"#!/bin/bash\necho hello"
+    expected_b64 = base64.b64encode(raw).decode()
+    created = {"id": 2, "name": "new-tmpl", "data": expected_b64}
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response(created)
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        result = client.create_template(name="new-tmpl", data=raw)
+    assert result == created
+    req = mock_open.call_args[0][0]
+    assert req.get_method() == "POST"
+    assert req.full_url.endswith("/templates")
+    body = json.loads(req.data)
+    assert body["data"] == expected_b64
+    assert body["name"] == "new-tmpl"
+    assert body["os_type"] == "linux"
+    assert body["forge_type"] == "github"
+    assert body["description"] == ""
+
+
+def test_create_template_accepts_custom_os_and_forge():
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response({"id": 3})
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        client.create_template(
+            name="win-tmpl",
+            data=b"data",
+            os_type="windows",
+            forge_type="gitea",
+            description="A windows template",
+        )
+    body = json.loads(mock_open.call_args[0][0].data)
+    assert body["os_type"] == "windows"
+    assert body["forge_type"] == "gitea"
+    assert body["description"] == "A windows template"
+
+
+def test_update_template_base64_encodes_data():
+    raw = b"new content"
+    expected_b64 = base64.b64encode(raw).decode()
+    updated = {"id": 1, "data": expected_b64}
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response(updated)
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        result = client.update_template(1, data=raw)
+    assert result == updated
+    req = mock_open.call_args[0][0]
+    assert req.get_method() == "PUT"
+    assert req.full_url.endswith("/templates/1")
+    body = json.loads(req.data)
+    assert body["data"] == expected_b64
+    assert "name" not in body
+    assert "description" not in body
+
+
+def test_update_template_includes_optional_fields_when_set():
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value = _make_response({"id": 1})
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        client.update_template(1, data=b"x", name="updated", description="new desc")
+    body = json.loads(mock_open.call_args[0][0].data)
+    assert body["name"] == "updated"
+    assert body["description"] == "new desc"
+    assert body["data"] == base64.b64encode(b"x").decode()
+
+
+def test_delete_template_makes_delete_request():
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = b""
+        mock_open.return_value = mock_resp
+        client = GarmClient("http://localhost:9997/api/v1")
+        client.token = "test-token"
+        result = client.delete_template(5)
+    assert result is None
+    req = mock_open.call_args[0][0]
+    assert req.get_method() == "DELETE"
+    assert req.full_url.endswith("/templates/5")

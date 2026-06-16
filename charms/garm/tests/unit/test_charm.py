@@ -235,6 +235,7 @@ def test_admin_password_is_unique_across_calls():
 def test_reconcile_scalesets_skips_when_no_secrets():
     """Scaleset reconciliation exits early when GARM secrets are unavailable."""
     charm = object.__new__(GarmCharm)
+    charm._maybe_first_run = MagicMock()
     charm._get_garm_secrets = MagicMock(return_value=None)
 
     with patch("charm.GarmClient") as mock_client:
@@ -246,6 +247,7 @@ def test_reconcile_scalesets_skips_when_no_secrets():
 def test_reconcile_scalesets_skips_restart():
     """Scaleset reconciliation must not restart the workload."""
     charm = object.__new__(GarmCharm)
+    charm._maybe_first_run = MagicMock()
     secret = MagicMock()
     secret.get_content.return_value = {
         "admin-username": "admin",
@@ -267,3 +269,40 @@ def test_reconcile_scalesets_skips_restart():
     mock_reconciler_cls.return_value.reconcile.assert_called_once_with([])
     charm.restart.assert_not_called()
     charm._restart_service.assert_not_called()
+
+
+def test_maybe_first_run_registers_admin_from_secret():
+    """The leader registers GARM's admin using the garm-secrets credentials."""
+    charm = object.__new__(GarmCharm)
+    secret = MagicMock()
+    secret.get_content.return_value = {
+        "admin-username": "admin",
+        "admin-password": "Admin-deadbeefcafebabe-Gx1!",
+    }
+    charm._get_garm_secrets = MagicMock(return_value=secret)
+    charm._get_garm_url = MagicMock(return_value="http://127.0.0.1:8080")
+
+    with (
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch("charm.GarmClient") as mock_client_cls,
+    ):
+        mock_unit.return_value.is_leader.return_value = True
+        charm._maybe_first_run()
+
+    mock_client_cls.return_value.first_run.assert_called_once_with(
+        "admin", "Admin-deadbeefcafebabe-Gx1!", "admin@garm.local", "GARM Admin"
+    )
+
+
+def test_maybe_first_run_skips_when_not_leader():
+    """Non-leader units do not attempt GARM first-run."""
+    charm = object.__new__(GarmCharm)
+
+    with (
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch("charm.GarmClient") as mock_client_cls,
+    ):
+        mock_unit.return_value.is_leader.return_value = False
+        charm._maybe_first_run()
+
+    mock_client_cls.assert_not_called()

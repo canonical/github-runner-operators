@@ -17,6 +17,7 @@ import tomli_w
 from paas_charm.app import WorkloadConfig
 
 from garm_api import GarmApiError, GarmClient
+from runner_template import RunnerConfig
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,8 @@ PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_PORT: typing.Final[int] = 8080
+GARM_ADMIN_EMAIL: typing.Final[str] = "admin@garm.local"
+GARM_ADMIN_FULL_NAME: typing.Final[str] = "GARM Admin"
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -138,6 +141,7 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
             self._on_configurator_changed,
@@ -150,6 +154,10 @@ class GarmCharm(paas_charm.go.Charm):
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
+
+    def _on_update_status(self, _: ops.HookEvent) -> None:
+        """Retry GARM admin first-run until it succeeds."""
+        self._maybe_first_run()
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -237,6 +245,35 @@ class GarmCharm(paas_charm.go.Charm):
             combine=True,
         )
         container.replan()
+        self._maybe_first_run()
+
+    def _maybe_first_run(self) -> None:
+        """Register the GARM admin user if it does not exist yet (leader only).
+
+        GARM needs an initial admin (POST /first-run) before its API accepts
+        authenticated calls. GarmClient.first_run is idempotent — a 409
+        "already initialised" is ignored — so this is safe to call on every
+        event; a failure (e.g. GARM not yet accepting connections right after a
+        restart) is logged and retried on the next event (update-status, relation
+        change, or scaleset reconcile).
+        """
+        if not self.unit.is_leader():
+            return
+        secret = self._get_garm_secrets()
+        if secret is None:
+            return
+        content = secret.get_content(refresh=True)
+        admin_username = content.get("admin-username")
+        admin_password = content.get("admin-password")
+        if not admin_username or not admin_password:
+            return
+        try:
+            client = GarmClient(f"{self._get_garm_url()}/api/v1")
+            client.first_run(
+                admin_username, admin_password, GARM_ADMIN_EMAIL, GARM_ADMIN_FULL_NAME
+            )
+        except GarmApiError as exc:
+            logger.info("GARM first-run not completed yet (will retry): %s", exc)
 
     def _ensure_secrets(self) -> None:
         """Create the garm-secrets juju secret on first call (leader only)."""
@@ -276,12 +313,12 @@ class GarmCharm(paas_charm.go.Charm):
         return secret.get_content()
 
     def _get_garm_url(self) -> str:
-        """Build the local GARM API URL from charm configuration."""
-        listen_address = str(self.config.get("garm-listen-address", ""))
-        listen_port = self.config.get("garm-listen-port", 9997)
-        if not listen_address:
-            return ""
-        return f"http://{listen_address}:{listen_port}"
+        """Return the local GARM API URL.
+
+        GARM binds its API to the fixed port in-pod (see render_garm_toml), so
+        the charm always reaches it over loopback.
+        """
+        return f"http://127.0.0.1:{GARM_PORT}"
 
     def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
         """Get PostgreSQL config from relation data, or None if not available.
@@ -354,12 +391,15 @@ class GarmCharm(paas_charm.go.Charm):
                         pre_install_scripts=_parse_pre_install_scripts(
                             data.get("pre_install_scripts", "")
                         ),
+                        runner_config=RunnerConfig.from_databag(data),
                     )
                 )
         return specs
 
     def _reconcile_scalesets(self) -> None:
         """Sync GARM scalesets against garm-configurator relation data."""
+        # Ensure the GARM admin exists before we attempt to authenticate below.
+        self._maybe_first_run()
         secret = self._get_garm_secrets()
         if not secret:
             logger.warning("GARM secrets not yet available; deferring scaleset reconcile")
