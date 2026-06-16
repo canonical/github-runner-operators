@@ -22,10 +22,14 @@ by :func:`build_template_data` and only does so when :meth:`RunnerConfig.has_con
 is true.
 """
 
+import ipaddress
 import json
+import re
 import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+_PORT_TOKEN_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
 
 # GARM hardcodes the runner username and actions-runner directory; the env file
 # read by the runner service therefore lives at the path below.
@@ -198,14 +202,15 @@ def _render_aproxy(config: RunnerConfig) -> str:
     Returns:
         A bash snippet configuring aproxy as a transparent forward proxy.
     """
-    redirect_ports = config.aproxy_redirect_ports or "80,443"
-    nft_ports = ", ".join(part.strip() for part in redirect_ports.split(",") if part.strip())
+    # Defensively re-validate the relation-provided values before rendering them
+    # into a root-executed nft ruleset: the databag is a trust boundary, so never
+    # rely on the configurator's validation alone — drop anything malformed.
+    ports = _valid_port_tokens(config.aproxy_redirect_ports) or ["80", "443"]
+    nft_ports = ", ".join(ports)
     exclude_guard = ""
-    if config.aproxy_exclude_addresses:
-        excludes = ", ".join(
-            part.strip() for part in config.aproxy_exclude_addresses.split(",") if part.strip()
-        )
-        exclude_guard = f"ip daddr != {{ {excludes} }} "
+    excludes = _valid_ipv4_tokens(config.aproxy_exclude_addresses)
+    if excludes:
+        exclude_guard = f"ip daddr != {{ {', '.join(excludes)} }} "
 
     # TODO(ISD-278): confirm the exact aproxy listen port / nft ruleset against
     # the production github-runner charm cloud-init.
@@ -257,10 +262,47 @@ def _render_static_host_prep() -> str:
     """
     # TODO(ISD-278): port the remaining production cloud-init steps from
     # canonical/github-runner-operator: apt mirror sync self-test, tmate proxy
-    # setup, and the post-job metrics collector.
+    # setup, and the post-job metrics collector. Also confirm the target account
+    # for these group memberships: ISD278 specifies "ubuntu", but GARM runs the
+    # runner as RUNNER_USER ("runner") — reconcile against the old charm's
+    # cloud-init. The command is guarded by "|| true", so it is a no-op if the
+    # user is absent.
     return "\n".join(
         [
             "# Static runner host preparation (ported from the github-runner charm).",
             "usermod -aG lxd,adm ubuntu >/dev/null 2>&1 || true",
         ]
     )
+
+
+def _valid_port_tokens(spec: str) -> list[str]:
+    """Return only the well-formed port / N-M range tokens from a comma list.
+
+    Args:
+        spec: A comma-separated ports string (possibly empty or untrusted).
+
+    Returns:
+        The subset of tokens matching ``N`` or ``N-M`` (digits only).
+    """
+    return [token.strip() for token in spec.split(",") if _PORT_TOKEN_RE.match(token.strip())]
+
+
+def _valid_ipv4_tokens(spec: str) -> list[str]:
+    """Return only the valid IPv4 address/CIDR tokens from a comma list.
+
+    Args:
+        spec: A comma-separated address string (possibly empty or untrusted).
+
+    Returns:
+        The subset of tokens that parse as IPv4 networks.
+    """
+    valid: list[str] = []
+    for token in spec.split(","):
+        token = token.strip()
+        try:
+            network = ipaddress.ip_network(token, strict=False)
+        except ValueError:
+            continue
+        if network.version == 4:
+            valid.append(token)
+    return valid

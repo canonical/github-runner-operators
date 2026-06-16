@@ -97,6 +97,23 @@ def test_build_template_data_per_option(config, present, absent):
     assert absent not in result
 
 
+# The consumer side defensively drops malformed/IPv6 tokens (the databag is a
+# trust boundary; the values are rendered into a root-executed nft ruleset).
+def test_aproxy_render_drops_malformed_tokens():
+    config = RunnerConfig(
+        runner_http_proxy="http://p.test:3128",
+        aproxy_redirect_ports="80,not-a-port,8000-9000,99 rm",
+        aproxy_exclude_addresses="10.0.0.0/8,evil;,2001:db8::1",
+    )
+    result = build_template_data(SAMPLE_BASE, config).decode()
+
+    assert "{ 80, 8000-9000 }" in result
+    assert "not-a-port" not in result
+    assert "10.0.0.0/8" in result
+    assert "evil" not in result
+    assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
+
+
 # from_databag maps each contract key into the config and ignores absent keys;
 # has_config reflects whether any option is set.
 def test_runner_config_from_databag_and_has_config():
