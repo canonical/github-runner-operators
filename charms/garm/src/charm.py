@@ -7,7 +7,7 @@
 import dataclasses
 import json
 import logging
-import secrets as _secrets
+import secrets
 import string
 import typing
 
@@ -43,7 +43,7 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
         Random alphanumeric string of the given length.
     """
     alphabet = string.ascii_letters + string.digits
-    return "".join(_secrets.choice(alphabet) for _ in range(length))
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def render_garm_toml(
@@ -107,10 +107,10 @@ def _generate_garm_secrets() -> dict[str, str]:
         Dict with ``jwt-secret`` (64-char hex) and ``db-passphrase`` (32-char alnum).
     """
     return {
-        "jwt-secret": _secrets.token_hex(32),
+        "jwt-secret": secrets.token_hex(32),
         "db-passphrase": _generate_passphrase(),
         "admin-username": "admin",
-        "admin-password": f"Admin-{_secrets.token_hex(8)}-Gx1!",
+        "admin-password": f"Admin-{secrets.token_hex(8)}-Gx1!",
     }
 
 
@@ -252,7 +252,7 @@ class GarmCharm(paas_charm.go.Charm):
         if "admin-username" not in secret_content:
             missing_secret_content["admin-username"] = "admin"
         if "admin-password" not in secret_content:
-            missing_secret_content["admin-password"] = f"Admin-{_secrets.token_hex(8)}-Gx1!"
+            missing_secret_content["admin-password"] = f"Admin-{secrets.token_hex(8)}-Gx1!"
         if missing_secret_content:
             secret.set_content({**secret_content, **missing_secret_content})
 
@@ -332,7 +332,9 @@ class GarmCharm(paas_charm.go.Charm):
                     continue
                 max_runner_raw = data.get("max_runner", "")
                 if not max_runner_raw:
-                    logger.warning("Skipping scaleset %s: max_runner not set in relation data", name)
+                    logger.warning(
+                        "Skipping scaleset %s: max_runner not set in relation data", name
+                    )
                     continue
                 try:
                     min_idle = int(data.get("min_idle_runner", "0"))
@@ -401,7 +403,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.info("PostgreSQL relation data not yet available")
             return
 
-        secrets = self._get_secrets()
+        secret_content = self._get_secrets()
         logger.info(
             "Configuring GARM with PostgreSQL backend at %s:%s",
             postgresql_config["hostname"],
@@ -409,8 +411,8 @@ class GarmCharm(paas_charm.go.Charm):
         )
         toml_content = render_garm_toml(
             listen_port=GARM_PORT,
-            jwt_secret=secrets["jwt-secret"],
-            db_passphrase=secrets["db-passphrase"],
+            jwt_secret=secret_content["jwt-secret"],
+            db_passphrase=secret_content["db-passphrase"],
             postgresql_config=postgresql_config,
         )
         container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
