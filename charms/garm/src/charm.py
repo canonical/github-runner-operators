@@ -239,10 +239,26 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
+            self._on_configurator_relation_changed,
+        )
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
+            self._on_configurator_relation_changed,
+        )
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
+            self._on_configurator_relation_changed,
+        )
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
+
+    def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
+        """Handle configurator relation joined/changed/broken by re-rendering TOML."""
+        self.restart()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
