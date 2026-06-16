@@ -508,7 +508,7 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
 
 
 @pytest.fixture(scope="module", name="garm_configurator_charm_file")
-def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
+def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
     """Return the path to the built garm-configurator charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
     if not charm:
