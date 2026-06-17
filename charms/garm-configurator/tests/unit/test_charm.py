@@ -590,10 +590,9 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert garm_out.local_unit_data["scaleset_os_arch"] == "amd64"
     assert garm_out.local_unit_data["scaleset_min_idle_runner"] == "0"
     assert garm_out.local_unit_data["scaleset_max_runner"] == "5"
-    # Scenario framework omits empty-string values from local_unit_data
-    assert garm_out.local_unit_data["scaleset_repo"] == "myorg/myrepo"
+    assert garm_out.local_unit_data["repo"] == "myorg/myrepo"
     assert garm_out.local_unit_data["scaleset_runner_group"] == "default"
-    assert "scaleset_org" not in garm_out.local_unit_data
+    assert "org" not in garm_out.local_unit_data
 
     # Image UUID
     assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
@@ -656,8 +655,8 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     arrange: Config uses org instead of repo, with runner_group and pre_install_scripts.
         Image UUID is present, garm relation is joined.
     act: config-changed fires.
-    assert: scaleset_org, scaleset_runner_group, and scaleset_pre_install_scripts
-        are present in the garm relation data. scaleset_repo is absent.
+    assert: org, scaleset_runner_group, and pre_install_scripts are present in the
+        garm relation data. repo is absent.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -680,10 +679,10 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
 
-    assert garm_out.local_unit_data["scaleset_org"] == "myorg"
+    assert garm_out.local_unit_data["org"] == "myorg"
     assert garm_out.local_unit_data["scaleset_runner_group"] == "my-group"
     assert (
         garm_out.local_unit_data["pre_install_scripts"]
         == json.dumps({"pre_install.sh": '{"setup.sh": "#!/bin/bash\\necho hello"}'})
     )
-    assert "scaleset_repo" not in garm_out.local_unit_data
+    assert "repo" not in garm_out.local_unit_data
