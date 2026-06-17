@@ -16,6 +16,10 @@ Each revision is versioned by the date of the revision.
 
 - export GARM Prometheus metrics via the `metrics-endpoint` integration, with JWT authentication disabled on the `/metrics` endpoint. GARM serves its API and metrics on a single fixed port (8080); the framework's `app-port`/`metrics-port`/`metrics-path` options are not used.
 
+## 2026-06-12
+
+- add GARM HTTP API client to the GARM charm: auto-generates admin credentials on first install, calls the GARM `/first-run` endpoint automatically on startup, and stores credentials in a Juju secret (`garm-admin-credentials`).
+
 ## 2026-06-08
 
 - reorder the template variables in the GitHub runner VM hostmetrics dashboard.

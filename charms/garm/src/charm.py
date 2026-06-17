@@ -15,6 +15,7 @@ import ops
 import paas_charm.go
 import tomli_w
 import yaml
+from garm_api import GarmApiClient, GarmApiError
 from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
+GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -224,6 +226,32 @@ def _generate_garm_secrets() -> dict[str, str]:
     }
 
 
+def _generate_admin_password() -> str:
+    """Generate a random password satisfying GARM's strong-password policy.
+
+    Policy: min 12 chars, at least one uppercase, one lowercase, one digit,
+    one symbol.  Full entropy is distributed across all 20 positions via a
+    Fisher-Yates shuffle so the structure is not predictable from the source.
+
+    Returns:
+        A 20-character password guaranteed to meet GARM's requirements.
+    """
+    symbols = "!@#$%-_=+"
+    alphabet = string.ascii_letters + string.digits + symbols
+    mandatory = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(symbols),
+    ]
+    filler = [secrets.choice(alphabet) for _ in range(16)]
+    chars = mandatory + filler
+    for i in range(len(chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        chars[i], chars[j] = chars[j], chars[i]
+    return "".join(chars)
+
+
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -391,7 +419,8 @@ class GarmCharm(paas_charm.go.Charm):
             },
             combine=True,
         )
-        logger.info("Super restart")
+        container.replan()
+        self._maybe_first_run()
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
@@ -438,13 +467,31 @@ class GarmCharm(paas_charm.go.Charm):
         return self._hash_toml(hash_input)
 
     def _ensure_secrets(self) -> None:
-        """Create the garm-secrets juju secret on first call (leader only)."""
+        """Create garm-secrets and garm-admin-credentials juju secrets (leader only)."""
         if not self.unit.is_leader():
             return
         try:
             self.model.get_secret(label=GARM_SECRETS_LABEL)
         except ops.SecretNotFoundError:
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
+        try:
+            self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
+        except ops.SecretNotFoundError:
+            self.app.add_secret(
+                {
+                    "username": "admin",
+                    "password": _generate_admin_password(),
+                    "email": "admin@garm.local",
+                    "full-name": "GARM Admin",
+                },
+                label=GARM_ADMIN_CREDENTIALS_LABEL,
+            )
+            logger.info(
+                "GARM admin credentials stored in Juju secret '%s'."
+                " Retrieve with: juju secret-get --label %s",
+                GARM_ADMIN_CREDENTIALS_LABEL,
+                GARM_ADMIN_CREDENTIALS_LABEL,
+            )
 
     def _get_secrets(self) -> dict[str, str] | None:
         """Retrieve secrets from the juju secret store.
@@ -568,6 +615,59 @@ class GarmCharm(paas_charm.go.Charm):
         except ops.SecretNotFoundError:
             logger.warning("Secret %s is not accessible", secret_uri)
             return ""
+
+    def _get_admin_credentials(self) -> dict[str, str] | None:
+        """Retrieve the GARM admin credentials from the Juju secret store.
+
+        Returns:
+            Dict with ``username``, ``password``, ``email``, ``full-name``,
+            or None if the secret is not yet available.
+        """
+        try:
+            secret = self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
+            return secret.get_content()
+        except ops.SecretNotFoundError:
+            return None
+
+    def _maybe_first_run(self) -> None:
+        """Call GARM first-run initialisation if GARM is not yet initialised."""
+        if not self.unit.is_leader():
+            return
+        admin_creds = self._get_admin_credentials()
+        if not admin_creds:
+            logger.warning(
+                "Admin credentials secret not yet available; skipping first-run check"
+            )
+            return
+
+        try:
+            username = admin_creds["username"]
+            password = admin_creds["password"]
+            email = admin_creds["email"]
+            full_name = admin_creds["full-name"]
+        except KeyError as exc:
+            logger.error(
+                "Admin credentials secret is missing required key %s; cannot initialise GARM",
+                exc,
+            )
+            return
+
+        client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
+
+        try:
+            client.wait_for_ready()
+            if client.is_initialized():
+                return
+            logger.info("GARM not yet initialised; running first-run setup")
+            client.first_run(
+                username=username,
+                password=password,
+                email=email,
+                full_name=full_name,
+            )
+        except GarmApiError as exc:
+            logger.warning("GARM first-run check failed (error out for retry): %s", exc)
+            raise
 
 
 if __name__ == "__main__":

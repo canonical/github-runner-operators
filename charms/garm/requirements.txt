@@ -2,3 +2,7 @@ ops==3.7.1
 paas-charm==1.11.3
 tomli-w==1.2.0
 PyYAML==6.0.3
+urllib3==2.6.3
+python-dateutil==2.9.0.post0
+pydantic==2.13.4
+typing-extensions==4.15.0
