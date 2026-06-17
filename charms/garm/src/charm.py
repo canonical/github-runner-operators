@@ -805,7 +805,10 @@ class GarmCharm(paas_charm.go.Charm):
         """Sync GARM GitHub endpoints/credentials against configurator relation data."""
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
-            logger.warning("Admin credentials not yet available; deferring github reconcile")
+            logger.warning(
+                "Admin credentials not yet available; skipping GitHub reconcile "
+                "until a later event"
+            )
             return
 
         # Talk to GARM over its fixed local listener (same target as first-run), rather than
