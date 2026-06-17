@@ -362,7 +362,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.info("PostgreSQL relation data not yet available; blocking")
             self.unit.status = ops.WaitingStatus("Waiting for postgresql relation")
             return
-
+        
         secrets_data = self._get_secrets()
         if secrets_data is None:
             logger.info("GARM secrets not yet available; blocking until leader initialises")
@@ -373,7 +373,52 @@ class GarmCharm(paas_charm.go.Charm):
         if not provider_configs:
             self.unit.status = ops.WaitingStatus("Waiting for garm-configurator relation")
             return
+        
+        container = self.unit.get_container(CONTAINER_NAME)
+        provider_config_hash = self._reconcile_provider_configs(
+            container,
+            provider_configs,
+            secrets_data,
+            postgresql_config,
+        )
 
+        container.add_layer(
+            "garm-command",
+            {
+                "services": {
+                    PEBBLE_SERVICE_NAME: {
+                        "override": "replace",
+                        "startup": "enabled",
+                        "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
+                        "environment": {
+                            "config_hash": provider_config_hash,
+                        },
+                    }
+                }
+            },
+            combine=True,
+        )
+        container.replan()
+        self._maybe_first_run()
+        self._reconcile_scalesets()
+        super().restart(rerun_migrations=rerun_migrations)
+
+    def _reconcile_provider_configs(
+        self,
+        container: ops.Container,
+        provider_configs: list[dict[str, str]],
+        secrets_data: dict[str, str],
+        postgresql_config: dict[str, typing.Any],
+    ) -> str:
+        """Push provider configs into the Pebble container.
+
+        Args:
+            container: The Pebble container to push the configs into.
+            provider_configs: List of provider config dicts from Configurator units.
+
+        Returns:
+            configuration hash of the new TOML content (used to detect changes).
+        """
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
@@ -392,7 +437,7 @@ class GarmCharm(paas_charm.go.Charm):
         previous_hash = self._get_on_disk_toml_hash(provider_files)
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping restart")
-            return
+            return new_hash
 
         # Log non-sensitive metadata about the config change.
         # Do NOT log toml_content here — it contains secrets
@@ -405,26 +450,7 @@ class GarmCharm(paas_charm.go.Charm):
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
 
-        container.add_layer(
-            "garm-command",
-            {
-                "services": {
-                    PEBBLE_SERVICE_NAME: {
-                        "override": "replace",
-                        "startup": "enabled",
-                        "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
-                        "environment": {
-                            "config_hash": new_hash,
-                        },
-                    }
-                }
-            },
-            combine=True,
-        )
-        container.replan()
-        self._maybe_first_run()
-        self._reconcile_scalesets()
-        super().restart(rerun_migrations=rerun_migrations)
+        return new_hash
 
     @staticmethod
     def _hash_toml(toml_content: str) -> str:
