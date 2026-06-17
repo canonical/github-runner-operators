@@ -74,7 +74,9 @@ def _check_file(agents_md: Path, tox_envs: set[str]) -> list[str]:
 
     for token in {t.strip() for t in BACKTICK.findall(text)}:
         if _is_path(token):
-            if not any((root / token.rstrip("/")).exists() for root in path_roots):
+            if ".." in token.split("/"):
+                errors.append(f"{rel}: path `{token}` must be repo-relative (no '..')")
+            elif not any((root / token.rstrip("/")).exists() for root in path_roots):
                 errors.append(f"{rel}: path `{token}` does not exist")
             continue
         method = _private_method(token)
