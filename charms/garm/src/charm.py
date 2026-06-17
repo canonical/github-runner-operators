@@ -17,7 +17,6 @@ import tomli_w
 from paas_charm.app import WorkloadConfig
 
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
-from garm_api import GarmApiError, GarmClient
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -430,9 +429,7 @@ class GarmCharm(paas_charm.go.Charm):
                     entity_type = "repository"
                     entity_name = repo
                 else:
-                    logger.warning(
-                        "Skipping scaleset %s: neither org nor repo specified", name
-                    )
+                    logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
                     continue
 
                 required = {
@@ -493,9 +490,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         try:
             garm_client = GarmApiClient(f"{garm_url}/api/v1")
-            token = garm_client.login(
-                admin_creds["username"], admin_creds["password"]
-            )
+            token = garm_client.login(admin_creds["username"], admin_creds["password"])
             auth_client = GarmAuthenticatedClient(f"{garm_url}/api/v1", token)
             desired = self._build_desired_scalesets()
             ScalesetReconciler(auth_client).reconcile(desired)

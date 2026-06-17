@@ -117,9 +117,7 @@ class GarmApiClient:
                 return
             except GarmConnectionError:
                 if time.monotonic() >= deadline:
-                    raise GarmConnectionError(
-                        f"GARM did not become ready within {timeout:.0f}s"
-                    )
+                    raise GarmConnectionError(f"GARM did not become ready within {timeout:.0f}s")
                 time.sleep(_READINESS_POLL_INTERVAL)
 
     def first_run(
@@ -221,13 +219,14 @@ class GarmAuthenticatedClient:
         """
         with self._api_client() as client:
             try:
-                return ProvidersApi(api_client=client).list_providers(
-                    _request_timeout=_REQUEST_TIMEOUT
-                ) or []
+                return (
+                    ProvidersApi(api_client=client).list_providers(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to list providers ({exc.status}): {exc.body}"
-                ) from exc
+                raise GarmApiError(f"Failed to list providers ({exc.status}): {exc.body}") from exc
 
     def list_credentials(self) -> list[ForgeCredentials]:
         """List all registered GARM credentials.
@@ -240,9 +239,12 @@ class GarmAuthenticatedClient:
         """
         with self._api_client() as client:
             try:
-                return CredentialsApi(api_client=client).list_credentials(
-                    _request_timeout=_REQUEST_TIMEOUT
-                ) or []
+                return (
+                    CredentialsApi(api_client=client).list_credentials(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to list credentials ({exc.status}): {exc.body}"
@@ -259,13 +261,14 @@ class GarmAuthenticatedClient:
         """
         with self._api_client() as client:
             try:
-                return ScalesetsApi(api_client=client).list_scalesets(
-                    _request_timeout=_REQUEST_TIMEOUT
-                ) or []
+                return (
+                    ScalesetsApi(api_client=client).list_scalesets(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to list scalesets ({exc.status}): {exc.body}"
-                ) from exc
+                raise GarmApiError(f"Failed to list scalesets ({exc.status}): {exc.body}") from exc
 
     def find_org_id(self, org_name: str) -> str | None:
         """Find a GARM organization's UUID by name.
@@ -281,10 +284,13 @@ class GarmAuthenticatedClient:
         """
         with self._api_client() as client:
             try:
-                orgs = OrganizationsApi(api_client=client).list_orgs(
-                    name=org_name,
-                    _request_timeout=_REQUEST_TIMEOUT,
-                ) or []
+                orgs = (
+                    OrganizationsApi(api_client=client).list_orgs(
+                        name=org_name,
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to list organizations ({exc.status}): {exc.body}"
@@ -308,9 +314,12 @@ class GarmAuthenticatedClient:
         """
         with self._api_client() as client:
             try:
-                repos = RepositoriesApi(api_client=client).list_repos(
-                    _request_timeout=_REQUEST_TIMEOUT,
-                ) or []
+                repos = (
+                    RepositoriesApi(api_client=client).list_repos(
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to list repositories ({exc.status}): {exc.body}"

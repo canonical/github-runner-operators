@@ -85,9 +85,7 @@ class ScalesetReconciler:
 
         for name, scaleset in observed.items():
             if name not in all_desired_names:
-                logger.info(
-                    "Deleting orphaned scaleset %s (id=%s)", name, scaleset.id
-                )
+                logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
                 self._client.delete_scaleset(scaleset.id)
 
     def _resolve_entity_id(self, spec: ScalesetSpec) -> str | None:

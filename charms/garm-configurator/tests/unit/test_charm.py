@@ -469,7 +469,8 @@ def test_garm_configurator_relation_data_written_on_reconcile():
         "max_runner": "5",
         "labels": "self-hosted,linux",
         "runner_group": "default",
-        "pre_install_scripts": "echo hello",
+        "pre_install_scripts": '{"pre_install.sh": "echo hello"}',
+        "repo": "myorg/myrepo",
     }
     for key, value in expected_relation_data.items():
         assert rel_out.local_unit_data[key] == value
