@@ -7,13 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from garm_api import (
-    GarmApiClient,
-    GarmApiError,
-    GarmAuthenticatedClient,
-    GarmConnectionError,
-)
-
+from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
 
 BASE_URL = "http://127.0.0.1:9997/api/v1"
 
@@ -38,7 +32,9 @@ class TestGarmApiClientLogin:
 
         client = GarmApiClient(BASE_URL)
         with patch("garm_api.LoginApi") as MockLoginApi:
-            MockLoginApi.return_value.login.side_effect = ApiException(status=401, reason="Unauthorized")
+            MockLoginApi.return_value.login.side_effect = ApiException(
+                status=401, reason="Unauthorized"
+            )
             with patch.object(client, "_api_client") as mock_api_client:
                 mock_api_client.return_value.__enter__ = MagicMock(return_value=MagicMock())
                 mock_api_client.return_value.__exit__ = MagicMock(return_value=False)

@@ -12,14 +12,14 @@ def _mock_client(providers=None, scalesets=None, org_id="org-uuid", repo_id=None
     """Build a mock GarmAuthenticatedClient."""
     client = MagicMock()
     provider_mocks = []
-    for name in (providers or []):
+    for name in providers or []:
         m = MagicMock()
         m.name = name
         provider_mocks.append(m)
     client.list_providers.return_value = provider_mocks
 
     scaleset_mocks = []
-    for ss in (scalesets or []):
+    for ss in scalesets or []:
         m = MagicMock()
         m.name = ss["name"]
         m.id = ss.get("id", 1)

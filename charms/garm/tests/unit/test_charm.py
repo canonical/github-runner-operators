@@ -541,6 +541,7 @@ def test_maybe_first_run_skips_on_missing_credential_key():
 
     mock_client_cls.assert_not_called()
 
+
 def test_reconcile_scalesets_skips_when_no_admin_credentials():
     """Scaleset reconciliation exits early when admin credentials are unavailable."""
     charm = object.__new__(GarmCharm)
@@ -555,10 +556,12 @@ def test_reconcile_scalesets_skips_when_no_admin_credentials():
 def test_reconcile_scalesets_skips_restart():
     """Scaleset reconciliation must not restart the workload."""
     charm = object.__new__(GarmCharm)
-    charm._get_admin_credentials = MagicMock(return_value={
-        "username": "admin",
-        "password": "TestPass-123!",
-    })
+    charm._get_admin_credentials = MagicMock(
+        return_value={
+            "username": "admin",
+            "password": "TestPass-123!",
+        }
+    )
     charm._get_garm_url = MagicMock(return_value="http://127.0.0.1:9997")
     charm._build_desired_scalesets = MagicMock(return_value=[])
     charm.restart = MagicMock()
@@ -581,10 +584,12 @@ def test_reconcile_scalesets_skips_restart():
 def test_reconcile_scalesets_skips_when_garm_url_unavailable():
     """Scaleset reconciliation exits early when the GARM URL is not configured."""
     charm = object.__new__(GarmCharm)
-    charm._get_admin_credentials = MagicMock(return_value={
-        "username": "admin",
-        "password": "TestPass-123!",
-    })
+    charm._get_admin_credentials = MagicMock(
+        return_value={
+            "username": "admin",
+            "password": "TestPass-123!",
+        }
+    )
     charm._get_garm_url = MagicMock(return_value="")
 
     with patch("charm.GarmApiClient") as mock_client_cls:
