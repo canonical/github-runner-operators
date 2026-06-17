@@ -304,6 +304,7 @@ class GarmCharm(paas_charm.go.Charm):
         """
         if not self.is_ready():
             return
+
         self._ensure_secrets()
 
         # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
@@ -347,6 +348,7 @@ class GarmCharm(paas_charm.go.Charm):
         if not provider_configs:
             self.unit.status = ops.WaitingStatus("Waiting for garm-configurator relation")
             return
+
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
@@ -448,10 +450,12 @@ class GarmCharm(paas_charm.go.Charm):
         try:
             self.model.get_secret(label=GARM_SECRETS_LABEL)
         except ops.SecretNotFoundError:
+            logger.info("GARM secrets not yet available; creating them")
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
         try:
             self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
         except ops.SecretNotFoundError:
+            logger.info("GARM admin credentials not yet available; creating them")
             self.app.add_secret(
                 {
                     "username": "admin",
