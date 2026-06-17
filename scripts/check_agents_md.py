@@ -26,9 +26,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIRST_PARTY = ("charms", "cmd", "internal")
-EXCLUDE_DIRS = {".git", ".tox", "lib", "parts", "prime", "stage", "vendor", "build"}
+# "tests" is excluded so a private-method citation can't be satisfied by a
+# same-named helper in a test file when the real charm method is renamed/removed.
+EXCLUDE_DIRS = {".git", ".tox", "lib", "parts", "prime", "stage", "vendor", "build", "tests"}
 
-PATH_EXTENSIONS = ("py", "toml", "yaml", "yml", "ini", "md", "cfg", "txt")
+PATH_EXTENSIONS = ("py", "go", "toml", "yaml", "yml", "ini", "md", "cfg", "txt")
 BACKTICK = re.compile(r"`([^`]+)`")
 TOX_ENV = re.compile(r"tox -e ([\w-]+)")
 PRIVATE_METHOD = re.compile(r"^_[a-z]\w*$")
@@ -107,12 +109,14 @@ def _private_method(token: str) -> str | None:
 
 def _defines_method(roots: list[Path], method: str) -> bool:
     """True if any first-party Python file under a root defines the method."""
-    needle = f"def {method}"
+    # Anchor on the name followed by "(" so `def _reconcile_state` does not
+    # satisfy a citation for `_reconcile`.
+    pattern = re.compile(rf"def {re.escape(method)}\s*\(")
     for root in roots:
         for py in root.rglob("*.py"):
             if _excluded(py):
                 continue
-            if needle in py.read_text(encoding="utf-8"):
+            if pattern.search(py.read_text(encoding="utf-8")):
                 return True
     return False
 
@@ -133,7 +137,7 @@ def _collect_tox_envs() -> set[str]:
 
 
 def _excluded(path: Path) -> bool:
-    """True if the path lives in a vendored, generated, or build directory."""
+    """True if the path lives in a vendored, generated, build, or test directory."""
     return any(part in EXCLUDE_DIRS for part in path.parts)
 
 
