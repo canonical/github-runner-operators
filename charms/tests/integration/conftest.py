@@ -451,7 +451,7 @@ def integrate_garm_with_postgresql_fixture(
     logger.info("Waiting up to 600s for GARM app '%s' to reach active status", app_name)
     try:
         juju.wait(
-            lambda status: jubilant.all_active(status, app_name),
+            lambda status: jubilant.all_agents_idle(status, app_name),
             timeout=10 * 60,
             delay=10,
         )
