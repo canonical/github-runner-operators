@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-26
 
-- sync GARM GitHub App credentials and endpoints from the garm-configurator relation over the GARM REST API, without restarting the service.
+- Sync GARM GitHub App credentials and endpoints from the garm-configurator relation over the GARM REST API, without restarting the service.
 
 ## 2026-06-23
 

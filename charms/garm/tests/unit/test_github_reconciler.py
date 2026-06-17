@@ -91,24 +91,16 @@ def test_no_create_or_delete_when_empty():
     client.delete_credentials.assert_not_called()
 
 
-def test_builtin_github_endpoint_never_deleted():
-    # Even when desired endpoints don't include github.com, it must not be deleted.
+def test_endpoints_never_deleted():
+    # The charm does not own endpoints, so neither the built-in github.com endpoint nor any
+    # operator-configured endpoint is ever deleted.
     client = _mock_client(
-        endpoints=[{"name": "github.com"}, {"name": "orphan-ep"}],
+        endpoints=[{"name": "github.com"}, {"name": "enterprise-ep"}],
         credentials=[],
     )
     reconciler = GithubReconciler(client)
     reconciler.reconcile([], [])
-    deleted_names = [c.args[0] for c in client.delete_github_endpoint.call_args_list]
-    assert "github.com" not in deleted_names
-    assert "orphan-ep" in deleted_names
-
-
-def test_delete_orphan_endpoint_not_in_desired():
-    client = _mock_client(endpoints=[{"name": "stale-ep"}], credentials=[])
-    reconciler = GithubReconciler(client)
-    reconciler.reconcile([], [])
-    client.delete_github_endpoint.assert_called_once_with("stale-ep")
+    client.delete_github_endpoint.assert_not_called()
 
 
 def test_update_endpoint_when_base_url_changed():

@@ -38,8 +38,9 @@ PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pe
 _GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 _SCALESET_TEST_NAME = "test-scaleset"
 _SCALESET_TEST_CREDENTIAL_NAME = "github-app-12345"
-# Credential name the charm derives from the configurator's github-app-id (app-<app_id>).
-_SYNCED_CREDENTIAL_NAME = "app-12345"
+# Credential name the GARM charm derives from the configurator's github-app-id +
+# installation id (12345 / 67890).
+_SYNCED_CREDENTIAL_NAME = "app-12345-67890"
 
 _TEST_RSA_PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
 MIICXwIBAAKBgQC2tCW5B18y5VnqqokOeamJgasI3H1405WWv7FmWl31I1Cgabhi

@@ -68,24 +68,16 @@ class GithubReconciler:
         self._reconcile_credentials(credentials)
 
     def _reconcile_endpoints(self, desired: list[EndpointSpec]) -> None:
+        # The charm creates/updates the endpoints it is asked to manage but never deletes
+        # endpoints it did not create: doing so would remove the built-in github.com endpoint
+        # or any enterprise endpoints an operator configured out of band. Endpoint deletion
+        # belongs with explicit custom-endpoint management, which is not in scope here.
         observed = {e.name: e for e in self._client.list_github_endpoints()}
-        desired_names = {spec.name for spec in desired}
-
         for spec in desired:
             if spec.name in observed:
                 self._maybe_update_endpoint(observed[spec.name], spec)
             else:
                 self._create_endpoint(spec)
-
-        for name, endpoint in observed.items():
-            if name not in desired_names:
-                if name == DEFAULT_GITHUB_ENDPOINT:
-                    logger.debug(
-                        "Skipping deletion of built-in endpoint '%s'", DEFAULT_GITHUB_ENDPOINT
-                    )
-                    continue
-                logger.info("Deleting orphaned GitHub endpoint '%s'", name)
-                self._client.delete_github_endpoint(name)
 
     def _create_endpoint(self, spec: EndpointSpec) -> None:
         kwargs: dict = {"name": spec.name}

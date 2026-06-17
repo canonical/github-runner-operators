@@ -175,6 +175,8 @@ class GithubAppConfig(BaseModel):
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_ID_CONFIG_NAME}"
             )
+        if not str(app_id).strip().isdigit():
+            raise CharmConfigInvalidError(f"{GITHUB_APP_ID_CONFIG_NAME} must be numeric")
 
         installation_id = charm.config.get(GITHUB_APP_INSTALLATION_ID_CONFIG_NAME)
         if not installation_id or not str(installation_id).strip():

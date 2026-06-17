@@ -784,7 +784,7 @@ class GarmCharm(paas_charm.go.Charm):
                     continue
 
                 credentials[dedupe_key] = CredentialSpec(
-                    name=f"app-{app_id}",
+                    name=f"app-{app_id}-{installation_id}",
                     endpoint=DEFAULT_GITHUB_ENDPOINT,
                     app_id=app_id,
                     installation_id=installation_id,
@@ -823,6 +823,8 @@ class GarmCharm(paas_charm.go.Charm):
         binding = self.model.get_binding(GARM_CONFIGURATOR_RELATION_NAME)
         address = binding.network.ingress_address if binding else None
         host = str(address) if address else "127.0.0.1"
+        if ":" in host:  # bracket IPv6 literals so the URL is valid
+            host = f"[{host}]"
         base = f"http://{host}:{GARM_PORT}"
         auth_client.update_controller(
             metadata_url=f"{base}/api/v1/metadata",

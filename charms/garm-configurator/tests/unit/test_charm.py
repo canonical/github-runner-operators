@@ -99,6 +99,11 @@ _MISSING_CONFIG_SENTINEL = object()
             id="missing-github-app-id",
         ),
         pytest.param(
+            {"github-app-id": "not-a-number"},
+            "github-app-id must be numeric",
+            id="non-numeric-github-app-id",
+        ),
+        pytest.param(
             {"github-app-installation-id": _MISSING_CONFIG_SENTINEL},
             "Missing required configuration: github-app-installation-id",
             id="missing-github-app-installation-id",

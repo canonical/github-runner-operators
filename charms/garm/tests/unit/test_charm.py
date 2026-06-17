@@ -654,7 +654,7 @@ def test_build_desired_github_builds_credential_from_relation():
     assert endpoints == []
     assert len(credentials) == 1
     cred = credentials[0]
-    assert cred.name == "app-12345"
+    assert cred.name == "app-12345-67890"
     assert cred.endpoint == DEFAULT_GITHUB_ENDPOINT
     assert cred.app_id == 12345
     assert cred.installation_id == 67890
