@@ -72,7 +72,7 @@ def _check_file(agents_md: Path, tox_envs: set[str]) -> list[str]:
     path_roots = [agents_md.parent, REPO_ROOT]
     method_roots = [REPO_ROOT / d for d in FIRST_PARTY]
 
-    for token in {t.strip() for t in BACKTICK.findall(text)}:
+    for token in dict.fromkeys(t.strip() for t in BACKTICK.findall(text)):
         if _is_path(token):
             if ".." in token.split("/"):
                 errors.append(f"{rel}: path `{token}` must be repo-relative (no '..')")
