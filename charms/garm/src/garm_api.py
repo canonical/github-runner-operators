@@ -397,7 +397,7 @@ class GarmAuthenticatedClient:
         with self._api_client() as client:
             try:
                 return ScalesetsApi(api_client=client).update_scale_set(
-                    scale_set_id=scaleset_id,
+                    scaleset_id=str(scaleset_id),
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
@@ -418,7 +418,7 @@ class GarmAuthenticatedClient:
         with self._api_client() as client:
             try:
                 ScalesetsApi(api_client=client).delete_scale_set(
-                    scale_set_id=scaleset_id,
+                    scaleset_id=str(scaleset_id),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:

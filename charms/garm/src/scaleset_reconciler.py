@@ -86,7 +86,8 @@ class ScalesetReconciler:
         for name, scaleset in observed.items():
             if name not in all_desired_names:
                 logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
-                self._client.delete_scaleset(scaleset.id)
+                if scaleset.id is not None:
+                    self._client.delete_scaleset(scaleset.id)
 
     def _resolve_entity_id(self, spec: ScalesetSpec) -> str | None:
         """Return the GARM entity UUID for *spec*, or None if not yet registered."""
@@ -102,17 +103,19 @@ class ScalesetReconciler:
         if spec.pre_install_scripts:
             extra_specs["pre_install_scripts"] = spec.pre_install_scripts
 
-        params = CreateScaleSetParams(
-            name=spec.name,
-            provider_name=spec.provider_name,
-            image=spec.image,
-            flavor=spec.flavor,
-            os_arch=spec.os_arch,
-            min_idle_runners=spec.min_idle_runners,
-            max_runners=spec.max_runners,
-            labels=sorted(spec.labels),
-            github_runner_group=spec.runner_group or None,
-            extra_specs=extra_specs or None,
+        params = CreateScaleSetParams.model_validate(
+            {
+                "name": spec.name,
+                "provider_name": spec.provider_name,
+                "image": spec.image,
+                "flavor": spec.flavor,
+                "os_arch": spec.os_arch,
+                "min_idle_runners": spec.min_idle_runners,
+                "max_runners": spec.max_runners,
+                "labels": sorted(spec.labels),
+                "github_runner_group": spec.runner_group or None,
+                "extra_specs": extra_specs or None,
+            }
         )
         logger.info("Creating scaleset %s under %s %s", spec.name, spec.entity_type, entity_id)
         if spec.entity_type == "organization":
