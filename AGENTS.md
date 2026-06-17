@@ -108,10 +108,12 @@ code, and **avoid `level=alive` health checks** in `rockcraft.yaml`.
 
 ## Existing guidance (read, don't duplicate)
 
-- `.github/instructions/` — Copilot-specific: charm-library-update review protocol, code
-  commenting style, documentation rules. These are **auto-synced** from upstream
-  `canonical/copilot-collections` (pinned in `.copilot-collections.yaml`) by the weekly
-  `copilot-collections-update.yml` workflow.
+- `.github/instructions/` — guidance in GitHub Copilot's custom-instructions format
+  (`applyTo` frontmatter), **auto-synced** from upstream `canonical/copilot-collections`
+  (pinned in `.copilot-collections.yaml`) by the weekly `copilot-collections-update.yml`
+  workflow. The format/delivery is Copilot-specific, but most of the content
+  (code-commenting style, documentation rules, the charm-library-update review protocol) is
+  general guidance worth following regardless of tool.
 - `CONTRIBUTING.md` — dev workflow, coverage/complexity gates, the 12-factor reference.
 
 ### Keeping this file honest
