@@ -121,10 +121,7 @@ def test_render_garm_toml_provider_section():
     provider = parsed["provider"][0]
     assert provider["name"] == "openstack"
     assert provider["provider_type"] == "external"
-    assert (
-        provider["external"]["provider_executable"]
-        == "/usr/local/bin/garm-provider-openstack"
-    )
+    assert provider["external"]["provider_executable"] == "/usr/local/bin/garm-provider-openstack"
 
 
 def test_generate_garm_secrets_returns_jwt_and_passphrase():
@@ -202,20 +199,13 @@ def test_render_garm_toml_with_configurator_providers():
 
     p0 = parsed["provider"][0]
     assert p0["name"] == "garm-configurator-0"
-    assert (
-        p0["external"]["provider_executable"]
-        == "/usr/local/bin/garm-provider-openstack"
-    )
-    assert (
-        p0["external"]["config_file"] == "/etc/garm/provider-garm-configurator-0.toml"
-    )
+    assert p0["external"]["provider_executable"] == "/usr/local/bin/garm-provider-openstack"
+    assert p0["external"]["config_file"] == "/etc/garm/provider-garm-configurator-0.toml"
     assert "environment_variables" not in p0["external"]
 
     p1 = parsed["provider"][1]
     assert p1["name"] == "garm-configurator-1"
-    assert (
-        p1["external"]["config_file"] == "/etc/garm/provider-garm-configurator-1.toml"
-    )
+    assert p1["external"]["config_file"] == "/etc/garm/provider-garm-configurator-1.toml"
 
     # Verify provider_files contains the expected paths and content.
     provider_toml_0 = provider_files["/etc/garm/provider-garm-configurator-0.toml"]
@@ -304,14 +294,8 @@ def test_build_provider_list_password_in_clouds_yaml():
     clouds_1 = yaml.safe_load(clouds_yaml_1)
     assert clouds_1["clouds"]["garm-configurator-1"]["auth"]["password"] == "pass2"
 
-    assert (
-        entries[0]["external"]["config_file"]
-        == "/etc/garm/provider-garm-configurator-0.toml"
-    )
-    assert (
-        entries[1]["external"]["config_file"]
-        == "/etc/garm/provider-garm-configurator-1.toml"
-    )
+    assert entries[0]["external"]["config_file"] == "/etc/garm/provider-garm-configurator-0.toml"
+    assert entries[1]["external"]["config_file"] == "/etc/garm/provider-garm-configurator-1.toml"
 
 
 def test_render_clouds_yaml_quotes_special_chars():
@@ -550,9 +534,7 @@ def test_maybe_first_run_skips_on_missing_credential_key():
     """
     charm = MagicMock()
     charm.unit.is_leader.return_value = True
-    charm._get_admin_credentials.return_value = {
-        "username": "admin"
-    }  # missing password etc.
+    charm._get_admin_credentials.return_value = {"username": "admin"}  # missing password etc.
 
     with patch("charm.GarmApiClient") as mock_client_cls:
         GarmCharm._maybe_first_run(charm)

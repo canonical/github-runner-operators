@@ -15,8 +15,9 @@ import ops
 import paas_charm.go
 import tomli_w
 import yaml
-from garm_api import GarmApiClient, GarmApiError
 from paas_charm.app import WorkloadConfig
+
+from garm_api import GarmApiClient, GarmApiError
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,6 @@ def _build_provider_list(
 
     This function generates both the GARM provider entries and the
     provider config file contents that must be pushed to the container.
-
-    If no providers are given, returns a default single-entry list with
-    the hardcoded "openstack" provider for backward compatibility.
 
     Args:
         providers: List of provider config dicts from Configurator units,
@@ -121,9 +119,7 @@ def _build_provider_list(
             "project_domain_name": provider["project_domain_name"],
         }
 
-        clouds_yaml = _render_clouds_yaml(
-            unit_name, auth_block, provider["region_name"]
-        )
+        clouds_yaml = _render_clouds_yaml(unit_name, auth_block, provider["region_name"])
 
         provider_files[provider_toml_path] = provider_toml
         provider_files[clouds_yaml_path] = clouds_yaml
@@ -291,9 +287,7 @@ class GarmCharm(paas_charm.go.Charm):
         paas-config.yaml, so metrics_target is set to None to suppress the
         framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(
-            super()._workload_config, port=GARM_PORT, metrics_target=None
-        )
+        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
 
     def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
         """Handle configurator relation joined/changed/broken by re-rendering TOML."""
@@ -345,23 +339,19 @@ class GarmCharm(paas_charm.go.Charm):
 
         secrets_data = self._get_secrets()
         if secrets_data is None:
-            logger.info(
-                "GARM secrets not yet available; blocking until leader initialises"
-            )
+            logger.info("GARM secrets not yet available; blocking until leader initialises")
             self.unit.status = ops.WaitingStatus("Waiting for GARM secrets")
             return
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
-            self.unit.status = ops.WaitingStatus(
-                "Waiting for garm-configurator relation"
-            )
+            self.unit.status = ops.WaitingStatus("Waiting for garm-configurator relation")
             return
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
             postgresql_config=postgresql_config,
-            providers=provider_configs if provider_configs else None,
+            providers=provider_configs,
         )
 
         # Detect config changes by comparing the new config hash against
@@ -369,19 +359,10 @@ class GarmCharm(paas_charm.go.Charm):
         hash_input = (
             toml_content
             + "\n"
-            + "\n".join(
-                f"{path}\n{content}" for path, content in sorted(provider_files.items())
-            )
+            + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
         new_hash = self._hash_toml(hash_input)
         previous_hash = self._get_on_disk_toml_hash(provider_files)
-        logger.info("hash: %s\ntoml: %s", new_hash, toml_content)
-        logger.info(
-            "configuration hash prev: %s, new: %s, changed: %s",
-            previous_hash,
-            new_hash,
-            previous_hash != new_hash,
-        )
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping restart")
             return
@@ -389,17 +370,11 @@ class GarmCharm(paas_charm.go.Charm):
         # Log non-sensitive metadata about the config change.
         # Do NOT log toml_content here — it contains secrets
         # (jwt_secret, db_passphrase, passwords).
-        provider_names = (
-            [p.get("unit_name") for p in provider_configs]
-            if provider_configs
-            else ["default"]
-        )
+        provider_names = [p.get("unit_name") for p in provider_configs]
         logger.info("Updating GARM config for providers: %s", provider_names)
 
         container = self.unit.get_container(CONTAINER_NAME)
-        container.push(
-            GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True
-        )
+        container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
 
@@ -589,9 +564,7 @@ class GarmCharm(paas_charm.go.Charm):
                     "password": password,
                     "project_name": data.get("openstack_project_name", ""),
                     "user_domain_name": data.get("openstack_user_domain_name", ""),
-                    "project_domain_name": data.get(
-                        "openstack_project_domain_name", ""
-                    ),
+                    "project_domain_name": data.get("openstack_project_domain_name", ""),
                     "region_name": data.get("openstack_region_name", ""),
                     "network": data.get("openstack_network", ""),
                 }
@@ -635,9 +608,7 @@ class GarmCharm(paas_charm.go.Charm):
             return
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
-            logger.warning(
-                "Admin credentials secret not yet available; skipping first-run check"
-            )
+            logger.warning("Admin credentials secret not yet available; skipping first-run check")
             return
 
         try:
