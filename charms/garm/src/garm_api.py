@@ -314,6 +314,8 @@ class GarmAuthenticatedClient:
         """
         with self._api_client() as client:
             try:
+                # The GARM repos API does not support a server-side name filter
+                # (unlike orgs which accepts name=), so we fetch all and filter client-side.
                 repos = (
                     RepositoriesApi(api_client=client).list_repos(
                         _request_timeout=_REQUEST_TIMEOUT,

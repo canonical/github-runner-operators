@@ -196,16 +196,20 @@ def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: st
     secrets_json = juju.cli("secrets", "--format=json")
     all_secrets = json.loads(secrets_json)
     garm_secret_uri = next(
-        (uri for uri, info in all_secrets.items() if info.get("label") == GARM_SECRETS_LABEL),
+        (
+            uri
+            for uri, info in all_secrets.items()
+            if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL
+        ),
         None,
     )
-    assert garm_secret_uri, f"{GARM_SECRETS_LABEL} not found for {garm_app_name}"
+    assert garm_secret_uri, f"{GARM_ADMIN_CREDENTIALS_LABEL} not found for {garm_app_name}"
 
     secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
     secret_data = json.loads(secret_json)
     content = secret_data[garm_secret_uri]["content"]["Data"]
-    admin_username = content["admin-username"]
-    admin_password = content["admin-password"]
+    admin_username = content["username"]
+    admin_password = content["password"]
 
     base_url = garm_url.rstrip("/")
     if not base_url.endswith("/api/v1"):

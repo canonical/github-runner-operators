@@ -74,7 +74,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "name": state.scaleset_config.name,
             "provider_name": state.provider_name,
             "credentials_name": state.credentials_name,
-            "image_id": str(state.image_id),
+            "image_id": state.image_id or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
             "min_idle_runner": str(state.scaleset_config.min_idle_runner),
@@ -168,7 +168,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         for key, value in {
             "scaleset_repo": state.scaleset_config.repo,
             "scaleset_org": state.scaleset_config.org,
-            "scaleset_pre_install_scripts": state.scaleset_config.pre_install_scripts,
         }.items():
             if value is not None:
                 garm_relation.data[self.unit][key] = value

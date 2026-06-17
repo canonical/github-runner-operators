@@ -32,7 +32,6 @@ CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
-GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 
@@ -498,13 +497,6 @@ class GarmCharm(paas_charm.go.Charm):
                 GARM_ADMIN_CREDENTIALS_LABEL,
             )
 
-    def _get_garm_secrets(self) -> ops.Secret | None:
-        """Return the GARM secret object when available."""
-        try:
-            return self.model.get_secret(label=GARM_SECRETS_LABEL)
-        except ops.SecretNotFoundError:
-            return None
-
     def _get_secrets(self) -> dict[str, str] | None:
         """Retrieve secrets from the juju secret store.
 
@@ -677,52 +669,6 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _get_garm_url(self) -> str:
-        """Build the local GARM API URL from charm configuration."""
-        listen_address = str(self.config.get("garm-listen-address", ""))
-        listen_port = self.config.get("garm-listen-port", 9997)
-        if not listen_address:
-            return ""
-        return f"http://{listen_address}:{listen_port}"
-
-    def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
-        """Get PostgreSQL config from relation data, or None if not available.
-
-        Returns:
-            Dict with postgresql connection parameters ready for the TOML config,
-            or None if the relation data is not yet available.
-        """
-        pg_requirer = self._database_requirers.get("postgresql")
-        if pg_requirer is None:
-            return None
-
-        relations = pg_requirer.fetch_relation_data()
-        if not relations:
-            return None
-
-        for data in relations.values():
-            if not data:
-                continue
-            endpoints = data.get("endpoints", "")
-            if not endpoints:
-                continue
-
-            # GARM only supports a single hostname in its PostgreSQL config struct
-            # (no multi-host DSN or failover list), so we take the first endpoint.
-            host_port = endpoints.split(",")[0]
-            host, port = host_port.rsplit(":", 1)
-
-            return {
-                "username": data.get("username", ""),
-                "password": data.get("password", ""),
-                "hostname": host,
-                "port": int(port),
-                "database": data.get("database", ""),
-                "sslmode": "prefer",
-            }
-
-        return None
-
     def _build_desired_scalesets(self) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
@@ -796,11 +742,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("Admin credentials not yet available; deferring scaleset reconcile")
             return
 
-        garm_url = self._get_garm_url()
-        if not garm_url:
-            logger.warning("GARM URL not yet available; deferring scaleset reconcile")
-            return
-
+        garm_url = f"http://127.0.0.1:{GARM_PORT}"
         try:
             garm_client = GarmApiClient(f"{garm_url}/api/v1")
             token = garm_client.login(admin_creds["username"], admin_creds["password"])
@@ -809,38 +751,6 @@ class GarmCharm(paas_charm.go.Charm):
             ScalesetReconciler(auth_client).reconcile(desired)
         except GarmApiError as exc:
             logger.warning("GARM API error during scaleset reconcile: %s", exc)
-
-    def _push_garm_config(
-        self,
-        container: ops.Container,
-        postgresql_config: dict[str, typing.Any] | None = None,
-    ) -> None:
-        """Render and push the GARM TOML config into the Pebble container.
-
-        Args:
-            container: The Pebble container to push the config into.
-            postgresql_config: Pre-fetched PostgreSQL connection parameters.
-                If None, fetches from the relation data (adds a round-trip).
-        """
-        if postgresql_config is None:
-            postgresql_config = self._get_postgresql_config()
-        if not postgresql_config:
-            logger.info("PostgreSQL relation data not yet available")
-            return
-
-        garm_secrets = self._get_secrets()
-        logger.info(
-            "Configuring GARM with PostgreSQL backend at %s:%s",
-            postgresql_config["hostname"],
-            postgresql_config["port"],
-        )
-        toml_content = render_garm_toml(
-            listen_port=GARM_PORT,
-            jwt_secret=garm_secrets["jwt-secret"],
-            db_passphrase=garm_secrets["db-passphrase"],
-            postgresql_config=postgresql_config,
-        )
-        container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
 
 
 if __name__ == "__main__":

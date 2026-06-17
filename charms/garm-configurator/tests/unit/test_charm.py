@@ -3,6 +3,8 @@
 
 """Unit tests for GarmConfiguratorCharm."""
 
+import json
+
 import ops
 import pytest
 from scenario import Context, Relation, Secret, State
@@ -462,7 +464,6 @@ def test_garm_configurator_relation_data_written_on_reconcile():
         "name": "my-scaleset",
         "provider_name": "openstack-myproject",
         "credentials_name": "github-app-12345",
-        "image_id": "None",
         "flavor": "m1.large",
         "os_arch": "amd64",
         "min_idle_runner": "0",
@@ -474,6 +475,7 @@ def test_garm_configurator_relation_data_written_on_reconcile():
     }
     for key, value in expected_relation_data.items():
         assert rel_out.local_unit_data[key] == value
+    assert "image_id" not in rel_out.local_unit_data
 
 
 def test_garm_configurator_relation_data_reflects_charm_state():
@@ -681,7 +683,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     assert garm_out.local_unit_data["scaleset_org"] == "myorg"
     assert garm_out.local_unit_data["scaleset_runner_group"] == "my-group"
     assert (
-        garm_out.local_unit_data["scaleset_pre_install_scripts"]
-        == '{"setup.sh": "#!/bin/bash\\necho hello"}'
+        garm_out.local_unit_data["pre_install_scripts"]
+        == json.dumps({"pre_install.sh": '{"setup.sh": "#!/bin/bash\\necho hello"}'})
     )
     assert "scaleset_repo" not in garm_out.local_unit_data

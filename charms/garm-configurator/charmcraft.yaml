@@ -108,10 +108,6 @@ config:
         A Python dict-like string containing key-value pairs of script name
         to bash script to be run prior to runner installation.
 
-provides:
-  garm-configurator:
-    interface: garm_configurator_v0
-
 requires:
   image:
     interface: github_runner_image_v0

@@ -144,17 +144,6 @@ def test_generate_garm_secrets_produces_unique_values():
     assert first["db-passphrase"] != second["db-passphrase"]
 
 
-def test_render_garm_toml_default_provider_when_no_providers_given():
-    """
-    arrange: No providers argument passed (defaults to None).
-    act: render_garm_toml is called without providers.
-    assert: The default "openstack" provider is rendered.
-    """
-    parsed = _render()
-    assert len(parsed["provider"]) == 1
-    assert parsed["provider"][0]["name"] == "openstack"
-
-
 def test_render_garm_toml_with_configurator_providers():
     """
     arrange: Two Configurator units provided provider configs.
@@ -231,18 +220,6 @@ def test_build_provider_list_returns_default_when_empty():
     assert: Returns the default single-entry list with "openstack" provider.
     """
     entries, files = _build_provider_list([])
-    assert len(entries) == 1
-    assert entries[0]["name"] == "openstack"
-    assert files == {}
-
-
-def test_build_provider_list_returns_default_when_none():
-    """
-    arrange: None is passed.
-    act: _build_provider_list is called with None.
-    assert: Returns the default single-entry list.
-    """
-    entries, files = _build_provider_list(None)
     assert len(entries) == 1
     assert entries[0]["name"] == "openstack"
     assert files == {}
@@ -562,7 +539,6 @@ def test_reconcile_scalesets_skips_restart():
             "password": "TestPass-123!",
         }
     )
-    charm._get_garm_url = MagicMock(return_value="http://127.0.0.1:9997")
     charm._build_desired_scalesets = MagicMock(return_value=[])
     charm.restart = MagicMock()
 
@@ -576,23 +552,6 @@ def test_reconcile_scalesets_skips_restart():
         charm._reconcile_scalesets()
 
     mock_client_cls.return_value.login.assert_called_once_with("admin", "TestPass-123!")
-    mock_auth_cls.assert_called_once_with("http://127.0.0.1:9997/api/v1", "test-token")
+    mock_auth_cls.assert_called_once_with("http://127.0.0.1:8080/api/v1", "test-token")
     mock_reconciler_cls.return_value.reconcile.assert_called_once_with([])
     charm.restart.assert_not_called()
-
-
-def test_reconcile_scalesets_skips_when_garm_url_unavailable():
-    """Scaleset reconciliation exits early when the GARM URL is not configured."""
-    charm = object.__new__(GarmCharm)
-    charm._get_admin_credentials = MagicMock(
-        return_value={
-            "username": "admin",
-            "password": "TestPass-123!",
-        }
-    )
-    charm._get_garm_url = MagicMock(return_value="")
-
-    with patch("charm.GarmApiClient") as mock_client_cls:
-        charm._reconcile_scalesets()
-
-    mock_client_cls.assert_not_called()
