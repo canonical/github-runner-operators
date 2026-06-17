@@ -153,14 +153,27 @@ def test_create_credential_when_missing():
     assert params.app.private_key_bytes == [1, 2, 3]
 
 
-def test_update_credential_when_description_changed():
-    existing = {"name": "my-cred", "id": 7, "description": "old description"}
+def test_update_adoptable_credential_when_description_changed():
+    # An observed credential with no description is unclaimed and adoptable; a non-empty desired
+    # description triggers an update.
+    existing = {"name": "my-cred", "id": 7, "description": None}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
-    reconciler.reconcile([], [_cred_spec(description="new description")])
+    reconciler.reconcile([], [_cred_spec(description=MANAGED_CREDENTIAL_DESCRIPTION)])
     client.update_credentials.assert_called_once()
-    id_arg = client.update_credentials.call_args[0][0]
-    assert id_arg == 7
+    assert client.update_credentials.call_args[0][0] == 7
+
+
+def test_update_skipped_for_unmanaged_credential():
+    # A credential with a different description is operator-owned and must not be overwritten,
+    # even when its name matches a desired credential.
+    existing = {"name": "app-1-2", "id": 7, "description": "operator owned"}
+    client = _mock_client(endpoints=[], credentials=[existing])
+    reconciler = GithubReconciler(client)
+    reconciler.reconcile(
+        [], [_cred_spec(name="app-1-2", description=MANAGED_CREDENTIAL_DESCRIPTION)]
+    )
+    client.update_credentials.assert_not_called()
 
 
 def test_no_update_credential_when_unchanged():
@@ -200,7 +213,7 @@ def test_nameless_observed_credential_ignored():
 
 
 def test_update_skipped_when_observed_credential_has_no_id():
-    existing = {"name": "app-1-2", "id": None, "description": "old description"}
+    existing = {"name": "app-1-2", "id": None, "description": MANAGED_CREDENTIAL_DESCRIPTION}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
     reconciler.reconcile([], [_cred_spec(name="app-1-2", description="new description")])

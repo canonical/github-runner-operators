@@ -199,7 +199,7 @@ class GithubAppConfig(BaseModel):
 
         return cls(
             client_id=str(client_id),
-            app_id=str(app_id),
+            app_id=str(app_id).strip(),
             installation_id=str(installation_id),
             private_key=private_key,
         )

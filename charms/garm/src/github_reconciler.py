@@ -130,10 +130,18 @@ class GithubReconciler:
         desired_names = {spec.name for spec in desired}
 
         for spec in desired:
-            if spec.name in observed:
-                self._maybe_update_credential(observed[spec.name], spec)
-            else:
+            if spec.name not in observed:
                 self._create_credential(spec)
+                continue
+            cred = observed[spec.name]
+            if not self._is_charm_managed(cred):
+                logger.warning(
+                    "Skipping GitHub credential '%s': the name is already used by a credential "
+                    "this charm does not manage",
+                    spec.name,
+                )
+                continue
+            self._maybe_update_credential(cred, spec)
 
         for name, cred in observed.items():
             if (
@@ -181,6 +189,13 @@ class GithubReconciler:
         )
         logger.info("Updating GitHub credential '%s' (id=%s)", spec.name, observed.id)
         self._client.update_credentials(observed.id, params)
+
+    @staticmethod
+    def _is_charm_managed(cred) -> bool:
+        # A credential carrying the managed marker was created by this charm; one with no
+        # description is unclaimed and safe to adopt. Any other description is operator-owned,
+        # so we never update or overwrite it.
+        return cred.description in (MANAGED_CREDENTIAL_DESCRIPTION, None, "")
 
     @staticmethod
     def _credential_needs_update(observed, spec: CredentialSpec) -> bool:
