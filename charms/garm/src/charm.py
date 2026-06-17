@@ -769,7 +769,13 @@ class GarmCharm(paas_charm.go.Charm):
                     app_id = int(app_id_raw)
                     installation_id = int(installation_id_raw)
                 except ValueError:
-                    logger.warning("Skipping GitHub credential: non-numeric app/installation id")
+                    logger.warning(
+                        "Skipping GitHub credential from %s: non-numeric app/installation id "
+                        "(app_id=%r, installation_id=%r)",
+                        unit.name,
+                        app_id_raw,
+                        installation_id_raw,
+                    )
                     continue
 
                 dedupe_key = (app_id, installation_id)
