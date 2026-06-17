@@ -56,6 +56,10 @@ config:
       type: string
       description: |
         GitHub App client ID.
+    github-app-id:
+      type: string
+      description: |
+        GitHub App ID (numeric).
     github-app-installation-id:
       type: string
       description: |

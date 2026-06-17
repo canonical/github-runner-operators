@@ -16,6 +16,7 @@ OPENSTACK_REGION_NAME_CONFIG_NAME = "openstack-region-name"
 OPENSTACK_NETWORK_CONFIG_NAME = "openstack-network"
 
 GITHUB_APP_CLIENT_ID_CONFIG_NAME = "github-app-client-id"
+GITHUB_APP_ID_CONFIG_NAME = "github-app-id"
 GITHUB_APP_INSTALLATION_ID_CONFIG_NAME = "github-app-installation-id"
 GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 
@@ -140,11 +141,13 @@ class GithubAppConfig(BaseModel):
 
     Attributes:
         client_id: GitHub App client ID.
+        app_id: GitHub App ID (numeric).
         installation_id: GitHub App installation ID.
         private_key: GitHub App private key (resolved from secret).
     """
 
     client_id: str
+    app_id: str
     installation_id: str
     private_key: str
 
@@ -165,6 +168,12 @@ class GithubAppConfig(BaseModel):
         if not client_id or not str(client_id).strip():
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_CLIENT_ID_CONFIG_NAME}"
+            )
+
+        app_id = charm.config.get(GITHUB_APP_ID_CONFIG_NAME)
+        if not app_id or not str(app_id).strip():
+            raise CharmConfigInvalidError(
+                f"Missing required configuration: {GITHUB_APP_ID_CONFIG_NAME}"
             )
 
         installation_id = charm.config.get(GITHUB_APP_INSTALLATION_ID_CONFIG_NAME)
@@ -188,6 +197,7 @@ class GithubAppConfig(BaseModel):
 
         return cls(
             client_id=str(client_id),
+            app_id=str(app_id),
             installation_id=str(installation_id),
             private_key=private_key,
         )

@@ -35,6 +35,7 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "openstack-region-name": "RegionOne",
         "openstack-network": "external-net",
         "github-app-client-id": "12345",
+        "github-app-id": "99999",
         "github-app-installation-id": "67890",
         "github-app-private-key": private_key_secret.id,
         "name": "my-scaleset",
@@ -91,6 +92,11 @@ _MISSING_CONFIG_SENTINEL = object()
             {"github-app-client-id": _MISSING_CONFIG_SENTINEL},
             "Missing required configuration: github-app-client-id",
             id="missing-github-app-client-id",
+        ),
+        pytest.param(
+            {"github-app-id": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: github-app-id",
+            id="missing-github-app-id",
         ),
         pytest.param(
             {"github-app-installation-id": _MISSING_CONFIG_SENTINEL},
@@ -528,6 +534,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
 
     # GitHub config
     assert garm_out.local_unit_data["github_client_id"] == "12345"
+    assert garm_out.local_unit_data["github_app_id"] == "99999"
     assert garm_out.local_unit_data["github_installation_id"] == "67890"
     assert "github_private_key" not in garm_out.local_unit_data
     assert "github_private_key_secret_uri" in garm_out.local_unit_data
@@ -595,6 +602,7 @@ def test_reconcile_writes_garm_data_on_relation_joined():
     assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
     assert garm_out.local_unit_data["name"] == "my-scaleset"
     assert garm_out.local_unit_data["github_client_id"] == "12345"
+    assert garm_out.local_unit_data["github_app_id"] == "99999"
     assert garm_out.local_unit_data["openstack_username"] == "admin"
 
 
