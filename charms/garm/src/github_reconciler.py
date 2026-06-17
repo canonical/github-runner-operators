@@ -112,11 +112,17 @@ class GithubReconciler:
 
     @staticmethod
     def _endpoint_needs_update(observed, spec: EndpointSpec) -> bool:
+        # An empty spec field means "unmanaged": only diff fields the spec actually sets, so we
+        # don't fire no-op updates (UpdateGithubEndpointParams omits None fields when serialized).
         return (
-            observed.base_url != (spec.base_url or None)
-            or observed.api_base_url != (spec.api_base_url or None)
-            or observed.upload_base_url != (spec.upload_base_url or None)
-            or observed.description != (spec.description or None)
+            bool(spec.base_url)
+            and observed.base_url != spec.base_url
+            or bool(spec.api_base_url)
+            and observed.api_base_url != spec.api_base_url
+            or bool(spec.upload_base_url)
+            and observed.upload_base_url != spec.upload_base_url
+            or bool(spec.description)
+            and observed.description != spec.description
         )
 
     def _reconcile_credentials(self, desired: list[CredentialSpec]) -> None:
@@ -178,4 +184,6 @@ class GithubReconciler:
 
     @staticmethod
     def _credential_needs_update(observed, spec: CredentialSpec) -> bool:
-        return observed.description != (spec.description or None)
+        # Only diff the description when the spec sets one, so an empty description does not
+        # trigger no-op updates (UpdateGithubCredentialsParams omits None fields when serialized).
+        return bool(spec.description) and observed.description != spec.description
