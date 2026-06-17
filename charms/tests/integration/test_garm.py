@@ -336,7 +336,7 @@ def test_garm_api_list_scalesets(
         scale set query path through postgresql is functional.
     """
     address = _get_garm_address(juju, configurator_garm)
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
@@ -486,7 +486,7 @@ def test_garm_api_has_configurator_provider(
         consumed and the provider was loaded.
     """
     address = _get_garm_address(juju, configurator_garm)
-    token = _garm_first_run(address)
+    token = _garm_first_run(juju, address)
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
     resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
