@@ -74,16 +74,16 @@ def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
         if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
             admin_creds_uri = uri
             break
-    assert admin_creds_uri is not None, (
-        f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
-    )
+    assert (
+        admin_creds_uri is not None
+    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
     secret_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
     secret = json.loads(secret_json)
     content = secret[admin_creds_uri]["content"]["Data"]
     for key in ("username", "password"):
-        assert key in content, (
-            f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
-        )
+        assert (
+            key in content
+        ), f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
     return content
 
 
@@ -168,7 +168,9 @@ class _MetricsNotReady(Exception):
 
 
 @retry(
-    retry=retry_if_exception_type((requests.exceptions.ConnectionError, _MetricsNotReady)),
+    retry=retry_if_exception_type(
+        (requests.exceptions.ConnectionError, _MetricsNotReady)
+    ),
     wait=wait_exponential(multiplier=1, min=1, max=30),
     stop=stop_after_attempt(10),
     reraise=True,
@@ -279,25 +281,25 @@ def test_garm_version(
 
 def test_garm_charm_reaches_active(
     juju: jubilant.Juju,
-    garm_app: str,
+    configurator_garm: str,
 ):
     """
-    arrange: The GARM charm is deployed with postgresql integrated.
+    arrange: The GARM charm is deployed with postgresql & garm-configurator integrated.
     act: Observe the Juju application status.
     assert: The application is in active status, confirming a successful install.
     """
     status = juju.status()
-    current = status.apps[garm_app].app_status.current
+    current = status.apps[configurator_garm].app_status.current
     logger.info("GARM app status: %s", current)
 
     assert jubilant.all_active(
-        status, garm_app
-    ), f"Expected {garm_app} to be active, got: {current}"
+        status, configurator_garm
+    ), f"Expected {configurator_garm} to be active, got: {current}"
 
 
 def test_garm_api_controller_info(
     juju: jubilant.Juju,
-    garm_app: str,
+    configurator_garm: str,
 ):
     """
     arrange: The GARM charm is deployed, active, and connected to postgresql.
@@ -305,7 +307,7 @@ def test_garm_api_controller_info(
     assert: The controller info response contains a valid controller_id (UUID),
         proving that GARM started, ran DB migrations, and is serving API requests.
     """
-    address = _get_garm_address(juju, garm_app)
+    address = _get_garm_address(juju, configurator_garm)
     logger.info("GARM address: %s", address)
 
     token = _garm_first_run(juju, address)
@@ -325,7 +327,7 @@ def test_garm_api_controller_info(
 
 def test_garm_api_list_scalesets(
     juju: jubilant.Juju,
-    garm_app: str,
+    configurator_garm: str,
 ):
     """
     arrange: The GARM charm is deployed, active, and initialized with an admin user.
@@ -333,7 +335,7 @@ def test_garm_api_list_scalesets(
     assert: The API returns a successful response (empty list), proving the
         scale set query path through postgresql is functional.
     """
-    address = _get_garm_address(juju, garm_app)
+    address = _get_garm_address(juju, configurator_garm)
     token = _garm_first_run(juju, address)
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
@@ -352,44 +354,16 @@ def test_garm_api_list_scalesets(
     ), f"Expected empty scale set list on fresh GARM, got: {scalesets}"
 
 
-def test_garm_api_list_providers(
-    juju: jubilant.Juju,
-    garm_app: str,
-):
-    """
-    arrange: The GARM charm is deployed with the OpenStack provider configured.
-    act: Query GET /api/v1/providers to list available providers.
-    assert: The openstack provider is registered and visible through the API.
-    """
-    address = _get_garm_address(juju, garm_app)
-    token = _garm_first_run(juju, address)
-
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
-    resp.raise_for_status()
-
-    providers = resp.json()
-    logger.info("Providers response: %s", json.dumps(providers, indent=2))
-    assert isinstance(
-        providers, list
-    ), f"Expected list response, got: {type(providers)}"
-    provider_names = [p.get("name", "") for p in providers]
-    assert (
-        "openstack" in provider_names
-    ), f"Expected 'openstack' provider in list, got: {provider_names}"
-
-
 def test_garm_pebble_service_command(
     juju: jubilant.Juju,
-    garm_app: str,
+    configurator_garm: str,
 ):
     """
     arrange: The GARM charm is deployed and active.
     act: Read the Pebble plan from the workload container.
     assert: The Pebble service runs the GARM binary with the canonical config flag.
     """
-    unit = f"{garm_app}/0"
+    unit = f"{configurator_garm}/0"
     logger.info("Reading Pebble plan from unit %s", unit)
     result = juju.exec(
         f"{PEBBLE_PREFIX} plan",
@@ -407,7 +381,7 @@ def test_garm_pebble_service_command(
 
 def test_garm_secrets_juju_secret_has_expected_keys(
     juju: jubilant.Juju,
-    garm_app: str,
+    configurator_garm: str,
 ):
     """
     arrange: The GARM charm is deployed and active (leader has initialised secrets).
@@ -481,14 +455,14 @@ def test_garm_admin_credentials_juju_secret_has_expected_keys(
 
 def test_garm_metrics_endpoint_no_auth(
     juju: jubilant.Juju,
-    garm_app: str,
+    configurator_garm: str,
 ):
     """
     arrange: The GARM charm is deployed, active, and connected to postgresql.
     act: GET /metrics with no Authorization header.
     assert: The endpoint responds 200 (JWT auth disabled) and exposes GARM metrics.
     """
-    address = _get_garm_address(juju, garm_app)
+    address = _get_garm_address(juju, configurator_garm)
     metrics_url = f"http://{address}:{GARM_API_PORT}/metrics"
     logger.info("Scraping GARM metrics (no auth) at %s", metrics_url)
 
@@ -497,4 +471,33 @@ def test_garm_metrics_endpoint_no_auth(
     assert "garm_health" in resp.text, (
         "Expected the garm_health metric in the /metrics response; "
         f"got first 500 chars: {resp.text[:500]}"
+    )
+
+
+def test_garm_api_has_configurator_provider(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: Configurator with OpenStack config is integrated with GARM.
+    act: Query the GARM REST API for registered providers.
+    assert: A provider named 'garm-configurator-*' is registered and visible
+        via the GARM API, confirming the configurator relation data was
+        consumed and the provider was loaded.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    token = _garm_first_run(juju, address)
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
+    resp.raise_for_status()
+    api_providers = resp.json()
+    logger.info("Providers response: %s", json.dumps(api_providers, indent=2))
+    assert isinstance(
+        api_providers, list
+    ), f"Expected list response from GARM API, got: {type(api_providers)}"
+    api_provider_names = [p.get("name", "") for p in api_providers]
+    assert any(n.startswith("garm-configurator") for n in api_provider_names), (
+        f"Expected a 'garm-configurator-*' provider in GARM API, "
+        f"got: {api_provider_names}"
     )
