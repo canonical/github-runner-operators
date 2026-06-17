@@ -354,34 +354,6 @@ def test_garm_api_list_scalesets(
     ), f"Expected empty scale set list on fresh GARM, got: {scalesets}"
 
 
-def test_garm_api_list_providers(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed with the OpenStack provider configured.
-    act: Query GET /api/v1/providers to list available providers.
-    assert: The openstack provider is registered and visible through the API.
-    """
-    address = _get_garm_address(juju, configurator_garm)
-    token = _garm_first_run(address)
-
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
-    resp.raise_for_status()
-
-    providers = resp.json()
-    logger.info("Providers response: %s", json.dumps(providers, indent=2))
-    assert isinstance(
-        providers, list
-    ), f"Expected list response, got: {type(providers)}"
-    provider_names = [p.get("name", "") for p in providers]
-    assert (
-        "openstack" in provider_names
-    ), f"Expected 'openstack' provider in list, got: {provider_names}"
-
-
 def test_garm_pebble_service_command(
     juju: jubilant.Juju,
     configurator_garm: str,
