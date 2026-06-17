@@ -334,7 +334,7 @@ class GarmCharm(paas_charm.go.Charm):
             + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
         new_hash = self._hash_toml(hash_input)
-        previous_hash = self._get_on_disk_toml_hash(toml_content, provider_files)
+        previous_hash = self._get_on_disk_toml_hash(provider_files)
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping restart")
             return
@@ -360,6 +360,9 @@ class GarmCharm(paas_charm.go.Charm):
                         "override": "merge",
                         "startup": "enabled",
                         "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
+                        "environment": {
+                            "config_hash": new_hash,
+                        }
                     }
                 }
             },
@@ -380,7 +383,7 @@ class GarmCharm(paas_charm.go.Charm):
         return hashlib.sha256(toml_content.encode("utf-8")).hexdigest()
 
     def _get_on_disk_toml_hash(
-        self, toml_content: str, provider_files: dict[str, str]
+        self, provider_files: dict[str, str]
     ) -> str | None:
         """Compute the hash of the config currently on disk in the container.
 
@@ -389,8 +392,6 @@ class GarmCharm(paas_charm.go.Charm):
         Returns None if the config file does not yet exist on disk.
 
         Args:
-            toml_content: The new TOML content (used only to derive the
-                provider_files keys for reading).
             provider_files: The new provider files dict (used only for keys).
 
         Returns:
