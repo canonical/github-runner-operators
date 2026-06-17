@@ -6,9 +6,9 @@ charm conventions; this file lists only what's specific to `garm`.
 - **Base: `paas_charm.go.Charm`.** Do **not** add a `_reconcile` method — the base class
   reconciles. Inject behaviour by overriding `restart()`, which writes the GARM TOML config,
   sets the Pebble command, and triggers admin first-run (`_maybe_first_run`).
-- **Readiness gate**, don't defer: `restart()` returns early when `not self.is_ready()` and
-  sets a `BlockedStatus` when PostgreSQL relation data is missing (`_get_postgresql_config`
-  returns `None`).
+- **Readiness gate**, don't defer: `restart()` returns early when `not self.is_ready()`, and
+  short-circuits by reporting a status (rather than `event.defer()`) when PostgreSQL relation
+  data is missing (`_get_postgresql_config` returns `None`).
 - **Owner of two labelled juju secrets** — `GARM_SECRETS_LABEL` and
   `GARM_ADMIN_CREDENTIALS_LABEL` — created leader-only in `_ensure_secrets`. As the **owner**,
   read them with plain `get_content()` (`_get_secrets`, `_get_admin_credentials`); `refresh=True`
