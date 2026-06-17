@@ -59,9 +59,9 @@ Charm logic should read full current state, act idempotently, and set unit statu
   pattern here (`GarmConfiguratorCharm._reconcile`): build state via
   `CharmState.from_charm(self)`, write relation data, set status once at the end.
 
-### Ops / Juju lifecycle idioms agents get wrong
+### Ops / Juju lifecycle idioms to take care of
 
-- **Secrets — owner vs observer** (a common mistake): `refresh=True` is an *observer* concept —
+- **Secrets — owner vs observer:** `refresh=True` is an *observer* concept —
   it advances the unit's *tracked* revision to the latest. Use it only when **consuming a
   secret you don't own** (an operator-supplied config secret, or one granted over a relation),
   especially in `secret-changed` handlers, so you read the new revision instead of the stale
