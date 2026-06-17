@@ -119,7 +119,9 @@ def _build_provider_list(
             "project_domain_name": provider["project_domain_name"],
         }
 
-        clouds_yaml = _render_clouds_yaml(unit_name, auth_block, provider["region_name"])
+        clouds_yaml = _render_clouds_yaml(
+            unit_name, auth_block, provider["region_name"]
+        )
 
         provider_files[provider_toml_path] = provider_toml
         provider_files[clouds_yaml_path] = clouds_yaml
@@ -261,7 +263,9 @@ class GarmCharm(paas_charm.go.Charm):
         paas-config.yaml, so metrics_target is set to None to suppress the
         framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
+        return dataclasses.replace(
+            super()._workload_config, port=GARM_PORT, metrics_target=None
+        )
 
     def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
         """Handle configurator relation joined/changed/broken by re-rendering TOML."""
@@ -308,17 +312,23 @@ class GarmCharm(paas_charm.go.Charm):
         postgresql_config = self._get_postgresql_config()
         if not postgresql_config:
             logger.info("PostgreSQL relation data not yet available; blocking")
-            self.unit.status = ops.BlockedStatus("Waiting for postgresql relation")
+            self.unit.status = ops.WaitingStatus("Waiting for postgresql relation")
             return
 
         secrets_data = self._get_secrets()
         if secrets_data is None:
-            logger.info("GARM secrets not yet available; blocking until leader initialises")
-            self.unit.status = ops.BlockedStatus("Waiting for GARM secrets")
+            logger.info(
+                "GARM secrets not yet available; blocking until leader initialises"
+            )
+            self.unit.status = ops.WaitingStatus("Waiting for GARM secrets")
             return
 
-        # Render TOML including dynamic providers from Configurator relation
         provider_configs = self._get_configurator_provider_configs()
+        if not provider_configs:
+            self.unit.status = ops.WaitingStatus(
+                "Waiting for garm-configurator relation"
+            )
+            return
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
@@ -331,10 +341,19 @@ class GarmCharm(paas_charm.go.Charm):
         hash_input = (
             toml_content
             + "\n"
-            + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
+            + "\n".join(
+                f"{path}\n{content}" for path, content in sorted(provider_files.items())
+            )
         )
         new_hash = self._hash_toml(hash_input)
         previous_hash = self._get_on_disk_toml_hash(provider_files)
+        logger.info("hash: %s\ntoml: %s", new_hash, toml_content)
+        logger.info(
+            "configuration hash prev: %s, new: %s, changed: %s",
+            previous_hash,
+            new_hash,
+            previous_hash != new_hash,
+        )
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping restart")
             return
@@ -343,12 +362,16 @@ class GarmCharm(paas_charm.go.Charm):
         # Do NOT log toml_content here — it contains secrets
         # (jwt_secret, db_passphrase, passwords).
         provider_names = (
-            [p.get("unit_name") for p in provider_configs] if provider_configs else ["default"]
+            [p.get("unit_name") for p in provider_configs]
+            if provider_configs
+            else ["default"]
         )
         logger.info("Updating GARM config for providers: %s", provider_names)
 
         container = self.unit.get_container(CONTAINER_NAME)
-        container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
+        container.push(
+            GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True
+        )
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
 
@@ -357,7 +380,7 @@ class GarmCharm(paas_charm.go.Charm):
             {
                 "services": {
                     PEBBLE_SERVICE_NAME: {
-                        "override": "merge",
+                        "override": "replace",
                         "startup": "enabled",
                         "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
                         "environment": {
@@ -368,6 +391,7 @@ class GarmCharm(paas_charm.go.Charm):
             },
             combine=True,
         )
+        logger.info("Super restart")
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
@@ -518,7 +542,9 @@ class GarmCharm(paas_charm.go.Charm):
                     "password": password,
                     "project_name": data.get("openstack_project_name", ""),
                     "user_domain_name": data.get("openstack_user_domain_name", ""),
-                    "project_domain_name": data.get("openstack_project_domain_name", ""),
+                    "project_domain_name": data.get(
+                        "openstack_project_domain_name", ""
+                    ),
                     "region_name": data.get("openstack_region_name", ""),
                     "network": data.get("openstack_network", ""),
                 }
