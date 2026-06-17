@@ -147,17 +147,10 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
-        self.framework.observe(self.on.update_status, self._on_update_status)
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
         self._ensure_secrets()
-
-    # Changed parameter type from ops.UpdateStatusEvent to ops.HookEvent to match the base class
-    # PaasCharm signature, as overrides cannot narrow parameter types (Liskov substitution).
-    def _on_update_status(self, _: ops.HookEvent) -> None:
-        """Retry GARM first-run initialization if it has not completed yet."""
-        self._maybe_first_run()
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -256,11 +249,11 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.unit.is_leader():
             return
         try:
-            self.model.get_secret(label=GARM_SECRETS_LABEL, refresh=True)
+            self.model.get_secret(label=GARM_SECRETS_LABEL)
         except ops.SecretNotFoundError:
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
         try:
-            self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL, refresh=True)
+            self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
         except ops.SecretNotFoundError:
             self.app.add_secret(
                 {
@@ -365,6 +358,7 @@ class GarmCharm(paas_charm.go.Charm):
         client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
 
         try:
+            client.wait_for_ready()
             if client.is_initialized():
                 return
             logger.info("GARM not yet initialised; running first-run setup")
@@ -375,7 +369,8 @@ class GarmCharm(paas_charm.go.Charm):
                 full_name=full_name,
             )
         except GarmApiError as exc:
-            logger.warning("GARM first-run check failed (will retry on next event): %s", exc)
+            logger.warning("GARM first-run check failed (error out for retry): %s", exc)
+            raise
 
     def _push_garm_config(
         self,

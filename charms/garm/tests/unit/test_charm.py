@@ -14,7 +14,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from garm_api import GarmApiError
+from garm_api import GarmApiError, GarmConnectionError
 
 from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
@@ -321,9 +321,9 @@ def test_maybe_first_run_calls_first_run_when_not_initialized():
     )
 
 
-def test_maybe_first_run_does_not_raise_on_api_error():
+def test_maybe_first_run_does_not_raise_on_connection_error():
     """
-    arrange: Leader unit; GarmApiClient.is_initialized raises GarmApiError.
+    arrange: Leader unit; GarmApiClient.wait_for_ready raises GarmConnectionError.
     act: Call _maybe_first_run().
     assert: The error is caught and does not propagate.
     """
@@ -332,8 +332,27 @@ def test_maybe_first_run_does_not_raise_on_api_error():
     charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
 
     with patch("charm.GarmApiClient") as mock_client_cls:
-        mock_client_cls.return_value.is_initialized.side_effect = GarmApiError("refused")
+        mock_client_cls.return_value.wait_for_ready.side_effect = GarmConnectionError("timeout")
         GarmCharm._maybe_first_run(charm)  # must not raise
+
+
+def test_maybe_first_run_does_not_raise_when_garm_not_ready():
+    """
+    arrange: Leader unit; GarmApiClient.wait_for_ready raises GarmConnectionError (timeout).
+    act: Call _maybe_first_run().
+    assert: The timeout error is caught and does not propagate.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        mock_client_cls.return_value.wait_for_ready.side_effect = GarmConnectionError(
+            "GARM did not become ready within 30s"
+        )
+        GarmCharm._maybe_first_run(charm)  # must not raise
+
+    mock_client_cls.return_value.is_initialized.assert_not_called()
 
 
 def test_maybe_first_run_skips_on_missing_credential_key():

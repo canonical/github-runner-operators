@@ -4,7 +4,9 @@
 """Thin wrapper over the generated GARM API client for charm use."""
 
 import logging
+import time
 
+import urllib3
 import urllib3.exceptions
 
 from garm_client.api.controller_info_api import ControllerInfoApi
@@ -17,10 +19,16 @@ from garm_client.models.new_user_params import NewUserParams
 logger = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT = 30
+_READINESS_POLL_INTERVAL = 1  # seconds between retries
+_READINESS_TIMEOUT = 30  # seconds before giving up
 
 
 class GarmApiError(Exception):
     """Raised when a GARM API call fails unexpectedly."""
+
+
+class GarmConnectionError(GarmApiError):
+    """Raised when a network-level connection to GARM fails (port closed, refused)."""
 
 
 class GarmApiClient:
@@ -67,7 +75,36 @@ class GarmApiClient:
                     f"Unexpected response from GARM controller-info ({exc.status}): {exc.body}"
                 ) from exc
             except urllib3.exceptions.HTTPError as exc:
-                raise GarmApiError(f"GARM connection error: {exc}") from exc
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def wait_for_ready(self, timeout: float = _READINESS_TIMEOUT) -> None:
+        """Wait until the GARM HTTP API is accepting connections.
+
+        Polls is_initialized(): both True (200) and False (409) indicate the HTTP
+        server is up. Only retries on GarmConnectionError (network-level failures);
+        unexpected HTTP errors propagate immediately.
+        
+        `is_initialized` is used due to it not requiring auth, and there is no dedicated,
+        readiness/health check API.  
+
+        Args:
+            timeout: Maximum seconds to wait before raising.
+
+        Raises:
+            GarmConnectionError: If GARM does not respond within *timeout* seconds.
+            GarmApiError: If GARM responds with an unexpected HTTP status.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                self.is_initialized()
+                return
+            except GarmConnectionError:
+                if time.monotonic() >= deadline:
+                    raise GarmConnectionError(
+                        f"GARM did not become ready within {timeout:.0f}s"
+                    )
+                time.sleep(_READINESS_POLL_INTERVAL)
 
     def first_run(
         self,
@@ -103,5 +140,5 @@ class GarmApiClient:
             except ApiException as exc:
                 raise GarmApiError(f"GARM first-run failed ({exc.status}): {exc.body}") from exc
             except urllib3.exceptions.HTTPError as exc:
-                raise GarmApiError(f"GARM connection error: {exc}") from exc
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         logger.info("GARM first-run initialisation complete for user '%s'", username)
