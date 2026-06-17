@@ -362,7 +362,7 @@ class GarmCharm(paas_charm.go.Charm):
                         "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
                         "environment": {
                             "config_hash": new_hash,
-                        }
+                        },
                     }
                 }
             },
@@ -382,9 +382,7 @@ class GarmCharm(paas_charm.go.Charm):
         """
         return hashlib.sha256(toml_content.encode("utf-8")).hexdigest()
 
-    def _get_on_disk_toml_hash(
-        self, provider_files: dict[str, str]
-    ) -> str | None:
+    def _get_on_disk_toml_hash(self, provider_files: dict[str, str]) -> str | None:
         """Compute the hash of the config currently on disk in the container.
 
         Reads the existing config files from the container, constructs the
