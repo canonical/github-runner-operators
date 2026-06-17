@@ -44,38 +44,28 @@ These are **K8s 12-factor charms** on the `go-framework` charmcraft extension: a
 charm layer wraps a Go workload (`CONTRIBUTING.md` §"12 factor"; each `charmcraft.yaml`).
 `garm-configurator` is the exception — a plain `ops` charm.
 
-### Holistic state handling — but don't add a second reconcile
+### Holistic state handling
 
-Charm logic should read full current state, act idempotently, and set unit status once.
+Read full current state, act idempotently, and set unit status once.
 
-- **`paas_charm` charms (`garm`, `planner-operator`, `webhook-gateway-operator`)**: the base
-  class **already runs the holistic flow** (`PaasCharm.restart()`). Do **not** add a
-  `_reconcile` method. To inject behaviour, **override a framework hook** and call
-  `super()` — e.g. `restart()` (`garm`: write config + first-run; `planner-operator`: sync
-  relation endpoints) or `_create_app()` (`planner-operator`/`webhook-gateway-operator`:
-  inject OTel env). Gate on readiness with an early return (`if not self.is_ready(): return`),
-  not `event.defer()`.
-- **`garm-configurator`**: a single `_reconcile` that every event observes is the correct
-  pattern here (`GarmConfiguratorCharm._reconcile`): build state via
-  `CharmState.from_charm(self)`, write relation data, set status once at the end.
+For **`paas_charm` charms** (`garm`, `planner-operator`, `webhook-gateway-operator`) — the base class already runs the holistic flow (`PaasCharm.restart()`):
+
+- **DON'T** add a `_reconcile` method.
+- **DO** inject behaviour by overriding a framework hook and calling `super()` — e.g. `restart()` (`garm`: write config + first-run; `planner-operator`: sync relation endpoints) or `_create_app()` (`planner-operator`/`webhook-gateway-operator`: inject OTel env).
+- **DO** gate on readiness with an early return (`if not self.is_ready(): return`); **DON'T** call `event.defer()`.
+
+For **`garm-configurator`** (plain `ops`):
+
+- **DO** keep the single `_reconcile` that every event observes (`GarmConfiguratorCharm._reconcile`): build state via `CharmState.from_charm(self)`, write relation data, set status once at the end.
 
 ### Ops / Juju lifecycle idioms to take care of
 
-- **Secrets — owner vs observer:** `refresh=True` is an *observer* concept —
-  it advances the unit's *tracked* revision to the latest. Use it only when **consuming a
-  secret you don't own** (an operator-supplied config secret, or one granted over a relation),
-  especially in `secret-changed` handlers, so you read the new revision instead of the stale
-  tracked one — e.g. the `*.from_charm` resolvers in `charms/garm-configurator/src/charm_state.py`.
-  When you **own** the secret (created via `add_secret`), plain `get_content()` already returns
-  the latest revision (and `set_content()` invalidates the cache), so `refresh=True` is
-  unnecessary — e.g. `garm`'s `_get_secrets` / `_get_admin_credentials`. Use `peek_content()`
-  to read the latest revision without changing tracking. The leader creates labelled secrets so
-  other units can fetch them by `label`.
-- **Relation data carries the secret id/URI, never the content**: `add_secret(..., label=...)`
-  → `secret.grant(relation)` → `relation.data[self.app]["token"] = str(secret.id)`
-  (`planner-operator`'s `_create_relation_credentials`).
-- Prefer **readiness-gating** (`is_ready()` early-return) over `event.defer()`.
-- Relation databags are **string-only** — serialise (e.g. `json.dumps`) structured values.
+- **Secrets — owner vs observer.** `refresh=True` is an *observer* concept: it advances the unit's *tracked* revision to the latest.
+  - **DO** pass `get_content(refresh=True)` only when **consuming a secret you don't own** (an operator-supplied config secret, or one granted over a relation), especially in `secret-changed` handlers — e.g. the `*.from_charm` resolvers in `charms/garm-configurator/src/charm_state.py`.
+  - **DON'T** pass `refresh=True` for a secret you **own** (created via `add_secret`): plain `get_content()` already returns the latest revision and `set_content()` invalidates the cache — e.g. `garm`'s `_get_secrets` / `_get_admin_credentials`. Use `peek_content()` to read the latest without changing tracking.
+  - **DO** create labelled secrets on the leader so other units can fetch them by `label`.
+- **DO** put the secret id/URI in relation data; **DON'T** put the content: `add_secret(..., label=...)` → `secret.grant(relation)` → `relation.data[self.app]["token"] = str(secret.id)` (`planner-operator`'s `_create_relation_credentials`).
+- **DO** serialise structured values (e.g. `json.dumps`) — relation databags are string-only.
 
 ### Testing
 
