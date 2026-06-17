@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # The built-in GARM GitHub endpoint that must never be deleted.
 DEFAULT_GITHUB_ENDPOINT = "github.com"
 
+# Description stamped on credentials this charm manages. Reconcile only deletes credentials
+# carrying this marker, so operator- or otherwise out-of-band-managed credentials are left alone.
+MANAGED_CREDENTIAL_DESCRIPTION = "Managed by garm-configurator"
+
 
 @dataclass
 class EndpointSpec:
@@ -126,7 +130,11 @@ class GithubReconciler:
                 self._create_credential(spec)
 
         for name, cred in observed.items():
-            if name not in desired_names and cred.id is not None:
+            if (
+                name not in desired_names
+                and cred.id is not None
+                and cred.description == MANAGED_CREDENTIAL_DESCRIPTION
+            ):
                 logger.info("Deleting orphaned GitHub credential '%s' (id=%s)", name, cred.id)
                 self._client.delete_credentials(cred.id)
 

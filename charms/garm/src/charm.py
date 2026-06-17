@@ -22,6 +22,7 @@ from paas_charm.charm_utils import block_if_invalid_data
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
+    MANAGED_CREDENTIAL_DESCRIPTION,
     CredentialSpec,
     EndpointSpec,
     GithubReconciler,
@@ -789,7 +790,7 @@ class GarmCharm(paas_charm.go.Charm):
                     app_id=app_id,
                     installation_id=installation_id,
                     private_key_bytes=list(private_key.encode()),
-                    description="Managed by garm-configurator",
+                    description=MANAGED_CREDENTIAL_DESCRIPTION,
                 )
 
         return [], list(credentials.values())

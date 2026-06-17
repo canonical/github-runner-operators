@@ -22,12 +22,18 @@ from garm_client.api.scalesets_api import ScalesetsApi
 from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
+from garm_client.models.create_github_credentials_params import CreateGithubCredentialsParams
+from garm_client.models.create_github_endpoint_params import CreateGithubEndpointParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
+from garm_client.models.forge_credentials import ForgeCredentials
+from garm_client.models.forge_endpoint import ForgeEndpoint
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.provider import Provider
 from garm_client.models.scale_set import ScaleSet
 from garm_client.models.update_controller_params import UpdateControllerParams
+from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
+from garm_client.models.update_github_endpoint_params import UpdateGithubEndpointParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 
 logger = logging.getLogger(__name__)
@@ -286,7 +292,7 @@ class GarmAuthenticatedClient(GarmApiClient):
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
-    def list_credentials(self) -> list:
+    def list_credentials(self) -> list[ForgeCredentials]:
         """List all registered GARM credentials.
 
         Returns:
@@ -308,7 +314,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     f"Failed to list credentials ({exc.status}): {exc.body}"
                 ) from exc
 
-    def list_github_endpoints(self) -> list:
+    def list_github_endpoints(self) -> list[ForgeEndpoint]:
         """List all registered GARM GitHub endpoints.
 
         Returns:
@@ -330,7 +336,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     f"Failed to list github endpoints ({exc.status}): {exc.body}"
                 ) from exc
 
-    def create_github_endpoint(self, params) -> object:
+    def create_github_endpoint(self, params: CreateGithubEndpointParams) -> ForgeEndpoint:
         """Create a new GitHub endpoint in GARM.
 
         Args:
@@ -353,7 +359,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     f"Failed to create github endpoint ({exc.status}): {exc.body}"
                 ) from exc
 
-    def update_github_endpoint(self, name: str, params) -> object:
+    def update_github_endpoint(
+        self, name: str, params: UpdateGithubEndpointParams
+    ) -> ForgeEndpoint:
         """Update an existing GitHub endpoint in GARM.
 
         Args:
@@ -398,7 +406,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     f"Failed to delete github endpoint {name} ({exc.status}): {exc.body}"
                 ) from exc
 
-    def create_credentials(self, params) -> object:
+    def create_credentials(self, params: CreateGithubCredentialsParams) -> ForgeCredentials:
         """Create new GitHub credentials in GARM.
 
         Args:
@@ -421,7 +429,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     f"Failed to create credential ({exc.status}): {exc.body}"
                 ) from exc
 
-    def update_credentials(self, cred_id: int, params) -> object:
+    def update_credentials(
+        self, cred_id: int, params: UpdateGithubCredentialsParams
+    ) -> ForgeCredentials:
         """Update existing GitHub credentials in GARM.
 
         Args:

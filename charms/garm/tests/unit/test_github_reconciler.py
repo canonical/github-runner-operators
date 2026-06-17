@@ -5,7 +5,12 @@
 
 from unittest.mock import MagicMock, call
 
-from github_reconciler import CredentialSpec, EndpointSpec, GithubReconciler
+from github_reconciler import (
+    MANAGED_CREDENTIAL_DESCRIPTION,
+    CredentialSpec,
+    EndpointSpec,
+    GithubReconciler,
+)
 
 
 def _mock_client(endpoints=None, credentials=None):
@@ -168,12 +173,21 @@ def test_no_update_credential_when_unchanged():
     client.create_credentials.assert_not_called()
 
 
-def test_delete_orphan_credential_not_in_desired():
-    existing = {"name": "stale-cred", "id": 42, "description": None}
+def test_delete_managed_orphan_credential():
+    existing = {"name": "stale-cred", "id": 42, "description": MANAGED_CREDENTIAL_DESCRIPTION}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
     reconciler.reconcile([], [])
     client.delete_credentials.assert_called_once_with(42)
+
+
+def test_unmanaged_orphan_credential_preserved():
+    # A credential without the managed marker (e.g. operator-created PAT) is never deleted.
+    existing = {"name": "operator-pat", "id": 99, "description": "set up by hand"}
+    client = _mock_client(endpoints=[], credentials=[existing])
+    reconciler = GithubReconciler(client)
+    reconciler.reconcile([], [])
+    client.delete_credentials.assert_not_called()
 
 
 def test_endpoints_reconciled_before_credentials():
