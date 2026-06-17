@@ -31,9 +31,10 @@ charms — there are four charms, not two).
 
 ## Build & test
 
-- `tox -e lint`, `tox -e format`, `tox -e static` — Python lint/format/type checks (ruff, black, mypy, pylint, bandit).
-- `tox -e <charm>-integration` — per-charm integration tests (`garm`, `webhook-gateway`, `planner`, `garm-configurator`), or `tox -e charms-integration` for all. Requires a live Juju model (jubilant + pytest-operator).
-- `go test ./...` — Go unit tests.
+- **Per-charm Python checks** — from the charm directory, `tox -c tox.toml` (envs `fmt`, `lint`, `complexity`, `static`, `unit`, `coverage-report`; ruff, codespell, pyright, pytest+coverage). CI runs these per charm via `tox -c tox.toml`.
+- **Integration tests** (root `tox.ini`) — `tox -e <charm>-integration` (`garm`, `webhook-gateway`, `planner`, `garm-configurator`) or `tox -e charms-integration` for all. Requires a live Juju model (jubilant + pytest-operator).
+- **`actions/` Python** — `tox -e actions-lint`, `tox -e actions-static`, `tox -e actions-unit`.
+- **Go** — `go test ./...`.
 - `charmcraft pack` — build a charm (run from the charm dir; not wired into tox).
 - Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function.
 
