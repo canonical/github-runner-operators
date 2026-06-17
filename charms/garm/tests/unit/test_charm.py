@@ -17,6 +17,7 @@ except ImportError:
 
 from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
+    GARM_PORT,
     GARM_SECRETS_LABEL,
     GarmCharm,
     _build_provider_list,
@@ -25,6 +26,7 @@ from charm import (
     render_garm_toml,
 )
 from garm_api import GarmConnectionError
+from github_reconciler import DEFAULT_GITHUB_ENDPOINT
 from scaleset_reconciler import ScalesetSpec
 
 _DEFAULT_PG_CONFIG = {
@@ -617,3 +619,159 @@ def test_reconcile_calls_restart():
     GarmCharm._reconcile(charm, MagicMock())
 
     charm.restart.assert_called_once()
+
+
+def _github_charm(units_data, private_key="-----PEM-----"):
+    """Build a GarmCharm stub whose configurator relation exposes the given unit databags."""
+    charm = MagicMock(spec=GarmCharm)
+    relation = MagicMock()
+    data_map = {}
+    for unit_data in units_data:
+        unit = MagicMock()
+        data_map[unit] = unit_data
+    relation.units = list(data_map)
+    relation.data = data_map
+    charm.model.relations.get.return_value = [relation]
+    charm._resolve_secret_value.return_value = private_key
+    return charm
+
+
+def test_build_desired_github_builds_credential_from_relation():
+    """Relation data yields one App credential with the private key resolved from a secret."""
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "12345",
+                "github_installation_id": "67890",
+                "github_private_key_secret_uri": "secret:abc",
+            }
+        ],
+        private_key="PEMDATA",
+    )
+
+    endpoints, credentials = GarmCharm._build_desired_github(charm)
+
+    assert endpoints == []
+    assert len(credentials) == 1
+    cred = credentials[0]
+    assert cred.name == "app-12345"
+    assert cred.endpoint == DEFAULT_GITHUB_ENDPOINT
+    assert cred.app_id == 12345
+    assert cred.installation_id == 67890
+    assert cred.private_key_bytes == list(b"PEMDATA")
+    charm._resolve_secret_value.assert_called_once_with("secret:abc")
+
+
+def test_build_desired_github_dedupes_per_app_installation():
+    """Two configurator units sharing an App/installation collapse to a single credential."""
+    unit_data = {
+        "github_app_id": "1",
+        "github_installation_id": "2",
+        "github_private_key_secret_uri": "secret:k",
+    }
+    charm = _github_charm([dict(unit_data), dict(unit_data)])
+
+    _, credentials = GarmCharm._build_desired_github(charm)
+
+    assert len(credentials) == 1
+
+
+def test_build_desired_github_skips_incomplete_unit():
+    """A unit missing required GitHub fields is skipped."""
+    charm = _github_charm([{"github_app_id": "1"}])
+
+    _, credentials = GarmCharm._build_desired_github(charm)
+
+    assert credentials == []
+
+
+def test_build_desired_github_skips_when_secret_unavailable():
+    """A credential is skipped when the private key secret resolves to empty."""
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "1",
+                "github_installation_id": "2",
+                "github_private_key_secret_uri": "secret:k",
+            }
+        ],
+        private_key="",
+    )
+
+    _, credentials = GarmCharm._build_desired_github(charm)
+
+    assert credentials == []
+
+
+def test_build_desired_github_skips_non_numeric_ids():
+    """A unit with a non-numeric app/installation id is skipped."""
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "not-a-number",
+                "github_installation_id": "2",
+                "github_private_key_secret_uri": "secret:k",
+            }
+        ]
+    )
+
+    _, credentials = GarmCharm._build_desired_github(charm)
+
+    assert credentials == []
+
+
+def test_reconcile_github_skips_when_no_admin_credentials():
+    """GitHub reconciliation exits early when admin credentials are unavailable."""
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(return_value=None)
+
+    with patch("charm.GarmApiClient") as mock_client:
+        charm._reconcile_github()
+
+    mock_client.assert_not_called()
+
+
+def test_reconcile_github_calls_reconciler_without_restart():
+    """GitHub reconciliation logs in over the local listener and never restarts the workload."""
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(
+        return_value={"username": "admin", "password": "TestPass-123!"}
+    )
+    endpoints: list = []
+    credentials = [object()]
+    charm._build_desired_github = MagicMock(return_value=(endpoints, credentials))
+    charm._ensure_controller_urls = MagicMock()
+    charm.restart = MagicMock()
+
+    with (
+        patch("charm.GarmApiClient") as mock_client_cls,
+        patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
+        patch("charm.GithubReconciler") as mock_reconciler_cls,
+    ):
+        mock_client_cls.return_value.login.return_value = "test-token"
+
+        charm._reconcile_github()
+
+    expected_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+    mock_client_cls.assert_called_once_with(expected_url)
+    mock_client_cls.return_value.login.assert_called_once_with("admin", "TestPass-123!")
+    mock_auth_cls.assert_called_once_with(expected_url, "test-token")
+    # Controller URLs must be configured before any operational call, or GARM returns 409.
+    charm._ensure_controller_urls.assert_called_once_with(mock_auth_cls.return_value)
+    mock_reconciler_cls.return_value.reconcile.assert_called_once_with(endpoints, credentials)
+    charm.restart.assert_not_called()
+
+
+def test_ensure_controller_urls_sets_urls_from_binding():
+    """Controller URLs are derived from the unit's address and pushed to GARM."""
+    charm = MagicMock(spec=GarmCharm)
+    charm.model.get_binding.return_value.network.ingress_address = "10.1.2.3"
+    auth_client = MagicMock()
+
+    GarmCharm._ensure_controller_urls(charm, auth_client)
+
+    auth_client.update_controller.assert_called_once_with(
+        metadata_url=f"http://10.1.2.3:{GARM_PORT}/api/v1/metadata",
+        callback_url=f"http://10.1.2.3:{GARM_PORT}/api/v1/callbacks",
+        webhook_url=f"http://10.1.2.3:{GARM_PORT}/webhooks",
+    )

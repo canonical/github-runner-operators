@@ -9,7 +9,10 @@ import time
 import urllib3
 import urllib3.exceptions
 
+from garm_client.api.controller_api import ControllerApi
 from garm_client.api.controller_info_api import ControllerInfoApi
+from garm_client.api.credentials_api import CredentialsApi
+from garm_client.api.endpoints_api import EndpointsApi
 from garm_client.api.first_run_api import FirstRunApi
 from garm_client.api.login_api import LoginApi
 from garm_client.api.organizations_api import OrganizationsApi
@@ -24,6 +27,7 @@ from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.provider import Provider
 from garm_client.models.scale_set import ScaleSet
+from garm_client.models.update_controller_params import UpdateControllerParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 
 logger = logging.getLogger(__name__)
@@ -230,6 +234,36 @@ class GarmAuthenticatedClient(GarmApiClient):
             header_value=f"Bearer {self._token}",
         )
 
+    def update_controller(self, metadata_url: str, callback_url: str, webhook_url: str) -> None:
+        """Set the controller metadata, callback and webhook URLs.
+
+        GARM rejects operational endpoints (credentials, endpoints, scalesets) with
+        HTTP 409 ``urls_required`` until these controller URLs are configured. The call
+        is idempotent.
+
+        Args:
+            metadata_url: URL runners use to fetch instance metadata.
+            callback_url: URL runners use for status callbacks.
+            webhook_url: URL GitHub uses to deliver webhooks.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                ControllerApi(api_client=client).update_controller(
+                    body=UpdateControllerParams(
+                        metadata_url=metadata_url,
+                        callback_url=callback_url,
+                        webhook_url=webhook_url,
+                    ),
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update controller ({exc.status}): {exc.body}"
+                ) from exc
+
     def list_providers(self) -> list[Provider]:
         """List all registered GARM providers.
 
@@ -251,6 +285,186 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(f"Failed to list providers ({exc.status}): {exc.body}") from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_credentials(self) -> list:
+        """List all registered GARM credentials.
+
+        Returns:
+            List of ForgeCredentials model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    CredentialsApi(api_client=client).list_credentials(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list credentials ({exc.status}): {exc.body}"
+                ) from exc
+
+    def list_github_endpoints(self) -> list:
+        """List all registered GARM GitHub endpoints.
+
+        Returns:
+            List of ForgeEndpoint model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    EndpointsApi(api_client=client).list_github_endpoints(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list github endpoints ({exc.status}): {exc.body}"
+                ) from exc
+
+    def create_github_endpoint(self, params) -> object:
+        """Create a new GitHub endpoint in GARM.
+
+        Args:
+            params: CreateGithubEndpointParams instance.
+
+        Returns:
+            Created ForgeEndpoint model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return EndpointsApi(api_client=client).create_github_endpoint(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create github endpoint ({exc.status}): {exc.body}"
+                ) from exc
+
+    def update_github_endpoint(self, name: str, params) -> object:
+        """Update an existing GitHub endpoint in GARM.
+
+        Args:
+            name: Name of the endpoint to update.
+            params: UpdateGithubEndpointParams instance.
+
+        Returns:
+            Updated ForgeEndpoint model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return EndpointsApi(api_client=client).update_github_endpoint(
+                    name=name,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update github endpoint {name} ({exc.status}): {exc.body}"
+                ) from exc
+
+    def delete_github_endpoint(self, name: str) -> None:
+        """Delete a GitHub endpoint from GARM.
+
+        Args:
+            name: Name of the endpoint to delete.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                EndpointsApi(api_client=client).delete_github_endpoint(
+                    name=name,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete github endpoint {name} ({exc.status}): {exc.body}"
+                ) from exc
+
+    def create_credentials(self, params) -> object:
+        """Create new GitHub credentials in GARM.
+
+        Args:
+            params: CreateGithubCredentialsParams instance.
+
+        Returns:
+            Created ForgeCredentials model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return CredentialsApi(api_client=client).create_credentials(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create credential ({exc.status}): {exc.body}"
+                ) from exc
+
+    def update_credentials(self, cred_id: int, params) -> object:
+        """Update existing GitHub credentials in GARM.
+
+        Args:
+            cred_id: Integer ID of the credentials to update.
+            params: UpdateGithubCredentialsParams instance.
+
+        Returns:
+            Updated ForgeCredentials model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return CredentialsApi(api_client=client).update_credentials(
+                    id=cred_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update credential {cred_id} ({exc.status}): {exc.body}"
+                ) from exc
+
+    def delete_credentials(self, cred_id: int) -> None:
+        """Delete GitHub credentials from GARM.
+
+        Args:
+            cred_id: Integer ID of the credentials to delete.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                CredentialsApi(api_client=client).delete_credentials(
+                    id=cred_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete credential {cred_id} ({exc.status}): {exc.body}"
+                ) from exc
 
     def list_scalesets(self) -> list[ScaleSet]:
         """List all scalesets across all entities.

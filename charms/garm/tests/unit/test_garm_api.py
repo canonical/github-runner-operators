@@ -334,3 +334,257 @@ def test_delete_scaleset_raises_on_api_error():
             MockApi.return_value.delete_scale_set.side_effect = ApiException(status=404)
             with pytest.raises(GarmApiError):
                 client.delete_scaleset(99)
+
+
+def test_list_github_endpoints_returns_list():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi returning one endpoint.
+    act: Call list_github_endpoints().
+    assert: The returned list carries the endpoint.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_ep = MagicMock()
+    mock_ep.name = "github.com"
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.list_github_endpoints.return_value = [mock_ep]
+            result = client.list_github_endpoints()
+    assert len(result) == 1
+    assert result[0].name == "github.com"
+
+
+def test_list_github_endpoints_returns_empty_on_none():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi returning None.
+    act: Call list_github_endpoints().
+    assert: An empty list is returned.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.list_github_endpoints.return_value = None
+            result = client.list_github_endpoints()
+    assert result == []
+
+
+def test_list_github_endpoints_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi raising ApiException(500).
+    act: Call list_github_endpoints().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.list_github_endpoints.side_effect = ApiException(status=500)
+            with pytest.raises(GarmApiError):
+                client.list_github_endpoints()
+
+
+def test_create_github_endpoint_returns_endpoint():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi returning the created endpoint.
+    act: Call create_github_endpoint().
+    assert: The created endpoint is returned.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_result = MagicMock()
+    mock_result.name = "my-enterprise"
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.create_github_endpoint.return_value = mock_result
+            result = client.create_github_endpoint(MagicMock())
+    assert result.name == "my-enterprise"
+
+
+def test_create_github_endpoint_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi raising ApiException(400).
+    act: Call create_github_endpoint().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.create_github_endpoint.side_effect = ApiException(status=400)
+            with pytest.raises(GarmApiError):
+                client.create_github_endpoint(MagicMock())
+
+
+def test_update_github_endpoint_returns_endpoint():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi returning the updated endpoint.
+    act: Call update_github_endpoint().
+    assert: The updated endpoint is returned.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_result = MagicMock()
+    mock_result.name = "my-enterprise"
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.update_github_endpoint.return_value = mock_result
+            result = client.update_github_endpoint("my-enterprise", MagicMock())
+    assert result.name == "my-enterprise"
+
+
+def test_update_github_endpoint_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi raising ApiException(404).
+    act: Call update_github_endpoint().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.update_github_endpoint.side_effect = ApiException(status=404)
+            with pytest.raises(GarmApiError):
+                client.update_github_endpoint("missing", MagicMock())
+
+
+def test_delete_github_endpoint_calls_api():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi stubbed.
+    act: Call delete_github_endpoint().
+    assert: delete_github_endpoint is called once.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            client.delete_github_endpoint("my-enterprise")
+    MockApi.return_value.delete_github_endpoint.assert_called_once()
+
+
+def test_delete_github_endpoint_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi raising ApiException(404).
+    act: Call delete_github_endpoint().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.delete_github_endpoint.side_effect = ApiException(status=404)
+            with pytest.raises(GarmApiError):
+                client.delete_github_endpoint("missing")
+
+
+def test_create_credentials_returns_credentials():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning the created credentials.
+    act: Call create_credentials().
+    assert: The created credentials are returned.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_result = MagicMock()
+    mock_result.id = 7
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.create_credentials.return_value = mock_result
+            result = client.create_credentials(MagicMock())
+    assert result.id == 7
+
+
+def test_create_credentials_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi raising ApiException(400).
+    act: Call create_credentials().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.create_credentials.side_effect = ApiException(status=400)
+            with pytest.raises(GarmApiError):
+                client.create_credentials(MagicMock())
+
+
+def test_update_credentials_returns_credentials():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning the updated credentials.
+    act: Call update_credentials().
+    assert: The updated credentials are returned.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_result = MagicMock()
+    mock_result.id = 7
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.update_credentials.return_value = mock_result
+            result = client.update_credentials(7, MagicMock())
+    assert result.id == 7
+
+
+def test_update_credentials_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi raising ApiException(404).
+    act: Call update_credentials().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.update_credentials.side_effect = ApiException(status=404)
+            with pytest.raises(GarmApiError):
+                client.update_credentials(99, MagicMock())
+
+
+def test_delete_credentials_calls_api():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi stubbed.
+    act: Call delete_credentials().
+    assert: delete_credentials is called once.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            client.delete_credentials(7)
+    MockApi.return_value.delete_credentials.assert_called_once()
+
+
+def test_delete_credentials_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi raising ApiException(404).
+    act: Call delete_credentials().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.delete_credentials.side_effect = ApiException(status=404)
+            with pytest.raises(GarmApiError):
+                client.delete_credentials(99)
+
+
+def test_update_controller_calls_api():
+    """
+    arrange: GarmAuthenticatedClient with ControllerApi stubbed.
+    act: Call update_controller() with metadata, callback and webhook URLs.
+    assert: update_controller is called once.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.ControllerApi") as MockApi:
+            client.update_controller(
+                metadata_url="http://garm/api/v1/metadata",
+                callback_url="http://garm/api/v1/callbacks",
+                webhook_url="http://garm/webhooks",
+            )
+    MockApi.return_value.update_controller.assert_called_once()
+
+
+def test_update_controller_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with ControllerApi raising ApiException(409).
+    act: Call update_controller().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.ControllerApi") as MockApi:
+            MockApi.return_value.update_controller.side_effect = ApiException(status=409)
+            with pytest.raises(GarmApiError):
+                client.update_controller(
+                    metadata_url="http://garm/api/v1/metadata",
+                    callback_url="http://garm/api/v1/callbacks",
+                    webhook_url="http://garm/webhooks",
+                )
