@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 import json
 import logging
@@ -451,7 +451,7 @@ def integrate_garm_with_postgresql_fixture(
     logger.info("Waiting up to 600s for GARM app '%s' to reach active status", app_name)
     try:
         juju.wait(
-            lambda status: jubilant.all_active(status, app_name),
+            lambda status: jubilant.all_agents_idle(status, app_name),
             timeout=10 * 60,
             delay=10,
         )
@@ -505,3 +505,115 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
         delay=10,
     )
     return app_name
+
+
+@pytest.fixture(scope="module", name="garm_configurator_charm_file")
+def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
+    """Return the path to the built garm-configurator charm file."""
+    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
+    if not charm:
+        pytest.skip(
+            f"missing required {CHARM_FILE_PARAM} option for garm-configurator "
+            "integration tests"
+        )
+    if len(charm) > 1:
+        configurator_charm = [file for file in charm if "garm-configurator" in file]
+        if not configurator_charm:
+            raise pytest.UsageError(
+                "No garm-configurator charm file found in --charm-file; "
+                "expected a path containing 'garm-configurator'"
+            )
+        return configurator_charm[0]
+    return charm[0]
+
+
+@pytest.fixture(scope="module", name="configurator_with_image")
+def deploy_configurator_with_image_fixture(
+    juju: jubilant.Juju,
+    garm_configurator_charm_file: str,
+    any_charm_image_builder_app: str,
+) -> str:
+    """Deploy the configurator with fake-image-builder integrated and valid config.
+
+    Creates Juju secrets for the password and private key fields, deploys the
+    configurator charm, sets all required config, integrates with the fake image
+    builder, and waits for the configurator to become active (image UUID received).
+    """
+    app_name = "garm-configurator"
+
+    # Create secrets first so we can reference them in config
+    password_secret = juju.add_secret(
+        name="configurator-os-password",
+        content={"value": "test-openstack-password"},
+    )
+    private_key_secret = juju.add_secret(
+        name="configurator-github-private-key",
+        content={"value": "test-github-private-key"},
+    )
+
+    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    juju.grant_secret(password_secret, app_name)
+    juju.grant_secret(private_key_secret, app_name)
+
+    juju.config(
+        app_name,
+        values={
+            "openstack-auth-url": "https://keystone.example.com:5000/v3",
+            "openstack-username": "admin",
+            "openstack-password": password_secret,
+            "openstack-project-name": "test-project",
+            "openstack-user-domain-name": "Default",
+            "openstack-project-domain-name": "Default",
+            "openstack-region-name": "RegionOne",
+            "openstack-network": "external-net",
+            "github-app-client-id": "test-client-id",
+            "github-app-installation-id": "test-installation-id",
+            "github-app-private-key": private_key_secret,
+            "name": "test-scaleset",
+            "flavor": "m1.large",
+            "os-arch": "amd64",
+            "min-idle-runner": "0",
+            "max-runner": "5",
+            "repo": "testorg/testrepo",
+        },
+    )
+
+    juju.integrate(app_name, any_charm_image_builder_app)
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    return app_name
+
+
+@pytest.fixture(scope="module", name="configurator_garm")
+def integrate_configurator_with_garm_fixture(
+    juju: jubilant.Juju,
+    configurator_with_image: str,
+    garm_app: str,
+) -> str:
+    """Integrate the configurator with GARM and wait for both to be active.
+
+    The configurator should remain Active after integration. GARM may
+    restart when it receives the relation data (TOML change detection),
+    so we wait for GARM to settle back to active.
+
+    Returns the garm app name.
+    """
+    juju.integrate(configurator_with_image, garm_app)
+    # Wait for both apps to settle. GARM may restart (TOML hash change).
+    juju.wait(
+        lambda status: jubilant.all_active(status, garm_app)
+        and jubilant.all_active(status, configurator_with_image),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return garm_app

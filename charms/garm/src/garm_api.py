@@ -83,9 +83,9 @@ class GarmApiClient:
         Polls is_initialized(): both True (200) and False (409) indicate the HTTP
         server is up. Only retries on GarmConnectionError (network-level failures);
         unexpected HTTP errors propagate immediately.
-        
+
         `is_initialized` is used due to it not requiring auth, and there is no dedicated,
-        readiness/health check API.  
+        readiness/health check API.
 
         Args:
             timeout: Maximum seconds to wait before raising.
@@ -101,9 +101,7 @@ class GarmApiClient:
                 return
             except GarmConnectionError:
                 if time.monotonic() >= deadline:
-                    raise GarmConnectionError(
-                        f"GARM did not become ready within {timeout:.0f}s"
-                    )
+                    raise GarmConnectionError(f"GARM did not become ready within {timeout:.0f}s")
                 time.sleep(_READINESS_POLL_INTERVAL)
 
     def first_run(

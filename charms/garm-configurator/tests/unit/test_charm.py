@@ -430,3 +430,150 @@ def test_status_waiting_on_relation_broken():
     )
     out = ctx.run(ctx.on.relation_broken(image_relation), state)
     assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+
+
+def test_reconcile_writes_full_config_to_garm_relation():
+    """
+    arrange: All configs valid, image relation has a UUID, garm relation is joined.
+    act: config-changed fires (holistic reconcile).
+    assert: The full config payload (provider, github, scaleset, image_id) is written
+        to the garm-configurator relation's local unit data.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(
+        endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}}
+    )
+    garm_relation = Relation(endpoint="garm-configurator")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+    out = ctx.run(ctx.on.config_changed(), state)
+    garm_out = out.get_relation(garm_relation.id)
+
+    # Provider config
+    assert garm_out.local_unit_data["openstack_auth_url"] == (
+        "https://keystone.example.com:5000/v3"
+    )
+    assert garm_out.local_unit_data["openstack_username"] == "admin"
+    assert "openstack_password" not in garm_out.local_unit_data
+    assert "openstack_password_secret_uri" in garm_out.local_unit_data
+    assert garm_out.local_unit_data["openstack_project_name"] == "myproject"
+    assert garm_out.local_unit_data["openstack_user_domain_name"] == "Default"
+    assert garm_out.local_unit_data["openstack_project_domain_name"] == "Default"
+    assert garm_out.local_unit_data["openstack_region_name"] == "RegionOne"
+    assert garm_out.local_unit_data["openstack_network"] == "external-net"
+
+    # GitHub config
+    assert garm_out.local_unit_data["github_client_id"] == "12345"
+    assert garm_out.local_unit_data["github_installation_id"] == "67890"
+    assert "github_private_key" not in garm_out.local_unit_data
+    assert "github_private_key_secret_uri" in garm_out.local_unit_data
+
+    # Scaleset config
+    assert garm_out.local_unit_data["scaleset_name"] == "my-scaleset"
+    assert garm_out.local_unit_data["scaleset_flavor"] == "m1.large"
+    assert garm_out.local_unit_data["scaleset_os_arch"] == "amd64"
+    assert garm_out.local_unit_data["scaleset_min_idle_runner"] == "0"
+    assert garm_out.local_unit_data["scaleset_max_runner"] == "5"
+    # Scenario framework omits empty-string values from local_unit_data
+    assert garm_out.local_unit_data["scaleset_repo"] == "myorg/myrepo"
+    assert garm_out.local_unit_data["scaleset_runner_group"] == "default"
+    assert "scaleset_org" not in garm_out.local_unit_data
+
+    # Image UUID
+    assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
+
+
+def test_reconcile_does_not_write_garm_data_without_image_uuid():
+    """
+    arrange: All configs valid, garm relation joined, but image relation has NO UUID.
+    act: config-changed fires.
+    assert: The garm-configurator relation's local unit data is empty (no data sent
+        before image is created).
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")  # No remote units data
+    garm_relation = Relation(endpoint="garm-configurator")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+    )
+    out = ctx.run(ctx.on.config_changed(), state)
+    garm_out = out.get_relation(garm_relation.id)
+    # Scenario auto-populates Juju network fields; check no charm-specific keys written
+    assert "image_id" not in garm_out.local_unit_data
+    assert "scaleset_name" not in garm_out.local_unit_data
+    assert "github_client_id" not in garm_out.local_unit_data
+
+
+def test_reconcile_writes_garm_data_on_relation_joined():
+    """
+    arrange: All configs valid, image has UUID, garm relation just joined.
+    act: relation_joined fires.
+    assert: Config payload is written to the garm relation's local unit data.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(
+        endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}}
+    )
+    garm_relation = Relation(endpoint="garm-configurator")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+    out = ctx.run(ctx.on.relation_joined(garm_relation), state)
+    garm_out = out.get_relation(garm_relation.id)
+    assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
+    assert garm_out.local_unit_data["scaleset_name"] == "my-scaleset"
+    assert garm_out.local_unit_data["github_client_id"] == "12345"
+    assert garm_out.local_unit_data["openstack_username"] == "admin"
+
+
+def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
+    """
+    arrange: Config uses org instead of repo, with runner_group and pre_install_scripts.
+        Image UUID is present, garm relation is joined.
+    act: config-changed fires.
+    assert: scaleset_org, scaleset_runner_group, and scaleset_pre_install_scripts
+        are present in the garm relation data. scaleset_repo is absent.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["repo"]
+    config["org"] = "myorg"
+    config["runner-group"] = "my-group"
+    config["pre-install-scripts"] = '{"setup.sh": "#!/bin/bash\\necho hello"}'
+    image_relation = Relation(
+        endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}}
+    )
+    garm_relation = Relation(endpoint="garm-configurator")
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+    out = ctx.run(ctx.on.config_changed(), state)
+    garm_out = out.get_relation(garm_relation.id)
+
+    assert garm_out.local_unit_data["scaleset_org"] == "myorg"
+    assert garm_out.local_unit_data["scaleset_runner_group"] == "my-group"
+    assert (
+        garm_out.local_unit_data["scaleset_pre_install_scripts"]
+        == '{"setup.sh": "#!/bin/bash\\necho hello"}'
+    )
+    assert "scaleset_repo" not in garm_out.local_unit_data
