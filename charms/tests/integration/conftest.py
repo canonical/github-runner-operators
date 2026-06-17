@@ -12,6 +12,7 @@ from typing import Iterator
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import TEST_RSA_PRIVATE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -505,7 +506,7 @@ def deploy_configurator_with_image_fixture(
     )
     private_key_secret = juju.add_secret(
         name="configurator-github-private-key",
-        content={"value": "test-github-private-key"},
+        content={"value": TEST_RSA_PRIVATE_KEY},
     )
 
     juju.deploy(charm=garm_configurator_charm_file, app=app_name)
@@ -530,7 +531,8 @@ def deploy_configurator_with_image_fixture(
             "openstack-region-name": "RegionOne",
             "openstack-network": "external-net",
             "github-app-client-id": "test-client-id",
-            "github-app-installation-id": "test-installation-id",
+            "github-app-id": "12345",
+            "github-app-installation-id": "67890",
             "github-app-private-key": private_key_secret,
             "name": "test-scaleset",
             "flavor": "m1.large",

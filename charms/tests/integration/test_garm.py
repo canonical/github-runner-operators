@@ -38,6 +38,8 @@ PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pe
 _GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 _SCALESET_TEST_NAME = "test-scaleset"
 _SCALESET_TEST_CREDENTIAL_NAME = "github-app-12345"
+# Credential name the charm derives from the configurator's github-app-id (app-<app_id>).
+_SYNCED_CREDENTIAL_NAME = "app-12345"
 
 _TEST_RSA_PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
 MIICXwIBAAKBgQC2tCW5B18y5VnqqokOeamJgasI3H1405WWv7FmWl31I1Cgabhi
@@ -769,4 +771,67 @@ def _wait_for_scaleset(
             f"got {observed_image!r}"
         )
     return scaleset
+
+
+def _list_github_credentials(base_url: str, token: str) -> list[dict]:
+    """List GARM GitHub credentials via the REST API (GARM returns null when empty)."""
+    resp = requests.get(
+        f"{base_url}/github/credentials", headers=_garm_auth_headers(token), timeout=30
+    )
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+def _list_github_endpoints(base_url: str, token: str) -> list[dict]:
+    """List GARM GitHub endpoints via the REST API (GARM returns null when empty)."""
+    resp = requests.get(
+        f"{base_url}/github/endpoints", headers=_garm_auth_headers(token), timeout=30
+    )
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+@retry(
+    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(18),
+    reraise=True,
+)
+def _wait_for_github_credential(base_url: str, token: str, name: str) -> dict:
+    """Wait until a GitHub credential with the given name is synced into GARM."""
+    credentials = _list_github_credentials(base_url, token)
+    match = next((cred for cred in credentials if cred.get("name") == name), None)
+    assert match is not None, (
+        f"Expected credential {name!r} to exist; got {[c.get('name') for c in credentials]}"
+    )
+    return match
+
+
+def test_github_credentials_synced_from_relation(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: GARM is integrated with a configurator that supplies GitHub App config
+        (github-app-id, installation id, and a private-key Juju secret).
+    act: Let the charm reconcile GitHub credentials from the relation data.
+    assert: GARM holds an App credential derived from the relation data, and the
+        built-in github.com endpoint is preserved (never deleted by the reconciler).
+    """
+    garm_app = configurator_garm
+    address = _get_garm_address(juju, garm_app)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+
+    credential = _wait_for_github_credential(base_url, token, _SYNCED_CREDENTIAL_NAME)
+
+    assert credential["name"] == _SYNCED_CREDENTIAL_NAME
+    # GARM aliases the field as "auth-type"; tolerate either spelling across versions.
+    auth_type = credential.get("auth-type") or credential.get("auth_type")
+    assert auth_type == "app", f"Expected app auth, got {auth_type!r}"
+
+    endpoint_names = {endpoint.get("name") for endpoint in _list_github_endpoints(base_url, token)}
+    assert "github.com" in endpoint_names, (
+        f"Built-in github.com endpoint must be preserved; got {sorted(endpoint_names)}"
+    )
 
