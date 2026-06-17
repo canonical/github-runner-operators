@@ -14,7 +14,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from garm_api import GarmApiError, GarmConnectionError
+from garm_api import GarmConnectionError
 
 from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
@@ -321,26 +321,16 @@ def test_maybe_first_run_calls_first_run_when_not_initialized():
     )
 
 
-def test_maybe_first_run_does_not_raise_on_connection_error():
+@pytest.mark.parametrize(
+    "error_message",
+    ["refused", "GARM did not become ready within 30s"],
+    ids=["connection-refused", "timeout"],
+)
+def test_maybe_first_run_raises_on_connection_error(error_message: str):
     """
     arrange: Leader unit; GarmApiClient.wait_for_ready raises GarmConnectionError.
     act: Call _maybe_first_run().
-    assert: The error is caught and does not propagate.
-    """
-    charm = MagicMock()
-    charm.unit.is_leader.return_value = True
-    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
-
-    with patch("charm.GarmApiClient") as mock_client_cls:
-        mock_client_cls.return_value.wait_for_ready.side_effect = GarmConnectionError("timeout")
-        GarmCharm._maybe_first_run(charm)  # must not raise
-
-
-def test_maybe_first_run_does_not_raise_when_garm_not_ready():
-    """
-    arrange: Leader unit; GarmApiClient.wait_for_ready raises GarmConnectionError (timeout).
-    act: Call _maybe_first_run().
-    assert: The timeout error is caught and does not propagate.
+    assert: GarmConnectionError propagates and is_initialized is not called.
     """
     charm = MagicMock()
     charm.unit.is_leader.return_value = True
@@ -348,11 +338,11 @@ def test_maybe_first_run_does_not_raise_when_garm_not_ready():
 
     with patch("charm.GarmApiClient") as mock_client_cls:
         mock_client_cls.return_value.wait_for_ready.side_effect = GarmConnectionError(
-            "GARM did not become ready within 30s"
+            error_message
         )
-        GarmCharm._maybe_first_run(charm)  # must not raise
-
-    mock_client_cls.return_value.is_initialized.assert_not_called()
+        with pytest.raises(GarmConnectionError):
+            GarmCharm._maybe_first_run(charm)
+        mock_client_cls.return_value.is_initialized.assert_not_called()
 
 
 def test_maybe_first_run_skips_on_missing_credential_key():
