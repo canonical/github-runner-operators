@@ -31,16 +31,4 @@ requires:
   garm-configurator:
     interface: garm_configurator_v0
     limit: 1
-    optional: true
-
-config:
-  options:
-    garm-listen-address:
-      type: string
-      default: "0.0.0.0"
-      description: Address GARM API server listens on.
-    garm-listen-port:
-      type: int
-      default: 8080
-      description: Port GARM API server listens on.
 

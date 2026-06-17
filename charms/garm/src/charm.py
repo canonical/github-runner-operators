@@ -14,6 +14,7 @@ import typing
 import ops
 import paas_charm.go
 import tomli_w
+import yaml
 from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
@@ -21,13 +22,13 @@ logger = logging.getLogger(__name__)
 GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
-TOML_HASH_LABEL: typing.Final[str] = "garm-toml-hash"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 GARM_PORT: typing.Final[int] = 8080
+GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -138,9 +139,7 @@ def _build_provider_list(
 
 
 def _render_clouds_yaml(cloud_name: str, auth: dict[str, str], region_name: str) -> str:
-    """Render a minimal clouds.yaml for gophercloud.
-
-    Since PyYAML is not a charm dependency, we render the YAML manually.
+    """Render a minimal clouds.yaml for gophercloud using PyYAML.
 
     Args:
         cloud_name: The cloud name in the ``clouds`` dict.
@@ -151,25 +150,19 @@ def _render_clouds_yaml(cloud_name: str, auth: dict[str, str], region_name: str)
     Returns:
         YAML-formatted string.
     """
-    lines = [
-        "clouds:",
-        f"  {cloud_name}:",
-        "    auth:",
-        f"      auth_url: {auth['auth_url']}",
-        f"      username: {auth['username']}",
-        f"      project_name: {auth['project_name']}",
-        f"      user_domain_name: {auth['user_domain_name']}",
-        f"      project_domain_name: {auth['project_domain_name']}",
-        f"      password: {auth['password']}",
-        f"    region_name: {region_name}",
-    ]
-    return "\n".join(lines) + "\n"
+    clouds = {
+        "clouds": {
+            cloud_name: {
+                "auth": auth,
+                "region_name": region_name,
+            }
+        }
+    }
+    return yaml.dump(clouds, default_flow_style=False)
 
 
 def render_garm_toml(
     *,
-    listen_address: str,
-    listen_port: int,
     jwt_secret: str,
     db_passphrase: str,
     postgresql_config: dict[str, typing.Any],
@@ -178,8 +171,6 @@ def render_garm_toml(
     """Render GARM's TOML configuration file content.
 
     Args:
-        listen_address: IP address for the GARM API server to bind on.
-        listen_port: Port for the GARM API server.
         jwt_secret: Secret string used to sign GARM JWT tokens.
         db_passphrase: 32-character passphrase for AES-256 encryption of secrets in the DB.
         postgresql_config: PostgreSQL connection parameters (username, password,
@@ -202,8 +193,8 @@ def render_garm_toml(
             "postgresql": postgresql_config,
         },
         "apiserver": {
-            "bind": listen_address,
-            "port": listen_port,
+            "bind": GARM_LISTEN_ADDRESS,
+            "port": GARM_PORT,
             "use_tls": False,
         },
         "jwt_auth": {
@@ -289,29 +280,6 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._ensure_secrets()
 
-        # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
-        # no separate metrics listener — and declares its scrape target in
-        # paas-config.yaml, so the go-framework's app-port/metrics-port/metrics-path
-        # settings don't apply. _workload_config also pins the workload port to
-        # GARM_PORT, so app-port has no effect on ingress, the opened ports, or the
-        # service URL (they can't drift from GARM's actual port). Warn rather than
-        # block when an operator sets any to a non-default value, tolerating their
-        # absence (the framework may drop them in future).
-        for option, default in (
-            ("app-port", GARM_PORT),
-            ("metrics-port", GARM_PORT),
-            ("metrics-path", "/metrics"),
-        ):
-            value = self.config.get(option)
-            if value is not None and str(value) != str(default):
-                logger.warning(
-                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
-                    "declares its Prometheus scrape config in paas-config.yaml",
-                    option,
-                    value,
-                    GARM_PORT,
-                )
-
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
         postgresql_config = self._get_postgresql_config()
@@ -329,21 +297,21 @@ class GarmCharm(paas_charm.go.Charm):
         # Render TOML including dynamic providers from Configurator relation
         provider_configs = self._get_configurator_provider_configs()
         toml_content, provider_files = render_garm_toml(
-            listen_address=str(self.config.get("garm-listen-address", "0.0.0.0")),
-            listen_port=int(self.config.get("garm-listen-port", GARM_PORT)),
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
             postgresql_config=postgresql_config,
             providers=provider_configs if provider_configs else None,
         )
 
+        # Detect config changes by comparing the new config hash against
+        # the hash of the config currently on disk in the container.
         hash_input = (
             toml_content
             + "\n"
             + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
         new_hash = self._hash_toml(hash_input)
-        previous_hash = self._get_stored_toml_hash()
+        previous_hash = self._get_on_disk_toml_hash(toml_content, provider_files)
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping restart")
             return
@@ -360,7 +328,6 @@ class GarmCharm(paas_charm.go.Charm):
         container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
-        self._store_toml_hash(new_hash)
 
         container.add_layer(
             "garm-command",
@@ -375,9 +342,7 @@ class GarmCharm(paas_charm.go.Charm):
             },
             combine=True,
         )
-        container.replan()
-        container.restart(PEBBLE_SERVICE_NAME)
-        self.update_app_and_unit_status(ops.ActiveStatus())
+        super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
     def _hash_toml(toml_content: str) -> str:
@@ -391,38 +356,40 @@ class GarmCharm(paas_charm.go.Charm):
         """
         return hashlib.sha256(toml_content.encode("utf-8")).hexdigest()
 
-    def _get_stored_toml_hash(self) -> str | None:
-        """Retrieve the stored TOML hash from the Juju secret, or None.
+    def _get_on_disk_toml_hash(
+        self, toml_content: str, provider_files: dict[str, str]
+    ) -> str | None:
+        """Compute the hash of the config currently on disk in the container.
 
-        Returns:
-            The stored SHA-256 hash string, or None if no hash has been
-            stored yet.
-        """
-        try:
-            secret = self.model.get_secret(label=TOML_HASH_LABEL)
-            return secret.get_content().get("sha256")
-        except ops.SecretNotFoundError:
-            return None
-
-    def _store_toml_hash(self, hash_value: str) -> None:
-        """Store the TOML hash in a Juju secret.
-
-        Only the leader can create or update application secrets. Non-leader
-        units read the hash (via _get_stored_toml_hash) to decide whether a
-        restart is needed, but only the leader persists it.
-
-        Creates or updates the secret labelled TOML_HASH_LABEL.
+        Reads the existing config files from the container, constructs the
+        same hash input used during render, and returns its SHA-256 digest.
+        Returns None if the config file does not yet exist on disk.
 
         Args:
-            hash_value: The SHA-256 hex digest to store.
+            toml_content: The new TOML content (used only to derive the
+                provider_files keys for reading).
+            provider_files: The new provider files dict (used only for keys).
+
+        Returns:
+            The SHA-256 hex digest of the on-disk config, or None if
+            the main config file does not exist yet.
         """
-        if not self.unit.is_leader():
-            return
+        container = self.unit.get_container(CONTAINER_NAME)
         try:
-            secret = self.model.get_secret(label=TOML_HASH_LABEL)
-            secret.set_content({"sha256": hash_value})
-        except ops.SecretNotFoundError:
-            self.app.add_secret({"sha256": hash_value}, label=TOML_HASH_LABEL)
+            existing_toml = container.pull(GARM_CONFIG_PATH).read()
+        except (ops.pebble.PathError, FileNotFoundError):
+            return None
+
+        existing_provider_parts: list[str] = []
+        for path in sorted(provider_files.keys()):
+            try:
+                existing_provider_parts.append(f"{path}\n{container.pull(path).read()}")
+            except (ops.pebble.PathError, FileNotFoundError):
+                # If a provider file is missing, the config has changed.
+                return None
+
+        hash_input = existing_toml + "\n" + "\n".join(existing_provider_parts)
+        return self._hash_toml(hash_input)
 
     def _ensure_secrets(self) -> None:
         """Create the garm-secrets juju secret on first call (leader only)."""
@@ -521,13 +488,6 @@ class GarmCharm(paas_charm.go.Charm):
             if not password and password_secret_uri:
                 password = self._resolve_secret_value(str(password_secret_uri))
 
-            # Resolve private key similarly.
-            private_key = data.get("github_private_key", "")
-            if not private_key:
-                pk_secret_uri = data.get("github_private_key_secret_uri")
-                if pk_secret_uri:
-                    private_key = self._resolve_secret_value(str(pk_secret_uri))
-
             configs.append(
                 {
                     "unit_name": unit_name,
@@ -541,10 +501,6 @@ class GarmCharm(paas_charm.go.Charm):
                     "network": data.get("openstack_network", ""),
                 }
             )
-
-            # Inject private key into the config for TOML rendering.
-            if private_key:
-                configs[-1]["github_private_key"] = private_key
 
         return configs
 

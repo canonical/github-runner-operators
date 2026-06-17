@@ -6,6 +6,7 @@
 import string
 
 import pytest
+import yaml
 
 try:
     import tomllib
@@ -27,8 +28,6 @@ _DEFAULT_PG_CONFIG = {
 def _render(**overrides) -> dict:
     """Helper: render TOML with defaults, return parsed dict."""
     kwargs = {
-        "listen_address": "0.0.0.0",
-        "listen_port": 8080,
         "jwt_secret": "test-secret",
         "db_passphrase": "a" * 32,
         "postgresql_config": _DEFAULT_PG_CONFIG,
@@ -81,8 +80,7 @@ def test_render_garm_toml_sslmode_propagated(sslmode: str):
     "section,key,value,kwargs",
     [
         ("apiserver", "bind", "0.0.0.0", {}),
-        ("apiserver", "port", 8080, {"listen_port": 8080}),
-        ("apiserver", "bind", "127.0.0.1", {"listen_address": "127.0.0.1"}),
+        ("apiserver", "port", 8080, {}),
         ("apiserver", "use_tls", False, {}),
         ("jwt_auth", "secret", "mysecret", {"jwt_secret": "mysecret"}),
         ("jwt_auth", "time_to_live", "8760h", {}),
@@ -92,7 +90,6 @@ def test_render_garm_toml_sslmode_propagated(sslmode: str):
     ids=[
         "apiserver-bind",
         "apiserver-port",
-        "apiserver-bind-address",
         "apiserver-use_tls",
         "jwt_auth-secret",
         "jwt_auth-time_to_live",
@@ -182,8 +179,6 @@ def test_render_garm_toml_with_configurator_providers():
         },
     ]
     toml_content, provider_files = render_garm_toml(
-        listen_address="0.0.0.0",
-        listen_port=8080,
         jwt_secret="test-secret",
         db_passphrase="a" * 32,
         postgresql_config=_DEFAULT_PG_CONFIG,
@@ -208,13 +203,15 @@ def test_render_garm_toml_with_configurator_providers():
     assert 'cloud = "garm-configurator-0"' in provider_toml_0
 
     clouds_yaml_0 = provider_files["/etc/garm/clouds-garm-configurator-0.yaml"]
-    assert "username: admin1" in clouds_yaml_0
-    assert "password: pass1" in clouds_yaml_0
-    assert "region_name: RegionOne" in clouds_yaml_0
+    clouds_0 = yaml.safe_load(clouds_yaml_0)
+    assert clouds_0["clouds"]["garm-configurator-0"]["auth"]["username"] == "admin1"
+    assert clouds_0["clouds"]["garm-configurator-0"]["auth"]["password"] == "pass1"
+    assert clouds_0["clouds"]["garm-configurator-0"]["region_name"] == "RegionOne"
 
     clouds_yaml_1 = provider_files["/etc/garm/clouds-garm-configurator-1.yaml"]
-    assert "username: admin2" in clouds_yaml_1
-    assert "password: pass2" in clouds_yaml_1
+    clouds_1 = yaml.safe_load(clouds_yaml_1)
+    assert clouds_1["clouds"]["garm-configurator-1"]["auth"]["username"] == "admin2"
+    assert clouds_1["clouds"]["garm-configurator-1"]["auth"]["password"] == "pass2"
 
 
 def test_build_provider_list_returns_default_when_empty():
@@ -278,12 +275,40 @@ def test_build_provider_list_password_in_clouds_yaml():
     assert len(entries) == 2
 
     clouds_yaml_0 = provider_files["/etc/garm/clouds-garm-configurator-0.yaml"]
-    assert "password: pass1" in clouds_yaml_0
-    assert "username: admin1" in clouds_yaml_0
-    assert "region_name: RegionOne" in clouds_yaml_0
+    clouds_0 = yaml.safe_load(clouds_yaml_0)
+    assert clouds_0["clouds"]["garm-configurator-0"]["auth"]["password"] == "pass1"
+    assert clouds_0["clouds"]["garm-configurator-0"]["auth"]["username"] == "admin1"
+    assert clouds_0["clouds"]["garm-configurator-0"]["region_name"] == "RegionOne"
 
     clouds_yaml_1 = provider_files["/etc/garm/clouds-garm-configurator-1.yaml"]
-    assert "password: pass2" in clouds_yaml_1
+    clouds_1 = yaml.safe_load(clouds_yaml_1)
+    assert clouds_1["clouds"]["garm-configurator-1"]["auth"]["password"] == "pass2"
 
     assert entries[0]["external"]["config_file"] == "/etc/garm/provider-garm-configurator-0.toml"
     assert entries[1]["external"]["config_file"] == "/etc/garm/provider-garm-configurator-1.toml"
+
+
+def test_render_clouds_yaml_quotes_special_chars():
+    """
+    arrange: A password containing YAML-significant characters (colon, hash).
+    act: _render_clouds_yaml is called (via _build_provider_list).
+    assert: The resulting clouds.yaml is valid YAML and the password
+            parses correctly (not truncated or misinterpreted).
+    """
+    providers = [
+        {
+            "unit_name": "special-provider",
+            "auth_url": "https://keystone.example.com:5000/v3",
+            "username": "admin",
+            "password": "p@ss:w0rd#123",
+            "project_name": "proj",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionOne",
+            "network": "net1",
+        },
+    ]
+    _, provider_files = _build_provider_list(providers)
+    clouds_yaml = provider_files["/etc/garm/clouds-special-provider.yaml"]
+    parsed = yaml.safe_load(clouds_yaml)
+    assert parsed["clouds"]["special-provider"]["auth"]["password"] == "p@ss:w0rd#123"
