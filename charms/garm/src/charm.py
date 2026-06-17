@@ -823,7 +823,11 @@ class GarmCharm(paas_charm.go.Charm):
         """
         binding = self.model.get_binding(GARM_CONFIGURATOR_RELATION_NAME)
         address = binding.network.ingress_address if binding else None
-        host = str(address) if address else "127.0.0.1"
+        if not address:
+            # Don't overwrite previously-set controller URLs with a loopback placeholder.
+            logger.warning("No reachable address for GARM controller URLs yet; skipping update")
+            return
+        host = str(address)
         if ":" in host:  # bracket IPv6 literals so the URL is valid
             host = f"[{host}]"
         base = f"http://{host}:{GARM_PORT}"

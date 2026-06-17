@@ -76,7 +76,7 @@ class GithubReconciler:
         # endpoints it did not create: doing so would remove the built-in github.com endpoint
         # or any enterprise endpoints an operator configured out of band. Endpoint deletion
         # belongs with explicit custom-endpoint management, which is not in scope here.
-        observed = {e.name: e for e in self._client.list_github_endpoints()}
+        observed = {e.name: e for e in self._client.list_github_endpoints() if e.name}
         for spec in desired:
             if spec.name in observed:
                 self._maybe_update_endpoint(observed[spec.name], spec)
@@ -120,7 +120,7 @@ class GithubReconciler:
         )
 
     def _reconcile_credentials(self, desired: list[CredentialSpec]) -> None:
-        observed = {c.name: c for c in self._client.list_credentials()}
+        observed = {c.name: c for c in self._client.list_credentials() if c.name}
         desired_names = {spec.name for spec in desired}
 
         for spec in desired:
@@ -159,6 +159,11 @@ class GithubReconciler:
         # detected from REST state — that is an accepted limitation.
         if not self._credential_needs_update(observed, spec):
             logger.debug("GitHub credential '%s' is up to date", spec.name)
+            return
+        if observed.id is None:
+            logger.warning(
+                "Cannot update GitHub credential '%s': observed id is missing", spec.name
+            )
             return
         params = UpdateGithubCredentialsParams(
             description=spec.description or None,

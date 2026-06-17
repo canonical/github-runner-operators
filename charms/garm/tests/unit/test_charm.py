@@ -775,3 +775,14 @@ def test_ensure_controller_urls_sets_urls_from_binding():
         callback_url=f"http://10.1.2.3:{GARM_PORT}/api/v1/callbacks",
         webhook_url=f"http://10.1.2.3:{GARM_PORT}/webhooks",
     )
+
+
+def test_ensure_controller_urls_skips_when_no_address():
+    """Controller URLs are not overwritten with a loopback placeholder when no address is known."""
+    charm = MagicMock(spec=GarmCharm)
+    charm.model.get_binding.return_value.network.ingress_address = None
+    auth_client = MagicMock()
+
+    GarmCharm._ensure_controller_urls(charm, auth_client)
+
+    auth_client.update_controller.assert_not_called()

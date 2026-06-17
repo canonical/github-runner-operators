@@ -190,6 +190,23 @@ def test_unmanaged_orphan_credential_preserved():
     client.delete_credentials.assert_not_called()
 
 
+def test_nameless_observed_credential_ignored():
+    # A credential GARM returns without a name must not become a None map key or be deleted.
+    existing = {"name": None, "id": 5, "description": MANAGED_CREDENTIAL_DESCRIPTION}
+    client = _mock_client(endpoints=[], credentials=[existing])
+    reconciler = GithubReconciler(client)
+    reconciler.reconcile([], [])
+    client.delete_credentials.assert_not_called()
+
+
+def test_update_skipped_when_observed_credential_has_no_id():
+    existing = {"name": "app-1-2", "id": None, "description": "old description"}
+    client = _mock_client(endpoints=[], credentials=[existing])
+    reconciler = GithubReconciler(client)
+    reconciler.reconcile([], [_cred_spec(name="app-1-2", description="new description")])
+    client.update_credentials.assert_not_called()
+
+
 def test_endpoints_reconciled_before_credentials():
     # Record the call order on a shared parent mock to verify endpoints come first.
     parent = MagicMock()
