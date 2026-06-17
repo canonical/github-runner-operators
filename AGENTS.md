@@ -11,7 +11,7 @@ guidance in `.github/instructions/` and the human-facing `CONTRIBUTING.md`.
 | `charms/` | Four Juju charms (see below) plus shared integration tests in `charms/tests/integration/`. |
 | `cmd/` | Go application entry points: `planner`, `webhook-gateway`. |
 | `internal/` | Shared Go packages (`database`, `github`, `planner`, `queue`, `server`, `telemetry`, `webhook`, …) — the application logic the paas charms package and deploy. |
-| `bundles`, `images` | Juju bundles and rock/image definitions. |
+| `*-rockcraft.yaml`, `build-*-rock.sh` (repo root) | Rock/image build definitions and their build scripts. |
 | `docs/` | Diátaxis-structured docs (Read the Docs). ADRs in `docs/adr/`. |
 | `actions/`, `runner_grafana_dashboards/` | A GitHub Action and runner-host dashboards. |
 | `parts`, `prime`, `stage`, `**/lib/charms/**` | **Generated or vendored — do not edit.** `lib/charms/**` is auto-updated; see `.github/instructions/charms-lib-updates.instructions.md`. |
