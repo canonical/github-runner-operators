@@ -835,6 +835,37 @@ def test_restart_proxy_change_yields_different_hash():
     assert hash_a != hash_b
 
 
+def test_restart_no_proxy_hash_matches_on_disk_format():
+    """
+    arrange: No proxy vars are set; the charm renders config for one provider.
+    act: Run restart() and capture the config_hash it computes.
+    assert: It equals the hash of the rendered config with no trailing proxy
+            section -- identical to _get_on_disk_toml_hash's format -- so the
+            first-run fallback never triggers a spurious replan.
+    """
+    charm = _make_restart_charm()
+    charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
+
+    with patch.dict(os.environ, {}, clear=True):
+        with patch("charm.GarmApiClient"):
+            with pytest.raises(StopIteration):
+                GarmCharm.restart(charm)
+    captured = _layer_service_env(charm)["config_hash"]
+
+    toml_content, provider_files = render_garm_toml(
+        jwt_secret="test-jwt-secret",
+        db_passphrase="a" * 32,
+        postgresql_config=_DEFAULT_PG_CONFIG,
+        providers=charm._get_configurator_provider_configs.return_value,
+    )
+    expected_input = (
+        toml_content
+        + "\n"
+        + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
+    )
+    assert captured == GarmCharm._hash_toml(expected_input)
+
+
 def test_render_garm_toml_default_provider_applies_proxy_var_names():
     """
     arrange: No configurator providers but a non-empty proxy_var_names list.

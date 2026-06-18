@@ -417,16 +417,18 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Detect config changes by comparing the new config hash against
         # the hash of the config currently on disk in the container.
-        # Proxy vars are included so that a proxy change triggers a replan.
         hash_input = (
             toml_content
             + "\n"
             + "\n".join(
                 f"{path}\n{content}" for path, content in sorted(provider_files.items())
             )
-            + "\n"
-            + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         )
+        # Append proxy vars (which aren't on disk) so a proxy change triggers a
+        # replan -- only when set, to keep the no-proxy hash identical to the
+        # on-disk hash used as the first-run fallback.
+        if proxy_env:
+            hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         new_hash = self._hash_toml(hash_input)
         # Compare against the hash recorded in the running Pebble plan: it also
         # covers the proxy env vars, which are not persisted to any on-disk
