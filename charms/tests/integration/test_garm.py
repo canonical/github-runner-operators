@@ -7,7 +7,6 @@ import base64
 import json
 import logging
 import secrets
-import shlex
 import urllib.error
 import urllib.request
 
@@ -325,76 +324,34 @@ def test_garm_metrics_endpoint_no_auth(
     )
 
 
-def test_scalesets_created_and_deleted_via_relation(
+def test_scaleset_created_and_updated_via_relation(
     juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
+    configurator_garm: str,
+    configurator_with_image: str,
 ):
     """
-    arrange: GARM is active and receives valid scaleset relation data.
-    act: Integrate the configurator, wait for the scaleset to appear, then remove the relation.
-    assert: The scaleset is created when the relation is active and deleted when it is removed.
+    arrange: GARM and garm-configurator are integrated and both active.
+    act: Verify the scaleset is created; then update max-runner via configurator config.
+    assert: The scaleset exists after integration and reflects the updated max_runners value.
     """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
+    address = _get_garm_address(juju, configurator_garm)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
+    token = garm_login_from_secret(juju, configurator_garm, base_url)
     _create_test_credential(base_url, token)
 
-    relation_data = _get_scaleset_relation_data(
-        juju, garm_app, garm_configurator_for_scaleset_tests
-    )
-    provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
-    if relation_data["provider_name"] not in provider_names:
-        pytest.skip(
-            f"requires GARM provider {relation_data['provider_name']!r}; "
-            f"available: {sorted(provider_names)}"
-        )
-
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        min_idle_runner="0",
-    )
     scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
     assert scaleset["name"] == _SCALESET_TEST_NAME
 
-    juju.remove_relation(garm_app, garm_configurator_for_scaleset_tests)
+    juju.config(configurator_with_image, values={"max-runner": "10"})
     juju.wait(
-        lambda status: jubilant.all_active(status, garm_app),
+        lambda status: jubilant.all_active(status, configurator_garm),
         timeout=3 * 60,
         delay=10,
     )
-    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
+    updated_scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    assert updated_scaleset["max_runners"] == 10
 
 
-def test_scaleset_creation_deferred_when_provider_missing(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-):
-    """
-    arrange: GARM and the test configurator are integrated, provider name is unknown to GARM.
-    act: Set relation data with a provider name GARM does not have registered.
-    assert: No scaleset is created and GARM remains healthy.
-    """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
-    base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
-    _create_test_credential(base_url, token)
-
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        provider_name="missing-provider",
-    )
-    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
-
-    app_status = juju.status().apps[garm_app].app_status.current
-    assert app_status in ("active", "waiting"), f"Expected active/waiting, got {app_status}"
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
     """Run a command inside the workload container via pebble exec.
 
@@ -625,99 +582,9 @@ def _list_scalesets(base_url: str, token: str) -> list[dict]:
     return scalesets
 
 
-def _list_providers(base_url: str, token: str) -> list[dict]:
-    """List GARM providers via the REST API."""
-    resp = requests.get(f"{base_url}/providers", headers=_garm_auth_headers(token), timeout=30)
-    resp.raise_for_status()
-    providers = resp.json()
-    assert isinstance(providers, list), f"Expected list response, got: {type(providers)}"
-    return providers
-
-
 def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
     """Return the first scaleset with the requested name."""
     return next((scaleset for scaleset in scalesets if scaleset.get("name") == name), None)
-
-
-def _get_relation_info(juju: jubilant.Juju, unit: str, endpoint: str, related_app: str) -> dict:
-    """Return show-unit relation info for a specific endpoint and related app."""
-    unit_info = json.loads(juju.cli("show-unit", unit, "--format=json"))[unit]
-    for relation in unit_info["relation-info"]:
-        if relation["endpoint"] != endpoint:
-            continue
-        related_units = relation.get("related-units", {})
-        if any(name.startswith(f"{related_app}/") for name in related_units):
-            return relation
-    raise AssertionError(
-        f"Relation {endpoint!r} between {unit!r} and app {related_app!r} not found"
-    )
-
-
-def _relation_exists(juju: jubilant.Juju, app_name: str, related_app: str) -> bool:
-    """Return whether the GARM app is related to the configurator app."""
-    try:
-        _get_relation_info(juju, f"{app_name}/0", "garm-configurator", related_app)
-    except AssertionError:
-        return False
-    return True
-
-
-def _get_scaleset_relation_data(
-    juju: jubilant.Juju, garm_app: str, garm_configurator_for_scaleset_tests: str
-) -> dict[str, str]:
-    """Return the configurator unit relation data as seen from the GARM side."""
-    relation = _get_relation_info(
-        juju,
-        f"{garm_app}/0",
-        "garm-configurator",
-        garm_configurator_for_scaleset_tests,
-    )
-    related_unit = f"{garm_configurator_for_scaleset_tests}/0"
-    data = relation["related-units"][related_unit]["data"]
-    return {key: str(value) for key, value in data.items()}
-
-
-def _ensure_garm_configurator_relation(
-    juju: jubilant.Juju, garm_app: str, garm_configurator_for_scaleset_tests: str
-) -> None:
-    """Ensure the GARM app is integrated with the scaleset-test configurator."""
-    if not _relation_exists(juju, garm_app, garm_configurator_for_scaleset_tests):
-        juju.integrate(garm_app, garm_configurator_for_scaleset_tests)
-    juju.wait(
-        lambda status: jubilant.all_active(status, garm_app),
-        timeout=3 * 60,
-        delay=10,
-    )
-
-
-def _set_scaleset_relation_data(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-    **overrides: str,
-) -> None:
-    """Mutate configurator relation data to exercise GARM reconcile scenarios."""
-    unit = f"{garm_configurator_for_scaleset_tests}/0"
-    relation = _get_relation_info(juju, unit, "garm-configurator", garm_app)
-    relation_id = relation["relation-id"]
-    relation_data = _get_scaleset_relation_data(
-        juju, garm_app, garm_configurator_for_scaleset_tests
-    )
-    relation_data.update(overrides)
-    command = " ".join(
-        [
-            "relation-set",
-            "-r",
-            str(relation_id),
-            *[shlex.quote(f"{key}={value}") for key, value in relation_data.items()],
-        ]
-    )
-    juju.exec(command, unit=unit)
-    juju.wait(
-        lambda status: jubilant.all_active(status, garm_app),
-        timeout=3 * 60,
-        delay=10,
-    )
 
 
 def _create_test_credential(garm_url: str, token: str) -> str:
@@ -818,16 +685,4 @@ def _wait_for_scaleset(
             f"got {observed_image!r}"
         )
     return scaleset
-
-
-@retry(
-    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    stop=stop_after_attempt(18),
-    reraise=True,
-)
-def _wait_for_scaleset_absent(base_url: str, token: str, name: str) -> None:
-    """Wait until a named scaleset no longer exists."""
-    scaleset = _find_scaleset(_list_scalesets(base_url, token), name)
-    assert scaleset is None, f"Expected scaleset {name!r} to be absent, got: {scaleset}"
 

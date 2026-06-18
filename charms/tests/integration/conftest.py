@@ -526,31 +526,6 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
     )
     return app_name
 
-
-@pytest.fixture(scope="module", name="garm_configurator_for_scaleset_tests")
-def garm_configurator_for_scaleset_tests_fixture(
-    juju: jubilant.Juju,
-    garm_configurator_charm_file: str,
-    any_charm_image_builder_app: str,
-) -> str:
-    """Deploy garm-configurator for GARM scaleset-sync integration tests."""
-    app_name = "garm-configurator-scaleset-test"
-    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
-    juju.wait(
-        lambda status: jubilant.all_blocked(status, app_name),
-        timeout=5 * 60,
-        delay=10,
-    )
-
-    password_secret_uri = juju.add_secret(name="os-pw-scaleset", content={"value": "fake-password"})
-    private_key_secret_uri = juju.add_secret(
-        name="gh-key-scaleset", content={"value": "fake-private-key"}
-    )
-    juju.grant_secret(password_secret_uri, app_name)
-    juju.grant_secret(private_key_secret_uri, app_name)
-    return app_name
-
-
 @pytest.fixture(scope="module", name="configurator_with_image")
 def deploy_configurator_with_image_fixture(
     juju: jubilant.Juju,
@@ -604,6 +579,7 @@ def deploy_configurator_with_image_fixture(
             "os-arch": "amd64",
             "min-idle-runner": "0",
             "max-runner": "5",
+            "org": "test-org",
             "repo": "testorg/testrepo",
         },
     )
