@@ -107,15 +107,18 @@ def _build_provider_list(
           contents (provider TOML + clouds.yaml for each provider).
     """
     if not providers:
+        default_external: dict[str, typing.Any] = {
+            "config_file": "",
+            "provider_executable": OPENSTACK_PROVIDER_BINARY,
+        }
+        if proxy_var_names:
+            default_external["environment_variables"] = proxy_var_names
         return [
             {
                 "name": "openstack",
                 "provider_type": "external",
                 "description": "OpenStack provider",
-                "external": {
-                    "config_file": "",
-                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
-                },
+                "external": default_external,
             }
         ], {}
 
@@ -425,7 +428,12 @@ class GarmCharm(paas_charm.go.Charm):
             + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         )
         new_hash = self._hash_toml(hash_input)
-        previous_hash = self._get_on_disk_toml_hash(provider_files)
+        # Compare against the hash recorded in the running Pebble plan: it also
+        # covers the proxy env vars, which are not persisted to any on-disk
+        # config file. Fall back to the on-disk hash only before a plan exists.
+        previous_hash = self._get_applied_config_hash() or self._get_on_disk_toml_hash(
+            provider_files
+        )
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping restart")
             return
@@ -506,6 +514,25 @@ class GarmCharm(paas_charm.go.Charm):
 
         hash_input = existing_toml + "\n" + "\n".join(existing_provider_parts)
         return self._hash_toml(hash_input)
+
+    def _get_applied_config_hash(self) -> str | None:
+        """Return the config_hash recorded in the running Pebble plan.
+
+        The hash is stored in the service environment on each successful apply,
+        so it reflects everything the previous apply acted on -- including the
+        proxy env vars, which are not written to any on-disk config file. This
+        makes it the authoritative "previously applied" marker;
+        _get_on_disk_toml_hash is only a fallback for the very first run,
+        before any plan exists.
+
+        Returns:
+            The stored config_hash, or None if the service is not yet in the plan.
+        """
+        container = self.unit.get_container(CONTAINER_NAME)
+        service = container.get_plan().services.get(PEBBLE_SERVICE_NAME)
+        if service is None:
+            return None
+        return service.environment.get("config_hash")
 
     def _ensure_secrets(self) -> None:
         """Create garm-secrets and garm-admin-credentials juju secrets (leader only)."""

@@ -653,8 +653,14 @@ def test_render_garm_toml_with_proxy_var_names():
             "network": "net2",
         },
     ]
-    proxy_var_names = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy",
-                       "https_proxy", "no_proxy"]
+    proxy_var_names = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    ]
     toml_content, _ = render_garm_toml(
         jwt_secret="test-secret",
         db_passphrase="a" * 32,
@@ -746,7 +752,9 @@ def _make_restart_charm() -> MagicMock:
     # function — pass it directly as the side_effect.
     charm._hash_toml.side_effect = GarmCharm._hash_toml
 
-    # Container: no existing config on disk → _get_on_disk_toml_hash returns None.
+    # No prior apply and no existing config on disk → both "previous hash"
+    # sources return None, forcing the replan path.
+    charm._get_applied_config_hash.return_value = None
     charm._get_on_disk_toml_hash.return_value = None
     mock_container = MagicMock()
     charm.unit.get_container.return_value = mock_container
@@ -755,6 +763,12 @@ def _make_restart_charm() -> MagicMock:
 
 
 _SENTINEL = object()  # used to stop restart() execution before super().restart()
+
+
+def _layer_service_env(charm: MagicMock) -> dict:
+    """Return the app service environment from the layer captured by add_layer."""
+    layer_arg = charm.unit.get_container.return_value.add_layer.call_args[0][1]
+    return layer_arg["services"]["app"]["environment"]
 
 
 def test_restart_proxy_vars_appear_in_pebble_layer():
@@ -780,10 +794,8 @@ def test_restart_proxy_vars_appear_in_pebble_layer():
             with pytest.raises(StopIteration):
                 GarmCharm.restart(charm)
 
-    container = charm.unit.get_container.return_value
-    container.add_layer.assert_called_once()
-    layer_arg = container.add_layer.call_args[0][1]
-    service_env = layer_arg["services"]["app"]["environment"]
+    charm.unit.get_container.return_value.add_layer.assert_called_once()
+    service_env = _layer_service_env(charm)
 
     assert service_env["http_proxy"] == "http://proxy.example.com:3128"
     assert service_env["HTTP_PROXY"] == "http://proxy.example.com:3128"
@@ -817,9 +829,80 @@ def test_restart_proxy_change_yields_different_hash():
             with pytest.raises(StopIteration):
                 GarmCharm.restart(charm_b)
 
-    hash_a = charm_a.unit.get_container.return_value.add_layer.call_args[0][1][
-        "services"]["app"]["environment"]["config_hash"]
-    hash_b = charm_b.unit.get_container.return_value.add_layer.call_args[0][1][
-        "services"]["app"]["environment"]["config_hash"]
+    hash_a = _layer_service_env(charm_a)["config_hash"]
+    hash_b = _layer_service_env(charm_b)["config_hash"]
 
     assert hash_a != hash_b
+
+
+def test_render_garm_toml_default_provider_applies_proxy_var_names():
+    """
+    arrange: No configurator providers but a non-empty proxy_var_names list.
+    act: Call render_garm_toml() with providers=None and proxy_var_names.
+    assert: The default openstack provider forwards the proxy var names via
+            environment_variables (consistent with the per-provider path).
+    """
+    proxy_var_names = ["http_proxy", "HTTP_PROXY"]
+    toml_content, _ = render_garm_toml(
+        jwt_secret="test-secret",
+        db_passphrase="a" * 32,
+        postgresql_config=_DEFAULT_PG_CONFIG,
+        proxy_var_names=proxy_var_names,
+    )
+    parsed = tomllib.loads(toml_content)
+
+    assert parsed["provider"][0]["external"]["environment_variables"] == proxy_var_names
+
+
+def test_restart_skips_replan_when_applied_hash_matches():
+    """
+    arrange: A charm with a proxy configured; first apply records its config_hash,
+             then the plan reports that same hash with nothing else changed.
+    act: Call restart() a second time with the identical proxy/config.
+    assert: No new layer is added -- an unchanged proxy does not force a restart
+            (regression test for the proxy-vs-on-disk hash mismatch).
+    """
+    charm = _make_restart_charm()
+    proxy_env = {"JUJU_CHARM_HTTP_PROXY": "http://proxy.example.com:3128"}
+
+    charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
+    with patch.dict(os.environ, proxy_env, clear=True):
+        with patch("charm.GarmApiClient"):
+            with pytest.raises(StopIteration):
+                GarmCharm.restart(charm)
+    applied_hash = _layer_service_env(charm)["config_hash"]
+
+    charm.unit.get_container.return_value.add_layer.reset_mock()
+    charm._get_applied_config_hash.return_value = applied_hash
+    charm._maybe_first_run.side_effect = None
+    with patch.dict(os.environ, proxy_env, clear=True):
+        with patch("charm.GarmApiClient"):
+            GarmCharm.restart(charm)
+
+    charm.unit.get_container.return_value.add_layer.assert_not_called()
+
+
+def test_get_applied_config_hash_returns_stored_hash():
+    """
+    arrange: The Pebble plan reports the app service with a config_hash in its env.
+    act: Call _get_applied_config_hash().
+    assert: The stored hash is returned.
+    """
+    charm = MagicMock()
+    service = MagicMock()
+    service.environment = {"config_hash": "deadbeef"}
+    charm.unit.get_container.return_value.get_plan.return_value.services = {"app": service}
+
+    assert GarmCharm._get_applied_config_hash(charm) == "deadbeef"
+
+
+def test_get_applied_config_hash_returns_none_when_service_absent():
+    """
+    arrange: The Pebble plan has no app service yet.
+    act: Call _get_applied_config_hash().
+    assert: None is returned so callers fall back to the on-disk hash.
+    """
+    charm = MagicMock()
+    charm.unit.get_container.return_value.get_plan.return_value.services = {}
+
+    assert GarmCharm._get_applied_config_hash(charm) is None
