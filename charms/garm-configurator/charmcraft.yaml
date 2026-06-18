@@ -63,6 +63,61 @@ config:
       description: |
         Juju secret containing the GitHub App private key (PEM format).
         The secret content must have a "value" key with the private key string.
+    name:
+      type: string
+      description: |
+        The name of the scaleset.
+    flavor:
+      type: string
+      description: |
+        The resource flavor to use for runners in the scaleset.
+    os-arch:
+      type: string
+      description: |
+        The CPU architecture for runners in the scaleset.
+    min-idle-runner:
+      type: int
+      default: 0
+      description: |
+        Minimum number of idle runners in the scaleset.
+    max-runner:
+      type: int
+      default: 0
+      description: |
+        Maximum number of runners in the scaleset.
+    labels:
+      type: string
+      description: |
+        Comma-separated list of labels to add to runners.
+    repo:
+      type: string
+      description: |
+        Repository to register runners to. Mutually exclusive with org.
+    org:
+      type: string
+      description: |
+        Organization to register runners to. Mutually exclusive with repo.
+    runner-group:
+      type: string
+      default: default
+      description: |
+        Runner group for org registration. Ignored when repo is set.
+    pre-install-scripts:
+      type: string
+      description: |
+        A Python dict-like string containing key-value pairs of script name
+        to bash script to be run prior to runner installation.
+
+requires:
+  image:
+    interface: github_runner_image_v0
+    limit: 1
+    optional: false
+
+provides:
+  garm-configurator:
+    interface: garm_configurator_v0
+    limit: 1
 
 parts:
   charm:

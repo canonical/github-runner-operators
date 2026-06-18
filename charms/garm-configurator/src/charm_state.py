@@ -19,6 +19,20 @@ GITHUB_APP_CLIENT_ID_CONFIG_NAME = "github-app-client-id"
 GITHUB_APP_INSTALLATION_ID_CONFIG_NAME = "github-app-installation-id"
 GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 
+SCALESET_NAME_CONFIG_NAME = "name"
+SCALESET_FLAVOR_CONFIG_NAME = "flavor"
+SCALESET_OS_ARCH_CONFIG_NAME = "os-arch"
+SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME = "min-idle-runner"
+SCALESET_MAX_RUNNER_CONFIG_NAME = "max-runner"
+SCALESET_LABELS_CONFIG_NAME = "labels"
+SCALESET_REPO_CONFIG_NAME = "repo"
+SCALESET_ORG_CONFIG_NAME = "org"
+SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
+SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
+
+IMAGE_RELATION_NAME = "image"
+GARM_RELATION_NAME = "garm-configurator"
+
 
 class CharmConfigInvalidError(Exception):
     """Raised when charm configuration is invalid.
@@ -100,7 +114,7 @@ class ProviderConfig(BaseModel):
             )
         try:
             secret = charm.model.get_secret(id=str(password_secret_id))
-            password = secret.get_content()["value"]
+            password = secret.get_content(refresh=True)["value"]
         except (ops.SecretNotFoundError, KeyError) as e:
             raise CharmConfigInvalidError(
                 f"{OPENSTACK_PASSWORD_CONFIG_NAME} secret is invalid or missing 'value' key"
@@ -163,7 +177,7 @@ class GithubAppConfig(BaseModel):
             )
         try:
             secret = charm.model.get_secret(id=str(private_key_secret_id))
-            private_key = secret.get_content()["value"]
+            private_key = secret.get_content(refresh=True)["value"]
         except (ops.SecretNotFoundError, KeyError) as e:
             raise CharmConfigInvalidError(
                 f"{GITHUB_APP_PRIVATE_KEY_CONFIG_NAME} secret is invalid or missing 'value' key"
@@ -176,12 +190,117 @@ class GithubAppConfig(BaseModel):
         )
 
 
+class ScalesetConfig(BaseModel):
+    """Scaleset configuration.
+
+    Attributes:
+        name: The name of the scaleset.
+        flavor: The resource flavor for runners.
+        os_arch: The CPU architecture for runners.
+        min_idle_runner: Minimum number of idle runners.
+        max_runner: Maximum number of runners.
+        labels: Comma-separated list of labels for runners.
+        repo: Repository to register runners to.
+        org: Organization to register runners to.
+        runner_group: Runner group for org registration.
+        pre_install_scripts: Script name to bash script pairs for pre-installation.
+    """
+
+    name: str
+    flavor: str
+    os_arch: str
+    min_idle_runner: int
+    max_runner: int
+    labels: str = ""
+    repo: str | None = None
+    org: str | None = None
+    runner_group: str = "default"
+    pre_install_scripts: str | None = None
+
+    @classmethod
+    def from_charm(cls, charm: ops.CharmBase) -> "ScalesetConfig":
+        """Initialize the scaleset config from charm.
+
+        Args:
+            charm: The charm instance.
+
+        Raises:
+            CharmConfigInvalidError: If any configuration is missing or invalid.
+
+        Returns:
+            The parsed scaleset configuration.
+        """
+        required_string_configs = (
+            SCALESET_NAME_CONFIG_NAME,
+            SCALESET_FLAVOR_CONFIG_NAME,
+            SCALESET_OS_ARCH_CONFIG_NAME,
+        )
+        for key in required_string_configs:
+            value = charm.config.get(key)
+            if not value or not str(value).strip():
+                raise CharmConfigInvalidError(f"Missing required configuration: {key}")
+
+        min_idle_runner = int(charm.config.get(SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME, 0))
+        if min_idle_runner < 0:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME} must be non-negative"
+            )
+
+        max_runner = int(charm.config.get(SCALESET_MAX_RUNNER_CONFIG_NAME, 0))
+        if max_runner < 0:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be non-negative"
+            )
+        if max_runner < min_idle_runner:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be greater than or equal to "
+                f"{SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME}"
+            )
+
+        repo = charm.config.get(SCALESET_REPO_CONFIG_NAME)
+        repo = str(repo).strip() if repo else None
+        org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
+        org = str(org).strip() if org else None
+        runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "default")).strip()
+
+        if repo and org:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_REPO_CONFIG_NAME} and {SCALESET_ORG_CONFIG_NAME} "
+                f"are mutually exclusive"
+            )
+        if not repo and not org:
+            raise CharmConfigInvalidError(
+                f"At least one of {SCALESET_REPO_CONFIG_NAME} or "
+                f"{SCALESET_ORG_CONFIG_NAME} must be provided"
+            )
+
+        labels = charm.config.get(SCALESET_LABELS_CONFIG_NAME)
+        labels = str(labels).strip() if labels else ""
+        pre_install_scripts = charm.config.get(SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME)
+        pre_install_scripts = str(pre_install_scripts) if pre_install_scripts else None
+
+        return cls(
+            name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
+            flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
+            os_arch=str(charm.config.get(SCALESET_OS_ARCH_CONFIG_NAME)).strip(),
+            min_idle_runner=min_idle_runner,
+            max_runner=max_runner,
+            labels=labels,
+            repo=repo,
+            org=org,
+            runner_group=runner_group,
+            pre_install_scripts=pre_install_scripts,
+        )
+
+
 class CharmState:
     """The charm state.
 
     Attributes:
         provider_config: OpenStack provider configuration.
         github_app_config: GitHub App configuration.
+        scaleset_config: Scaleset configuration.
+        image_id: OpenStack image UUID received from the image builder relation, or None.
     """
 
     def __init__(
@@ -189,15 +308,21 @@ class CharmState:
         *,
         provider_config: ProviderConfig,
         github_app_config: GithubAppConfig,
+        scaleset_config: ScalesetConfig,
+        image_id: str | None,
     ) -> None:
         """Initialize the charm state.
 
         Args:
             provider_config: The OpenStack provider configuration.
             github_app_config: The GitHub App configuration.
+            scaleset_config: The scaleset configuration.
+            image_id: The OpenStack image UUID from the image builder relation.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
+        self.scaleset_config = scaleset_config
+        self.image_id = image_id
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -214,7 +339,30 @@ class CharmState:
         """
         provider_config = ProviderConfig.from_charm(charm)
         github_app_config = GithubAppConfig.from_charm(charm)
+        scaleset_config = ScalesetConfig.from_charm(charm)
+        image_id = _get_image_id_from_relation(charm)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
+            scaleset_config=scaleset_config,
+            image_id=image_id,
         )
+
+
+def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
+    """Return the OpenStack image UUID from the image builder relation, if available.
+
+    Args:
+        charm: The charm instance.
+
+    Returns:
+        The image UUID string, or None if the relation is absent or no UUID has been set yet.
+    """
+    relation = charm.model.get_relation(IMAGE_RELATION_NAME)
+    if relation is None:
+        return None
+    for unit in relation.units:
+        image_id = relation.data[unit].get("id")
+        if image_id:
+            return image_id
+    return None

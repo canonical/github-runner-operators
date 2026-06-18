@@ -8,9 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-16
+
+- Add Garm configurator relation with GARM charm and write OpenStack provider related toml configurations.
+
+## 2026-06-15
+
+- export GARM Prometheus metrics via the `metrics-endpoint` integration, with JWT authentication disabled on the `/metrics` endpoint. GARM serves its API and metrics on a single fixed port (8080); the framework's `app-port`/`metrics-port`/`metrics-path` options are not used.
+
+## 2026-06-12
+
+- add GARM HTTP API client to the GARM charm: auto-generates admin credentials on first install, calls the GARM `/first-run` endpoint automatically on startup, and stores credentials in a Juju secret (`garm-admin-credentials`).
+
+## 2026-06-08
+
+- reorder the template variables in the GitHub runner VM hostmetrics dashboard.
+- add PostgreSQL relation support for persistent storage.
+
+## 2026-06-04
+
+- add GARM Scaleset configurations for the GARM configurator charm.
+
 ## 2026-06-03
 
-Update the `includeAll` setting of the `github_runner`, `github_run_id`, and `github_run_attempt` variables for a better dashboard default experience.
+- update the `includeAll` setting of the `github_runner`, `github_run_id`, and `github_run_attempt` variables for a better dashboard default experience.
 
 ## 2026-06-02
 

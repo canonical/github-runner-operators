@@ -8,6 +8,7 @@ cryptographically
 dvipng
 fonts
 freefont
+Garm
 github
 GPG
 gyre
@@ -67,6 +68,7 @@ URL
 PR
 Read the Docs
 Spread
+toml
 landscape
 lastmod
 yaml
@@ -80,3 +82,4 @@ retrigger(ing)?
 Diátaxis
 hostmetrics
 configurator
+scaleset
