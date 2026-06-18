@@ -3,6 +3,7 @@
 
 """Unit tests for GarmCharm."""
 
+import os
 import string
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,7 @@ from charm import (
     _build_provider_list,
     _generate_admin_password,
     _generate_garm_secrets,
+    _proxy_environment,
     render_garm_toml,
 )
 from garm_api import GarmConnectionError
@@ -540,3 +542,284 @@ def test_maybe_first_run_skips_on_missing_credential_key():
         GarmCharm._maybe_first_run(charm)
 
     mock_client_cls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _proxy_environment tests
+# ---------------------------------------------------------------------------
+
+
+def test_proxy_environment_happy_path():
+    """
+    arrange: All three JUJU_CHARM_* proxy vars are set in the environment.
+    act: Call _proxy_environment().
+    assert: Returns both lower- and upper-case variants for each variable
+            with the expected values.
+    """
+    env_vars = {
+        "JUJU_CHARM_HTTP_PROXY": "http://proxy.example.com:3128",
+        "JUJU_CHARM_HTTPS_PROXY": "https://proxy.example.com:3129",
+        "JUJU_CHARM_NO_PROXY": "localhost,127.0.0.1",
+    }
+    with patch.dict(os.environ, env_vars, clear=True):
+        result = _proxy_environment()
+
+    assert result["http_proxy"] == "http://proxy.example.com:3128"
+    assert result["HTTP_PROXY"] == "http://proxy.example.com:3128"
+    assert result["https_proxy"] == "https://proxy.example.com:3129"
+    assert result["HTTPS_PROXY"] == "https://proxy.example.com:3129"
+    assert result["no_proxy"] == "localhost,127.0.0.1"
+    assert result["NO_PROXY"] == "localhost,127.0.0.1"
+    assert len(result) == 6
+
+
+@pytest.mark.parametrize(
+    "env_vars,expected_keys",
+    [
+        # Empty string values are dropped entirely.
+        (
+            {
+                "JUJU_CHARM_HTTP_PROXY": "",
+                "JUJU_CHARM_HTTPS_PROXY": "",
+                "JUJU_CHARM_NO_PROXY": "",
+            },
+            [],
+        ),
+        # Whitespace-only values are stripped and treated as empty.
+        (
+            {
+                "JUJU_CHARM_HTTP_PROXY": "   ",
+                "JUJU_CHARM_HTTPS_PROXY": "\t",
+                "JUJU_CHARM_NO_PROXY": "  ",
+            },
+            [],
+        ),
+        # Nothing set → empty result.
+        ({}, []),
+        # Only http_proxy set → only that pair is present.
+        (
+            {"JUJU_CHARM_HTTP_PROXY": "http://proxy.example.com:3128"},
+            ["http_proxy", "HTTP_PROXY"],
+        ),
+    ],
+    ids=["all-empty", "all-whitespace", "nothing-set", "only-http"],
+)
+def test_proxy_environment_edge_cases(env_vars: dict, expected_keys: list):
+    """
+    arrange: Various incomplete or empty JUJU_CHARM_* configurations.
+    act: Call _proxy_environment().
+    assert: Only keys for non-empty values appear; empty/whitespace values
+            are omitted.
+    """
+    with patch.dict(os.environ, env_vars, clear=True):
+        result = _proxy_environment()
+
+    assert set(result.keys()) == set(expected_keys)
+
+
+# ---------------------------------------------------------------------------
+# render_garm_toml with proxy_var_names tests
+# ---------------------------------------------------------------------------
+
+
+def test_render_garm_toml_with_proxy_var_names():
+    """
+    arrange: Two provider configs and a non-empty proxy_var_names list.
+    act: Call render_garm_toml() with proxy_var_names.
+    assert: Every provider's external dict contains an environment_variables
+            key equal to the supplied list.
+    """
+    providers = [
+        {
+            "unit_name": "garm-configurator-0",
+            "auth_url": "https://ks1.example.com:5000/v3",
+            "username": "admin1",
+            "password": "pass1",
+            "project_name": "proj1",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionOne",
+            "network": "net1",
+        },
+        {
+            "unit_name": "garm-configurator-1",
+            "auth_url": "https://ks2.example.com:5000/v3",
+            "username": "admin2",
+            "password": "pass2",
+            "project_name": "proj2",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionTwo",
+            "network": "net2",
+        },
+    ]
+    proxy_var_names = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy",
+                       "https_proxy", "no_proxy"]
+    toml_content, _ = render_garm_toml(
+        jwt_secret="test-secret",
+        db_passphrase="a" * 32,
+        postgresql_config=_DEFAULT_PG_CONFIG,
+        providers=providers,
+        proxy_var_names=proxy_var_names,
+    )
+    parsed = tomllib.loads(toml_content)
+
+    for provider in parsed["provider"]:
+        assert provider["external"]["environment_variables"] == proxy_var_names
+
+
+def test_render_garm_toml_no_proxy_var_names_omits_key():
+    """
+    arrange: Provider configs but no proxy_var_names (default None).
+    act: Call render_garm_toml() without proxy_var_names.
+    assert: environment_variables is absent from every provider external dict
+            (preserves existing behaviour; the existing assertion in
+            test_render_garm_toml_with_configurator_providers also covers this).
+    """
+    providers = [
+        {
+            "unit_name": "garm-configurator-0",
+            "auth_url": "https://ks1.example.com:5000/v3",
+            "username": "admin1",
+            "password": "pass1",
+            "project_name": "proj1",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionOne",
+            "network": "net1",
+        },
+    ]
+    toml_content, _ = render_garm_toml(
+        jwt_secret="test-secret",
+        db_passphrase="a" * 32,
+        postgresql_config=_DEFAULT_PG_CONFIG,
+        providers=providers,
+    )
+    parsed = tomllib.loads(toml_content)
+
+    for provider in parsed["provider"]:
+        assert "environment_variables" not in provider["external"]
+
+
+# ---------------------------------------------------------------------------
+# restart() proxy injection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_restart_charm() -> MagicMock:
+    """Build a minimal GarmCharm mock suitable for testing restart() proxy injection.
+
+    Mirrors the mock setup pattern used by existing restart-related tests.
+    The mock overrides _hash_toml and _get_on_disk_toml_hash so the actual
+    hash logic runs without needing a real Pebble container.
+    """
+    charm = MagicMock()
+    charm.is_ready.return_value = True
+    charm.config.get.return_value = None
+
+    # PostgreSQL relation data
+    charm._get_postgresql_config.return_value = _DEFAULT_PG_CONFIG
+
+    # GARM secrets
+    charm._get_secrets.return_value = {
+        "jwt-secret": "test-jwt-secret",
+        "db-passphrase": "a" * 32,
+    }
+
+    # Configurator provider configs — one real provider so render succeeds.
+    charm._get_configurator_provider_configs.return_value = [
+        {
+            "unit_name": "garm-configurator-0",
+            "auth_url": "https://ks1.example.com:5000/v3",
+            "username": "admin1",
+            "password": "pass1",
+            "project_name": "proj1",
+            "user_domain_name": "Default",
+            "project_domain_name": "Default",
+            "region_name": "RegionOne",
+            "network": "net1",
+        }
+    ]
+
+    # Wire the real hash function so hash assertions are meaningful.
+    # _hash_toml is a staticmethod, so GarmCharm._hash_toml is already a plain
+    # function — pass it directly as the side_effect.
+    charm._hash_toml.side_effect = GarmCharm._hash_toml
+
+    # Container: no existing config on disk → _get_on_disk_toml_hash returns None.
+    charm._get_on_disk_toml_hash.return_value = None
+    mock_container = MagicMock()
+    charm.unit.get_container.return_value = mock_container
+
+    return charm
+
+
+_SENTINEL = object()  # used to stop restart() execution before super().restart()
+
+
+def test_restart_proxy_vars_appear_in_pebble_layer():
+    """
+    arrange: JUJU_CHARM_HTTP_PROXY and JUJU_CHARM_HTTPS_PROXY are set; container
+             has no existing config (forces replan path).
+    act: Call GarmCharm.restart() with the charm mock, intercepting execution
+         after add_layer via a sentinel exception raised by _maybe_first_run.
+    assert: The Pebble layer passed to add_layer has the proxy vars in the
+            service environment alongside config_hash.
+    """
+    proxy_env_vars = {
+        "JUJU_CHARM_HTTP_PROXY": "http://proxy.example.com:3128",
+        "JUJU_CHARM_HTTPS_PROXY": "https://proxy.example.com:3129",
+    }
+    charm = _make_restart_charm()
+    # Raise after add_layer so we never reach super().restart(), which requires
+    # self to be a real GarmCharm instance for the zero-arg super() check.
+    charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
+
+    with patch.dict(os.environ, proxy_env_vars, clear=True):
+        with patch("charm.GarmApiClient"):
+            with pytest.raises(StopIteration):
+                GarmCharm.restart(charm)
+
+    container = charm.unit.get_container.return_value
+    container.add_layer.assert_called_once()
+    layer_arg = container.add_layer.call_args[0][1]
+    service_env = layer_arg["services"]["app"]["environment"]
+
+    assert service_env["http_proxy"] == "http://proxy.example.com:3128"
+    assert service_env["HTTP_PROXY"] == "http://proxy.example.com:3128"
+    assert service_env["https_proxy"] == "https://proxy.example.com:3129"
+    assert service_env["HTTPS_PROXY"] == "https://proxy.example.com:3129"
+    assert "config_hash" in service_env
+
+
+def test_restart_proxy_change_yields_different_hash():
+    """
+    arrange: Two restart() calls with different proxy settings, both against a
+             container with no existing config so both reach the add_layer path.
+    act: Capture config_hash from each add_layer call via the sentinel intercept.
+    assert: The two hashes differ, confirming a proxy change triggers a replan.
+    """
+    charm_a = _make_restart_charm()
+    charm_b = _make_restart_charm()
+    charm_a._maybe_first_run.side_effect = StopIteration(_SENTINEL)
+    charm_b._maybe_first_run.side_effect = StopIteration(_SENTINEL)
+
+    env_a = {"JUJU_CHARM_HTTP_PROXY": "http://proxy-a.example.com:3128"}
+    env_b = {"JUJU_CHARM_HTTP_PROXY": "http://proxy-b.example.com:9090"}
+
+    with patch.dict(os.environ, env_a, clear=True):
+        with patch("charm.GarmApiClient"):
+            with pytest.raises(StopIteration):
+                GarmCharm.restart(charm_a)
+
+    with patch.dict(os.environ, env_b, clear=True):
+        with patch("charm.GarmApiClient"):
+            with pytest.raises(StopIteration):
+                GarmCharm.restart(charm_b)
+
+    hash_a = charm_a.unit.get_container.return_value.add_layer.call_args[0][1][
+        "services"]["app"]["environment"]["config_hash"]
+    hash_b = charm_b.unit.get_container.return_value.add_layer.call_args[0][1][
+        "services"]["app"]["environment"]["config_hash"]
+
+    assert hash_a != hash_b

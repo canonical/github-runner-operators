@@ -7,6 +7,7 @@
 import dataclasses
 import hashlib
 import logging
+import os
 import secrets
 import string
 import typing
@@ -48,8 +49,36 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+# Juju injects model proxy config (juju-http-proxy/...) into the hook
+# environment as JUJU_CHARM_*. GARM and its child provider executables
+# (garm-provider-openstack -> gophercloud) honour the conventional proxy
+# variables, so we mirror each configured value into both the lower- and
+# upper-case form.
+_JUJU_PROXY_VARS: typing.Final[dict[str, str]] = {
+    "JUJU_CHARM_HTTP_PROXY": "http_proxy",
+    "JUJU_CHARM_HTTPS_PROXY": "https_proxy",
+    "JUJU_CHARM_NO_PROXY": "no_proxy",
+}
+
+
+def _proxy_environment() -> dict[str, str]:
+    """Build proxy env vars from Juju model proxy config.
+
+    Returns a mapping with both lower- and upper-case variants for each
+    non-empty Juju proxy setting, suitable for a Pebble service environment.
+    """
+    env: dict[str, str] = {}
+    for juju_var, target in _JUJU_PROXY_VARS.items():
+        value = os.environ.get(juju_var, "").strip()
+        if value:
+            env[target] = value
+            env[target.upper()] = value
+    return env
+
+
 def _build_provider_list(
     providers: list[dict[str, str]] | None,
+    proxy_var_names: list[str] | None = None,
 ) -> tuple[list[dict[str, typing.Any]], dict[str, str]]:
     r"""Build the list of [[provider]] TOML entries and provider config files.
 
@@ -65,6 +94,10 @@ def _build_provider_list(
             each with keys: unit_name, auth_url, username, password,
             project_name, user_domain_name, project_domain_name,
             region_name, network.
+        proxy_var_names: Optional list of environment variable names to
+            whitelist in each provider's ``external.environment_variables``
+            so GARM forwards them to the child provider process. When None
+            or empty, the key is omitted (preserving existing behaviour).
 
     Returns:
         A tuple of (provider_entries, provider_files):
@@ -125,15 +158,19 @@ def _build_provider_list(
         provider_files[provider_toml_path] = provider_toml
         provider_files[clouds_yaml_path] = clouds_yaml
 
+        external: dict[str, typing.Any] = {
+            "config_file": provider_toml_path,
+            "provider_executable": OPENSTACK_PROVIDER_BINARY,
+        }
+        if proxy_var_names:
+            external["environment_variables"] = proxy_var_names
+
         result.append(
             {
                 "name": unit_name,
                 "provider_type": "external",
                 "description": f"OpenStack provider ({unit_name})",
-                "external": {
-                    "config_file": provider_toml_path,
-                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
-                },
+                "external": external,
             }
         )
     return result, provider_files
@@ -168,6 +205,7 @@ def render_garm_toml(
     db_passphrase: str,
     postgresql_config: dict[str, typing.Any],
     providers: list[dict[str, str]] | None = None,
+    proxy_var_names: list[str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     """Render GARM's TOML configuration file content.
 
@@ -179,6 +217,10 @@ def render_garm_toml(
         providers: Optional list of provider config dicts from Configurator
             units. If None or empty, a default single "openstack" provider
             is used for backward compatibility.
+        proxy_var_names: Optional list of environment variable names to
+            whitelist in each provider's ``external.environment_variables``
+            so GARM forwards them to child provider processes. When None
+            or empty, the key is omitted from the provider entries.
 
     Returns:
         A tuple of (toml_content, provider_files):
@@ -186,7 +228,7 @@ def render_garm_toml(
         - provider_files: Dict mapping container file paths to their
           contents (provider config TOML + clouds.yaml for each provider).
     """
-    provider_entries, provider_files = _build_provider_list(providers)
+    provider_entries, provider_files = _build_provider_list(providers, proxy_var_names)
     config: dict[str, typing.Any] = {
         "database": {
             "backend": "postgresql",
@@ -361,21 +403,26 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
+        proxy_env = _proxy_environment()
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
             postgresql_config=postgresql_config,
             providers=provider_configs,
+            proxy_var_names=sorted(proxy_env.keys()),
         )
 
         # Detect config changes by comparing the new config hash against
         # the hash of the config currently on disk in the container.
+        # Proxy vars are included so that a proxy change triggers a replan.
         hash_input = (
             toml_content
             + "\n"
             + "\n".join(
                 f"{path}\n{content}" for path, content in sorted(provider_files.items())
             )
+            + "\n"
+            + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         )
         new_hash = self._hash_toml(hash_input)
         previous_hash = self._get_on_disk_toml_hash(provider_files)
@@ -406,6 +453,7 @@ class GarmCharm(paas_charm.go.Charm):
                         "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
                         "environment": {
                             "config_hash": new_hash,
+                            **proxy_env,
                         },
                     }
                 }
