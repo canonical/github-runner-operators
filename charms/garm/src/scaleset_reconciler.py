@@ -146,6 +146,18 @@ class ScalesetReconciler:
             logger.debug("Scaleset %s is up to date", spec.name)
             return
 
+        observed_labels = sorted(t.name for t in (observed.tags or []) if t.name)
+        if observed_labels != sorted(spec.labels):
+            # UpdateScaleSetParams has no labels field; label changes require
+            # recreating the scaleset. Log a warning so operators are aware.
+            logger.warning(
+                "Scaleset %s labels changed (%s -> %s) but cannot be updated in place;"
+                " delete and recreate the scaleset to apply label changes",
+                spec.name,
+                observed_labels,
+                sorted(spec.labels),
+            )
+
         extra_specs: dict[str, object] = {}
         if spec.pre_install_scripts:
             extra_specs["pre_install_scripts"] = spec.pre_install_scripts
@@ -167,8 +179,7 @@ class ScalesetReconciler:
     @staticmethod
     def _needs_update(observed, spec: ScalesetSpec) -> bool:
         observed_scripts = (observed.extra_specs or {}).get("pre_install_scripts", {})
-        # NOTE: The GARM ScaleSet response model does not expose a labels field,
-        # so label changes cannot be detected here and will not trigger an update.
+        observed_labels = sorted(t.name for t in (observed.tags or []) if t.name)
         return (
             observed.image != spec.image
             or observed.flavor != spec.flavor
@@ -176,4 +187,5 @@ class ScalesetReconciler:
             or observed.min_idle_runners != spec.min_idle_runners
             or observed.github_runner_group != (spec.runner_group or None)
             or observed_scripts != spec.pre_install_scripts
+            or observed_labels != sorted(spec.labels)
         )

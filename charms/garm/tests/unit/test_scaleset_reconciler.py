@@ -18,9 +18,15 @@ class _FakeProvider:
         self.name = name
 
 
+class _FakeTag:
+    def __init__(self, name):
+        self.name = name
+
+
 class _FakeScaleset:
     def __init__(self, name, sid=1, image="ubuntu-22.04", flavor="m1.small",
-                 max_runners=5, min_idle_runners=0, github_runner_group=None, extra_specs=None):
+                 max_runners=5, min_idle_runners=0, github_runner_group=None,
+                 extra_specs=None, tags=None):
         self.name = name
         self.id = sid
         self.image = image
@@ -29,6 +35,7 @@ class _FakeScaleset:
         self.min_idle_runners = min_idle_runners
         self.github_runner_group = github_runner_group
         self.extra_specs = extra_specs or {}
+        self.tags = [_FakeTag(t) for t in (tags or [])]
 
 
 class FakeGarmClient:
@@ -50,6 +57,7 @@ class FakeGarmClient:
                 min_idle_runners=ss.get("min_idle_runners", 0),
                 github_runner_group=ss.get("github_runner_group", None),
                 extra_specs=ss.get("extra_specs", {}),
+                tags=ss.get("tags", []),
             )
             for ss in (scalesets or [])
         ]
@@ -190,7 +198,8 @@ def test_create_deferred_when_dependency_missing(providers, org_id):
 
 def _existing_scaleset(**overrides):
     base = dict(name="my-scaleset", id=1, image="ubuntu-22.04", flavor="m1.small",
-                max_runners=5, min_idle_runners=0, github_runner_group=None, extra_specs={})
+                max_runners=5, min_idle_runners=0, github_runner_group=None,
+                extra_specs={}, tags=[])
     base.update(overrides)
     return base
 
