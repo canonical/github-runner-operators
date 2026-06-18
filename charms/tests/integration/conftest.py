@@ -23,6 +23,8 @@ from tests.conftest import (
 
 logger = logging.getLogger(__name__)
 
+GITHUB_PATH = "swetha1654/github-runner-operators"
+
 
 @pytest.fixture(name="planner_charm_file", scope="module")
 def planner_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
@@ -225,7 +227,7 @@ def integrate_webhook_gateway_rabbitmq_fixture(
 def github_test_hook_fixture():
     """Create and cleanup a temporary webhook in the test repository."""
     github_client = create_github_app_client()
-    repo = github_client.get_repo("canonical/github-runner-operators")
+    repo = github_client.get_repo(GITHUB_PATH)
     hook = repo.create_hook(
         name="web",
         events=["workflow_job"],

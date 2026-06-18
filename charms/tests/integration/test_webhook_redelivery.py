@@ -15,7 +15,8 @@ from tests.integration.helpers import (
     trigger_failed_workflow_job_delivery,
 )
 
-GITHUB_PATH = "swetha1654/github-runner-operators"
+from conftest import GITHUB_PATH
+
 DISPATCH_WORKFLOW_PATH = "copilot-collections-update.yml"
 
 
