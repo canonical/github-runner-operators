@@ -14,15 +14,19 @@ SET labels = (
 )
 WHERE f.labels::text <> lower(f.labels::text);
 
--- Lowercase labels of jobs still needing a runner. Completed jobs are never
--- re-matched, so their labels are left as historical data.
+-- Normalize labels of jobs still needing a runner the same way ingestion does:
+-- lowercase and strip GitHub's implicit labels (self-hosted, linux). The old
+-- case-sensitive strip left uppercased implicit labels (e.g. "Linux") in the
+-- stored array, so lowercasing alone would keep them and matching would still
+-- fail. Completed jobs are never re-matched, so their labels are left as
+-- historical data.
 UPDATE job AS j
-SET labels = (
-    SELECT COALESCE(array_agg(lower(x) ORDER BY ord), '{}')
+SET labels = COALESCE((
+    SELECT array_agg(lower(x) ORDER BY ord)
     FROM unnest(j.labels) WITH ORDINALITY AS u(x, ord)
-)
-WHERE j.completed_at IS NULL
-  AND j.labels::text <> lower(j.labels::text);
+    WHERE lower(x) NOT IN ('self-hosted', 'linux')
+), '{}')
+WHERE j.completed_at IS NULL;
 
 -- Re-run flavor assignment for unassigned, incomplete jobs that now match a
 -- flavor after lowercasing. Mirrors the application's assignment query.
