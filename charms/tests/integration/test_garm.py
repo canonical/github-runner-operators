@@ -57,6 +57,344 @@ PG8an+PHNVGDEj1cOOwp/YNQieRp/WPH6bpBtwwe0r6pQZQ=
 -----END RSA PRIVATE KEY-----"""
 
 
+def test_garm_blocks_without_postgresql(
+    juju: jubilant.Juju,
+    garm_app_deployed: str,
+):
+    """
+    arrange: The GARM charm is deployed without postgresql integration.
+    act: Observe the Juju application status.
+    assert: The application is blocked with a message about missing postgresql.
+    """
+    status = juju.status()
+    app_status = status.apps[garm_app_deployed].app_status
+    logger.info(
+        "GARM status without postgresql: %s - %s",
+        app_status.current,
+        app_status.message,
+    )
+
+    assert app_status.current == "blocked"
+    assert "postgresql" in app_status.message.lower()
+
+
+def test_garm_rock_contains_binaries(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed with the built ROCK image.
+    act: Execute a file-existence check for GARM binaries inside the workload container.
+    assert: Both the GARM server binary and the OpenStack provider binary are present.
+    """
+    unit = f"{garm_app}/0"
+    logger.info("Checking GARM binaries in unit %s", unit)
+    result = juju.exec(
+        f"{PEBBLE_PREFIX} ls /usr/local/bin/",
+        unit=unit,
+    )
+
+    assert (
+        GARM_BINARY.split("/")[-1] in result.stdout
+    ), f"Expected garm binary in /usr/local/bin/, got: {result.stdout}"
+    assert (
+        GARM_PROVIDER_BINARY.split("/")[-1] in result.stdout
+    ), f"Expected garm-provider-openstack binary in /usr/local/bin/, got: {result.stdout}"
+    logger.info("GARM binaries confirmed present: %s", result.stdout.strip())
+
+
+def test_garm_version(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed and active.
+    act: Run `garm -version` inside the workload container.
+    assert: The command exits successfully and prints a version string.
+    """
+    unit = f"{garm_app}/0"
+    logger.info("Running garm -version in unit %s", unit)
+    result = _pebble_exec(juju, unit, f"{GARM_BINARY} -version")
+
+    version_output = result.stdout.strip()
+    logger.info("GARM version: %s", version_output)
+    assert version_output, "Expected non-empty version output from garm -version"
+    # TODO: Once garm-rockcraft.yaml switches from source-commit to source-tag (>= v0.2.2),
+    # tighten this assertion to require version_output.startswith("v").
+    # Currently the ROCK is built from a shallow clone of a pinned commit, so git describe
+    # falls back to an abbreviated SHA (e.g. "47811d0") instead of a semver tag.
+    is_semver = version_output.startswith("v") or "." in version_output
+    is_commit_sha = all(c in "0123456789abcdef" for c in version_output)
+    assert (
+        is_semver or is_commit_sha
+    ), f"Expected version string (semver or commit SHA), got: {version_output}"
+
+
+def test_garm_charm_reaches_active(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: The GARM charm is deployed with postgresql & garm-configurator integrated.
+    act: Observe the Juju application status.
+    assert: The application is in active status, confirming a successful install.
+    """
+    status = juju.status()
+    current = status.apps[configurator_garm].app_status.current
+    logger.info("GARM app status: %s", current)
+
+    assert jubilant.all_active(
+        status, configurator_garm
+    ), f"Expected {configurator_garm} to be active, got: {current}"
+
+
+def test_garm_api_controller_info(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and connected to postgresql.
+    act: Complete first-run initialization and query /api/v1/controller-info.
+    assert: The controller info response contains a valid controller_id (UUID),
+        proving that GARM started, ran DB migrations, and is serving API requests.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    logger.info("GARM address: %s", address)
+
+    token = _garm_first_run(juju, address)
+    assert token, "Expected non-empty JWT token from first-run/login"
+    logger.info("Got admin JWT token (length=%d)", len(token))
+
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/controller-info", headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    info = resp.json()
+    logger.info("Controller info: %s", json.dumps(info, indent=2))
+    assert "controller_id" in info, f"Expected controller_id in response, got: {info}"
+    assert info["controller_id"], "Expected non-empty controller_id"
+
+
+def test_garm_api_list_scalesets(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and initialized with an admin user.
+    act: Query GET /api/v1/scalesets to list scale sets.
+    assert: The API returns a successful response (empty list), proving the
+        scale set query path through postgresql is functional.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    token = _garm_first_run(juju, address)
+
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
+    resp.raise_for_status()
+
+    scalesets = resp.json()
+    logger.info("Scale sets response: %s", scalesets)
+    # Fresh GARM has no scale sets configured — expect empty list
+    assert isinstance(
+        scalesets, list
+    ), f"Expected list response, got: {type(scalesets)}"
+    assert (
+        len(scalesets) == 0
+    ), f"Expected empty scale set list on fresh GARM, got: {scalesets}"
+
+
+def test_garm_pebble_service_command(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: The GARM charm is deployed and active.
+    act: Read the Pebble plan from the workload container.
+    assert: The Pebble service runs the GARM binary with the canonical config flag.
+    """
+    unit = f"{configurator_garm}/0"
+    logger.info("Reading Pebble plan from unit %s", unit)
+    result = juju.exec(
+        f"{PEBBLE_PREFIX} plan",
+        unit=unit,
+    )
+    plan_output = result.stdout
+    logger.info("Pebble plan:\n%s", plan_output)
+    assert (
+        GARM_BINARY in plan_output
+    ), f"Expected {GARM_BINARY} in pebble plan, got: {plan_output}"
+    assert (
+        f"-config {GARM_CONFIG_PATH}" in plan_output
+    ), f"Expected '-config {GARM_CONFIG_PATH}' in pebble plan, got: {plan_output}"
+
+
+def test_garm_secrets_juju_secret_has_expected_keys(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: The GARM charm is deployed and active (leader has initialised secrets).
+    act: List Juju secrets and show the garm-secrets secret content.
+    assert: The garm-secrets secret contains jwt-secret and db-passphrase keys.
+    """
+    logger.info("Listing Juju secrets")
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+
+    garm_secret_uri = None
+    for uri, info in all_secrets.items():
+        if info.get("label") == GARM_SECRETS_LABEL:
+            garm_secret_uri = uri
+            break
+
+    logger.info("Found GARM secret URI: %s", garm_secret_uri)
+    assert (
+        garm_secret_uri is not None
+    ), f"Expected a Juju secret labelled '{GARM_SECRETS_LABEL}' to exist"
+
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
+    secret = json.loads(secret_json)
+    content = secret[garm_secret_uri]["content"]["Data"]
+    logger.info("GARM secret keys: %s", list(content))
+
+    assert (
+        "jwt-secret" in content
+    ), f"Expected 'jwt-secret' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+    assert (
+        "db-passphrase" in content
+    ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
+
+
+def test_garm_admin_credentials_juju_secret_has_expected_keys(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed and active (leader has initialised secrets).
+    act: List Juju secrets and show the garm-admin-credentials secret content.
+    assert: The garm-admin-credentials secret contains username, password, email,
+        and full-name keys.
+    """
+    logger.info("Listing Juju secrets")
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+
+    admin_creds_uri = None
+    for uri, info in all_secrets.items():
+        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
+            admin_creds_uri = uri
+            break
+
+    logger.info("Found admin credentials secret URI: %s", admin_creds_uri)
+    assert (
+        admin_creds_uri is not None
+    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
+
+    admin_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
+    admin_secret = json.loads(admin_json)
+    admin_content = admin_secret[admin_creds_uri]["content"]["Data"]
+    logger.info("GARM admin credentials keys: %s", list(admin_content))
+
+    for expected_key in ("username", "password", "email", "full-name"):
+        assert expected_key in admin_content, (
+            f"Expected '{expected_key}' key in {GARM_ADMIN_CREDENTIALS_LABEL},"
+            f" got keys: {list(admin_content)}"
+        )
+
+
+def test_garm_metrics_endpoint_no_auth(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+):
+    """
+    arrange: The GARM charm is deployed, active, and connected to postgresql.
+    act: GET /metrics with no Authorization header.
+    assert: The endpoint responds 200 (JWT auth disabled) and exposes GARM metrics.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    metrics_url = f"http://{address}:{GARM_API_PORT}/metrics"
+    logger.info("Scraping GARM metrics (no auth) at %s", metrics_url)
+
+    resp = _scrape_metrics_until_ready(metrics_url)
+    # _scrape_metrics_until_ready only returns on a 200 response containing garm_health.
+    assert "garm_health" in resp.text, (
+        "Expected the garm_health metric in the /metrics response; "
+        f"got first 500 chars: {resp.text[:500]}"
+    )
+
+
+def test_scalesets_created_and_deleted_via_relation(
+    juju: jubilant.Juju,
+    garm_app: str,
+    garm_configurator_for_scaleset_tests: str,
+):
+    """
+    arrange: GARM is active and receives valid scaleset relation data.
+    act: Integrate the configurator, wait for the scaleset to appear, then remove the relation.
+    assert: The scaleset is created when the relation is active and deleted when it is removed.
+    """
+    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
+    address = _get_garm_address(juju, garm_app)
+    base_url = _garm_api_base_url(address)
+    token = garm_login_from_secret(juju, garm_app, base_url)
+    _create_test_credential(base_url, token)
+
+    relation_data = _get_scaleset_relation_data(
+        juju, garm_app, garm_configurator_for_scaleset_tests
+    )
+    provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
+    if relation_data["provider_name"] not in provider_names:
+        pytest.skip(
+            f"requires GARM provider {relation_data['provider_name']!r}; "
+            f"available: {sorted(provider_names)}"
+        )
+
+    _set_scaleset_relation_data(
+        juju,
+        garm_app,
+        garm_configurator_for_scaleset_tests,
+        min_idle_runner="0",
+    )
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    assert scaleset["name"] == _SCALESET_TEST_NAME
+
+    juju.remove_relation(garm_app, garm_configurator_for_scaleset_tests)
+    juju.wait(
+        lambda status: jubilant.all_active(status, garm_app),
+        timeout=3 * 60,
+        delay=10,
+    )
+    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
+
+
+def test_scaleset_creation_deferred_when_provider_missing(
+    juju: jubilant.Juju,
+    garm_app: str,
+    garm_configurator_for_scaleset_tests: str,
+):
+    """
+    arrange: GARM and the test configurator are integrated, provider name is unknown to GARM.
+    act: Set relation data with a provider name GARM does not have registered.
+    assert: No scaleset is created and GARM remains healthy.
+    """
+    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
+    address = _get_garm_address(juju, garm_app)
+    base_url = _garm_api_base_url(address)
+    token = garm_login_from_secret(juju, garm_app, base_url)
+    _create_test_credential(base_url, token)
+
+    _set_scaleset_relation_data(
+        juju,
+        garm_app,
+        garm_configurator_for_scaleset_tests,
+        provider_name="missing-provider",
+    )
+    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
+
+    app_status = juju.status().apps[garm_app].app_status.current
+    assert app_status in ("active", "waiting"), f"Expected active/waiting, got {app_status}"
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
     """Run a command inside the workload container via pebble exec.
 
@@ -493,342 +831,3 @@ def _wait_for_scaleset_absent(base_url: str, token: str, name: str) -> None:
     scaleset = _find_scaleset(_list_scalesets(base_url, token), name)
     assert scaleset is None, f"Expected scaleset {name!r} to be absent, got: {scaleset}"
 
-
-def test_garm_blocks_without_postgresql(
-    juju: jubilant.Juju,
-    garm_app_deployed: str,
-):
-    """
-    arrange: The GARM charm is deployed without postgresql integration.
-    act: Observe the Juju application status.
-    assert: The application is blocked with a message about missing postgresql.
-    """
-    status = juju.status()
-    app_status = status.apps[garm_app_deployed].app_status
-    logger.info(
-        "GARM status without postgresql: %s - %s",
-        app_status.current,
-        app_status.message,
-    )
-
-    assert app_status.current == "blocked"
-    assert "postgresql" in app_status.message.lower()
-
-
-def test_garm_rock_contains_binaries(
-    juju: jubilant.Juju,
-    garm_app: str,
-):
-    """
-    arrange: The GARM charm is deployed with the built ROCK image.
-    act: Execute a file-existence check for GARM binaries inside the workload container.
-    assert: Both the GARM server binary and the OpenStack provider binary are present.
-    """
-    unit = f"{garm_app}/0"
-    logger.info("Checking GARM binaries in unit %s", unit)
-    result = juju.exec(
-        f"{PEBBLE_PREFIX} ls /usr/local/bin/",
-        unit=unit,
-    )
-
-    assert (
-        GARM_BINARY.split("/")[-1] in result.stdout
-    ), f"Expected garm binary in /usr/local/bin/, got: {result.stdout}"
-    assert (
-        GARM_PROVIDER_BINARY.split("/")[-1] in result.stdout
-    ), f"Expected garm-provider-openstack binary in /usr/local/bin/, got: {result.stdout}"
-    logger.info("GARM binaries confirmed present: %s", result.stdout.strip())
-
-
-def test_garm_version(
-    juju: jubilant.Juju,
-    garm_app: str,
-):
-    """
-    arrange: The GARM charm is deployed and active.
-    act: Run `garm -version` inside the workload container.
-    assert: The command exits successfully and prints a version string.
-    """
-    unit = f"{garm_app}/0"
-    logger.info("Running garm -version in unit %s", unit)
-    result = _pebble_exec(juju, unit, f"{GARM_BINARY} -version")
-
-    version_output = result.stdout.strip()
-    logger.info("GARM version: %s", version_output)
-    assert version_output, "Expected non-empty version output from garm -version"
-    # TODO: Once garm-rockcraft.yaml switches from source-commit to source-tag (>= v0.2.2),
-    # tighten this assertion to require version_output.startswith("v").
-    # Currently the ROCK is built from a shallow clone of a pinned commit, so git describe
-    # falls back to an abbreviated SHA (e.g. "47811d0") instead of a semver tag.
-    is_semver = version_output.startswith("v") or "." in version_output
-    is_commit_sha = all(c in "0123456789abcdef" for c in version_output)
-    assert (
-        is_semver or is_commit_sha
-    ), f"Expected version string (semver or commit SHA), got: {version_output}"
-
-
-def test_garm_charm_reaches_active(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed with postgresql & garm-configurator integrated.
-    act: Observe the Juju application status.
-    assert: The application is in active status, confirming a successful install.
-    """
-    status = juju.status()
-    current = status.apps[configurator_garm].app_status.current
-    logger.info("GARM app status: %s", current)
-
-    assert jubilant.all_active(
-        status, configurator_garm
-    ), f"Expected {configurator_garm} to be active, got: {current}"
-
-
-def test_garm_api_controller_info(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed, active, and connected to postgresql.
-    act: Complete first-run initialization and query /api/v1/controller-info.
-    assert: The controller info response contains a valid controller_id (UUID),
-        proving that GARM started, ran DB migrations, and is serving API requests.
-    """
-    address = _get_garm_address(juju, configurator_garm)
-    logger.info("GARM address: %s", address)
-
-    token = _garm_first_run(juju, address)
-    assert token, "Expected non-empty JWT token from first-run/login"
-    logger.info("Got admin JWT token (length=%d)", len(token))
-
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{base_url}/controller-info", headers=headers, timeout=30)
-    resp.raise_for_status()
-
-    info = resp.json()
-    logger.info("Controller info: %s", json.dumps(info, indent=2))
-    assert "controller_id" in info, f"Expected controller_id in response, got: {info}"
-    assert info["controller_id"], "Expected non-empty controller_id"
-
-
-def test_garm_api_list_scalesets(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed, active, and initialized with an admin user.
-    act: Query GET /api/v1/scalesets to list scale sets.
-    assert: The API returns a successful response (empty list), proving the
-        scale set query path through postgresql is functional.
-    """
-    address = _get_garm_address(juju, configurator_garm)
-    token = _garm_first_run(juju, address)
-
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
-    resp.raise_for_status()
-
-    scalesets = resp.json()
-    logger.info("Scale sets response: %s", scalesets)
-    # Fresh GARM has no scale sets configured — expect empty list
-    assert isinstance(
-        scalesets, list
-    ), f"Expected list response, got: {type(scalesets)}"
-    assert (
-        len(scalesets) == 0
-    ), f"Expected empty scale set list on fresh GARM, got: {scalesets}"
-
-
-def test_garm_pebble_service_command(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed and active.
-    act: Read the Pebble plan from the workload container.
-    assert: The Pebble service runs the GARM binary with the canonical config flag.
-    """
-    unit = f"{configurator_garm}/0"
-    logger.info("Reading Pebble plan from unit %s", unit)
-    result = juju.exec(
-        f"{PEBBLE_PREFIX} plan",
-        unit=unit,
-    )
-    plan_output = result.stdout
-    logger.info("Pebble plan:\n%s", plan_output)
-    assert (
-        GARM_BINARY in plan_output
-    ), f"Expected {GARM_BINARY} in pebble plan, got: {plan_output}"
-    assert (
-        f"-config {GARM_CONFIG_PATH}" in plan_output
-    ), f"Expected '-config {GARM_CONFIG_PATH}' in pebble plan, got: {plan_output}"
-
-
-def test_garm_secrets_juju_secret_has_expected_keys(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed and active (leader has initialised secrets).
-    act: List Juju secrets and show the garm-secrets secret content.
-    assert: The garm-secrets secret contains jwt-secret and db-passphrase keys.
-    """
-    logger.info("Listing Juju secrets")
-    secrets_json = juju.cli("secrets", "--format=json")
-    all_secrets = json.loads(secrets_json)
-
-    garm_secret_uri = None
-    for uri, info in all_secrets.items():
-        if info.get("label") == GARM_SECRETS_LABEL:
-            garm_secret_uri = uri
-            break
-
-    logger.info("Found GARM secret URI: %s", garm_secret_uri)
-    assert (
-        garm_secret_uri is not None
-    ), f"Expected a Juju secret labelled '{GARM_SECRETS_LABEL}' to exist"
-
-    secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
-    secret = json.loads(secret_json)
-    content = secret[garm_secret_uri]["content"]["Data"]
-    logger.info("GARM secret keys: %s", list(content))
-
-    assert (
-        "jwt-secret" in content
-    ), f"Expected 'jwt-secret' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
-    assert (
-        "db-passphrase" in content
-    ), f"Expected 'db-passphrase' key in {GARM_SECRETS_LABEL}, got keys: {list(content)}"
-
-
-def test_garm_admin_credentials_juju_secret_has_expected_keys(
-    juju: jubilant.Juju,
-    garm_app: str,
-):
-    """
-    arrange: The GARM charm is deployed and active (leader has initialised secrets).
-    act: List Juju secrets and show the garm-admin-credentials secret content.
-    assert: The garm-admin-credentials secret contains username, password, email,
-        and full-name keys.
-    """
-    logger.info("Listing Juju secrets")
-    secrets_json = juju.cli("secrets", "--format=json")
-    all_secrets = json.loads(secrets_json)
-
-    admin_creds_uri = None
-    for uri, info in all_secrets.items():
-        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
-            admin_creds_uri = uri
-            break
-
-    logger.info("Found admin credentials secret URI: %s", admin_creds_uri)
-    assert (
-        admin_creds_uri is not None
-    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
-
-    admin_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
-    admin_secret = json.loads(admin_json)
-    admin_content = admin_secret[admin_creds_uri]["content"]["Data"]
-    logger.info("GARM admin credentials keys: %s", list(admin_content))
-
-    for expected_key in ("username", "password", "email", "full-name"):
-        assert expected_key in admin_content, (
-            f"Expected '{expected_key}' key in {GARM_ADMIN_CREDENTIALS_LABEL},"
-            f" got keys: {list(admin_content)}"
-        )
-
-
-def test_garm_metrics_endpoint_no_auth(
-    juju: jubilant.Juju,
-    configurator_garm: str,
-):
-    """
-    arrange: The GARM charm is deployed, active, and connected to postgresql.
-    act: GET /metrics with no Authorization header.
-    assert: The endpoint responds 200 (JWT auth disabled) and exposes GARM metrics.
-    """
-    address = _get_garm_address(juju, configurator_garm)
-    metrics_url = f"http://{address}:{GARM_API_PORT}/metrics"
-    logger.info("Scraping GARM metrics (no auth) at %s", metrics_url)
-
-    resp = _scrape_metrics_until_ready(metrics_url)
-    # _scrape_metrics_until_ready only returns on a 200 response containing garm_health.
-    assert "garm_health" in resp.text, (
-        "Expected the garm_health metric in the /metrics response; "
-        f"got first 500 chars: {resp.text[:500]}"
-    )
-
-
-def test_scalesets_created_and_deleted_via_relation(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-):
-    """
-    arrange: GARM is active and receives valid scaleset relation data.
-    act: Integrate the configurator, wait for the scaleset to appear, then remove the relation.
-    assert: The scaleset is created when the relation is active and deleted when it is removed.
-    """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
-    base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
-    _create_test_credential(base_url, token)
-
-    relation_data = _get_scaleset_relation_data(
-        juju, garm_app, garm_configurator_for_scaleset_tests
-    )
-    provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
-    if relation_data["provider_name"] not in provider_names:
-        pytest.skip(
-            f"requires GARM provider {relation_data['provider_name']!r}; "
-            f"available: {sorted(provider_names)}"
-        )
-
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        min_idle_runner="1",
-    )
-    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-    assert scaleset["name"] == _SCALESET_TEST_NAME
-
-    juju.remove_relation(garm_app, garm_configurator_for_scaleset_tests)
-    juju.wait(
-        lambda status: jubilant.all_active(status, garm_app),
-        timeout=3 * 60,
-        delay=10,
-    )
-    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
-
-
-def test_scaleset_creation_deferred_when_provider_missing(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-):
-    """
-    arrange: GARM and the test configurator are integrated, provider name is unknown to GARM.
-    act: Set relation data with a provider name GARM does not have registered.
-    assert: No scaleset is created and GARM remains healthy.
-    """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
-    base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
-    _create_test_credential(base_url, token)
-
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        provider_name="missing-provider",
-    )
-    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
-
-    app_status = juju.status().apps[garm_app].app_status.current
-    assert app_status in ("active", "waiting"), f"Expected active/waiting, got {app_status}"

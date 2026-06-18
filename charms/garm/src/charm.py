@@ -390,7 +390,8 @@ class GarmCharm(paas_charm.go.Charm):
         new_hash = self._hash_toml(hash_input)
         previous_hash = self._get_on_disk_toml_hash(provider_files)
         if previous_hash == new_hash:
-            logger.debug("TOML config unchanged; skipping restart")
+            logger.debug("TOML config unchanged; skipping service restart")
+            self._reconcile_scalesets()
             return
 
         # Log non-sensitive metadata about the config change.

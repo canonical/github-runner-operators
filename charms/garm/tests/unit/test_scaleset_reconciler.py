@@ -137,7 +137,11 @@ def _reconcile(client, desired):
     ids=["org-entity", "repo-entity"],
 )
 def test_create_scaleset(entity_type, entity_name, create_key, expected_entity_id):
-    """A scaleset absent from GARM is created under the correct entity."""
+    """
+    arrange: FakeGarmClient with the provider registered and no existing scalesets.
+    act: Reconcile a desired spec for an org or repo entity.
+    assert: Exactly one scaleset is created under the correct entity; no updates or deletes.
+    """
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[],
@@ -166,7 +170,11 @@ def test_create_scaleset(entity_type, entity_name, create_key, expected_entity_i
     ids=["provider-missing", "entity-not-registered"],
 )
 def test_create_deferred_when_dependency_missing(providers, org_id):
-    """Creation is deferred (not attempted) when provider or entity is absent."""
+    """
+    arrange: FakeGarmClient missing either the provider or the entity registration.
+    act: Reconcile a desired spec.
+    assert: No scaleset is created, updated, or deleted.
+    """
     client = FakeGarmClient(providers=providers, scalesets=[], org_id=org_id)
     _reconcile(client, [_spec()])
 
@@ -198,7 +206,11 @@ def _existing_scaleset(**overrides):
     ids=["image-changed", "flavor-changed", "max-runners-changed", "min-idle-changed"],
 )
 def test_update_when_field_changed(changed_field, new_value, spec_kwarg):
-    """An existing scaleset is updated when any tracked field differs."""
+    """
+    arrange: FakeGarmClient with one existing scaleset whose tracked field differs from spec.
+    act: Reconcile a desired spec with the changed field.
+    assert: Exactly one update is issued; no creates or deletes.
+    """
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset()],
@@ -213,7 +225,11 @@ def test_update_when_field_changed(changed_field, new_value, spec_kwarg):
 
 
 def test_no_update_when_scaleset_unchanged():
-    """An existing scaleset that matches the desired state is left untouched."""
+    """
+    arrange: FakeGarmClient with one existing scaleset that matches the desired spec exactly.
+    act: Reconcile with that spec.
+    assert: No creates, updates, or deletes are issued.
+    """
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset()],
@@ -231,7 +247,11 @@ def test_no_update_when_scaleset_unchanged():
 
 
 def test_delete_orphaned_scaleset():
-    """A scaleset not in the desired set is deleted."""
+    """
+    arrange: FakeGarmClient with an observed scaleset not present in the desired set.
+    act: Reconcile with a different desired scaleset name.
+    assert: The orphaned scaleset id is in deleted; new scaleset is created.
+    """
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
@@ -250,7 +270,11 @@ def test_delete_orphaned_scaleset():
     ids=["empty-state", "deferred-spec-preserves-existing"],
 )
 def test_no_delete(providers, scalesets, desired, expected_deleted):
-    """No scalesets are deleted when state is empty or the spec is deferred."""
+    """
+    arrange: FakeGarmClient in an empty state or with a deferred (no-provider) spec.
+    act: Reconcile.
+    assert: No scalesets are deleted.
+    """
     client = FakeGarmClient(providers=providers, scalesets=scalesets)
     _reconcile(client, desired)
 
@@ -263,7 +287,11 @@ def test_no_delete(providers, scalesets, desired, expected_deleted):
 
 
 def test_pre_install_scripts_passed_in_create():
-    """pre_install_scripts are included in extra_specs when creating a scaleset."""
+    """
+    arrange: FakeGarmClient with provider registered and no existing scalesets.
+    act: Reconcile a spec containing pre_install_scripts.
+    assert: Created scaleset params include extra_specs with the script mapping.
+    """
     scripts = {"setup.sh": "#!/bin/bash\napt-get update"}
     client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
     _reconcile(client, [_spec(pre_install_scripts=scripts)])

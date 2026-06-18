@@ -40,7 +40,11 @@ def _stub_api_client(client):
     ids=["200-ok", "409-not-initialised"],
 )
 def test_is_initialized(side_effect, expected):
-    """is_initialized returns True on 200 and False on 409."""
+    """
+    arrange: GarmApiClient pointed at BASE_URL with a stubbed api_client.
+    act: Call is_initialized(); ControllerInfoApi raises ApiException(409) or succeeds.
+    assert: Returns True on success, False on 409.
+    """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.ControllerInfoApi") as MockApi:
@@ -51,7 +55,11 @@ def test_is_initialized(side_effect, expected):
 
 
 def test_is_initialized_raises_on_unexpected_status():
-    """is_initialized raises GarmApiError for any status other than 200/409."""
+    """
+    arrange: GarmApiClient with ControllerInfoApi raising ApiException(500).
+    act: Call is_initialized().
+    assert: GarmApiError is raised.
+    """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.ControllerInfoApi") as MockApi:
@@ -66,14 +74,22 @@ def test_is_initialized_raises_on_unexpected_status():
 
 
 def test_wait_for_ready_returns_immediately_when_ready():
-    """wait_for_ready returns without sleeping when GARM is already up."""
+    """
+    arrange: GarmApiClient with is_initialized returning True immediately.
+    act: Call wait_for_ready(timeout=5).
+    assert: Returns without error and without sleeping.
+    """
     client = GarmApiClient(BASE_URL)
     with patch.object(client, "is_initialized", return_value=True):
         client.wait_for_ready(timeout=5)
 
 
 def test_wait_for_ready_raises_after_timeout():
-    """wait_for_ready raises GarmConnectionError when GARM never responds."""
+    """
+    arrange: GarmApiClient with is_initialized always raising GarmConnectionError.
+    act: Call wait_for_ready(timeout=30) with monotonic clock simulating timeout.
+    assert: GarmConnectionError is raised mentioning readiness.
+    """
     client = GarmApiClient(BASE_URL)
     with patch.object(client, "is_initialized", side_effect=GarmConnectionError("refused")):
         with patch("garm_api.time.sleep"):
@@ -88,7 +104,11 @@ def test_wait_for_ready_raises_after_timeout():
 
 
 def test_first_run_succeeds():
-    """first_run completes without error on a successful API response."""
+    """
+    arrange: GarmApiClient with FirstRunApi returning a mock response.
+    act: Call first_run with valid credentials.
+    assert: Completes without error.
+    """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.FirstRunApi") as MockApi:
@@ -97,7 +117,11 @@ def test_first_run_succeeds():
 
 
 def test_first_run_raises_on_api_error():
-    """first_run raises GarmApiError when the API returns an error status."""
+    """
+    arrange: GarmApiClient with FirstRunApi raising ApiException(400).
+    act: Call first_run with credentials.
+    assert: GarmApiError is raised.
+    """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.FirstRunApi") as MockApi:
@@ -112,7 +136,11 @@ def test_first_run_raises_on_api_error():
 
 
 def test_login_returns_token():
-    """login returns the JWT token string from a successful response."""
+    """
+    arrange: GarmApiClient with LoginApi returning a mock result with token="test-jwt-token".
+    act: Call login("admin", "password").
+    assert: Returns the token string.
+    """
     client = GarmApiClient(BASE_URL)
     mock_result = MagicMock()
     mock_result.token = "test-jwt-token"
@@ -132,7 +160,11 @@ def test_login_returns_token():
     ids=["none-token", "empty-token"],
 )
 def test_login_raises_when_token_missing(token_value, error_type):
-    """login raises GarmApiError when the response token is absent or empty."""
+    """
+    arrange: GarmApiClient with LoginApi returning a response with an absent or empty token.
+    act: Call login("admin", "password").
+    assert: GarmApiError is raised mentioning "token".
+    """
     client = GarmApiClient(BASE_URL)
     mock_result = MagicMock()
     mock_result.token = token_value
@@ -144,7 +176,11 @@ def test_login_raises_when_token_missing(token_value, error_type):
 
 
 def test_login_raises_on_api_error():
-    """login raises GarmApiError when the API returns an error status."""
+    """
+    arrange: GarmApiClient with LoginApi raising ApiException(401).
+    act: Call login("admin", "wrong").
+    assert: GarmApiError is raised.
+    """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.LoginApi") as MockApi:
@@ -168,7 +204,11 @@ def test_login_raises_on_api_error():
     ids=["two-providers", "none-response", "empty-list"],
 )
 def test_list_providers(api_response, expected_names):
-    """list_providers returns the correct provider names, or [] when the API returns None."""
+    """
+    arrange: GarmAuthenticatedClient with ProvidersApi returning the parameterised response.
+    act: Call list_providers().
+    assert: Returns a list of providers with the expected names, or [] when API returns None.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     if api_response is not None:
         mocks = []
@@ -200,7 +240,11 @@ def test_list_providers(api_response, expected_names):
     ids=["two-scalesets", "none-response"],
 )
 def test_list_scalesets(api_response, expected_names):
-    """list_scalesets returns the correct scaleset names, or [] when the API returns None."""
+    """
+    arrange: GarmAuthenticatedClient with ScalesetsApi returning the parameterised response.
+    act: Call list_scalesets().
+    assert: Returns a list of scalesets with the expected names, or [] when API returns None.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     if api_response is not None:
         mocks = []
@@ -234,7 +278,11 @@ def test_list_scalesets(api_response, expected_names):
     ids=["found", "not-found", "empty-list"],
 )
 def test_find_org_id(target, registered, expected):
-    """find_org_id returns the UUID when the org is registered, else None."""
+    """
+    arrange: GarmAuthenticatedClient with OrganizationsApi listing the parameterised orgs.
+    act: Call find_org_id(target).
+    assert: Returns the UUID when found, None when absent.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     mocks = []
     for i, name in enumerate(registered):
@@ -258,7 +306,11 @@ def test_find_org_id(target, registered, expected):
     ids=["found", "not-found"],
 )
 def test_find_repo_id(target, registered, expected):
-    """find_repo_id returns the UUID when the repo is registered, else None."""
+    """
+    arrange: GarmAuthenticatedClient with RepositoriesApi listing the parameterised repos.
+    act: Call find_repo_id(target).
+    assert: Returns the UUID when found, None when absent.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     mocks = []
     for i, name in enumerate(registered):
@@ -279,7 +331,11 @@ def test_find_repo_id(target, registered, expected):
 
 
 def test_delete_scaleset_succeeds():
-    """delete_scaleset completes without error and passes the correct scaleset_id."""
+    """
+    arrange: GarmAuthenticatedClient with ScalesetsApi stubbed.
+    act: Call delete_scaleset(42).
+    assert: delete_scale_set is called with scaleset_id="42" and the correct timeout.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     with _stub_api_client(client):
         with patch("garm_api.ScalesetsApi") as MockApi:
@@ -290,7 +346,11 @@ def test_delete_scaleset_succeeds():
 
 
 def test_delete_scaleset_raises_on_api_error():
-    """delete_scaleset raises GarmApiError when the API returns an error status."""
+    """
+    arrange: GarmAuthenticatedClient with ScalesetsApi raising ApiException(404).
+    act: Call delete_scaleset(99).
+    assert: GarmApiError is raised.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     with _stub_api_client(client):
         with patch("garm_api.ScalesetsApi") as MockApi:
