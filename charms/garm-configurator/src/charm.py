@@ -132,8 +132,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         When the image UUID is present and this unit holds leadership, also
         provisions Juju secrets for the OpenStack password and GitHub App
-        private key, and writes the full OpenStack provider and GitHub App
-        credential fields alongside their secret URIs in the same update call.
+        private key, then writes the full OpenStack provider and GitHub App
+        credential fields alongside their secret URIs.
 
         Does nothing when no garm-configurator relation is joined yet or when
         secrets cannot be created (non-leader unit). Status reporting is
@@ -147,67 +147,63 @@ class GarmConfiguratorCharm(ops.CharmBase):
             return
 
         pre_install = state.scaleset_config.pre_install_scripts
-        relation_data: dict[str, str] = {
-            "name": state.scaleset_config.name,
-            "provider_name": state.provider_name,
-            "credentials_name": state.credentials_name,
-            "image_id": state.image_id or "",
-            "flavor": state.scaleset_config.flavor,
-            "os_arch": state.scaleset_config.os_arch,
-            "min_idle_runner": str(state.scaleset_config.min_idle_runner),
-            "max_runner": str(state.scaleset_config.max_runner),
-            "labels": (
-                state.scaleset_config.labels
-                if isinstance(state.scaleset_config.labels, str)
-                else ",".join(state.scaleset_config.labels)
-            ),
-            "runner_group": state.scaleset_config.runner_group,
-            "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
-            if pre_install
-            else "",
-        }
-        if state.scaleset_config.org:
-            relation_data["org"] = state.scaleset_config.org
-        if state.scaleset_config.repo:
-            relation_data["repo"] = state.scaleset_config.repo
+        garm_relation.data[self.unit].update(
+            {
+                "name": state.scaleset_config.name,
+                "provider_name": state.provider_name,
+                "credentials_name": state.credentials_name,
+                "image_id": state.image_id or "",
+                "flavor": state.scaleset_config.flavor,
+                "os_arch": state.scaleset_config.os_arch,
+                "min_idle_runner": str(state.scaleset_config.min_idle_runner),
+                "max_runner": str(state.scaleset_config.max_runner),
+                "labels": (
+                    state.scaleset_config.labels
+                    if isinstance(state.scaleset_config.labels, str)
+                    else ",".join(state.scaleset_config.labels)
+                ),
+                "runner_group": state.scaleset_config.runner_group,
+                "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
+                if pre_install
+                else "",
+                **({"org": state.scaleset_config.org} if state.scaleset_config.org else {}),
+                **({"repo": state.scaleset_config.repo} if state.scaleset_config.repo else {}),
+            }
+        )
 
-        if state.image_id is not None:
-            password_secret = self._ensure_relation_secret(
-                garm_relation,
-                "configurator-password",
-                state.provider_config.password,
-            )
-            github_key_secret = self._ensure_relation_secret(
-                garm_relation,
-                "configurator-github-key",
-                state.github_app_config.private_key,
-            )
-            if password_secret is not None and github_key_secret is not None:
-                relation_data.update(
-                    {
-                        "openstack_auth_url": state.provider_config.auth_url,
-                        "openstack_username": state.provider_config.username,
-                        "openstack_password_secret_uri": password_secret.id,
-                        "openstack_project_name": state.provider_config.project_name,
-                        "openstack_user_domain_name": state.provider_config.user_domain_name,
-                        "openstack_project_domain_name": state.provider_config.project_domain_name,
-                        "openstack_region_name": state.provider_config.region_name,
-                        "openstack_network": state.provider_config.network,
-                        "github_client_id": state.github_app_config.client_id,
-                        "github_installation_id": state.github_app_config.installation_id,
-                        "github_private_key_secret_uri": github_key_secret.id,
-                        "scaleset_name": state.scaleset_config.name,
-                        "scaleset_flavor": state.scaleset_config.flavor,
-                        "scaleset_os_arch": state.scaleset_config.os_arch,
-                        "scaleset_min_idle_runner": str(state.scaleset_config.min_idle_runner),
-                        "scaleset_max_runner": str(state.scaleset_config.max_runner),
-                        "scaleset_labels": state.scaleset_config.labels,
-                        "scaleset_runner_group": state.scaleset_config.runner_group,
-                        "image_id": state.image_id,
-                    }
-                )
+        if state.image_id is None:
+            return
 
-        garm_relation.data[self.unit].update(relation_data)
+        password_secret = self._ensure_relation_secret(
+            garm_relation,
+            "configurator-password",
+            state.provider_config.password,
+        )
+        github_key_secret = self._ensure_relation_secret(
+            garm_relation,
+            "configurator-github-key",
+            state.github_app_config.private_key,
+        )
+
+        if password_secret is None or github_key_secret is None:
+            return
+
+        garm_relation.data[self.unit].update(
+            {
+                "openstack_auth_url": state.provider_config.auth_url,
+                "openstack_username": state.provider_config.username,
+                "openstack_password_secret_uri": password_secret.id,
+                "openstack_project_name": state.provider_config.project_name,
+                "openstack_user_domain_name": state.provider_config.user_domain_name,
+                "openstack_project_domain_name": state.provider_config.project_domain_name,
+                "openstack_region_name": state.provider_config.region_name,
+                "openstack_network": state.provider_config.network,
+                "github_client_id": state.github_app_config.client_id,
+                "github_installation_id": state.github_app_config.installation_id,
+                "github_private_key_secret_uri": github_key_secret.id,
+                "image_id": state.image_id,
+            }
+        )
 
 
 if __name__ == "__main__":
