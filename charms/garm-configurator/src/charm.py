@@ -147,29 +147,30 @@ class GarmConfiguratorCharm(ops.CharmBase):
             return
 
         pre_install = state.scaleset_config.pre_install_scripts
-        garm_relation.data[self.unit].update(
-            {
-                "name": state.scaleset_config.name,
-                "provider_name": state.provider_name,
-                "credentials_name": state.credentials_name,
-                "image_id": state.image_id or "",
-                "flavor": state.scaleset_config.flavor,
-                "os_arch": state.scaleset_config.os_arch,
-                "min_idle_runner": str(state.scaleset_config.min_idle_runner),
-                "max_runner": str(state.scaleset_config.max_runner),
-                "labels": (
-                    state.scaleset_config.labels
-                    if isinstance(state.scaleset_config.labels, str)
-                    else ",".join(state.scaleset_config.labels)
-                ),
-                "runner_group": state.scaleset_config.runner_group,
-                "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
-                if pre_install
-                else "",
-                **({"org": state.scaleset_config.org} if state.scaleset_config.org else {}),
-                **({"repo": state.scaleset_config.repo} if state.scaleset_config.repo else {}),
-            }
-        )
+        basic_data: dict[str, str] = {
+            "name": state.scaleset_config.name,
+            "provider_name": state.provider_name,
+            "credentials_name": state.credentials_name,
+            "image_id": state.image_id or "",
+            "flavor": state.scaleset_config.flavor,
+            "os_arch": state.scaleset_config.os_arch,
+            "min_idle_runner": str(state.scaleset_config.min_idle_runner),
+            "max_runner": str(state.scaleset_config.max_runner),
+            "labels": (
+                state.scaleset_config.labels
+                if isinstance(state.scaleset_config.labels, str)
+                else ",".join(state.scaleset_config.labels)
+            ),
+            "runner_group": state.scaleset_config.runner_group,
+            "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
+            if pre_install
+            else "",
+        }
+        if state.scaleset_config.org:
+            basic_data["org"] = state.scaleset_config.org
+        if state.scaleset_config.repo:
+            basic_data["repo"] = state.scaleset_config.repo
+        garm_relation.data[self.unit].update(basic_data)
 
         if state.image_id is None:
             return
