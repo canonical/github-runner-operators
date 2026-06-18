@@ -201,9 +201,11 @@ func buildWebhookJob(jobEvent *github.WorkflowJobEvent, body []byte) (*githubWeb
 	}, nil
 }
 
+// isSelfHosted reports whether any label marks the job as self-hosted. The
+// check is case-insensitive since GitHub does not normalize label casing.
 func isSelfHosted(labels []string) bool {
 	for _, label := range labels {
-		if strings.Contains(label, "self-hosted") {
+		if strings.Contains(strings.ToLower(label), "self-hosted") {
 			return true
 		}
 	}

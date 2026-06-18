@@ -339,6 +339,33 @@ func TestDatabase_AddJob_DefaultLabelsStripped(t *testing.T) {
 	assert.Equal(t, []string{"x64", "noble"}, jobs[0].Labels)
 }
 
+// Verify that flavor matching is case-insensitive: GitHub injects the
+// architecture/OS labels with its own casing (e.g. "X64", "Linux"), which must
+// still match flavors defined with lowercase labels.
+func TestDatabase_AddJob_CaseInsensitiveFlavorMatching(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-x64-noble",
+		Labels:   []string{"x64", "noble"},
+		Priority: 100,
+	}))
+
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "1",
+		Labels:   []string{"self-hosted", "Linux", "X64", "Noble"},
+	}))
+
+	jobs, err := db.ListJobs(ctx, "github", ListJobOptions{WithId: "1"})
+	assert.NoError(t, err)
+	assert.Equal(t, "github-x64-noble", *jobs[0].AssignedFlavor)
+	assert.Equal(t, []string{"x64", "noble"}, jobs[0].Labels)
+}
+
 func TestDatabase_AddJob_EqualPriority(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
@@ -536,6 +563,24 @@ func TestDatabase_AddFlavor(t *testing.T) {
 
 	assert.Len(t, jobs, 1)
 	assert.Equal(t, flavor.Name, *jobs[0].AssignedFlavor)
+}
+
+// Verify that flavor labels are stored lowercase so that matching against
+// (also lowercased) job labels is case-insensitive.
+func TestDatabase_AddFlavor_LowercasesLabels(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "amd64-large",
+		Labels:   []string{"Self-Hosted", "AMD64", "Large"},
+	}))
+
+	flavor, err := db.GetFlavor(ctx, "amd64-large")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"self-hosted", "amd64", "large"}, flavor.Labels)
 }
 
 func TestDatabase_AddFlavor_Exists(t *testing.T) {
