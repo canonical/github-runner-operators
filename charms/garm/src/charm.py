@@ -827,19 +827,13 @@ class GarmCharm(paas_charm.go.Charm):
         """Configure the GARM controller URLs that gate its operational API.
 
         GARM returns 409 ``urls_required`` on credential/endpoint/scaleset operations until
-        the metadata and callback URLs are set. They are derived from the unit's reachable
-        address; runner-facing values are refined once ingress is wired up.
+        the metadata and callback URLs are set. The base is the application's reachable URL
+        provided by the go framework: the external ingress URL when an ingress relation is
+        present, otherwise the in-cluster Kubernetes service URL. Runners reach the
+        metadata/callback paths through it, and GitHub reaches the webhook path; both require
+        the public ingress URL, so this is re-run when ingress becomes ready or is revoked.
         """
-        binding = self.model.get_binding(GARM_CONFIGURATOR_RELATION_NAME)
-        address = binding.network.ingress_address if binding else None
-        if not address:
-            # Don't overwrite previously-set controller URLs with a loopback placeholder.
-            logger.warning("No reachable address for GARM controller URLs yet; skipping update")
-            return
-        host = str(address)
-        if ":" in host:  # bracket IPv6 literals so the URL is valid
-            host = f"[{host}]"
-        base = f"http://{host}:{GARM_PORT}"
+        base = self._base_url.rstrip("/")
         auth_client.update_controller(
             metadata_url=f"{base}/api/v1/metadata",
             callback_url=f"{base}/api/v1/callbacks",

@@ -762,27 +762,31 @@ def test_reconcile_github_calls_reconciler_without_restart():
     charm.restart.assert_not_called()
 
 
-def test_ensure_controller_urls_sets_urls_from_binding():
-    """Controller URLs are derived from the unit's address and pushed to GARM."""
+def test_ensure_controller_urls_sets_urls_from_base_url():
+    """Controller URLs are derived from the framework's base URL and pushed to GARM."""
     charm = MagicMock(spec=GarmCharm)
-    charm.model.get_binding.return_value.network.ingress_address = "10.1.2.3"
+    charm._base_url = "https://garm.example.com"
     auth_client = MagicMock()
 
     GarmCharm._ensure_controller_urls(charm, auth_client)
 
     auth_client.update_controller.assert_called_once_with(
-        metadata_url=f"http://10.1.2.3:{GARM_PORT}/api/v1/metadata",
-        callback_url=f"http://10.1.2.3:{GARM_PORT}/api/v1/callbacks",
-        webhook_url=f"http://10.1.2.3:{GARM_PORT}/webhooks",
+        metadata_url="https://garm.example.com/api/v1/metadata",
+        callback_url="https://garm.example.com/api/v1/callbacks",
+        webhook_url="https://garm.example.com/webhooks",
     )
 
 
-def test_ensure_controller_urls_skips_when_no_address():
-    """Controller URLs are not overwritten with a loopback placeholder when no address is known."""
+def test_ensure_controller_urls_strips_trailing_slash_from_base_url():
+    """A trailing slash on the ingress URL does not produce double slashes in the paths."""
     charm = MagicMock(spec=GarmCharm)
-    charm.model.get_binding.return_value.network.ingress_address = None
+    charm._base_url = "https://garm.example.com/"
     auth_client = MagicMock()
 
     GarmCharm._ensure_controller_urls(charm, auth_client)
 
-    auth_client.update_controller.assert_not_called()
+    auth_client.update_controller.assert_called_once_with(
+        metadata_url="https://garm.example.com/api/v1/metadata",
+        callback_url="https://garm.example.com/api/v1/callbacks",
+        webhook_url="https://garm.example.com/webhooks",
+    )
