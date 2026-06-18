@@ -30,12 +30,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
         for event in [
             self.on.config_changed,
             self.on.secret_changed,
+            self.on[GARM_RELATION_NAME].relation_joined,
             self.on[GARM_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_joined,
             self.on[IMAGE_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_broken,
-            self.on[GARM_RELATION_NAME].relation_joined,
-            self.on[GARM_RELATION_NAME].relation_changed,
         ]:
             self.framework.observe(event, self._reconcile)
 

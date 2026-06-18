@@ -141,6 +141,9 @@ class ScalesetReconciler:
             extra_specs=extra_specs or None,
         )
         logger.info("Updating scaleset %s (id=%s)", spec.name, observed.id)
+        if observed.id is None:
+            logger.warning("Scaleset %s has no id; skipping update", spec.name)
+            return
         self._client.update_scaleset(observed.id, params)
 
     @staticmethod
@@ -151,6 +154,6 @@ class ScalesetReconciler:
             or observed.flavor != spec.flavor
             or observed.max_runners != spec.max_runners
             or observed.min_idle_runners != spec.min_idle_runners
-            or observed.runner_group != (spec.runner_group or None)
+            or observed.github_runner_group != (spec.runner_group or None)
             or observed_scripts != spec.pre_install_scripts
         )

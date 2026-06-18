@@ -227,6 +227,8 @@ class GarmAuthenticatedClient:
                 )
             except ApiException as exc:
                 raise GarmApiError(f"Failed to list providers ({exc.status}): {exc.body}") from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def list_credentials(self) -> list[ForgeCredentials]:
         """List all registered GARM credentials.
@@ -269,6 +271,8 @@ class GarmAuthenticatedClient:
                 )
             except ApiException as exc:
                 raise GarmApiError(f"Failed to list scalesets ({exc.status}): {exc.body}") from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def find_org_id(self, org_name: str) -> str | None:
         """Find a GARM organization's UUID by name.
@@ -295,6 +299,8 @@ class GarmAuthenticatedClient:
                 raise GarmApiError(
                     f"Failed to list organizations ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         for org in orgs:
             if org.name == org_name:
                 return org.id
@@ -326,6 +332,8 @@ class GarmAuthenticatedClient:
                 raise GarmApiError(
                     f"Failed to list repositories ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         for repo in repos:
             if repo.name == repo_name:
                 return repo.id
@@ -355,6 +363,8 @@ class GarmAuthenticatedClient:
                 raise GarmApiError(
                     f"Failed to create org scaleset ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def create_repo_scaleset(self, repo_id: str, params: CreateScaleSetParams) -> ScaleSet:
         """Create a scaleset under a GARM repository.
@@ -380,6 +390,8 @@ class GarmAuthenticatedClient:
                 raise GarmApiError(
                     f"Failed to create repo scaleset ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def update_scaleset(self, scaleset_id: int, params: UpdateScaleSetParams) -> ScaleSet:
         """Update an existing scaleset.
@@ -405,6 +417,8 @@ class GarmAuthenticatedClient:
                 raise GarmApiError(
                     f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def delete_scaleset(self, scaleset_id: int) -> None:
         """Delete a scaleset.
@@ -425,3 +439,5 @@ class GarmAuthenticatedClient:
                 raise GarmApiError(
                     f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc

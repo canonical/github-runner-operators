@@ -20,14 +20,14 @@ class _FakeProvider:
 
 class _FakeScaleset:
     def __init__(self, name, sid=1, image="ubuntu-22.04", flavor="m1.small",
-                 max_runners=5, min_idle_runners=0, runner_group=None, extra_specs=None):
+                 max_runners=5, min_idle_runners=0, github_runner_group=None, extra_specs=None):
         self.name = name
         self.id = sid
         self.image = image
         self.flavor = flavor
         self.max_runners = max_runners
         self.min_idle_runners = min_idle_runners
-        self.runner_group = runner_group
+        self.github_runner_group = github_runner_group
         self.extra_specs = extra_specs or {}
 
 
@@ -48,7 +48,7 @@ class FakeGarmClient:
                 flavor=ss.get("flavor", "m1.small"),
                 max_runners=ss.get("max_runners", 5),
                 min_idle_runners=ss.get("min_idle_runners", 0),
-                runner_group=ss.get("runner_group", None),
+                github_runner_group=ss.get("github_runner_group", None),
                 extra_specs=ss.get("extra_specs", {}),
             )
             for ss in (scalesets or [])
@@ -182,7 +182,7 @@ def test_create_deferred_when_dependency_missing(providers, org_id):
 
 def _existing_scaleset(**overrides):
     base = dict(name="my-scaleset", id=1, image="ubuntu-22.04", flavor="m1.small",
-                max_runners=5, min_idle_runners=0, runner_group=None, extra_specs={})
+                max_runners=5, min_idle_runners=0, github_runner_group=None, extra_specs={})
     base.update(overrides)
     return base
 

@@ -19,8 +19,6 @@ from tests.conftest import (
 )
 
 logger = logging.getLogger(__name__)
-GARM_API_PORT = 9997
-GARM_SECRETS_LABEL = "garm-secrets"
 
 
 @pytest.fixture(name="planner_charm_file", scope="module")
@@ -550,6 +548,7 @@ def garm_configurator_for_scaleset_tests_fixture(
     )
     juju.grant_secret(password_secret_uri, app_name)
     juju.grant_secret(private_key_secret_uri, app_name)
+    return app_name
 
 
 @pytest.fixture(scope="module", name="configurator_with_image")
