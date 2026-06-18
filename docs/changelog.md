@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-18
+
+- match planner runner labels case-insensitively, so jobs requesting GitHub's implicit label casing (e.g. `X64`, `Linux`) match flavors defined in lowercase. A migration lowercases existing labels and re-assigns jobs previously left unmatched due to casing.
+
 ## 2026-06-16
 
 - Add Garm configurator relation with GARM charm and write OpenStack provider related toml configurations.
