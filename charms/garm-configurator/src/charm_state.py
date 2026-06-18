@@ -63,6 +63,7 @@ class ProviderConfig(BaseModel):
         project_domain_name: OpenStack project domain name.
         region_name: OpenStack region name.
         network: OpenStack network name or ID.
+        provider_name: GARM provider name. Defaults to the Juju unit name with "/" replaced by "-".
     """
 
     auth_url: str
@@ -73,6 +74,7 @@ class ProviderConfig(BaseModel):
     project_domain_name: str
     region_name: str
     network: str
+    provider_name: str
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ProviderConfig":
@@ -129,6 +131,7 @@ class ProviderConfig(BaseModel):
             project_domain_name=str(charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)),
             region_name=str(charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME)),
             network=str(charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME)),
+            provider_name=charm.unit.name.replace("/", "-"),
         )
 
 
@@ -347,16 +350,6 @@ class CharmState:
             scaleset_config=scaleset_config,
             image_id=image_id,
         )
-
-    @property
-    def provider_name(self) -> str:
-        """Derived GARM provider name for scalesets."""
-        return f"openstack-{self.provider_config.project_name}"
-
-    @property
-    def credentials_name(self) -> str:
-        """Derived GARM credentials name for scalesets."""
-        return f"github-app-{self.github_app_config.client_id}"
 
 
 def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:

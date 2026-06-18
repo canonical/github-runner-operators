@@ -462,8 +462,7 @@ def test_garm_configurator_relation_data_written_on_reconcile():
     rel_out = out.get_relation(garm_relation.id)
     expected_relation_data = {
         "name": "my-scaleset",
-        "provider_name": "openstack-myproject",
-        "credentials_name": "github-app-12345",
+        "provider_name": "garm-configurator-0",
         "flavor": "m1.large",
         "os_arch": "amd64",
         "min_idle_runner": "0",
@@ -480,9 +479,9 @@ def test_garm_configurator_relation_data_written_on_reconcile():
 
 def test_garm_configurator_relation_data_reflects_charm_state():
     """
-    arrange: Valid config with project and client identifiers plus a garm-configurator relation.
+    arrange: Valid config with a garm-configurator relation.
     act: Run config-changed.
-    assert: Derived provider and credentials names are written from CharmState.
+    assert: provider_name uses the Juju unit name (unit.name with "/" → "-").
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -500,8 +499,8 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     out = ctx.run(ctx.on.config_changed(), state)
 
     rel_out = out.get_relation(garm_relation.id)
-    assert rel_out.local_unit_data["provider_name"] == "openstack-demo-project"
-    assert rel_out.local_unit_data["credentials_name"] == "github-app-abc123"
+    assert rel_out.local_unit_data["provider_name"] == "garm-configurator-0"
+    assert "credentials_name" not in rel_out.local_unit_data
 
 
 def test_garm_configurator_no_error_when_no_relation():

@@ -149,8 +149,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         pre_install = state.scaleset_config.pre_install_scripts
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
-            "provider_name": state.provider_name,
-            "credentials_name": state.credentials_name,
+            "provider_name": state.provider_config.provider_name,
             "image_id": state.image_id or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
