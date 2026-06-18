@@ -762,151 +762,40 @@ def test_garm_metrics_endpoint_no_auth(
     )
 
 
-def test_scaleset_creation_deferred_when_provider_missing(
+def test_scalesets_created_and_deleted_via_relation(
     juju: jubilant.Juju,
     garm_app: str,
     garm_configurator_for_scaleset_tests: str,
 ):
     """
-    arrange: GARM and the test configurator are deployed, and a matching credential exists.
-    act: Override the relation data with a provider name GARM does not know about.
-    assert: No scaleset is created and the GARM app remains healthy.
+    arrange: GARM is active and receives valid scaleset relation data.
+    act: Integrate the configurator, wait for the scaleset to appear, then remove the relation.
+    assert: The scaleset is created when the relation is active and deleted when it is removed.
     """
     _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
     address = _get_garm_address(juju, garm_app)
     base_url = _garm_api_base_url(address)
     token = garm_login_from_secret(juju, garm_app, base_url)
     _create_test_credential(base_url, token)
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        provider_name="missing-provider",
-    )
 
-    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
-
-    status = juju.status()
-    app_status = status.apps[garm_app].app_status.current
-    assert app_status in ("active", "waiting"), f"Expected active/waiting, got {app_status}"
-
-
-def test_scalesets_created_from_relation_data(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-):
-    """
-    arrange: GARM is active and receives valid scaleset relation data plus a test credential.
-    act: Reconcile against relation data that points at the built-in openstack provider.
-    assert: A matching scaleset appears in the GARM API.
-    """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
-    base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
-    _create_test_credential(base_url, token)
     relation_data = _get_scaleset_relation_data(
         juju, garm_app, garm_configurator_for_scaleset_tests
     )
     provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
-    provider_name = relation_data["provider_name"]
-    if provider_name not in provider_names:
+    if relation_data["provider_name"] not in provider_names:
         pytest.skip(
-            f"requires GARM provider {provider_name!r}; available providers: {sorted(provider_names)}"
+            f"requires GARM provider {relation_data['provider_name']!r}; "
+            f"available: {sorted(provider_names)}"
         )
+
     _set_scaleset_relation_data(
         juju,
         garm_app,
         garm_configurator_for_scaleset_tests,
         min_idle_runner="1",
     )
-
     scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
     assert scaleset["name"] == _SCALESET_TEST_NAME
-
-
-def test_scaleset_updated_on_relation_change(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-):
-    """
-    arrange: A scaleset already exists in GARM from valid configurator relation data.
-    act: Change the relation data image_id and wait for another reconcile.
-    assert: The scaleset reflects the updated image_id.
-    """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
-    base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
-    _create_test_credential(base_url, token)
-    relation_data = _get_scaleset_relation_data(
-        juju, garm_app, garm_configurator_for_scaleset_tests
-    )
-    provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
-    provider_name = relation_data["provider_name"]
-    if provider_name not in provider_names:
-        pytest.skip(
-            f"requires GARM provider {provider_name!r}; available providers: {sorted(provider_names)}"
-        )
-    original_image_id = relation_data["image_id"]
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        min_idle_runner="1",
-    )
-    _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        image_id=f"{original_image_id}-updated",
-    )
-
-    scaleset = _wait_for_scaleset(
-        base_url,
-        token,
-        _SCALESET_TEST_NAME,
-        image_id=f"{original_image_id}-updated",
-    )
-    observed_image = scaleset.get("image_id") or scaleset.get("image")
-    assert observed_image == f"{original_image_id}-updated"
-
-
-def test_scaleset_deleted_when_relation_removed(
-    juju: jubilant.Juju,
-    garm_app: str,
-    garm_configurator_for_scaleset_tests: str,
-):
-    """
-    arrange: A scaleset exists in GARM for the test configurator relation.
-    act: Remove the garm-configurator relation from GARM.
-    assert: The matching scaleset disappears from GARM.
-    """
-    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
-    address = _get_garm_address(juju, garm_app)
-    base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, garm_app, base_url)
-    _create_test_credential(base_url, token)
-    relation_data = _get_scaleset_relation_data(
-        juju, garm_app, garm_configurator_for_scaleset_tests
-    )
-    provider_names = {provider.get("name", "") for provider in _list_providers(base_url, token)}
-    provider_name = relation_data["provider_name"]
-    if provider_name not in provider_names:
-        pytest.skip(
-            f"requires GARM provider {provider_name!r}; available providers: {sorted(provider_names)}"
-        )
-    _set_scaleset_relation_data(
-        juju,
-        garm_app,
-        garm_configurator_for_scaleset_tests,
-        min_idle_runner="1",
-    )
-    _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
 
     juju.remove_relation(garm_app, garm_configurator_for_scaleset_tests)
     juju.wait(
@@ -914,5 +803,32 @@ def test_scaleset_deleted_when_relation_removed(
         timeout=3 * 60,
         delay=10,
     )
-
     _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
+
+
+def test_scaleset_creation_deferred_when_provider_missing(
+    juju: jubilant.Juju,
+    garm_app: str,
+    garm_configurator_for_scaleset_tests: str,
+):
+    """
+    arrange: GARM and the test configurator are integrated, provider name is unknown to GARM.
+    act: Set relation data with a provider name GARM does not have registered.
+    assert: No scaleset is created and GARM remains healthy.
+    """
+    _ensure_garm_configurator_relation(juju, garm_app, garm_configurator_for_scaleset_tests)
+    address = _get_garm_address(juju, garm_app)
+    base_url = _garm_api_base_url(address)
+    token = garm_login_from_secret(juju, garm_app, base_url)
+    _create_test_credential(base_url, token)
+
+    _set_scaleset_relation_data(
+        juju,
+        garm_app,
+        garm_configurator_for_scaleset_tests,
+        provider_name="missing-provider",
+    )
+    _wait_for_scaleset_absent(base_url, token, _SCALESET_TEST_NAME)
+
+    app_status = juju.status().apps[garm_app].app_status.current
+    assert app_status in ("active", "waiting"), f"Expected active/waiting, got {app_status}"

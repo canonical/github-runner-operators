@@ -334,21 +334,24 @@ def garm_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
     return image
 
 
-@pytest.fixture(name="garm_configurator_charm_file", scope="module")
+@pytest.fixture(scope="module", name="garm_configurator_charm_file")
 def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
     """Return the path to the built garm-configurator charm file."""
     charm = pytestconfig.getoption(CHARM_FILE_PARAM)
     if not charm:
         pytest.skip(
-            f"missing required {CHARM_FILE_PARAM} option for garm-configurator integration tests"
+            f"missing required {CHARM_FILE_PARAM} option for garm-configurator "
+            "integration tests"
         )
-    configurator_charms = [file for file in charm if "garm-configurator" in file]
-    if not configurator_charms:
-        pytest.skip(
-            "scaleset integration tests require a garm-configurator charm path in "
-            f"{CHARM_FILE_PARAM}"
-        )
-    return configurator_charms[0]
+    if len(charm) > 1:
+        configurator_charm = [file for file in charm if "garm-configurator" in file]
+        if not configurator_charm:
+            raise pytest.UsageError(
+                "No garm-configurator charm file found in --charm-file; "
+                "expected a path containing 'garm-configurator'"
+            )
+        return configurator_charm[0]
+    return charm[0]
 
 
 def _pre_pull_garm_image(image: str) -> None:
@@ -547,25 +550,6 @@ def garm_configurator_for_scaleset_tests_fixture(
     )
     juju.grant_secret(password_secret_uri, app_name)
     juju.grant_secret(private_key_secret_uri, app_name)
-
-@pytest.fixture(scope="module", name="garm_configurator_charm_file")
-def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
-    """Return the path to the built garm-configurator charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        pytest.skip(
-            f"missing required {CHARM_FILE_PARAM} option for garm-configurator "
-            "integration tests"
-        )
-    if len(charm) > 1:
-        configurator_charm = [file for file in charm if "garm-configurator" in file]
-        if not configurator_charm:
-            raise pytest.UsageError(
-                "No garm-configurator charm file found in --charm-file; "
-                "expected a path containing 'garm-configurator'"
-            )
-        return configurator_charm[0]
-    return charm[0]
 
 
 @pytest.fixture(scope="module", name="configurator_with_image")

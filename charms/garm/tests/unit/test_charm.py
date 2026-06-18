@@ -25,6 +25,7 @@ from charm import (
     render_garm_toml,
 )
 from garm_api import GarmConnectionError
+from scaleset_reconciler import ScalesetSpec
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -520,7 +521,11 @@ def test_maybe_first_run_skips_on_missing_credential_key():
 
 
 def test_reconcile_scalesets_skips_when_no_admin_credentials():
-    """Scaleset reconciliation exits early when admin credentials are unavailable."""
+    """
+    arrange: Admin credentials secret is unavailable.
+    act: Call _reconcile_scalesets().
+    assert: No GARM API connection is attempted.
+    """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(return_value=None)
 
@@ -530,28 +535,52 @@ def test_reconcile_scalesets_skips_when_no_admin_credentials():
     mock_client.assert_not_called()
 
 
-def test_reconcile_scalesets_skips_restart():
-    """Scaleset reconciliation must not restart the workload."""
+def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
+    """
+    arrange: One configurator relation unit with a complete scaleset spec; GARM has no
+             existing scalesets and the provider is registered.
+    act: Call _reconcile_scalesets().
+    assert: The scaleset is created via the API, and charm.restart is never called.
+    """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(
-        return_value={
-            "username": "admin",
-            "password": "TestPass-123!",
-        }
+        return_value={"username": "admin", "password": "TestPass-123!"}
     )
-    charm._build_desired_scalesets = MagicMock(return_value=[])
+    charm._build_desired_scalesets = MagicMock(
+        return_value=[
+            ScalesetSpec(
+                name="my-scaleset",
+                provider_name="garm-configurator-0",
+                image="ubuntu-22.04",
+                flavor="m1.small",
+                os_arch="amd64",
+                min_idle_runners=0,
+                max_runners=5,
+                entity_type="organization",
+                entity_name="my-org",
+            )
+        ]
+    )
     charm.restart = MagicMock()
+
+    provider = MagicMock()
+    provider.name = "garm-configurator-0"
+    auth_client = MagicMock()
+    auth_client.list_providers.return_value = [provider]
+    auth_client.list_scalesets.return_value = []
+    auth_client.find_org_id.return_value = "org-uuid"
+    created = MagicMock()
+    created.id = 42
+    auth_client.create_org_scaleset.return_value = created
 
     with (
         patch("charm.GarmApiClient") as mock_client_cls,
-        patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
-        patch("charm.ScalesetReconciler") as mock_reconciler_cls,
+        patch("charm.GarmAuthenticatedClient", return_value=auth_client),
     ):
         mock_client_cls.return_value.login.return_value = "test-token"
-
         charm._reconcile_scalesets()
 
-    mock_client_cls.return_value.login.assert_called_once_with("admin", "TestPass-123!")
-    mock_auth_cls.assert_called_once_with("http://127.0.0.1:8080/api/v1", "test-token")
-    mock_reconciler_cls.return_value.reconcile.assert_called_once_with([])
+    auth_client.create_org_scaleset.assert_called_once()
+    auth_client.update_scaleset.assert_not_called()
+    auth_client.delete_scaleset.assert_not_called()
     charm.restart.assert_not_called()
