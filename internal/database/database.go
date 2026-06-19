@@ -13,6 +13,9 @@
 // When a job is inserted, it is assigned a flavor using the following algorithm:
 //  1. The flavor's platform must match the job's platform.
 //  2. The flavor's labels must be a superset of (or equal to) the job's labels.
+//     Matching is case-insensitive: both flavor and job labels are normalized to
+//     lowercase on insertion, since GitHub injects architecture/OS labels (e.g.
+//     "X64", "Linux") with casing that differs from how flavors are defined.
 //  3. If multiple flavors match, choose the one with the highest priority.
 //  4. If there is still a tie, pick one at random.
 package database
@@ -25,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -58,6 +62,8 @@ const (
 // GitHub automatically adds these labels to all self-hosted runner jobs.
 // They are stripped from job labels on insertion so they don't interfere
 // with flavor matching. The original labels are preserved in the raw payload.
+// Keys must be lowercase: stripDefaultLabels lowercases each label before
+// comparing, so stripping is case-insensitive.
 var defaultGitHubLabels = map[string]struct{}{
 	"self-hosted": {},
 	"linux":       {},
@@ -357,7 +363,7 @@ func (d *Database) AddFlavor(ctx context.Context, flavor *Flavor) error {
 	`, pgx.NamedArgs{
 		"platform":         flavor.Platform,
 		"name":             flavor.Name,
-		"labels":           flavor.Labels,
+		"labels":           lowercaseLabels(flavor.Labels),
 		"priority":         flavor.Priority,
 		"is_disabled":      flavor.IsDisabled,
 		"minimum_pressure": flavor.MinimumPressure,
@@ -636,12 +642,27 @@ func (d *Database) Close() {
 	}
 }
 
+// stripDefaultLabels normalizes labels to lowercase and removes GitHub's
+// implicit labels (see defaultGitHubLabels). Lowercasing makes both the strip
+// and downstream flavor matching case-insensitive.
 func stripDefaultLabels(labels []string) []string {
 	filtered := make([]string, 0, len(labels))
 	for _, l := range labels {
+		l = strings.ToLower(l)
 		if _, ok := defaultGitHubLabels[l]; !ok {
 			filtered = append(filtered, l)
 		}
 	}
 	return filtered
+}
+
+// lowercaseLabels normalizes labels to lowercase. Flavor labels are stored
+// lowercase so that matching against (also lowercased) job labels is
+// case-insensitive.
+func lowercaseLabels(labels []string) []string {
+	lowered := make([]string, len(labels))
+	for i, l := range labels {
+		lowered[i] = strings.ToLower(l)
+	}
+	return lowered
 }
