@@ -331,25 +331,32 @@ def test_scaleset_created_and_updated_via_relation(
 ):
     """
     arrange: GARM and garm-configurator are integrated and both active.
-    act: Verify the scaleset is created; then update max-runner via configurator config.
-    assert: The scaleset exists after integration and reflects the updated max_runners value.
+    act: Verify the scaleset is created and reflects updated config.
+    assert: After a config change the scaleset exists with the new max_runners value.
     """
     address = _get_garm_address(juju, configurator_garm)
     base_url = _garm_api_base_url(address)
-    token = garm_login_from_secret(juju, configurator_garm, base_url)
+
+    # _garm_first_run sets the controller callback/metadata URLs that GARM requires
+    # before it will serve operational endpoints (returns 409 otherwise).  The
+    # configurator_garm fixture integrates the charms before these URLs exist, so
+    # the first reconcile defers.  Calling _garm_first_run here is idempotent (PUT).
+    token = _garm_first_run(juju, address)
     _create_test_credential(base_url, token)
 
-    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-    assert scaleset["name"] == _SCALESET_TEST_NAME
-
+    # A config change triggers config_changed on the configurator → relation_changed
+    # on GARM → _reconcile_scalesets() runs now that URLs are configured.
+    # Using max-runner=10 doubles as the update assertion below.
     juju.config(configurator_with_image, values={"max-runner": "10"})
     juju.wait(
         lambda status: jubilant.all_active(status, configurator_garm),
         timeout=3 * 60,
         delay=10,
     )
-    updated_scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-    assert updated_scaleset["max_runners"] == 10
+
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    assert scaleset["name"] == _SCALESET_TEST_NAME
+    assert scaleset["max_runners"] == 10
 
 
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
