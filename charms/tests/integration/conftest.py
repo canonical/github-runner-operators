@@ -580,7 +580,6 @@ def deploy_configurator_with_image_fixture(
             "min-idle-runner": "0",
             "max-runner": "5",
             "org": "test-org",
-            "repo": "testorg/testrepo",
         },
     )
 
