@@ -684,7 +684,7 @@ def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
         }
     ).encode()
     req = urllib.request.Request(
-        f"{garm_url}/orgs",
+        f"{garm_url}/organizations",
         data=data,
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         method="POST",
