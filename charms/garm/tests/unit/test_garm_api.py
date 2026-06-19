@@ -158,6 +158,19 @@ def test_login_raises_on_api_error():
             with pytest.raises(GarmApiError):
                 client.login("admin", "wrong")
 
+
+def test_authenticated_client_from_login():
+    """
+    arrange: GarmApiClient.login is patched to return "test-jwt".
+    act: Call GarmAuthenticatedClient.from_login(BASE_URL, "admin", "pass").
+    assert: Returns a GarmAuthenticatedClient with the token set.
+    """
+    with patch.object(GarmApiClient, "login", return_value="test-jwt"):
+        auth_client = GarmAuthenticatedClient.from_login(BASE_URL, "admin", "pass")
+    assert isinstance(auth_client, GarmAuthenticatedClient)
+    assert auth_client._token == "test-jwt"
+
+
 @pytest.mark.parametrize(
     "api_response, expected_names",
     [

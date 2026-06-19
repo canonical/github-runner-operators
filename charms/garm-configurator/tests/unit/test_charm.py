@@ -468,7 +468,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
         "min_idle_runner": "0",
         "max_runner": "5",
         "labels": "self-hosted,linux",
-        "runner_group": "default",
+        "runner_group": "Default",
         "pre_install_scripts": '{"pre_install.sh": "echo hello"}',
         "repo": "myorg/myrepo",
     }
@@ -541,7 +541,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert garm_out.local_unit_data["min_idle_runner"] == "0"
     assert garm_out.local_unit_data["max_runner"] == "5"
     assert garm_out.local_unit_data["repo"] == "myorg/myrepo"
-    assert garm_out.local_unit_data["runner_group"] == "default"
+    assert garm_out.local_unit_data["runner_group"] == "Default"
     assert "org" not in garm_out.local_unit_data
 
     # Image UUID

@@ -745,9 +745,11 @@ class GarmCharm(paas_charm.go.Charm):
 
         garm_url = f"http://127.0.0.1:{GARM_PORT}"
         try:
-            garm_client = GarmApiClient(f"{garm_url}/api/v1")
-            token = garm_client.login(admin_creds["username"], admin_creds["password"])
-            auth_client = GarmAuthenticatedClient(f"{garm_url}/api/v1", token)
+            auth_client = GarmAuthenticatedClient.from_login(
+                f"{garm_url}/api/v1",
+                admin_creds["username"],
+                admin_creds["password"],
+            )
             desired = self._build_desired_scalesets()
             ScalesetReconciler(auth_client).reconcile(desired)
         except GarmApiError as exc:

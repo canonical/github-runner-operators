@@ -60,6 +60,12 @@ class ScalesetReconciler:
         all_desired_names: set[str] = {spec.name for spec in desired}
 
         for spec in desired:
+            try:
+                create_params = self._to_create_params(spec)
+            except Exception as exc:
+                logger.warning("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
+                continue
+
             if spec.provider_name not in providers:
                 logger.warning(
                     "Skipping scaleset %s: provider %s not registered yet",
@@ -81,7 +87,7 @@ class ScalesetReconciler:
             if spec.name in observed:
                 self._maybe_update(observed[spec.name], spec)
             else:
-                self._create(spec, entity_id)
+                self._create(spec, entity_id, create_params)
 
         for name, scaleset in observed.items():
             if name not in all_desired_names:
@@ -116,12 +122,23 @@ class ScalesetReconciler:
         logger.warning("Unknown entity_type %r for scaleset %s", spec.entity_type, spec.name)
         return None
 
-    def _create(self, spec: ScalesetSpec, entity_id: str) -> None:
+    @staticmethod
+    def _to_create_params(spec: ScalesetSpec) -> CreateScaleSetParams:
+        """Build and validate CreateScaleSetParams from a ScalesetSpec.
+
+        Args:
+            spec: The desired scaleset specification.
+
+        Returns:
+            Validated CreateScaleSetParams ready for the GARM API.
+
+        Raises:
+            ValidationError: If the spec data fails Pydantic model validation.
+        """
         extra_specs: dict[str, object] = {}
         if spec.pre_install_scripts:
             extra_specs["pre_install_scripts"] = spec.pre_install_scripts
-
-        params = CreateScaleSetParams.model_validate(
+        return CreateScaleSetParams.model_validate(
             {
                 "name": spec.name,
                 "provider_name": spec.provider_name,
@@ -135,6 +152,8 @@ class ScalesetReconciler:
                 "extra_specs": extra_specs or None,
             }
         )
+
+    def _create(self, spec: ScalesetSpec, entity_id: str, params: CreateScaleSetParams) -> None:
         logger.info("Creating scaleset %s under %s %s", spec.name, spec.entity_type, entity_id)
         if spec.entity_type == "organization":
             self._client.create_org_scaleset(entity_id, params)

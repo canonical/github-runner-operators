@@ -184,8 +184,14 @@ class GarmApiClient:
         return result.token
 
 
-class GarmAuthenticatedClient:
-    """Authenticated GARM API client for scaleset and entity management operations."""
+class GarmAuthenticatedClient(GarmApiClient):
+    """Authenticated GARM API client for scaleset and entity management operations.
+
+    Extends ``GarmApiClient`` with authenticated operations. The ``_api_client``
+    method is overridden to include a Bearer token on every request, so all
+    inherited unauthenticated methods (``wait_for_ready``, ``first_run``, etc.)
+    also work from this class.
+    """
 
     def __init__(self, base_url: str, token: str) -> None:
         """Create an authenticated client.
@@ -195,8 +201,26 @@ class GarmAuthenticatedClient:
                 e.g. ``http://127.0.0.1:9997/api/v1``.
             token: JWT Bearer token from ``GarmApiClient.login()``.
         """
-        self._base_url = base_url
+        super().__init__(base_url)
         self._token = token
+
+    @classmethod
+    def from_login(cls, base_url: str, username: str, password: str) -> "GarmAuthenticatedClient":
+        """Log in to GARM and return an authenticated client.
+
+        Args:
+            base_url: Full base URL including the API prefix.
+            username: Admin username.
+            password: Admin password.
+
+        Returns:
+            Authenticated ``GarmAuthenticatedClient`` instance.
+
+        Raises:
+            GarmApiError: If login fails.
+        """
+        token = GarmApiClient(base_url).login(username, password)
+        return cls(base_url, token)
 
     def _api_client(self) -> ApiClient:
         """Build an authenticated ApiClient with JWT Bearer token."""

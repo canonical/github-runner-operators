@@ -573,11 +573,8 @@ def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
     created.id = 42
     auth_client.create_org_scaleset.return_value = created
 
-    with (
-        patch("charm.GarmApiClient") as mock_client_cls,
-        patch("charm.GarmAuthenticatedClient", return_value=auth_client),
-    ):
-        mock_client_cls.return_value.login.return_value = "test-token"
+    with patch("charm.GarmAuthenticatedClient") as mock_auth_cls:
+        mock_auth_cls.from_login.return_value = auth_client
         charm._reconcile_scalesets()
 
     auth_client.create_org_scaleset.assert_called_once()
