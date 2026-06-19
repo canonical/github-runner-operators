@@ -343,6 +343,7 @@ def test_scaleset_created_and_updated_via_relation(
     # the first reconcile defers.  Calling _garm_first_run here is idempotent (PUT).
     token = _garm_first_run(juju, address)
     _create_test_credential(base_url, token)
+    _create_test_org(base_url, token, "test-org")
 
     # A config change triggers config_changed on the configurator → relation_changed
     # on GARM → _reconcile_scalesets() runs now that URLs are configured.
@@ -667,6 +668,33 @@ def _create_test_credential(garm_url: str, token: str) -> str:
             allow_conflict=True,
         )
     return _SCALESET_TEST_CREDENTIAL_NAME
+
+
+def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
+    """Register a GitHub organization in GARM with the test credential.
+
+    GARM requires an organization to be registered before a scaleset can be
+    created for it.  Silently skips if the org already exists (409 Conflict).
+    """
+    data = json.dumps(
+        {
+            "name": org_name,
+            "credentials_name": _SCALESET_TEST_CREDENTIAL_NAME,
+            "webhook_secret": "",
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"{garm_url}/orgs",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise
 
 
 @retry(
