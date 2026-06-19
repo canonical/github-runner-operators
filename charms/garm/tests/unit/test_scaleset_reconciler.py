@@ -7,21 +7,13 @@ import pytest
 
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
-
-# ---------------------------------------------------------------------------
-# Fake client — records operations as observable state
-# ---------------------------------------------------------------------------
-
-
 class _FakeProvider:
     def __init__(self, name):
         self.name = name
 
-
 class _FakeTag:
     def __init__(self, name):
         self.name = name
-
 
 class _FakeScaleset:
     def __init__(self, name, sid=1, image="ubuntu-22.04", flavor="m1.small",
@@ -36,7 +28,6 @@ class _FakeScaleset:
         self.github_runner_group = github_runner_group
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
-
 
 class FakeGarmClient:
     """In-memory fake for GarmAuthenticatedClient.
@@ -91,12 +82,6 @@ class FakeGarmClient:
     def delete_scaleset(self, scaleset_id):
         self.deleted.append(scaleset_id)
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _spec(
     name="my-scaleset",
     provider_name="openstack-demo",
@@ -126,15 +111,8 @@ def _spec(
         pre_install_scripts=pre_install_scripts or {},
     )
 
-
 def _reconcile(client, desired):
     ScalesetReconciler(client).reconcile(desired)
-
-
-# ---------------------------------------------------------------------------
-# Creation
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     "entity_type, entity_name, create_key, expected_entity_id",
@@ -168,7 +146,6 @@ def test_create_scaleset(entity_type, entity_name, create_key, expected_entity_i
     assert client.updated == []
     assert client.deleted == []
 
-
 @pytest.mark.parametrize(
     "providers, org_id",
     [
@@ -190,19 +167,12 @@ def test_create_deferred_when_dependency_missing(providers, org_id):
     assert client.updated == []
     assert client.deleted == []
 
-
-# ---------------------------------------------------------------------------
-# Update
-# ---------------------------------------------------------------------------
-
-
 def _existing_scaleset(**overrides):
     base = dict(name="my-scaleset", id=1, image="ubuntu-22.04", flavor="m1.small",
                 max_runners=5, min_idle_runners=0, github_runner_group=None,
                 extra_specs={}, tags=[])
     base.update(overrides)
     return base
-
 
 @pytest.mark.parametrize(
     "changed_field, new_value, spec_kwarg",
@@ -232,7 +202,6 @@ def test_update_when_field_changed(changed_field, new_value, spec_kwarg):
     assert client.created == []
     assert client.deleted == []
 
-
 def test_no_update_when_scaleset_unchanged():
     """
     arrange: FakeGarmClient with one existing scaleset that matches the desired spec exactly.
@@ -249,12 +218,6 @@ def test_no_update_when_scaleset_unchanged():
     assert client.updated == []
     assert client.deleted == []
 
-
-# ---------------------------------------------------------------------------
-# Delete
-# ---------------------------------------------------------------------------
-
-
 def test_delete_orphaned_scaleset():
     """
     arrange: FakeGarmClient with an observed scaleset not present in the desired set.
@@ -268,7 +231,6 @@ def test_delete_orphaned_scaleset():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted == [42]
-
 
 @pytest.mark.parametrize(
     "providers, scalesets, desired, expected_deleted",
@@ -288,12 +250,6 @@ def test_no_delete(providers, scalesets, desired, expected_deleted):
     _reconcile(client, desired)
 
     assert client.deleted == expected_deleted
-
-
-# ---------------------------------------------------------------------------
-# Extra specs (pre_install_scripts)
-# ---------------------------------------------------------------------------
-
 
 def test_pre_install_scripts_passed_in_create():
     """

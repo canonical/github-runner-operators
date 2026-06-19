@@ -10,7 +10,6 @@ import urllib3
 import urllib3.exceptions
 
 from garm_client.api.controller_info_api import ControllerInfoApi
-from garm_client.api.credentials_api import CredentialsApi
 from garm_client.api.first_run_api import FirstRunApi
 from garm_client.api.login_api import LoginApi
 from garm_client.api.organizations_api import OrganizationsApi
@@ -21,7 +20,6 @@ from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
-from garm_client.models.forge_credentials import ForgeCredentials
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.provider import Provider
@@ -230,28 +228,6 @@ class GarmAuthenticatedClient:
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
-    def list_credentials(self) -> list[ForgeCredentials]:
-        """List all registered GARM credentials.
-
-        Returns:
-            List of ForgeCredentials model objects.
-
-        Raises:
-            GarmApiError: On API error.
-        """
-        with self._api_client() as client:
-            try:
-                return (
-                    CredentialsApi(api_client=client).list_credentials(
-                        _request_timeout=_REQUEST_TIMEOUT
-                    )
-                    or []
-                )
-            except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to list credentials ({exc.status}): {exc.body}"
-                ) from exc
-
     def list_scalesets(self) -> list[ScaleSet]:
         """List all scalesets across all entities.
 
@@ -335,7 +311,7 @@ class GarmAuthenticatedClient:
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         for repo in repos:
-            if repo.name == repo_name:
+            if f"{repo.owner}/{repo.name}" == repo_name:
                 return repo.id
         return None
 

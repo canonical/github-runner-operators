@@ -154,11 +154,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "os_arch": state.scaleset_config.os_arch,
             "min_idle_runner": str(state.scaleset_config.min_idle_runner),
             "max_runner": str(state.scaleset_config.max_runner),
-            "labels": (
-                state.scaleset_config.labels
-                if isinstance(state.scaleset_config.labels, str)
-                else ",".join(state.scaleset_config.labels)
-            ),
+            "labels": state.scaleset_config.labels,
             "runner_group": state.scaleset_config.runner_group,
             "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
             if pre_install

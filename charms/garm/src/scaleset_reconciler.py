@@ -54,8 +54,8 @@ class ScalesetReconciler:
         Args:
             desired: The full desired set of scalesets.
         """
-        providers = {p.name for p in self._client.list_providers()}
-        observed = {ss.name: ss for ss in self._client.list_scalesets()}
+        providers = {provider.name for provider in self._client.list_providers()}
+        observed = {scaleset.name: scaleset for scaleset in self._client.list_scalesets()}
 
         all_desired_names: set[str] = {spec.name for spec in desired}
 
@@ -92,7 +92,7 @@ class ScalesetReconciler:
                     # Disable the scaleset first so GARM stops launching new runners.
                     # GARM returns 400 if the scaleset still has active runners,
                     # so disabling first drains it for the next reconcile to clean up.
-                    self._client.update_scaleset(scaleset.id, UpdateScaleSetParams(enabled=False))
+                    self._client.update_scaleset(scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0))
                 except GarmApiError as exc:
                     logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
                 try:
