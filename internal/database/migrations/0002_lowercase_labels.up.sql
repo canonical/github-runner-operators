@@ -26,7 +26,12 @@ SET labels = COALESCE((
     FROM unnest(j.labels) WITH ORDINALITY AS u(x, ord)
     WHERE lower(x) NOT IN ('self-hosted', 'linux')
 ), '{}')
-WHERE j.completed_at IS NULL;
+WHERE j.completed_at IS NULL
+  -- Only touch rows that actually change: those with uppercase characters or a
+  -- still-present implicit label. Mirrors the flavor guard above and avoids
+  -- locking/WAL for jobs already in canonical form.
+  AND (j.labels::text <> lower(j.labels::text)
+       OR EXISTS (SELECT 1 FROM unnest(j.labels) AS x WHERE lower(x) IN ('self-hosted', 'linux')));
 
 -- Re-run flavor assignment for unassigned, incomplete jobs that now match a
 -- flavor after lowercasing. Mirrors the application's assignment query.
