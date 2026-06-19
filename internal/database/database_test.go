@@ -583,6 +583,56 @@ func TestDatabase_AddFlavor_LowercasesLabels(t *testing.T) {
 	assert.Equal(t, []string{"self-hosted", "amd64", "large"}, flavor.Labels)
 }
 
+// Verify the 0002 data backfill against rows stored the way the old
+// case-sensitive code wrote them. The backfill lives only in raw SQL (the app's
+// forward path can't be reused from golang-migrate), so this exercises the exact
+// shipped migration file: it must lowercase flavor labels, lowercase and strip
+// implicit labels from incomplete jobs, reassign jobs that only failed to match
+// because of casing, and leave completed jobs as historical data.
+func TestMigration0002_LowercaseLabels(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	// Seed pre-migration rows with raw INSERTs so mixed-case labels are stored
+	// verbatim, bypassing the lowercasing setters and reproducing production state.
+	_, err := db.conn.Exec(ctx, `
+		INSERT INTO flavor (platform, name, labels, priority)
+		VALUES ('github', 'github-x64-noble', ARRAY['X64','Noble'], 100);
+
+		INSERT INTO job (platform, id, labels, created_at, completed_at, assigned_flavor)
+		VALUES
+		  ('github', 'incomplete', ARRAY['self-hosted','Linux','X64','Noble'], now(), NULL, NULL),
+		  ('github', 'completed',  ARRAY['self-hosted','Linux','X64','Noble'], now(), now(), NULL);
+	`, pgx.QueryExecModeSimpleProtocol)
+	require.NoError(t, err)
+
+	migrationSQL, err := migrationsFS.ReadFile("migrations/0002_lowercase_labels.up.sql")
+	require.NoError(t, err)
+	_, err = db.conn.Exec(ctx, string(migrationSQL), pgx.QueryExecModeSimpleProtocol)
+	require.NoError(t, err)
+
+	var flavorLabels []string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels FROM flavor WHERE name = 'github-x64-noble'`).Scan(&flavorLabels))
+	assert.Equal(t, []string{"x64", "noble"}, flavorLabels)
+
+	var incLabels []string
+	var incFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'incomplete'`).Scan(&incLabels, &incFlavor))
+	assert.Equal(t, []string{"x64", "noble"}, incLabels)
+	require.NotNil(t, incFlavor)
+	assert.Equal(t, "github-x64-noble", *incFlavor)
+
+	var compLabels []string
+	var compFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'completed'`).Scan(&compLabels, &compFlavor))
+	assert.Equal(t, []string{"self-hosted", "Linux", "X64", "Noble"}, compLabels)
+	assert.Nil(t, compFlavor)
+}
+
 func TestDatabase_AddFlavor_Exists(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
