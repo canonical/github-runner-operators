@@ -14,12 +14,15 @@ SET labels = (
 )
 WHERE f.labels::text <> lower(f.labels::text);
 
--- Normalize labels of jobs still needing a runner the same way ingestion does:
--- lowercase and strip GitHub's implicit labels (self-hosted, linux). The old
--- case-sensitive strip left uppercased implicit labels (e.g. "Linux") in the
--- stored array, so lowercasing alone would keep them and matching would still
--- fail. Completed jobs are never re-matched, so their labels are left as
--- historical data.
+-- Normalize the labels of all incomplete jobs (completed_at IS NULL) the same
+-- way ingestion does: lowercase and strip GitHub's implicit labels (self-hosted,
+-- linux). Already-assigned jobs are included on purpose -- disabling, deleting or
+-- updating a flavor resets its jobs to unassigned and re-runs assignment (see
+-- updateAssignedFlavorSql), which re-reads j.labels, so labels left in mixed case
+-- would re-introduce the casing mismatch for live jobs. The old case-sensitive
+-- strip also left uppercased implicit labels (e.g. "Linux") in the array, which
+-- lowercasing alone would keep. Completed jobs are never re-matched, so their
+-- labels are kept as historical data.
 UPDATE job AS j
 SET labels = COALESCE((
     SELECT array_agg(lower(x) ORDER BY ord)

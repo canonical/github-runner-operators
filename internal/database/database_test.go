@@ -606,7 +606,11 @@ func TestMigration0002_LowercaseLabels(t *testing.T) {
 		  ('github', 'completed',  ARRAY['self-hosted','Linux','X64','Noble'], now(), now(), NULL),
 		  -- Already-normalized, unassigned job: skipped by the label-rewrite guard
 		  -- but must still be picked up by the reassignment step.
-		  ('github', 'normalized', ARRAY['x64','noble'], now(), NULL, NULL);
+		  ('github', 'normalized', ARRAY['x64','noble'], now(), NULL, NULL),
+		  -- Assigned but in-progress job: its labels must be normalized too (so a
+		  -- later flavor change that re-matches it still works) while keeping its
+		  -- existing assignment.
+		  ('github', 'assigned', ARRAY['X64','Noble'], now(), NULL, 'github-x64-noble');
 	`, pgx.QueryExecModeSimpleProtocol)
 	require.NoError(t, err)
 
@@ -642,6 +646,14 @@ func TestMigration0002_LowercaseLabels(t *testing.T) {
 	assert.Equal(t, []string{"x64", "noble"}, normLabels)
 	require.NotNil(t, normFlavor)
 	assert.Equal(t, "github-x64-noble", *normFlavor)
+
+	var asgLabels []string
+	var asgFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'assigned'`).Scan(&asgLabels, &asgFlavor))
+	assert.Equal(t, []string{"x64", "noble"}, asgLabels)
+	require.NotNil(t, asgFlavor)
+	assert.Equal(t, "github-x64-noble", *asgFlavor)
 }
 
 func TestDatabase_AddFlavor_Exists(t *testing.T) {
