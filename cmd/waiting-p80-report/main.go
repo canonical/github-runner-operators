@@ -91,6 +91,9 @@ func run(cfg config) error {
 	if err != nil {
 		return err
 	}
+	if cfg.verbose {
+		fmt.Fprintf(os.Stderr, "retrieved %d rows\n", len(rows))
+	}
 	var w io.Writer = os.Stdout
 	if cfg.out != "" {
 		f, err := os.Create(cfg.out)
