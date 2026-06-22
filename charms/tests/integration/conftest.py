@@ -478,23 +478,9 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
 
 
 @pytest.fixture(scope="module", name="garm_configurator_charm_file")
-def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
+def garm_configurator_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built garm-configurator charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        pytest.skip(
-            f"missing required {CHARM_FILE_PARAM} option for garm-configurator "
-            "integration tests"
-        )
-    if len(charm) > 1:
-        configurator_charm = [file for file in charm if "garm-configurator" in file]
-        if not configurator_charm:
-            raise pytest.UsageError(
-                "No garm-configurator charm file found in --charm-file; "
-                "expected a path containing 'garm-configurator'"
-            )
-        return configurator_charm[0]
-    return charm[0]
+    return charm_paths["garm-configurator"].path
 
 
 @pytest.fixture(scope="module", name="configurator_with_image")
