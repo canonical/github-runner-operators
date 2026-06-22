@@ -15,6 +15,7 @@ import ops
 import paas_charm.go
 import tomli_w
 import yaml
+from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState, SSHDebugInfo
 from garm_api import GarmApiClient, GarmApiError
 from paas_charm.app import WorkloadConfig
 
@@ -31,6 +32,8 @@ OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-ope
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
+GARM_BASE_TEMPLATE_NAME: typing.Final[str] = "github_linux"
+GARM_CHARMED_TEMPLATE_NAME: typing.Final[str] = "github_linux_charmed"
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -273,6 +276,18 @@ class GarmCharm(paas_charm.go.Charm):
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
             self._on_configurator_relation_changed,
         )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
+            self._on_debug_ssh_relation_changed,
+        )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_changed,
+            self._on_debug_ssh_relation_changed,
+        )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
+            self._on_debug_ssh_relation_changed,
+        )
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
@@ -300,6 +315,10 @@ class GarmCharm(paas_charm.go.Charm):
     def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
         """Handle configurator relation joined/changed/broken by re-rendering TOML."""
         self.restart()
+
+    def _on_debug_ssh_relation_changed(self, _: ops.EventBase) -> None:
+        """Handle debug-ssh relation joined/changed/broken by updating the charmed template."""
+        self._apply_charmed_template()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -414,6 +433,7 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
+        self._apply_charmed_template()
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
@@ -663,6 +683,160 @@ class GarmCharm(paas_charm.go.Charm):
         except GarmApiError as exc:
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
+
+    def _apply_charmed_template(self) -> None:
+        """Create or delete the charmed runner install template in GARM.
+
+        Derives the ``github_linux_charmed`` template from the built-in
+        ``github_linux`` base by prepending a shell snippet that writes tmate
+        environment variables to the runner's ``.env`` file.
+
+        Called by the ``debug-ssh`` relation event handlers and at the end of
+        every ``restart()`` so the template state stays consistent with the
+        current relation data.
+
+        Only the leader unit manages templates; non-leaders skip silently.
+        """
+        if not self.unit.is_leader():
+            return
+
+        admin_creds = self._get_admin_credentials()
+        if not admin_creds:
+            logger.warning(
+                "Admin credentials not yet available; skipping charmed template update"
+            )
+            return
+
+        try:
+            username = admin_creds["username"]
+            password = admin_creds["password"]
+        except KeyError as exc:
+            logger.error(
+                "Admin credentials missing key %s; cannot update charmed template", exc
+            )
+            return
+
+        state = CharmState.from_charm(self)
+        connections = state.ssh_debug_connections
+
+        client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
+
+        try:
+            token = client.login(username=username, password=password)
+            templates = client.list_templates(token)
+        except GarmApiError as exc:
+            logger.warning(
+                "GARM template update failed (will retry on next event): %s", exc
+            )
+            raise
+
+        charmed = next(
+            (t for t in templates if t.name == GARM_CHARMED_TEMPLATE_NAME), None
+        )
+
+        if not connections:
+            if charmed is not None:
+                logger.info(
+                    "No debug-ssh connections; deleting charmed template (id=%s)", charmed.id
+                )
+                try:
+                    client.delete_template(token, charmed.id)
+                except GarmApiError as exc:
+                    logger.warning(
+                        "Failed to delete charmed template: %s", exc
+                    )
+                    raise
+            return
+
+        base = next(
+            (t for t in templates if t.name == GARM_BASE_TEMPLATE_NAME), None
+        )
+        if base is None:
+            logger.warning(
+                "Base template '%s' not found in GARM; cannot build charmed template",
+                GARM_BASE_TEMPLATE_NAME,
+            )
+            return
+
+        try:
+            base_script = bytes(client.get_template(token, base.id).data).decode("utf-8")
+        except GarmApiError as exc:
+            logger.warning("Failed to fetch base template data: %s", exc)
+            raise
+
+        snippet = _build_tmate_env_snippet(connections)
+        patched_script = _prepend_after_shebang(base_script, snippet)
+        patched_data = patched_script.encode("utf-8")
+
+        try:
+            if charmed is not None:
+                logger.info(
+                    "Updating charmed template (id=%s) with %d tmate connection(s)",
+                    charmed.id,
+                    len(connections),
+                )
+                client.delete_template(token, charmed.id)
+
+            logger.info(
+                "Creating charmed template '%s' with %d tmate connection(s)",
+                GARM_CHARMED_TEMPLATE_NAME,
+                len(connections),
+            )
+            client.create_template(
+                token=token,
+                name=GARM_CHARMED_TEMPLATE_NAME,
+                description="Charmed GitHub Linux template managed by the GARM charm",
+                forge_type="github",
+                os_type="linux",
+                data=patched_data,
+            )
+        except GarmApiError as exc:
+            logger.warning("Failed to apply charmed template: %s", exc)
+            raise
+
+
+def _build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
+    """Build a shell snippet that writes tmate env vars to the runner's .env file.
+
+    Uses only the first connection; tmate env vars are scalar values.
+
+    Args:
+        connections: List of SSH debug connections from the debug-ssh relation.
+
+    Returns:
+        A shell snippet string (no shebang) to be prepended to the base template.
+    """
+    conn = connections[0]
+    runner_env = "/home/ubuntu/actions-runner/.env"
+    lines = [
+        f"mkdir -p $(dirname {runner_env})",
+        f'cat >> {runner_env} << "EOF"',
+        f"TMATE_SERVER_HOST={conn.host}",
+        f"TMATE_SERVER_PORT={conn.port}",
+        f"TMATE_SERVER_RSA_FINGERPRINT={conn.rsa_fingerprint}",
+        f"TMATE_SERVER_ED25519_FINGERPRINT={conn.ed25519_fingerprint}",
+        "EOF",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _prepend_after_shebang(script: str, snippet: str) -> str:
+    """Insert *snippet* immediately after the shebang line of *script*.
+
+    If no shebang is present the snippet is prepended at the very start.
+
+    Args:
+        script: The original shell script (may start with ``#!``).
+        snippet: The shell code to inject.
+
+    Returns:
+        The modified script string.
+    """
+    lines = script.split("\n")
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + "\n" + snippet + "\n".join(lines[1:])
+    return snippet + script
 
 
 if __name__ == "__main__":

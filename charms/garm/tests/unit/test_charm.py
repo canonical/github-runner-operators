@@ -20,10 +20,13 @@ from charm import (
     GARM_SECRETS_LABEL,
     GarmCharm,
     _build_provider_list,
+    _build_tmate_env_snippet,
     _generate_admin_password,
     _generate_garm_secrets,
+    _prepend_after_shebang,
     render_garm_toml,
 )
+from charm_state import SSHDebugInfo
 from garm_api import GarmConnectionError
 
 _DEFAULT_PG_CONFIG = {
@@ -540,3 +543,29 @@ def test_maybe_first_run_skips_on_missing_credential_key():
         GarmCharm._maybe_first_run(charm)
 
     mock_client_cls.assert_not_called()
+
+
+def test_ssh_debug_info_env_vars():
+    """
+    arrange: One SSHDebugInfo connection.
+    act: Call _build_tmate_env_snippet() and _prepend_after_shebang().
+    assert: The patched script starts with the shebang, then contains
+            all four TMATE_SERVER_* variables with correct values.
+    """
+    conn = SSHDebugInfo(
+        host="10.10.0.5",
+        port=2222,
+        rsa_fingerprint="SHA256:rsa",
+        ed25519_fingerprint="SHA256:ed",
+    )
+    base_script = "#!/bin/bash\necho 'hello'\n"
+
+    snippet = _build_tmate_env_snippet([conn])
+    patched = _prepend_after_shebang(base_script, snippet)
+
+    assert patched.startswith("#!/bin/bash\n")
+    assert "TMATE_SERVER_HOST=10.10.0.5" in patched
+    assert "TMATE_SERVER_PORT=2222" in patched
+    assert "TMATE_SERVER_RSA_FINGERPRINT=SHA256:rsa" in patched
+    assert "TMATE_SERVER_ED25519_FINGERPRINT=SHA256:ed" in patched
+    assert "echo 'hello'" in patched

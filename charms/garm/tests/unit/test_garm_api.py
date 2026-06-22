@@ -173,3 +173,74 @@ def test_wait_for_ready_propagates_non_connection_api_error_immediately(client):
             client.wait_for_ready()
 
     mock_sleep.assert_not_called()
+
+
+class TestIsInitialized:
+    """Tests for GarmApiClient.is_initialized grouped for node-ID compatibility."""
+
+    def test_returns_true_when_controller_info_succeeds(self, client):
+        """is_initialized returns True when controller_info returns 200."""
+        with patch("garm_api.ControllerInfoApi") as mock_cls:
+            mock_cls.return_value.controller_info.return_value = MagicMock()
+            assert client.is_initialized() is True
+
+    def test_returns_false_on_409(self, client):
+        """is_initialized returns False when GARM returns 409 (not yet initialised)."""
+        with patch("garm_api.ControllerInfoApi") as mock_cls:
+            mock_cls.return_value.controller_info.side_effect = ApiException(status=409)
+            assert client.is_initialized() is False
+
+    def test_raises_garm_api_error_on_unexpected_status(self, client):
+        """is_initialized raises GarmApiError on unexpected HTTP status."""
+        with patch("garm_api.ControllerInfoApi") as mock_cls:
+            mock_cls.return_value.controller_info.side_effect = ApiException(status=500)
+            with pytest.raises(GarmApiError, match="500"):
+                client.is_initialized()
+
+
+class TestFirstRun:
+    """Tests for GarmApiClient.first_run grouped for node-ID compatibility."""
+
+    def test_calls_api_with_correct_params(self, client):
+        """first_run passes correct parameters to the underlying API."""
+        with patch("garm_api.FirstRunApi") as mock_cls:
+            mock_cls.return_value.first_run.return_value = MagicMock()
+            client.first_run("admin", "Password-123!", "admin@test.local", "Admin User")
+        body = mock_cls.return_value.first_run.call_args.kwargs["body"]
+        assert body.username == "admin"
+        assert body.email == "admin@test.local"
+
+    def test_raises_garm_api_error_on_failure(self, client):
+        """first_run raises GarmApiError when the API returns an error."""
+        with patch("garm_api.FirstRunApi") as mock_cls:
+            mock_cls.return_value.first_run.side_effect = ApiException(status=400)
+            with pytest.raises(GarmApiError, match="400"):
+                client.first_run("admin", "Password-123!", "admin@test.local", "Admin User")
+
+
+class TestLogin:
+    """Tests for GarmApiClient.login."""
+
+    def test_returns_jwt_token(self, client):
+        """
+        arrange: LoginApi.login returns a JWTResponse with a token.
+        act: Call client.login().
+        assert: The returned token matches the mock value.
+        """
+        mock_response = MagicMock()
+        mock_response.token = "jwt-test-token"
+        with patch("garm_api.LoginApi") as mock_cls:
+            mock_cls.return_value.login.return_value = mock_response
+            token = client.login("admin", "Password-123!")
+        assert token == "jwt-test-token"
+
+    def test_raises_garm_api_error_on_failure(self, client):
+        """
+        arrange: LoginApi.login raises ApiException with status 401.
+        act: Call client.login().
+        assert: Raises GarmApiError with the status code in the message.
+        """
+        with patch("garm_api.LoginApi") as mock_cls:
+            mock_cls.return_value.login.side_effect = ApiException(status=401)
+            with pytest.raises(GarmApiError, match="401"):
+                client.login("admin", "wrong-password")
