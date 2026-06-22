@@ -11,15 +11,19 @@ every day from history.
 
 ## Usage
 
-	waiting-p80-report -dsn "$POSTGRESQL_DB_CONNECT_STRING" -from 2026-05-01 -to 2026-05-31 -o p80.csv
+```shell
+waiting-p80-report -dsn "$POSTGRESQL_DB_CONNECT_STRING" -from 2026-05-01 -to 2026-05-31 -o p80.csv
+```
 
 Flags:
 
-	-dsn   PostgreSQL connection string (or POSTGRESQL_DB_CONNECT_STRING env)
-	-from  start date YYYY-MM-DD (inclusive, UTC)
-	-to    end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC
-	-o     output CSV path (default: stdout)
-	-v     verbose logging to stderr
+```text
+-dsn   PostgreSQL connection string (or POSTGRESQL_DB_CONNECT_STRING env)
+-from  start date YYYY-MM-DD (inclusive, UTC)
+-to    end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC
+-o     output CSV path (default: stdout)
+-v     verbose logging to stderr
+```
 
 CSV columns: `day,platform,p80_seconds,sample_count`.
 
@@ -33,7 +37,9 @@ the CSV.
 
 Daily at 06:00, appending yesterday's row to a running CSV:
 
-	0 6 * * *  waiting-p80-report -dsn "$DSN" -from $(date -d 'yesterday' +%F) -to $(date -d 'yesterday' +%F) >> /var/log/p80.csv
+```shell
+0 6 * * *  waiting-p80-report -dsn "$DSN" -from $(date -d 'yesterday' +%F) -to $(date -d 'yesterday' +%F) >> /var/log/p80.csv
+```
 
 ## Testing
 
