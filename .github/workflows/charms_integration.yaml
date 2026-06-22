@@ -18,7 +18,7 @@ jobs:
       working-directory: .
 
   required_status_checks:
-    name: Required Integration Test Status Checks
+    name: charms-integration-status-check
     runs-on: ubuntu-latest
     needs:
       - integration-test
