@@ -710,6 +710,25 @@ func TestGetWorkflowJob(t *testing.T) {
 		}),
 		expectNil: true,
 	}, {
+		name: "self-hosted label with mixed casing is eligible",
+		headers: map[string]interface{}{
+			"X-GitHub-Event": "workflow_job",
+		},
+		body: mk(map[string]any{
+			"action": "queued",
+			"repository": map[string]any{
+				"full_name": "canonical/test-repo",
+			},
+			"workflow_job": map[string]any{
+				"id":         260,
+				"labels":     []string{"Self-Hosted", "X64", "Large"},
+				"created_at": "2025-01-01T10:00:00Z",
+			},
+		}),
+		validateJob: func(t *testing.T, job *githubWebhookJob) {
+			assert.Equal(t, "260", job.id)
+		},
+	}, {
 		name: "missing workflow_job field",
 		headers: map[string]interface{}{
 			"X-GitHub-Event": "workflow_job",
