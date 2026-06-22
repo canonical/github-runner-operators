@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-19
 
-- add `waiting-p80-report` standalone CLI that extracts the daily P80 of job waiting time from the planner PostgreSQL database into a CSV. Not part of the planner charm; no charm or migration change.
+- add `waiting-p80-report` standalone CLI that extracts the daily P80 of job waiting time from the planner's PostgreSQL database into a CSV. Not part of the planner charm; no charm or migration change.
 
 ## 2026-06-18
 

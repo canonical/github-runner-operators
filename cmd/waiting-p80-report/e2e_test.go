@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -16,24 +17,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testSchema is a dedicated schema for e2e test isolation, so this test does not
+// mutate the shared public schema used by internal/database integration tests
+// when packages run in parallel.
+const testSchema = "waiting_p80_e2e"
+
+// withSearchPath returns a copy of dsn with search_path set to the given schema
+// via the libpq options parameter, so all connections from that DSN resolve
+// unqualified table names against the isolated schema.
+func withSearchPath(t *testing.T, dsn, schema string) string {
+	t.Helper()
+	u, err := url.Parse(dsn)
+	require.NoError(t, err)
+	q := u.Query()
+	q.Set("options", "-c search_path="+schema)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 // TestReport_EndToEnd seeds jobs with known waiting times into a real Postgres
-// (POSTGRESQL_DB_CONNECT_STRING) and asserts the report query returns the
-// expected daily P80 and sample_count. Requires -tags=integration and a live DB,
-// mirroring the pattern in internal/database/database_test.go.
+// (POSTGRESQL_DB_CONNECT_STRING) using an isolated schema and asserts the
+// report query returns the expected daily P80 and sample_count. Requires
+// -tags=integration and a live DB, mirroring the pattern in
+// internal/database/database_test.go.
 func TestReport_EndToEnd(t *testing.T) {
 	dsn := os.Getenv("POSTGRESQL_DB_CONNECT_STRING")
 	if dsn == "" {
 		t.Fatal("test database not configured, missing POSTGRESQL_DB_CONNECT_STRING environment variable")
 	}
 
+	isolatedDSN := withSearchPath(t, dsn, testSchema)
+
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := pgxpool.New(ctx, isolatedDSN)
 	require.NoError(t, err)
 	defer pool.Close()
 
-	// Reset and create the minimal schema the query needs.
+	// Create an isolated schema so this test does not clash with other
+	// integration test packages that reset the public schema.
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		DROP SCHEMA IF EXISTS %s CASCADE;
+		CREATE SCHEMA %s;`, testSchema, testSchema))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", testSchema))
+	})
+
+	// Create the minimal table the query needs, inside the isolated schema.
 	_, err = pool.Exec(ctx, `
-		DROP TABLE IF EXISTS job;
 		CREATE TABLE job (
 			pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 			platform        TEXT        NOT NULL,
@@ -79,7 +110,7 @@ func TestReport_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := config{
-		dsn:  dsn,
+		dsn:  isolatedDSN,
 		from: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		to:   time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
 	}
