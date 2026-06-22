@@ -5,6 +5,7 @@
 """GARM charm entrypoint."""
 
 import dataclasses
+import hashlib
 import logging
 import secrets
 import string
@@ -13,17 +14,23 @@ import typing
 import ops
 import paas_charm.go
 import tomli_w
+import yaml
+from garm_api import GarmApiClient, GarmApiError
 from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
 
 GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
+GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
+GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
+GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 GARM_PORT: typing.Final[int] = 8080
+GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -41,25 +48,145 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _build_provider_list(
+    providers: list[dict[str, str]] | None,
+) -> tuple[list[dict[str, typing.Any]], dict[str, str]]:
+    r"""Build the list of [[provider]] TOML entries and provider config files.
+
+    The garm-provider-openstack binary reads its credentials from a
+    provider-specific TOML config file that references a clouds.yaml file
+    -- it does NOT read OPENSTACK_* environment variables.
+
+    This function generates both the GARM provider entries and the
+    provider config file contents that must be pushed to the container.
+
+    Args:
+        providers: List of provider config dicts from Configurator units,
+            each with keys: unit_name, auth_url, username, password,
+            project_name, user_domain_name, project_domain_name,
+            region_name, network.
+
+    Returns:
+        A tuple of (provider_entries, provider_files):
+        - provider_entries: List of provider dicts for the GARM TOML
+          [[provider]] section, with config_file paths set.
+        - provider_files: Dict mapping container file paths to their
+          contents (provider TOML + clouds.yaml for each provider).
+    """
+    if not providers:
+        return [
+            {
+                "name": "openstack",
+                "provider_type": "external",
+                "description": "OpenStack provider",
+                "external": {
+                    "config_file": "",
+                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
+                },
+            }
+        ], {}
+
+    result: list[dict[str, typing.Any]] = []
+    provider_files: dict[str, str] = {}
+
+    for provider in providers:
+        unit_name = provider["unit_name"]
+
+        provider_toml_path = f"{GARM_PROVIDER_CONFIG_DIR}/provider-{unit_name}.toml"
+        clouds_yaml_path = f"{GARM_PROVIDER_CONFIG_DIR}/clouds-{unit_name}.yaml"
+
+        # Build the provider-specific TOML config that garm-provider-openstack reads.
+        provider_toml = tomli_w.dumps(
+            {
+                "cloud": unit_name,
+                "network_id": provider["network"],
+                "credentials": {
+                    "clouds": clouds_yaml_path,
+                },
+                # 2025/07/24 - This option is set to mitigate CVE-2024-6174
+                "use_config_drive": True,
+            }
+        )
+
+        # Build the clouds.yaml that gophercloud reads for OpenStack credentials.
+        auth_block = {
+            "auth_url": provider["auth_url"],
+            "username": provider["username"],
+            "password": provider["password"],
+            "project_name": provider["project_name"],
+            "user_domain_name": provider["user_domain_name"],
+            "project_domain_name": provider["project_domain_name"],
+        }
+
+        clouds_yaml = _render_clouds_yaml(
+            unit_name, auth_block, provider["region_name"]
+        )
+
+        provider_files[provider_toml_path] = provider_toml
+        provider_files[clouds_yaml_path] = clouds_yaml
+
+        result.append(
+            {
+                "name": unit_name,
+                "provider_type": "external",
+                "description": f"OpenStack provider ({unit_name})",
+                "external": {
+                    "config_file": provider_toml_path,
+                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
+                },
+            }
+        )
+    return result, provider_files
+
+
+def _render_clouds_yaml(cloud_name: str, auth: dict[str, str], region_name: str) -> str:
+    """Render a minimal clouds.yaml for gophercloud using PyYAML.
+
+    Args:
+        cloud_name: The cloud name in the ``clouds`` dict.
+        auth: Auth parameters (auth_url, username, password, project_name,
+            user_domain_name, project_domain_name).
+        region_name: OpenStack region name.
+
+    Returns:
+        YAML-formatted string.
+    """
+    clouds = {
+        "clouds": {
+            cloud_name: {
+                "auth": auth,
+                "region_name": region_name,
+            }
+        }
+    }
+    return yaml.dump(clouds, default_flow_style=False)
+
+
 def render_garm_toml(
     *,
-    listen_port: int,
     jwt_secret: str,
     db_passphrase: str,
     postgresql_config: dict[str, typing.Any],
-) -> str:
+    providers: list[dict[str, str]] | None = None,
+) -> tuple[str, dict[str, str]]:
     """Render GARM's TOML configuration file content.
 
     Args:
-        listen_port: Port for the GARM API server.
         jwt_secret: Secret string used to sign GARM JWT tokens.
         db_passphrase: 32-character passphrase for AES-256 encryption of secrets in the DB.
         postgresql_config: PostgreSQL connection parameters (username, password,
             hostname, port, database, sslmode).
+        providers: Optional list of provider config dicts from Configurator
+            units. If None or empty, a default single "openstack" provider
+            is used for backward compatibility.
 
     Returns:
-        TOML-formatted string ready to be written to disk.
+        A tuple of (toml_content, provider_files):
+        - toml_content: TOML-formatted string ready to be written to disk.
+        - provider_files: Dict mapping container file paths to their
+          contents (provider config TOML + clouds.yaml for each provider).
     """
+    provider_entries, provider_files = _build_provider_list(providers)
     config: dict[str, typing.Any] = {
         "database": {
             "backend": "postgresql",
@@ -67,8 +194,8 @@ def render_garm_toml(
             "postgresql": postgresql_config,
         },
         "apiserver": {
-            "bind": "0.0.0.0",
-            "port": listen_port,
+            "bind": GARM_LISTEN_ADDRESS,
+            "port": GARM_PORT,
             "use_tls": False,
         },
         "jwt_auth": {
@@ -79,20 +206,9 @@ def render_garm_toml(
             "disable_auth": True,
             "enable": True,
         },
-        "provider": [
-            {
-                "name": "openstack",
-                "provider_type": "external",
-                "description": "OpenStack provider",
-                "external": {
-                    "config_file": "",
-                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
-                    "environment_variables": [],
-                },
-            }
-        ],
+        "provider": provider_entries,
     }
-    return tomli_w.dumps(config)
+    return tomli_w.dumps(config), provider_files
 
 
 def _generate_garm_secrets() -> dict[str, str]:
@@ -107,6 +223,32 @@ def _generate_garm_secrets() -> dict[str, str]:
     }
 
 
+def _generate_admin_password() -> str:
+    """Generate a random password satisfying GARM's strong-password policy.
+
+    Policy: min 12 chars, at least one uppercase, one lowercase, one digit,
+    one symbol.  Full entropy is distributed across all 20 positions via a
+    Fisher-Yates shuffle so the structure is not predictable from the source.
+
+    Returns:
+        A 20-character password guaranteed to meet GARM's requirements.
+    """
+    symbols = "!@#$%-_=+"
+    alphabet = string.ascii_letters + string.digits + symbols
+    mandatory = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(symbols),
+    ]
+    filler = [secrets.choice(alphabet) for _ in range(16)]
+    chars = mandatory + filler
+    for i in range(len(chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        chars[i], chars[j] = chars[j], chars[i]
+    return "".join(chars)
+
+
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -118,9 +260,26 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
         self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(self.on.leader_elected, self._on_leader_elected)
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
+            self._on_configurator_relation_changed,
+        )
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
+            self._on_configurator_relation_changed,
+        )
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
+            self._on_configurator_relation_changed,
+        )
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
+        self._ensure_secrets()
+
+    def _on_leader_elected(self, _: ops.LeaderElectedEvent) -> None:
+        """Ensure secrets exist when the leader is elected."""
         self._ensure_secrets()
 
     @property
@@ -134,7 +293,13 @@ class GarmCharm(paas_charm.go.Charm):
         paas-config.yaml, so metrics_target is set to None to suppress the
         framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
+        return dataclasses.replace(
+            super()._workload_config, port=GARM_PORT, metrics_target=None
+        )
+
+    def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
+        """Handle configurator relation joined/changed/broken by re-rendering TOML."""
+        self.restart()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -147,6 +312,7 @@ class GarmCharm(paas_charm.go.Charm):
         """
         if not self.is_ready():
             return
+
         self._ensure_secrets()
 
         # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
@@ -174,58 +340,166 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
-        if not self._get_postgresql_config():
+        postgresql_config = self._get_postgresql_config()
+        if not postgresql_config:
             logger.info("PostgreSQL relation data not yet available; blocking")
-            self.unit.status = ops.BlockedStatus("Waiting for postgresql relation")
+            self.unit.status = ops.WaitingStatus("Waiting for postgresql relation")
             return
 
-        # TODO: Eliminate double-replan (ISD-5718). paas_charm calls replan()
-        # internally in super().restart(), which starts GARM with the default
-        # command momentarily before this method overrides it. Acceptable for
-        # the scaffold; resolve by contributing an upstream hook in a future story.
-        super().restart(rerun_migrations=rerun_migrations)
-        container = self.unit.get_container(CONTAINER_NAME)
-        try:
-            self._push_garm_config(container)
-        except ops.SecretNotFoundError:
-            logger.warning("garm-secrets not yet available; deferring config push")
-            self.unit.status = ops.WaitingStatus("Waiting for leader to initialise garm-secrets")
+        secrets_data = self._get_secrets()
+        if secrets_data is None:
+            logger.info(
+                "GARM secrets not yet available; blocking until leader initialises"
+            )
+            self.unit.status = ops.WaitingStatus("Waiting for GARM secrets")
             return
+
+        provider_configs = self._get_configurator_provider_configs()
+        if not provider_configs:
+            self.unit.status = ops.WaitingStatus(
+                "Waiting for garm-configurator relation"
+            )
+            return
+
+        toml_content, provider_files = render_garm_toml(
+            jwt_secret=secrets_data["jwt-secret"],
+            db_passphrase=secrets_data["db-passphrase"],
+            postgresql_config=postgresql_config,
+            providers=provider_configs,
+        )
+
+        # Detect config changes by comparing the new config hash against
+        # the hash of the config currently on disk in the container.
+        hash_input = (
+            toml_content
+            + "\n"
+            + "\n".join(
+                f"{path}\n{content}" for path, content in sorted(provider_files.items())
+            )
+        )
+        new_hash = self._hash_toml(hash_input)
+        previous_hash = self._get_on_disk_toml_hash(provider_files)
+        if previous_hash == new_hash:
+            logger.debug("TOML config unchanged; skipping restart")
+            return
+
+        # Log non-sensitive metadata about the config change.
+        # Do NOT log toml_content here — it contains secrets
+        # (jwt_secret, db_passphrase, passwords).
+        provider_names = [p.get("unit_name") for p in provider_configs]
+        logger.info("Updating GARM config for providers: %s", provider_names)
+
+        container = self.unit.get_container(CONTAINER_NAME)
+        container.push(
+            GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True
+        )
+        for path, content in provider_files.items():
+            container.push(path, content, permissions=0o600, make_dirs=True)
+
         container.add_layer(
             "garm-command",
             {
                 "services": {
                     PEBBLE_SERVICE_NAME: {
-                        "override": "merge",
+                        "override": "replace",
                         "startup": "enabled",
                         "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
+                        "environment": {
+                            "config_hash": new_hash,
+                        },
                     }
                 }
             },
             combine=True,
         )
         container.replan()
+        self._maybe_first_run()
+        super().restart(rerun_migrations=rerun_migrations)
+
+    @staticmethod
+    def _hash_toml(toml_content: str) -> str:
+        """Return the SHA-256 hex digest of the given TOML content.
+
+        Args:
+            toml_content: The TOML string to hash.
+
+        Returns:
+            A 64-character hex digest string.
+        """
+        return hashlib.sha256(toml_content.encode("utf-8")).hexdigest()
+
+    def _get_on_disk_toml_hash(self, provider_files: dict[str, str]) -> str | None:
+        """Compute the hash of the config currently on disk in the container.
+
+        Reads the existing config files from the container, constructs the
+        same hash input used during render, and returns its SHA-256 digest.
+        Returns None if the config file does not yet exist on disk.
+
+        Args:
+            provider_files: The new provider files dict (used only for keys).
+
+        Returns:
+            The SHA-256 hex digest of the on-disk config, or None if
+            the main config file does not exist yet.
+        """
+        container = self.unit.get_container(CONTAINER_NAME)
+        try:
+            existing_toml = container.pull(GARM_CONFIG_PATH).read()
+        except (ops.pebble.PathError, FileNotFoundError):
+            return None
+
+        existing_provider_parts: list[str] = []
+        for path in sorted(provider_files.keys()):
+            try:
+                existing_provider_parts.append(f"{path}\n{container.pull(path).read()}")
+            except (ops.pebble.PathError, FileNotFoundError):
+                # If a provider file is missing, the config has changed.
+                return None
+
+        hash_input = existing_toml + "\n" + "\n".join(existing_provider_parts)
+        return self._hash_toml(hash_input)
 
     def _ensure_secrets(self) -> None:
-        """Create the garm-secrets juju secret on first call (leader only)."""
+        """Create garm-secrets and garm-admin-credentials juju secrets (leader only)."""
         if not self.unit.is_leader():
             return
         try:
             self.model.get_secret(label=GARM_SECRETS_LABEL)
         except ops.SecretNotFoundError:
+            logger.info("GARM secrets not yet available; creating them")
             self.app.add_secret(_generate_garm_secrets(), label=GARM_SECRETS_LABEL)
+        try:
+            self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
+        except ops.SecretNotFoundError:
+            logger.info("GARM admin credentials not yet available; creating them")
+            self.app.add_secret(
+                {
+                    "username": "admin",
+                    "password": _generate_admin_password(),
+                    "email": "admin@garm.local",
+                    "full-name": "GARM Admin",
+                },
+                label=GARM_ADMIN_CREDENTIALS_LABEL,
+            )
+            logger.info(
+                "GARM admin credentials stored in Juju secret '%s'."
+                " Retrieve with: juju secret-get --label %s",
+                GARM_ADMIN_CREDENTIALS_LABEL,
+                GARM_ADMIN_CREDENTIALS_LABEL,
+            )
 
-    def _get_secrets(self) -> dict[str, str]:
+    def _get_secrets(self) -> dict[str, str] | None:
         """Retrieve secrets from the juju secret store.
 
         Returns:
-            Dict with jwt-secret and db-passphrase.
-
-        Raises:
-            ops.SecretNotFoundError: If the secret doesn't exist yet.
+            Dict with jwt-secret and db-passphrase, or None if the
+            secret is not accessible (e.g. not yet created by the leader).
         """
-        secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
-        return secret.get_content()
+        try:
+            secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
+            return secret.get_content()
+        except ops.SecretNotFoundError:
+            return None
 
     def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
         """Get PostgreSQL config from relation data, or None if not available.
@@ -265,30 +539,130 @@ class GarmCharm(paas_charm.go.Charm):
 
         return None
 
-    def _push_garm_config(self, container: ops.Container) -> None:
-        """Render and push the GARM TOML config into the Pebble container.
+    def _get_configurator_provider_configs(
+        self,
+    ) -> list[dict[str, str]]:
+        """Read OpenStack provider configs from all Configurator units.
+
+        Each Configurator unit writes its provider config to unit-level
+        relation data on the ``garm-configurator`` endpoint. This method
+        collects all such configs, keyed by unit name for TOML provider
+        naming.
+
+        Passwords stored as Juju secret URIs are resolved at this point
+        so that the plaintext value is available for the provider's
+        clouds.yaml file.
+
+        Returns:
+            A list of dicts, each containing the provider config fields
+            (auth_url, username, password, project_name, etc.) plus a
+            ``unit_name`` key for the provider's TOML name.
+        """
+        relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
+        if relation is None:
+            return []
+
+        configs: list[dict[str, str]] = []
+        for unit in relation.units:
+            data = relation.data[unit]
+            # Only include units that have sent the full provider config
+            if "openstack_auth_url" not in data:
+                continue
+
+            # Resolve password: may be a plain value or a secret URI.
+            password = data.get("openstack_password", "")
+            unit_name = unit.name.replace("/", "-")
+            password_secret_uri = data.get("openstack_password_secret_uri", "")
+            if not password and password_secret_uri:
+                password = self._resolve_secret_value(str(password_secret_uri))
+
+            configs.append(
+                {
+                    "unit_name": unit_name,
+                    "auth_url": data.get("openstack_auth_url", ""),
+                    "username": data.get("openstack_username", ""),
+                    "password": password,
+                    "project_name": data.get("openstack_project_name", ""),
+                    "user_domain_name": data.get("openstack_user_domain_name", ""),
+                    "project_domain_name": data.get(
+                        "openstack_project_domain_name", ""
+                    ),
+                    "region_name": data.get("openstack_region_name", ""),
+                    "network": data.get("openstack_network", ""),
+                }
+            )
+
+        return configs
+
+    def _resolve_secret_value(self, secret_uri: str) -> str:
+        """Resolve a secret URI and return its ``value`` content.
 
         Args:
-            container: The Pebble container to push the config into.
+            secret_uri: A Juju secret URI.
+
+        Returns:
+            The ``value`` field from the secret's content, or an empty
+            string if the secret is not accessible.
         """
-        postgresql_config = self._get_postgresql_config()
-        if not postgresql_config:
-            logger.info("PostgreSQL relation data not yet available")
+        try:
+            secret = self.model.get_secret(id=secret_uri)
+            return secret.get_content(refresh=True).get("value", "")
+        except ops.SecretNotFoundError:
+            logger.warning("Secret %s is not accessible", secret_uri)
+            return ""
+
+    def _get_admin_credentials(self) -> dict[str, str] | None:
+        """Retrieve the GARM admin credentials from the Juju secret store.
+
+        Returns:
+            Dict with ``username``, ``password``, ``email``, ``full-name``,
+            or None if the secret is not yet available.
+        """
+        try:
+            secret = self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
+            return secret.get_content()
+        except ops.SecretNotFoundError:
+            return None
+
+    def _maybe_first_run(self) -> None:
+        """Call GARM first-run initialisation if GARM is not yet initialised."""
+        if not self.unit.is_leader():
+            return
+        admin_creds = self._get_admin_credentials()
+        if not admin_creds:
+            logger.warning(
+                "Admin credentials secret not yet available; skipping first-run check"
+            )
             return
 
-        secrets = self._get_secrets()
-        logger.info(
-            "Configuring GARM with PostgreSQL backend at %s:%s",
-            postgresql_config["hostname"],
-            postgresql_config["port"],
-        )
-        toml_content = render_garm_toml(
-            listen_port=GARM_PORT,
-            jwt_secret=secrets["jwt-secret"],
-            db_passphrase=secrets["db-passphrase"],
-            postgresql_config=postgresql_config,
-        )
-        container.push(GARM_CONFIG_PATH, toml_content, make_dirs=True)
+        try:
+            username = admin_creds["username"]
+            password = admin_creds["password"]
+            email = admin_creds["email"]
+            full_name = admin_creds["full-name"]
+        except KeyError as exc:
+            logger.error(
+                "Admin credentials secret is missing required key %s; cannot initialise GARM",
+                exc,
+            )
+            return
+
+        client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
+
+        try:
+            client.wait_for_ready()
+            if client.is_initialized():
+                return
+            logger.info("GARM not yet initialised; running first-run setup")
+            client.first_run(
+                username=username,
+                password=password,
+                email=email,
+                full_name=full_name,
+            )
+        except GarmApiError as exc:
+            logger.warning("GARM first-run check failed (error out for retry): %s", exc)
+            raise
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
 
 IMAGE_RELATION_NAME = "image"
+GARM_RELATION_NAME = "garm-configurator"
 
 
 class CharmConfigInvalidError(Exception):
