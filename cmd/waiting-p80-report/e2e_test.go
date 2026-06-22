@@ -128,11 +128,11 @@ func TestReport_EndToEnd(t *testing.T) {
 	require.Len(t, rows, 2, "expected one row per day with started jobs")
 	assert.Equal(t, "2026-05-01", rows[0].Day.UTC().Format("2006-01-02"))
 	assert.Equal(t, "github", rows[0].Platform)
-	assert.Equal(t, 5, rows[0].SampleCount, "NULL-started and negative-wait jobs must be excluded")
+	assert.Equal(t, int64(5), rows[0].SampleCount, "NULL-started and negative-wait jobs must be excluded")
 	// P80 interpolates between 40 and 300 -> 92.
 	assert.InDelta(t, 92.0, rows[0].P80Seconds, 0.01)
 
 	assert.Equal(t, "2026-05-02", rows[1].Day.UTC().Format("2006-01-02"))
-	assert.Equal(t, 1, rows[1].SampleCount)
+	assert.Equal(t, int64(1), rows[1].SampleCount)
 	assert.InDelta(t, 60.0, rows[1].P80Seconds, 0.01)
 }

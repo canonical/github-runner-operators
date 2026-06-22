@@ -111,7 +111,7 @@ type dailyP80Row struct {
 	Day         time.Time
 	Platform    string
 	P80Seconds  float64
-	SampleCount int
+	SampleCount int64
 }
 
 func buildQuery() string {
@@ -171,7 +171,7 @@ func writeCSV(w io.Writer, rows []dailyP80Row) error {
 			r.Day.UTC().Format("2006-01-02"),
 			r.Platform,
 			strconv.FormatFloat(r.P80Seconds, 'f', -1, 64),
-			strconv.Itoa(r.SampleCount),
+			strconv.FormatInt(r.SampleCount, 10),
 		}); err != nil {
 			return err
 		}
