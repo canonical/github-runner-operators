@@ -35,7 +35,7 @@ func TestWriteCSV(t *testing.T) {
 		{Day: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC), Platform: "github", P80Seconds: 0, SampleCount: 0},
 	}
 	var buf bytes.Buffer
-	if err := writeCSV(&buf, rows); err != nil {
+	if err := writeCSV(&buf, rows, false); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
@@ -45,9 +45,24 @@ func TestWriteCSV(t *testing.T) {
 	}
 }
 
+func TestWriteCSV_NoHeader(t *testing.T) {
+	rows := []dailyP80Row{
+		{Day: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Platform: "github", P80Seconds: 210.5, SampleCount: 42},
+	}
+	var buf bytes.Buffer
+	if err := writeCSV(&buf, rows, true); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	want := "2026-05-01,github,210.5,42\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestWriteCSV_Empty(t *testing.T) {
 	var buf bytes.Buffer
-	if err := writeCSV(&buf, nil); err != nil {
+	if err := writeCSV(&buf, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	want := "day,platform,p80_seconds,sample_count\n"

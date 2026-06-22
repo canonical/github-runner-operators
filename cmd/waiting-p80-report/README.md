@@ -18,11 +18,12 @@ waiting-p80-report -dsn "$POSTGRESQL_DB_CONNECT_STRING" -from 2026-05-01 -to 202
 Flags:
 
 ```text
--dsn   PostgreSQL connection string (or POSTGRESQL_DB_CONNECT_STRING env)
--from  start date YYYY-MM-DD (inclusive, UTC)
--to    end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC
--o     output CSV path (default: stdout)
--v     verbose logging to stderr
+-dsn        PostgreSQL connection string (or POSTGRESQL_DB_CONNECT_STRING env)
+-from       start date YYYY-MM-DD (inclusive, UTC)
+-to         end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC
+-o          output CSV path (default: stdout)
+-v          verbose logging to stderr
+-no-header  omit CSV header line (useful for appending to an existing CSV)
 ```
 
 CSV columns: `day,platform,p80_seconds,sample_count`.
@@ -30,15 +31,17 @@ CSV columns: `day,platform,p80_seconds,sample_count`.
 The P80 is computed SQL-side via `percentile_cont(0.8) WITHIN GROUP (...)` grouped by the UTC
 day the job *started* (the moment waiting ended), matching the population the ephemeral
 `github_runner_planner_webhook_job_waiting_seconds` histogram records. Jobs with a NULL
-`started_at` or `created_at` are excluded. Days with no started jobs simply do not appear in
-the CSV.
+`started_at` or `created_at` are excluded, as are rows where `started_at < created_at`
+(negative waiting times) which would otherwise skew the percentile. Days with no started jobs
+simply do not appear in the CSV.
 
 ## Cron example
 
-Daily at 06:00, appending yesterday's row to a running CSV:
+Daily at 06:00, appending yesterday's row to a running CSV (use `-no-header` so the header
+is not repeated on each append):
 
 ```shell
-0 6 * * *  waiting-p80-report -dsn "$DSN" -from $(date -d 'yesterday' +%F) -to $(date -d 'yesterday' +%F) >> /var/log/p80.csv
+0 6 * * *  waiting-p80-report -dsn "$DSN" -no-header -from $(date -d 'yesterday' +%F) -to $(date -d 'yesterday' +%F) >> /var/log/p80.csv
 ```
 
 ## Testing

@@ -25,11 +25,12 @@ import (
 )
 
 type config struct {
-	dsn     string
-	from    time.Time
-	to      time.Time
-	out     string
-	verbose bool
+	dsn      string
+	from     time.Time
+	to       time.Time
+	out      string
+	verbose  bool
+	noHeader bool
 }
 
 func parseConfig() (config, error) {
@@ -39,6 +40,7 @@ func parseConfig() (config, error) {
 	fromStr := flag.String("from", "", "start date YYYY-MM-DD (inclusive, UTC)")
 	toStr := flag.String("to", "", "end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC")
 	flag.BoolVar(&cfg.verbose, "v", false, "verbose logging to stderr")
+	flag.BoolVar(&cfg.noHeader, "no-header", false, "omit CSV header line (useful for appending to an existing CSV)")
 	flag.Parse()
 
 	if cfg.dsn == "" {
@@ -103,7 +105,7 @@ func run(cfg config) error {
 		defer f.Close()
 		w = f
 	}
-	return writeCSV(w, rows)
+	return writeCSV(w, rows, cfg.noHeader)
 }
 
 // dailyP80Row is one row of the daily P80 rollup.
@@ -157,14 +159,17 @@ func queryRows(ctx context.Context, cfg config) ([]dailyP80Row, error) {
 	return out, rows.Err()
 }
 
-// writeCSV writes the daily P80 rows as CSV with a header line. Days with no jobs
-// do not appear in rows (the SQL GROUP BY omits them), so absent days are simply
-// absent from the CSV. Flush errors (e.g. disk full, broken pipe) are surfaced
-// via csv.Writer.Error rather than silently dropped.
-func writeCSV(w io.Writer, rows []dailyP80Row) error {
+// writeCSV writes the daily P80 rows as CSV. When noHeader is false (default) a
+// header line is emitted; set noHeader to true for append use-cases (e.g. cron).
+// Days with no jobs do not appear in rows (the SQL GROUP BY omits them), so
+// absent days are simply absent from the CSV. Flush errors (e.g. disk full,
+// broken pipe) are surfaced via csv.Writer.Error rather than silently dropped.
+func writeCSV(w io.Writer, rows []dailyP80Row, noHeader bool) error {
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"day", "platform", "p80_seconds", "sample_count"}); err != nil {
-		return err
+	if !noHeader {
+		if err := cw.Write([]string{"day", "platform", "p80_seconds", "sample_count"}); err != nil {
+			return err
+		}
 	}
 	for _, r := range rows {
 		if err := cw.Write([]string{
