@@ -7,7 +7,7 @@ backends:
     type: integration-test
     systems:
       - ubuntu-24.04:
-          runner: [self-hosted, edge, noble]
+          runner: [self-hosted-linux-amd64-noble-edge]
           cpu: 4
           memory: 8
           disk: 20
