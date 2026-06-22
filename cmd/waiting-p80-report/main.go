@@ -123,6 +123,7 @@ func buildQuery() string {
 		FROM job
 		WHERE started_at IS NOT NULL
 		  AND created_at IS NOT NULL
+		  AND started_at >= created_at
 		  AND started_at >= @from
 		  AND started_at < @to
 		GROUP BY day, platform

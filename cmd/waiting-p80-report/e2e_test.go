@@ -109,6 +109,14 @@ func TestReport_EndToEnd(t *testing.T) {
 		"github", "null-started", day.Add(-999*time.Second))
 	require.NoError(t, err)
 
+	// Seed one job where started_at < created_at (negative wait) to confirm
+	// it is excluded by the started_at >= created_at guard.
+	_, err = pool.Exec(ctx, `
+		INSERT INTO job (platform, id, created_at, started_at, raw)
+		VALUES ($1, $2, $3, $4, '{}')`,
+		"github", "negative-wait", day.Add(10*time.Second), day)
+	require.NoError(t, err)
+
 	cfg := config{
 		dsn:  isolatedDSN,
 		from: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
@@ -120,7 +128,7 @@ func TestReport_EndToEnd(t *testing.T) {
 	require.Len(t, rows, 2, "expected one row per day with started jobs")
 	assert.Equal(t, "2026-05-01", rows[0].Day.UTC().Format("2006-01-02"))
 	assert.Equal(t, "github", rows[0].Platform)
-	assert.Equal(t, 5, rows[0].SampleCount, "NULL-started job must be excluded")
+	assert.Equal(t, 5, rows[0].SampleCount, "NULL-started and negative-wait jobs must be excluded")
 	// P80 interpolates between 40 and 300 -> 92.
 	assert.InDelta(t, 92.0, rows[0].P80Seconds, 0.01)
 
