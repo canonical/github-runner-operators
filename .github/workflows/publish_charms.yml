@@ -1,134 +1,21 @@
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
 name: Publish to edge
 
 on:
   push:
     branches:
-    - main
-  # We also run on pull_request to ensure build process is working, but the final publish will be skipped for pull_request
-  pull_request:
-
-env:
-  CHARMCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
-  ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
+      - main
 
 jobs:
-  publish-charm:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-        - charm: planner
-          path: charms/planner-operator
-          rockcraft: planner-rockcraft.yaml
-        - charm: webhook-gateway
-          path: charms/webhook-gateway-operator
-          rockcraft: webhook-gateway-rockcraft.yaml
-        - charm: garm
-          path: charms/garm
-          rockcraft: garm-rockcraft.yaml
+  publish:
+    uses: canonical/charm-ci/.github/workflows/publish-artifacts.yml@main
     permissions:
       actions: read
       contents: write
-    name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (${{ matrix.charm }})
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7.0.0
-    - name: Remove Android SDK
-      run: sudo rm -rf /usr/local/lib/android
-    - name: setup lxd
-      uses: canonical/setup-lxd@v1
-    - name: rename ${{ matrix.rockcraft }}
-      run: |
-        mv ${{ matrix.rockcraft }} rockcraft.yaml
-    - name: build rock
-      id: rockcraft
-      run: |
-        sudo snap install --channel latest/stable --classic rockcraft
-        rockcraft pack --verbosity trace
-        echo rock=`ls *.rock` >> $GITHUB_OUTPUT
-    - run: |
-        echo rockcraft pack:
-        echo ${{ steps.rockcraft.outputs.rock }}
-    - name: upload rock
-      run: |
-        docker run -d -p 5000:5000 --name registry registry:latest
-        rockcraft.skopeo --insecure-policy copy --dest-tls-verify=false oci-archive:${{ steps.rockcraft.outputs.rock }} docker://localhost:5000/rock:latest
-    - name: build charm
-      id: charmcraft
-      working-directory: ${{ matrix.path }}/
-      run: |
-        sudo snap install --channel latest/stable --classic charmcraft
-        charmcraft pack --verbosity trace
-        echo charms=`ls -d $PWD/*.charm` >> $GITHUB_OUTPUT
-    - run: |
-        echo charmcraft pack:
-        echo ${{ steps.charmcraft.outputs.charms }}
-    - id: charm-name
-      working-directory: ${{ matrix.path }}/
-      run: |
-        echo charm-name=`yq -r .name charmcraft.yaml` >> $GITHUB_OUTPUT
-    - run: |
-        sudo apt update && sudo apt install python3-yaml -y
-    - name: update upstream-source
-      working-directory: ${{ matrix.path }}/
-      shell: python
-      run: |
-        import os
-        import subprocess
+    with:
+      integration-workflow-name: charms_integration.yaml
+    secrets:
+      CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
 
-        import yaml
-
-        expanded_charmcraft_yaml = subprocess.check_output(
-          ["charmcraft", "expand-extensions"],
-          env={**os.environ, "CHARMCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS": "true"}
-        )
-        charmcraft_yaml = yaml.safe_load(expanded_charmcraft_yaml)
-        resources = charmcraft_yaml["resources"]
-        resources[list(resources)[0]]["upstream-source"] = "localhost:5000/rock:latest"
-        yaml.dump(charmcraft_yaml, open("charmcraft.yaml", "w"), sort_keys=False)
-    - working-directory: ${{ matrix.path }}/
-      run: |
-        echo upload charm ${{ steps.charm-name.outputs.charm-name }}
-    - working-directory: ${{ matrix.path }}/
-      run: |
-        cat charmcraft.yaml
-    - if: github.event_name == 'push'
-      name: publish charm
-      uses: canonical/charming-actions/upload-charm@2.7.0
-      with:
-        credentials: ${{ secrets.CHARMHUB_TOKEN }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        built-charm-path: ${{ steps.charmcraft.outputs.charms }}
-        tag-prefix: ${{ steps.charm-name.outputs.charm-name }}
-        charm-path: ${{ matrix.path }}
-
-  publish-garm-configurator:
-    name: ${{ github.event_name == 'push' && '' || 'Test ' }}Publish Charm (garm-configurator)
-    permissions:
-      actions: read
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7.0.0
-    - name: setup lxd
-      uses: canonical/setup-lxd@v1
-    - name: build charm
-      id: charmcraft
-      working-directory: charms/garm-configurator/
-      run: |
-        sudo snap install --channel latest/stable --classic charmcraft
-        charmcraft pack --verbosity trace
-        echo charms=`ls -d $PWD/*.charm` >> $GITHUB_OUTPUT
-    - id: charm-name
-      working-directory: charms/garm-configurator/
-      run: |
-        echo charm-name=`yq -r .name charmcraft.yaml` >> $GITHUB_OUTPUT
-    - if: github.event_name == 'push'
-      name: publish charm
-      uses: canonical/charming-actions/upload-charm@2.7.0
-      with:
-        credentials: ${{ secrets.CHARMHUB_TOKEN }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        built-charm-path: ${{ steps.charmcraft.outputs.charms }}
-        tag-prefix: ${{ steps.charm-name.outputs.charm-name }}
-        charm-path: charms/garm-configurator
