@@ -44,6 +44,12 @@ jobs:
           COVER_PKG=$(go list ./internal/... | grep -Ev "$EXCLUDE_PKGS" | tr '\n' ',')
           go test -v -count=1 -coverprofile=coverage.out -race -tags=integration -coverpkg=$COVER_PKG ./internal/...
 
+      - name: Test waiting-p80-report CLI
+        env:
+          POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
+        run: |
+          go test -v -count=1 -race -tags=integration ./cmd/waiting-p80-report/...
+
       - name: Print coverage report
         run: |
           go tool cover -func=coverage.out
