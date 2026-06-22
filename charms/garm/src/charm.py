@@ -424,20 +424,13 @@ class GarmCharm(paas_charm.go.Charm):
                 f"{path}\n{content}" for path, content in sorted(provider_files.items())
             )
         )
-        # Append proxy vars (which aren't on disk) so a proxy change triggers a
-        # replan -- only when set, to keep the no-proxy hash identical to the
-        # on-disk hash used as the first-run fallback.
-        if proxy_env:
-            hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         new_hash = self._hash_toml(hash_input)
-        # Compare against the hash recorded in the running Pebble plan: it also
-        # covers the proxy env vars, which are not persisted to any on-disk
-        # config file. Fall back to the on-disk hash only before a plan exists.
-        previous_hash = self._get_applied_config_hash() or self._get_on_disk_toml_hash(
-            provider_files
-        )
-        if previous_hash == new_hash:
-            logger.debug("TOML config unchanged; skipping restart")
+        # The TOML/provider files live on disk, but the proxy values live only in
+        # the Pebble service environment. Compare each against where it is stored
+        # and skip the restart only when neither changed.
+        config_unchanged = self._get_on_disk_toml_hash(provider_files) == new_hash
+        if config_unchanged and self._get_applied_proxy_env() == proxy_env:
+            logger.debug("GARM config and proxy unchanged; skipping restart")
             return
 
         # Log non-sensitive metadata about the config change.
@@ -517,24 +510,23 @@ class GarmCharm(paas_charm.go.Charm):
         hash_input = existing_toml + "\n" + "\n".join(existing_provider_parts)
         return self._hash_toml(hash_input)
 
-    def _get_applied_config_hash(self) -> str | None:
-        """Return the config_hash recorded in the running Pebble plan.
+    def _get_applied_proxy_env(self) -> dict[str, str]:
+        """Return the proxy vars currently set on the running Pebble service.
 
-        The hash is stored in the service environment on each successful apply,
-        so it reflects everything the previous apply acted on -- including the
-        proxy env vars, which are not written to any on-disk config file. This
-        makes it the authoritative "previously applied" marker;
-        _get_on_disk_toml_hash is only a fallback for the very first run,
-        before any plan exists.
+        Proxy values are never written to disk; they live only in the service
+        environment, so the applied state must be read back from the plan to
+        detect a proxy change. Every env var the charm sets other than
+        config_hash is a proxy var.
 
         Returns:
-            The stored config_hash, or None if the service is not yet in the plan.
+            The applied proxy env mapping, empty if the service is not yet in
+            the plan.
         """
         container = self.unit.get_container(CONTAINER_NAME)
         service = container.get_plan().services.get(PEBBLE_SERVICE_NAME)
         if service is None:
-            return None
-        return service.environment.get("config_hash")
+            return {}
+        return {k: v for k, v in service.environment.items() if k != "config_hash"}
 
     def _ensure_secrets(self) -> None:
         """Create garm-secrets and garm-admin-credentials juju secrets (leader only)."""

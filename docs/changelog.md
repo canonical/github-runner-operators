@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-22
+
+- route the GARM charm's outbound traffic through the Juju model proxy: model-level `juju-http-proxy`/`juju-https-proxy`/`juju-no-proxy` settings are now applied to GARM and forwarded to the OpenStack provider executable, so OpenStack and GitHub API calls egress via the proxy.
+
 ## 2026-06-16
 
 - Add Garm configurator relation with GARM charm and write OpenStack provider related toml configurations.
