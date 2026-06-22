@@ -16,7 +16,7 @@ func TestBuildQuery(t *testing.T) {
 		{"percentile_cont(0.8)", "percentile_cont(0.8)"},
 		{"started_at guard", "started_at IS NOT NULL"},
 		{"created_at guard", "created_at IS NOT NULL"},
-		{"day bucket", "date_trunc('day', started_at AT TIME ZONE 'UTC')"},
+		{"day bucket", "date_trunc('day', started_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"},
 		{"group by day", "GROUP BY day, platform"},
 		{"from param", "@from"},
 		{"to param", "@to"},

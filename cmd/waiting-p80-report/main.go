@@ -37,7 +37,7 @@ func parseConfig() (config, error) {
 	flag.StringVar(&cfg.dsn, "dsn", "", "PostgreSQL connection string (or set POSTGRESQL_DB_CONNECT_STRING)")
 	flag.StringVar(&cfg.out, "o", "", "output CSV path (default: stdout)")
 	fromStr := flag.String("from", "", "start date YYYY-MM-DD (inclusive, UTC)")
-	toStr := flag.String("to", "", "end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC)")
+	toStr := flag.String("to", "", "end date YYYY-MM-DD (inclusive, UTC); defaults to today UTC")
 	flag.BoolVar(&cfg.verbose, "v", false, "verbose logging to stderr")
 	flag.Parse()
 
@@ -113,7 +113,7 @@ type dailyP80Row struct {
 
 func buildQuery() string {
 	return `
-		SELECT date_trunc('day', started_at AT TIME ZONE 'UTC') AS day,
+		SELECT date_trunc('day', started_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day,
 		       platform,
 		       percentile_cont(0.8) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (started_at - created_at))) AS p80_seconds,
 		       COUNT(*) AS sample_count
@@ -155,10 +155,10 @@ func queryRows(ctx context.Context, cfg config) ([]dailyP80Row, error) {
 
 // writeCSV writes the daily P80 rows as CSV with a header line. Days with no jobs
 // do not appear in rows (the SQL GROUP BY omits them), so absent days are simply
-// absent from the CSV.
+// absent from the CSV. Flush errors (e.g. disk full, broken pipe) are surfaced
+// via csv.Writer.Error rather than silently dropped.
 func writeCSV(w io.Writer, rows []dailyP80Row) error {
 	cw := csv.NewWriter(w)
-	defer cw.Flush()
 	if err := cw.Write([]string{"day", "platform", "p80_seconds", "sample_count"}); err != nil {
 		return err
 	}
@@ -172,5 +172,6 @@ func writeCSV(w io.Writer, rows []dailyP80Row) error {
 			return err
 		}
 	}
-	return nil
+	cw.Flush()
+	return cw.Error()
 }
