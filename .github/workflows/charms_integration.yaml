@@ -16,6 +16,9 @@ jobs:
       actions: read
     with:
       working-directory: .
+      test-secret-1-name: TEST_GITHUB_APP_ID
+      test-secret-2-name: TEST_GITHUB_APP_INSTALLATION_ID
+      test-secret-3-name: TEST_GITHUB_APP_PRIVATE_KEY
 
   required_status_checks:
     name: Required Integration Test Status Checks

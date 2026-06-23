@@ -14,6 +14,9 @@ backends:
 environment:
   CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
   OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'
+  TEST_GITHUB_APP_ID: '$(HOST: echo "${TEST_GITHUB_APP_ID:-}")'
+  TEST_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${TEST_GITHUB_APP_INSTALLATION_ID:-}")'
+  TEST_GITHUB_APP_PRIVATE_KEY: '$(HOST: echo "${TEST_GITHUB_APP_PRIVATE_KEY:-}")'
 exclude:
 - .git
 - .tox
