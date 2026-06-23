@@ -14,6 +14,8 @@ platforms:
 
 # (Required)
 summary: Provides planner API service.
+links:
+  documentation: https://canonical.com/juju/docs/github-runner-charms/
 
 # (Required)
 description: |
