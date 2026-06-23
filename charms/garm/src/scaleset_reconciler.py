@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from garm_api import GarmApiError, GarmAuthenticatedClient
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
+from garm_client.models.scale_set import ScaleSet
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 
 logger = logging.getLogger(__name__)
@@ -91,27 +92,33 @@ class ScalesetReconciler:
 
         for name, scaleset in observed.items():
             if name not in all_desired_names:
-                logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
-                if scaleset.id is None:
-                    continue
-                try:
-                    # Disable the scaleset first so GARM stops launching new runners.
-                    # GARM returns 400 if the scaleset still has active runners,
-                    # so disabling first drains it for the next reconcile to clean up.
-                    self._client.update_scaleset(scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0))
-                except GarmApiError as exc:
-                    logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
-                try:
-                    self._client.delete_scaleset(scaleset.id)
-                except GarmApiError as exc:
-                    # 400 means runners are still present; scaleset will be deleted
-                    # on the next reconcile pass once GARM has cleaned them up.
-                    logger.warning(
-                        "Could not delete scaleset %s (runners may still be active; "
-                        "will retry on next reconcile): %s",
-                        name,
-                        exc,
-                    )
+                self._delete_orphaned(name, scaleset)
+
+    def _delete_orphaned(self, name: str, scaleset: ScaleSet) -> None:
+        """Disable then delete a scaleset that is no longer in the desired set."""
+        logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
+        if scaleset.id is None:
+            return
+        try:
+            # Disable the scaleset first so GARM stops launching new runners.
+            # GARM returns 400 if the scaleset still has active runners,
+            # so disabling first drains it for the next reconcile to clean up.
+            self._client.update_scaleset(
+                scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
+            )
+        except GarmApiError as exc:
+            logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
+        try:
+            self._client.delete_scaleset(scaleset.id)
+        except GarmApiError as exc:
+            # 400 means runners are still present; scaleset will be deleted
+            # on the next reconcile pass once GARM has cleaned them up.
+            logger.warning(
+                "Could not delete scaleset %s (runners may still be active; "
+                "will retry on next reconcile): %s",
+                name,
+                exc,
+            )
 
     def _resolve_entity_id(self, spec: ScalesetSpec) -> str | None:
         """Return the GARM entity UUID for *spec*, or None if not yet registered."""

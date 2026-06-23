@@ -6,6 +6,7 @@ import secrets
 import string
 import subprocess
 import textwrap
+import time
 from typing import Iterator
 
 import jubilant
@@ -616,3 +617,201 @@ def integrate_configurator_with_garm_fixture(
         delay=10,
     )
     return garm_app
+
+
+@pytest.fixture(scope="module", name="fake_github_api_url")
+def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
+    """Deploy a mock GitHub API server as an any-charm unit.
+
+    Starts a Python HTTP server on port 8085 inside the any-charm pod.
+    Returns the base URL (http://{pod_ip}:8085) so GARM credentials
+    can be pointed at it instead of api.github.com.
+    """
+    app_name = "fake-github-api"
+
+    mock_server_script = textwrap.dedent("""\
+        #!/usr/bin/env python3
+        import http.server
+        import json
+        import re
+        import socket
+        import base64
+
+        def _make_jwt():
+            header = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').rstrip(b'=').decode()
+            payload = base64.urlsafe_b64encode(b'{"exp":4070908800}').rstrip(b'=').decode()
+            sig = base64.urlsafe_b64encode(b'x' * 32).rstrip(b'=').decode()
+            return f"{header}.{payload}.{sig}"
+
+        MOCK_JWT = _make_jwt()
+        SCALESETS = {}
+        NEXT_SCALESET_ID = [1]
+
+        def _self_ip():
+            return socket.gethostbyname(socket.gethostname())
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass
+
+            def _send_json(self, data, status=200):
+                body = json.dumps(data).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _send_no_content(self):
+                self.send_response(204)
+                self.end_headers()
+
+            def _send_not_found(self):
+                self.send_response(404)
+                body = b'{"error":"not found"}'
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _read_json(self):
+                length = int(self.headers.get("Content-Length", 0))
+                return json.loads(self.rfile.read(length)) if length else {}
+
+            def do_GET(self):
+                path = self.path.split("?")[0]
+                if path == "/rate_limit":
+                    self._send_json({"resources": {"core": {"limit": 5000, "remaining": 5000, "reset": 9999999999}}})
+                elif path == "/app":
+                    self._send_json({"id": 12345, "name": "test-app", "slug": "test-app"})
+                elif re.match(r"^/orgs/[^/]+/actions/runner-groups$", path):
+                    self._send_json({
+                        "total_count": 1,
+                        "runner_groups": [{
+                            "id": 1, "name": "Default", "visibility": "all",
+                            "default": True, "runners_url": "", "inherited": False,
+                            "allows_public_repositories": False,
+                        }],
+                    })
+                elif re.match(r"^/_apis/runtime/runnerscalesets(/|$)", path):
+                    self._send_json({"count": len(SCALESETS), "value": list(SCALESETS.values())})
+                elif re.match(r"^/_apis/runtime/runnergroups/", path):
+                    self._send_json({"count": 1, "value": [{"id": 1, "name": "Default"}]})
+                else:
+                    self._send_not_found()
+
+            def do_POST(self):
+                path = self.path.split("?")[0]
+                body = self._read_json()
+                if re.match(r"^/app/installations/\\d+/access_tokens$", path):
+                    self._send_json({"token": "ghs_fake_installation_token", "expires_at": "2099-01-01T00:00:00Z", "permissions": {}})
+                elif re.match(r"^/orgs/[^/]+/actions/runners/registration-token$", path):
+                    self._send_json({"token": "FAKEREGISTRATIONTOKENXXX", "expires_at": "2099-01-01T00:00:00Z"})
+                elif path == "/actions/runner-registration":
+                    ip = _self_ip()
+                    self._send_json({"url": f"http://{ip}:8085", "token": MOCK_JWT})
+                elif re.match(r"^/_apis/runtime/runnerscalesets$", path):
+                    sid = NEXT_SCALESET_ID[0]
+                    NEXT_SCALESET_ID[0] += 1
+                    ss = {
+                        "id": sid,
+                        "name": body.get("name", ""),
+                        "runnerGroupId": body.get("runnerGroupId", 1),
+                        "runnerGroupName": "Default",
+                        "labels": body.get("labels", []),
+                        "RunnerSetting": body.get("RunnerSetting", {}),
+                    }
+                    SCALESETS[sid] = ss
+                    self._send_json(ss)
+                else:
+                    self._send_not_found()
+
+            def do_DELETE(self):
+                path = self.path.split("?")[0]
+                m = re.match(r"^/_apis/runtime/runnerscalesets/(\\d+)$", path)
+                if m:
+                    SCALESETS.pop(int(m.group(1)), None)
+                    self._send_no_content()
+                else:
+                    self._send_not_found()
+
+            def do_PATCH(self):
+                path = self.path.split("?")[0]
+                m = re.match(r"^/_apis/runtime/runnerscalesets/(\\d+)$", path)
+                if m:
+                    body = self._read_json()
+                    sid = int(m.group(1))
+                    if sid in SCALESETS:
+                        SCALESETS[sid].update({k: v for k, v in body.items() if v is not None})
+                        self._send_json(SCALESETS[sid])
+                    else:
+                        self._send_not_found()
+                else:
+                    self._send_not_found()
+
+        if __name__ == "__main__":
+            server = http.server.HTTPServer(("0.0.0.0", 8085), Handler)
+            server.serve_forever()
+    """)
+
+    any_charm_src_overwrite = {
+        "any_charm.py": textwrap.dedent("""\
+            from any_charm_base import AnyCharmBase
+            import os
+            import pathlib
+            import subprocess
+            import sys
+
+            _SERVER_SCRIPT = pathlib.Path(__file__).parent / "github_mock_server.py"
+            _PID_FILE = pathlib.Path("/tmp/github_mock_server.pid")
+
+            class AnyCharm(AnyCharmBase):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self._ensure_server_running()
+
+                def _ensure_server_running(self):
+                    if _PID_FILE.exists():
+                        try:
+                            os.kill(int(_PID_FILE.read_text().strip()), 0)
+                            return
+                        except (ProcessLookupError, ValueError, OSError):
+                            pass
+                    proc = subprocess.Popen(
+                        [sys.executable, str(_SERVER_SCRIPT)],
+                        start_new_session=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    _PID_FILE.write_text(str(proc.pid))
+        """),
+        "github_mock_server.py": mock_server_script,
+    }
+
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+        config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=10 * 60,
+        delay=10,
+    )
+
+    status = juju.status()
+    pod_ip = status.apps[app_name].units[f"{app_name}/0"].address
+
+    for _ in range(10):
+        try:
+            result = juju.exec(
+                "curl -sf http://localhost:8085/rate_limit",
+                unit=f"{app_name}/0",
+            )
+            if result.stdout.strip():
+                break
+        except Exception:
+            pass
+        time.sleep(3)
+
+    return f"http://{pod_ip}:8085"

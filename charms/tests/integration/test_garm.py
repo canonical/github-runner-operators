@@ -328,6 +328,7 @@ def test_scaleset_created_and_updated_via_relation(
     juju: jubilant.Juju,
     configurator_garm: str,
     configurator_with_image: str,
+    fake_github_api_url: str,
 ):
     """
     arrange: GARM and garm-configurator are integrated and both active.
@@ -342,7 +343,15 @@ def test_scaleset_created_and_updated_via_relation(
     # configurator_garm fixture integrates the charms before these URLs exist, so
     # the first reconcile defers.  Calling _garm_first_run here is idempotent (PUT).
     token = _garm_first_run(juju, address)
-    _create_test_credential(base_url, token)
+
+    # Restore system templates so GARM can find a linux/github template when
+    # CreateEntityScaleSet calls findTemplate internally.
+    _restore_system_templates(base_url, token)
+
+    # Create credential and org pointed at the mock GitHub API server so that
+    # GARM's GitHub App calls (installation token, runner-groups, etc.) hit our
+    # mock instead of real GitHub.
+    _create_test_credential(base_url, token, fake_github_api_url)
     _create_test_org(base_url, token, "test-org")
 
     # A config change triggers config_changed on the configurator → relation_changed
@@ -358,6 +367,7 @@ def test_scaleset_created_and_updated_via_relation(
     scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
     assert scaleset["name"] == _SCALESET_TEST_NAME
     assert scaleset["max_runners"] == 10
+
 
 
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
@@ -595,8 +605,8 @@ def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
     return next((scaleset for scaleset in scalesets if scaleset.get("name") == name), None)
 
 
-def _create_test_credential(garm_url: str, token: str) -> str:
-    """Create a GitHub App credential in GARM for testing."""
+def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> str:
+    """Create a GitHub App credential in GARM pointing at the mock server."""
 
     def _request(
         path: str, payload: dict, *, method: str = "POST", allow_conflict: bool = True
@@ -624,8 +634,8 @@ def _create_test_credential(garm_url: str, token: str) -> str:
                 "name": "github.com",
                 "description": "GitHub.com test endpoint",
                 "base_url": "https://github.com",
-                "api_base_url": "https://api.github.com",
-                "upload_base_url": "https://uploads.github.com",
+                "api_base_url": mock_base_url,
+                "upload_base_url": mock_base_url,
             },
         )
         _request(
@@ -651,8 +661,8 @@ def _create_test_credential(garm_url: str, token: str) -> str:
                 "name": _SCALESET_TEST_CREDENTIAL_NAME,
                 "description": "Test credential for scaleset integration tests",
                 "base_url": "https://github.com",
-                "api_base_url": "https://api.github.com",
-                "upload_base_url": "https://uploads.github.com",
+                "api_base_url": mock_base_url,
+                "upload_base_url": mock_base_url,
                 "ca_cert_bundle": "",
                 "credentials": {
                     "name": "test-creds",
@@ -670,17 +680,39 @@ def _create_test_credential(garm_url: str, token: str) -> str:
     return _SCALESET_TEST_CREDENTIAL_NAME
 
 
+
+def _restore_system_templates(garm_url: str, token: str) -> None:
+    """Restore GARM's built-in system templates so scaleset creation can find a template.
+
+    GARM requires a matching template (os_type=linux, forge_type=github) to exist
+    before CreateEntityScaleSet proceeds. This call restores all system templates.
+    Silently succeeds if templates already exist.
+    """
+    data = json.dumps({"restore_all": True}).encode()
+    req = urllib.request.Request(
+        f"{garm_url}/templates/restore",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30):
+        pass
+
+
 def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
     """Register a GitHub organization in GARM with the test credential.
 
     GARM requires an organization to be registered before a scaleset can be
     created for it.  Silently skips if the org already exists (409 Conflict).
+    agent_mode=True prevents GARM from attempting to install a webhook using
+    the fake credential, which would fail against the mock server.
     """
     data = json.dumps(
         {
             "name": org_name,
             "credentials_name": _SCALESET_TEST_CREDENTIAL_NAME,
-            "webhook_secret": "",
+            "webhook_secret": "test-webhook-secret",
+            "agent_mode": True,
         }
     ).encode()
     req = urllib.request.Request(
@@ -695,6 +727,7 @@ def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
     except urllib.error.HTTPError as exc:
         if exc.code != 409:
             raise
+
 
 
 @retry(
