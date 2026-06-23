@@ -1,5 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+import base64
 import json
 import os
 import time
@@ -58,9 +59,11 @@ def required_int_env(name: str) -> int:
 
 def create_github_app_client() -> Github:
     """Create a GitHub client authenticated as the test app installation."""
+    # Private key is stored base64-encoded in CI secrets to avoid GITHUB_ENV multiline issues.
+    private_key = base64.b64decode(required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR)).decode()
     app_auth = AppAuth(
         app_id=required_int_env(GITHUB_APP_ID_ENV_VAR),
-        private_key=required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR),
+        private_key=private_key,
     )
     installation_auth = AppInstallationAuth(
         app_auth=app_auth,

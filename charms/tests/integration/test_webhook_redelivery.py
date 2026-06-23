@@ -3,6 +3,8 @@
 
 """Integration tests for webhook redelivery daemon startup."""
 
+import base64
+
 import jubilant
 import pytest
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
@@ -48,7 +50,7 @@ def test_webhook_gateway_redelivery_daemon_start(
     """
     github_app_private_key_secret_uri = juju.add_secret(
         name="github-app-private-key",
-        content={"value": required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR)},
+        content={"value": base64.b64decode(required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR)).decode()},
     )
     juju.grant_secret(github_app_private_key_secret_uri, webhook_gateway_app)
 
