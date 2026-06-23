@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-22
+
+- `waiting-p80-report`: clamp negative waiting times (clock skew, `started_at < created_at`) to 0 instead of excluding those jobs. Previously dropping them removed the fastest jobs from the population and biased the reported P80 upward.
+
 ## 2026-06-19
 
 - add `waiting-p80-report` standalone CLI that extracts the daily P80 of job waiting time from the planner's PostgreSQL database into a CSV. Not part of the planner charm; no charm or migration change.
