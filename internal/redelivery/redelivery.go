@@ -8,6 +8,7 @@ package redelivery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -164,6 +165,11 @@ func (d *Daemon) redeliverFailedDeliveries(ctx context.Context) (int, error) {
 
 		err := d.client.RedeliverDelivery(ctx, d.config.GitHubOrg, d.config.GitHubRepo, d.config.WebhookID, delivery.GetID())
 		if err != nil {
+			var acceptedErr *github.AcceptedError
+			if errors.As(err, &acceptedErr) {
+				redelivered++
+				continue
+			}
 			redeliveryErrors.Add(ctx, 1)
 			logger.ErrorContext(ctx, "cannot redeliver webhook",
 				slog.Int64("delivery_id", delivery.GetID()),

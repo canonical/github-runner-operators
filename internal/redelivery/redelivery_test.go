@@ -11,6 +11,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -59,11 +60,12 @@ func (f *fakeGitHubClient) ListDeliveries(_ context.Context, _, _ string, _ int6
 }
 
 func (f *fakeGitHubClient) RedeliverDelivery(_ context.Context, _, _ string, _, deliveryID int64) error {
-	if f.redeliverErr != nil {
-		return f.redeliverErr
+	// Only track redelivery attempts that succeed or return AcceptedError (HTTP 202).
+	var acceptedErr *github.AcceptedError
+	if f.redeliverErr == nil || errors.As(f.redeliverErr, &acceptedErr) {
+		f.redelivered = append(f.redelivered, deliveryID)
 	}
-	f.redelivered = append(f.redelivered, deliveryID)
-	return nil
+	return f.redeliverErr
 }
 
 func makeDelivery(id int64, status, event, action string, deliveredAt time.Time) *github.HookDelivery {
@@ -202,6 +204,45 @@ func TestRedeliverContinuesOnSingleFailure(t *testing.T) {
 	m := mr.Collect(t)
 	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
 	assert.Equal(t, 2.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
+}
+
+func TestRedeliverAcceptedErrorAsSuccess(t *testing.T) {
+	/*
+		arrange: Create a daemon with failed deliveries and a client that returns AcceptedError.
+		act: Run a single redelivery cycle.
+		assert: AcceptedError (HTTP 202) is treated as successful redelivery,
+		        count is incremented, and no error metric is recorded.
+	*/
+	mr := telemetry.AcquireTestMetricReader(t)
+	defer telemetry.ReleaseTestMetricReader(t)
+
+	now := time.Now().UTC()
+	client := &fakeGitHubClient{
+		deliveries: []*github.HookDelivery{
+			makeDelivery(1, "failed", "workflow_job", "queued", now.Add(-1*time.Minute)),
+			makeDelivery(2, "failed", "workflow_job", "completed", now.Add(-2*time.Minute)),
+		},
+		redeliverErr: &github.AcceptedError{},
+	}
+
+	cfg := &Config{
+		GitHubAppID:             testAppID,
+		GitHubAppInstallationID: testInstallID,
+		GitHubAppPrivateKey:     testAppKey,
+		GitHubOrg:               testOrg,
+		WebhookID:               testWebhookID,
+		Interval:                10 * time.Minute,
+	}
+
+	daemon := newTestDaemon(t, cfg, client)
+	daemon.runOnce(context.Background())
+
+	// Both deliveries should be recorded as successfully redelivered (AcceptedError = request accepted).
+	assert.Equal(t, []int64{1, 2}, client.redelivered)
+
+	m := mr.Collect(t)
+	assert.Equal(t, 2.0, m.Counter(t, "github-runner.webhook.redelivery.count"))
+	assert.Equal(t, 0.0, m.Counter(t, "github-runner.webhook.redelivery.errors"))
 }
 
 func TestConfigValidation(t *testing.T) {
