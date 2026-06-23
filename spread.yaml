@@ -30,3 +30,7 @@ integration-suites:
     - integration-test
     environment:
       TOX_ENV: charms-integration
+    pytest-environment-template: |
+      TEST_GITHUB_APP_ID={{ env.get("TEST_GITHUB_APP_ID", "") }}
+      TEST_GITHUB_APP_INSTALLATION_ID={{ env.get("TEST_GITHUB_APP_INSTALLATION_ID", "") }}
+      TEST_GITHUB_APP_PRIVATE_KEY={{ env.get("TEST_GITHUB_APP_PRIVATE_KEY", "") }}
