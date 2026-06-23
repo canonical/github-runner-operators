@@ -20,6 +20,9 @@ from garm_client.models.create_template_params import CreateTemplateParams
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.template import Template
+from garm_client.models.update_template_params import UpdateTemplateParams
+
+from charm_state import SSHDebugInfo
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +287,35 @@ class GarmApiClient:
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
+    def update_template(self, token: str, template_id: int, data: bytes) -> Template:
+        """Update the body of an existing runner install template in place.
+
+        Args:
+            token: JWT token from login().
+            template_id: Numeric template ID to update.
+            data: New raw shell script bytes for the template body.
+
+        Returns:
+            The updated Template.
+
+        Raises:
+            GarmApiError: If the API call fails.
+        """
+        with self._authenticated_api_client(token) as client:
+            api = TemplatesApi(api_client=client)
+            try:
+                return api.update_template(
+                    template_id=template_id,
+                    body=UpdateTemplateParams(data=list(data)),
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"GARM update_template({template_id}) failed ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
     def delete_template(self, token: str, template_id: int) -> None:
         """Delete a runner install template by ID.
 
@@ -306,3 +338,47 @@ class GarmApiClient:
                 ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+
+def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
+    """Build a shell snippet that writes tmate env vars to the runner's .env file.
+
+    Uses only the first connection (caller must sort for stability).
+
+    Args:
+        connections: List of SSHDebugInfo from the debug-ssh relation.
+
+    Returns:
+        A shell snippet string (no shebang) to be prepended to the base template.
+    """
+    conn = connections[0]
+    runner_env = "/home/ubuntu/actions-runner/.env"
+    lines = [
+        f"mkdir -p $(dirname {runner_env})",
+        f'cat >> {runner_env} << "EOF"',
+        f"TMATE_SERVER_HOST={conn.host}",
+        f"TMATE_SERVER_PORT={conn.port}",
+        f"TMATE_SERVER_RSA_FINGERPRINT={conn.rsa_fingerprint}",
+        f"TMATE_SERVER_ED25519_FINGERPRINT={conn.ed25519_fingerprint}",
+        "EOF",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def prepend_after_shebang(script: str, snippet: str) -> str:
+    """Insert *snippet* immediately after the shebang line of *script*.
+
+    If no shebang is present the snippet is prepended at the very start.
+
+    Args:
+        script: The original shell script (may start with ``#!``).
+        snippet: The shell code to inject.
+
+    Returns:
+        The modified script string.
+    """
+    lines = script.split("\n")
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + "\n" + snippet + "\n".join(lines[1:])
+    return snippet + script

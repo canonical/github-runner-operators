@@ -16,7 +16,7 @@ import paas_charm.go
 import tomli_w
 import yaml
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState, SSHDebugInfo
-from garm_api import GarmApiClient, GarmApiError
+from garm_api import GarmApiClient, GarmApiError, build_tmate_env_snippet, prepend_after_shebang
 from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
@@ -318,7 +318,7 @@ class GarmCharm(paas_charm.go.Charm):
 
     def _on_debug_ssh_relation_changed(self, _: ops.EventBase) -> None:
         """Handle debug-ssh relation joined/changed/broken by updating the charmed template."""
-        self._apply_charmed_template()
+        self.restart()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
@@ -398,43 +398,43 @@ class GarmCharm(paas_charm.go.Charm):
         )
         new_hash = self._hash_toml(hash_input)
         previous_hash = self._get_on_disk_toml_hash(provider_files)
-        if previous_hash == new_hash:
-            logger.debug("TOML config unchanged; skipping restart")
-            return
+        if previous_hash != new_hash:
+            # Log non-sensitive metadata about the config change.
+            # Do NOT log toml_content here — it contains secrets
+            # (jwt_secret, db_passphrase, passwords).
+            provider_names = [p.get("unit_name") for p in provider_configs]
+            logger.info("Updating GARM config for providers: %s", provider_names)
 
-        # Log non-sensitive metadata about the config change.
-        # Do NOT log toml_content here — it contains secrets
-        # (jwt_secret, db_passphrase, passwords).
-        provider_names = [p.get("unit_name") for p in provider_configs]
-        logger.info("Updating GARM config for providers: %s", provider_names)
+            container = self.unit.get_container(CONTAINER_NAME)
+            container.push(
+                GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True
+            )
+            for path, content in provider_files.items():
+                container.push(path, content, permissions=0o600, make_dirs=True)
 
-        container = self.unit.get_container(CONTAINER_NAME)
-        container.push(
-            GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True
-        )
-        for path, content in provider_files.items():
-            container.push(path, content, permissions=0o600, make_dirs=True)
-
-        container.add_layer(
-            "garm-command",
-            {
-                "services": {
-                    PEBBLE_SERVICE_NAME: {
-                        "override": "replace",
-                        "startup": "enabled",
-                        "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
-                        "environment": {
-                            "config_hash": new_hash,
-                        },
+            container.add_layer(
+                "garm-command",
+                {
+                    "services": {
+                        PEBBLE_SERVICE_NAME: {
+                            "override": "replace",
+                            "startup": "enabled",
+                            "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
+                            "environment": {
+                                "config_hash": new_hash,
+                            },
+                        }
                     }
-                }
-            },
-            combine=True,
-        )
-        container.replan()
-        self._maybe_first_run()
+                },
+                combine=True,
+            )
+            container.replan()
+            self._maybe_first_run()
+            super().restart(rerun_migrations=rerun_migrations)
+        else:
+            logger.debug("TOML config unchanged; skipping restart")
+
         self._apply_charmed_template()
-        super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
     def _hash_toml(toml_content: str) -> str:
@@ -685,7 +685,7 @@ class GarmCharm(paas_charm.go.Charm):
             raise
 
     def _apply_charmed_template(self) -> None:
-        """Create or delete the charmed runner install template in GARM.
+        """Create, update, or delete the charmed runner install template in GARM.
 
         Derives the ``github_linux_charmed`` template from the built-in
         ``github_linux`` base by prepending a shell snippet that writes tmate
@@ -693,9 +693,8 @@ class GarmCharm(paas_charm.go.Charm):
 
         Called by the ``debug-ssh`` relation event handlers and at the end of
         every ``restart()`` so the template state stays consistent with the
-        current relation data.
-
-        Only the leader unit manages templates; non-leaders skip silently.
+        current relation data.  Never raises — failures are logged and retried
+        on the next event.  Only the leader unit manages templates.
         """
         if not self.unit.is_leader():
             return
@@ -716,9 +715,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
-        state = CharmState.from_charm(self)
-        connections = state.ssh_debug_connections
-
+        connections = CharmState.from_charm(self).ssh_debug_connections
         client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
 
         try:
@@ -728,24 +725,14 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning(
                 "GARM template update failed (will retry on next event): %s", exc
             )
-            raise
+            return
 
         charmed = next(
             (t for t in templates if t.name == GARM_CHARMED_TEMPLATE_NAME), None
         )
 
         if not connections:
-            if charmed is not None:
-                logger.info(
-                    "No debug-ssh connections; deleting charmed template (id=%s)", charmed.id
-                )
-                try:
-                    client.delete_template(token, charmed.id)
-                except GarmApiError as exc:
-                    logger.warning(
-                        "Failed to delete charmed template: %s", exc
-                    )
-                    raise
+            self._delete_charmed_template_if_present(client, token, charmed)
             return
 
         base = next(
@@ -758,30 +745,92 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
+        patched_data = self._build_charmed_template_data(client, token, base.id, connections)
+        if patched_data is None:
+            return
+
+        self._sync_charmed_template(client, token, charmed, patched_data, len(connections))
+
+    def _delete_charmed_template_if_present(
+        self,
+        client: "GarmApiClient",
+        token: str,
+        charmed: typing.Any,
+    ) -> None:
+        """Delete the charmed template when no debug-ssh connections remain."""
+        if charmed is None:
+            return
+        logger.info(
+            "No debug-ssh connections; deleting charmed template (id=%s)", charmed.id
+        )
         try:
-            base_script = bytes(client.get_template(token, base.id).data).decode("utf-8")
+            client.delete_template(token, charmed.id)
+        except GarmApiError as exc:
+            logger.warning("Failed to delete charmed template: %s", exc)
+
+    def _build_charmed_template_data(
+        self,
+        client: "GarmApiClient",
+        token: str,
+        base_id: int,
+        connections: list[SSHDebugInfo],
+    ) -> bytes | None:
+        """Fetch the base template and build the patched script bytes.
+
+        Returns None (and logs) if the base data is missing or unreadable.
+        """
+        try:
+            base_template = client.get_template(token, base_id)
         except GarmApiError as exc:
             logger.warning("Failed to fetch base template data: %s", exc)
-            raise
+            return None
 
-        snippet = _build_tmate_env_snippet(connections)
-        patched_script = _prepend_after_shebang(base_script, snippet)
-        patched_data = patched_script.encode("utf-8")
+        if base_template.data is None:
+            logger.warning(
+                "Base template '%s' has no body; cannot build charmed template",
+                GARM_BASE_TEMPLATE_NAME,
+            )
+            return None
 
-        try:
-            if charmed is not None:
-                logger.info(
-                    "Updating charmed template (id=%s) with %d tmate connection(s)",
-                    charmed.id,
-                    len(connections),
-                )
-                client.delete_template(token, charmed.id)
+        base_script = bytes(base_template.data).decode("utf-8")
+        snippet = build_tmate_env_snippet(connections)
+        return prepend_after_shebang(base_script, snippet).encode("utf-8")
+
+    def _sync_charmed_template(
+        self,
+        client: "GarmApiClient",
+        token: str,
+        charmed: typing.Any,
+        patched_data: bytes,
+        n_connections: int,
+    ) -> None:
+        """Create or atomically update the charmed template; skip if unchanged."""
+        if charmed is not None:
+            try:
+                current = client.get_template(token, charmed.id)
+                if current.data is not None and bytes(current.data) == patched_data:
+                    logger.debug("Charmed template unchanged; skipping update")
+                    return
+            except GarmApiError:
+                pass  # proceed to update
 
             logger.info(
-                "Creating charmed template '%s' with %d tmate connection(s)",
-                GARM_CHARMED_TEMPLATE_NAME,
-                len(connections),
+                "Updating charmed template (id=%s) with %d tmate connection(s)",
+                charmed.id,
+                n_connections,
             )
+            try:
+                client.update_template(token, charmed.id, patched_data)
+            except GarmApiError as exc:
+                logger.warning("Failed to update charmed template: %s", exc)
+            return
+
+        logger.info(
+            "Creating charmed template '%s' with %d tmate connection(s)",
+            GARM_CHARMED_TEMPLATE_NAME,
+            n_connections,
+        )
+        try:
             client.create_template(
                 token=token,
                 name=GARM_CHARMED_TEMPLATE_NAME,
@@ -791,52 +840,7 @@ class GarmCharm(paas_charm.go.Charm):
                 data=patched_data,
             )
         except GarmApiError as exc:
-            logger.warning("Failed to apply charmed template: %s", exc)
-            raise
-
-
-def _build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
-    """Build a shell snippet that writes tmate env vars to the runner's .env file.
-
-    Uses only the first connection; tmate env vars are scalar values.
-
-    Args:
-        connections: List of SSH debug connections from the debug-ssh relation.
-
-    Returns:
-        A shell snippet string (no shebang) to be prepended to the base template.
-    """
-    conn = connections[0]
-    runner_env = "/home/ubuntu/actions-runner/.env"
-    lines = [
-        f"mkdir -p $(dirname {runner_env})",
-        f'cat >> {runner_env} << "EOF"',
-        f"TMATE_SERVER_HOST={conn.host}",
-        f"TMATE_SERVER_PORT={conn.port}",
-        f"TMATE_SERVER_RSA_FINGERPRINT={conn.rsa_fingerprint}",
-        f"TMATE_SERVER_ED25519_FINGERPRINT={conn.ed25519_fingerprint}",
-        "EOF",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def _prepend_after_shebang(script: str, snippet: str) -> str:
-    """Insert *snippet* immediately after the shebang line of *script*.
-
-    If no shebang is present the snippet is prepended at the very start.
-
-    Args:
-        script: The original shell script (may start with ``#!``).
-        snippet: The shell code to inject.
-
-    Returns:
-        The modified script string.
-    """
-    lines = script.split("\n")
-    if lines and lines[0].startswith("#!"):
-        return lines[0] + "\n" + snippet + "\n".join(lines[1:])
-    return snippet + script
+            logger.warning("Failed to create charmed template: %s", exc)
 
 
 if __name__ == "__main__":

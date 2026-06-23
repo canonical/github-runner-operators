@@ -5,45 +5,19 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     CharmState,
-    GarmConfig,
     SSHDebugInfo,
     _get_ssh_debug_connections,
 )
 
 
-def _make_charm(*, relation=None, config=None):
+def _make_charm(*, relation=None):
     """Build a minimal mock charm."""
     charm = MagicMock()
     charm.model.get_relation.return_value = relation
-    charm.config.get.side_effect = lambda key, default=None: (config or {}).get(key, default)
     return charm
-
-
-def test_garm_config_from_charm_defaults():
-    """
-    arrange: Charm config has no explicit values set.
-    act: Call GarmConfig.from_charm().
-    assert: use_runner_proxy_for_tmate defaults to False.
-    """
-    charm = _make_charm()
-    result = GarmConfig.from_charm(charm)
-    assert result.use_runner_proxy_for_tmate is False
-
-
-def test_garm_config_from_charm_custom_values():
-    """
-    arrange: Charm config has use-runner-proxy-for-tmate set to True.
-    act: Call GarmConfig.from_charm().
-    assert: use_runner_proxy_for_tmate is True.
-    """
-    charm = _make_charm(config={"use-runner-proxy-for-tmate": True})
-    result = GarmConfig.from_charm(charm)
-    assert result.use_runner_proxy_for_tmate is True
 
 
 def test_ssh_debug_info_from_charm_no_relation():
@@ -122,6 +96,41 @@ def test_ssh_debug_info_from_charm_incomplete_relation_data():
     result = _get_ssh_debug_connections(charm)
 
     assert result == []
+
+
+def test_ssh_debug_connections_sorted_by_host_port():
+    """
+    arrange: Two debug-ssh units with different hosts.
+    act: Call _get_ssh_debug_connections().
+    assert: Result is sorted by (host, port) for stable selection.
+    """
+    unit_a = MagicMock()
+    unit_a.name = "tmate-ssh-server/0"
+    unit_b = MagicMock()
+    unit_b.name = "tmate-ssh-server/1"
+    relation = MagicMock()
+    relation.units = [unit_b, unit_a]  # intentionally reversed
+    relation.data = {
+        unit_a: {
+            "host": "10.0.0.2",
+            "port": "2222",
+            "rsa_fingerprint": "SHA256:rsa-a",
+            "ed25519_fingerprint": "SHA256:ed-a",
+        },
+        unit_b: {
+            "host": "10.0.0.1",
+            "port": "2222",
+            "rsa_fingerprint": "SHA256:rsa-b",
+            "ed25519_fingerprint": "SHA256:ed-b",
+        },
+    }
+    charm = _make_charm(relation=relation)
+
+    result = _get_ssh_debug_connections(charm)
+
+    assert len(result) == 2
+    assert result[0].host == "10.0.0.1"
+    assert result[1].host == "10.0.0.2"
 
 
 def test_charm_state_from_charm_no_debug_ssh_relation():

@@ -20,14 +20,12 @@ from charm import (
     GARM_SECRETS_LABEL,
     GarmCharm,
     _build_provider_list,
-    _build_tmate_env_snippet,
     _generate_admin_password,
     _generate_garm_secrets,
-    _prepend_after_shebang,
     render_garm_toml,
 )
 from charm_state import SSHDebugInfo
-from garm_api import GarmConnectionError
+from garm_api import GarmApiError, GarmConnectionError, build_tmate_env_snippet, prepend_after_shebang
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -548,7 +546,7 @@ def test_maybe_first_run_skips_on_missing_credential_key():
 def test_ssh_debug_info_env_vars():
     """
     arrange: One SSHDebugInfo connection.
-    act: Call _build_tmate_env_snippet() and _prepend_after_shebang().
+    act: Call build_tmate_env_snippet() and prepend_after_shebang().
     assert: The patched script starts with the shebang, then contains
             all four TMATE_SERVER_* variables with correct values.
     """
@@ -560,8 +558,8 @@ def test_ssh_debug_info_env_vars():
     )
     base_script = "#!/bin/bash\necho 'hello'\n"
 
-    snippet = _build_tmate_env_snippet([conn])
-    patched = _prepend_after_shebang(base_script, snippet)
+    snippet = build_tmate_env_snippet([conn])
+    patched = prepend_after_shebang(base_script, snippet)
 
     assert patched.startswith("#!/bin/bash\n")
     assert "TMATE_SERVER_HOST=10.10.0.5" in patched
@@ -569,3 +567,129 @@ def test_ssh_debug_info_env_vars():
     assert "TMATE_SERVER_RSA_FINGERPRINT=SHA256:rsa" in patched
     assert "TMATE_SERVER_ED25519_FINGERPRINT=SHA256:ed" in patched
     assert "echo 'hello'" in patched
+
+
+def test_apply_charmed_template_skips_on_non_leader():
+    """
+    arrange: Unit is not the Juju leader.
+    act: Call _apply_charmed_template().
+    assert: No GARM API call is made.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = False
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        GarmCharm._apply_charmed_template(charm)
+
+    mock_client_cls.assert_not_called()
+
+
+def test_apply_charmed_template_skips_when_credentials_unavailable():
+    """
+    arrange: Leader unit; admin credentials secret does not exist.
+    act: Call _apply_charmed_template().
+    assert: No GARM API call is made.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = None
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        GarmCharm._apply_charmed_template(charm)
+
+    mock_client_cls.assert_not_called()
+
+
+def test_apply_charmed_template_logs_and_returns_on_garm_error():
+    """
+    arrange: Leader; credentials OK; GARM login raises GarmApiError.
+    act: Call _apply_charmed_template().
+    assert: Exception is swallowed (not re-raised); no crash.
+    """
+    charm = MagicMock()
+    charm.unit.is_leader.return_value = True
+    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
+
+    with patch("charm.GarmApiClient") as mock_client_cls:
+        mock_client_cls.return_value.login.side_effect = GarmApiError("timeout")
+        GarmCharm._apply_charmed_template(charm)  # must not raise
+
+
+def test_sync_charmed_template_updates_in_place_when_charmed_exists():
+    """
+    arrange: Charmed template exists; patched_data differs from current body.
+    act: Call _sync_charmed_template().
+    assert: update_template is called; create_template is NOT called.
+    """
+    charm = MagicMock()
+    client = MagicMock()
+    charmed = MagicMock()
+    charmed.id = 42
+
+    current_template = MagicMock()
+    current_template.data = list(b"old-data")
+    client.get_template.return_value = current_template
+
+    patched_data = b"new-data"
+    GarmCharm._sync_charmed_template(charm, client, "tok", charmed, patched_data, 1)
+
+    client.update_template.assert_called_once_with("tok", 42, patched_data)
+    client.create_template.assert_not_called()
+
+
+def test_sync_charmed_template_skips_when_data_unchanged():
+    """
+    arrange: Charmed template exists; body matches the patched_data exactly.
+    act: Call _sync_charmed_template().
+    assert: Neither update_template nor create_template is called.
+    """
+    charm = MagicMock()
+    client = MagicMock()
+    charmed = MagicMock()
+    charmed.id = 7
+
+    data = b"same-data"
+    current_template = MagicMock()
+    current_template.data = list(data)
+    client.get_template.return_value = current_template
+
+    GarmCharm._sync_charmed_template(charm, client, "tok", charmed, data, 1)
+
+    client.update_template.assert_not_called()
+    client.create_template.assert_not_called()
+
+
+def test_sync_charmed_template_creates_when_charmed_absent():
+    """
+    arrange: No existing charmed template.
+    act: Call _sync_charmed_template().
+    assert: create_template is called; update_template is NOT called.
+    """
+    charm = MagicMock()
+    client = MagicMock()
+
+    patched_data = b"script"
+    GarmCharm._sync_charmed_template(charm, client, "tok", None, patched_data, 1)
+
+    client.create_template.assert_called_once()
+    client.update_template.assert_not_called()
+
+
+def test_build_charmed_template_data_returns_none_when_data_is_null():
+    """
+    arrange: get_template returns a Template whose .data is None.
+    act: Call _build_charmed_template_data().
+    assert: Returns None without raising TypeError.
+    """
+    charm = MagicMock()
+    client = MagicMock()
+    template = MagicMock()
+    template.data = None
+    client.get_template.return_value = template
+
+    conn = SSHDebugInfo(
+        host="h", port=22, rsa_fingerprint="r", ed25519_fingerprint="e"
+    )
+    result = GarmCharm._build_charmed_template_data(charm, client, "tok", 1, [conn])
+
+    assert result is None

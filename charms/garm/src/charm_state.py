@@ -31,33 +31,6 @@ class SSHDebugInfo:
     ed25519_fingerprint: str
 
 
-@dataclasses.dataclass(frozen=True)
-class GarmConfig:
-    """Charm-level GARM configuration parsed from the Juju model.
-
-    Attributes:
-        use_runner_proxy_for_tmate: Whether to route tmate traffic through the runner proxy.
-    """
-
-    use_runner_proxy_for_tmate: bool
-
-    @classmethod
-    def from_charm(cls, charm: ops.CharmBase) -> "GarmConfig":
-        """Parse GARM config from charm config options.
-
-        Args:
-            charm: The charm instance.
-
-        Returns:
-            Parsed GarmConfig.
-        """
-        return cls(
-            use_runner_proxy_for_tmate=bool(
-                charm.config.get("use-runner-proxy-for-tmate", False)
-            ),
-        )
-
-
 def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     """Read SSH debug connection info from the debug-ssh relation.
 
@@ -65,7 +38,8 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
         charm: The charm instance.
 
     Returns:
-        List of SSHDebugInfo for units that have sent complete relation data.
+        List of SSHDebugInfo for units that have sent complete relation data,
+        sorted by (host, port) for stable ordering across events.
     """
     relation = charm.model.get_relation(DEBUG_SSH_INTEGRATION_NAME)
     if relation is None:
@@ -82,6 +56,14 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
         if not host or not port_str or not rsa_fingerprint or not ed25519_fingerprint:
             logger.warning(
                 "%s relation data for %s not yet ready.",
+                DEBUG_SSH_INTEGRATION_NAME,
+                unit.name,
+            )
+            continue
+
+        if any("\n" in v for v in (host, rsa_fingerprint, ed25519_fingerprint)):
+            logger.warning(
+                "Rejecting %s relation data for %s: value contains newline (possible injection).",
                 DEBUG_SSH_INTEGRATION_NAME,
                 unit.name,
             )
@@ -107,7 +89,9 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
             )
         )
 
-    return connections
+    # relation.units is unordered; sort so that ≥2 debug-ssh units always
+    # produce the same connections[0] selection rather than flip-flopping.
+    return sorted(connections, key=lambda c: (c.host, c.port))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -116,11 +100,9 @@ class CharmState:
 
     Attributes:
         ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
-        garm_config: GARM-specific charm configuration.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
-    garm_config: GarmConfig
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -132,7 +114,4 @@ class CharmState:
         Returns:
             Current CharmState.
         """
-        return cls(
-            ssh_debug_connections=_get_ssh_debug_connections(charm),
-            garm_config=GarmConfig.from_charm(charm),
-        )
+        return cls(ssh_debug_connections=_get_ssh_debug_connections(charm))
