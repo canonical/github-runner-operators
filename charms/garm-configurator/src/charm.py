@@ -152,6 +152,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "image_id": state.image_id or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
+            "os_type": state.scaleset_config.os_type,
             "min_idle_runner": str(state.scaleset_config.min_idle_runner),
             "max_runner": str(state.scaleset_config.max_runner),
             "labels": state.scaleset_config.labels,

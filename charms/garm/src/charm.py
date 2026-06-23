@@ -719,6 +719,7 @@ class GarmCharm(paas_charm.go.Charm):
                         image=required["image"],
                         flavor=required["flavor"],
                         os_arch=required["os_arch"],
+                        os_type=data.get("os_type", "linux") or "linux",
                         min_idle_runners=min_idle,
                         max_runners=max_runners,
                         entity_type=entity_type,

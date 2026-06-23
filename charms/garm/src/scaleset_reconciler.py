@@ -24,6 +24,7 @@ class ScalesetSpec:
     image: str
     flavor: str
     os_arch: str
+    os_type: str
     min_idle_runners: int
     max_runners: int
     entity_type: str
@@ -153,6 +154,7 @@ class ScalesetReconciler:
                 "image": spec.image,
                 "flavor": spec.flavor,
                 "os_arch": spec.os_arch,
+                "os_type": spec.os_type,
                 "min_idle_runners": spec.min_idle_runners,
                 "max_runners": spec.max_runners,
                 "labels": sorted(spec.labels),
