@@ -605,8 +605,16 @@ def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
     return next((scaleset for scaleset in scalesets if scaleset.get("name") == name), None)
 
 
+_SCALESET_TEST_ENDPOINT_NAME = "mock-github-endpoint"
+
+
 def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> str:
-    """Create a GitHub App credential in GARM pointing at the mock server."""
+    """Create a GitHub App credential in GARM pointing at the mock server.
+
+    Uses a dedicated endpoint name ``mock-github-endpoint`` (not the built-in
+    ``github.com`` one) so that GARM routes all GitHub API calls to our mock
+    instead of the real api.github.com.
+    """
 
     def _request(
         path: str, payload: dict, *, method: str = "POST", allow_conflict: bool = True
@@ -628,12 +636,16 @@ def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> st
             raise
 
     try:
+        # Create a dedicated endpoint pointing at the mock server.
+        # GARM ships with a default "github.com" endpoint wired to
+        # api.github.com; we use a different name so our credential is
+        # guaranteed to use the mock URL for every GitHub API call.
         _request(
             "/github/endpoints",
             {
-                "name": "github.com",
-                "description": "GitHub.com test endpoint",
-                "base_url": "https://github.com",
+                "name": _SCALESET_TEST_ENDPOINT_NAME,
+                "description": "Mock GitHub API endpoint for integration tests",
+                "base_url": mock_base_url,
                 "api_base_url": mock_base_url,
                 "upload_base_url": mock_base_url,
             },
@@ -643,7 +655,7 @@ def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> st
             {
                 "name": _SCALESET_TEST_CREDENTIAL_NAME,
                 "description": "Test credential for scaleset integration tests",
-                "endpoint": "github.com",
+                "endpoint": _SCALESET_TEST_ENDPOINT_NAME,
                 "auth_type": "app",
                 "app": {
                     "app_id": 12345,
@@ -660,7 +672,7 @@ def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> st
             {
                 "name": _SCALESET_TEST_CREDENTIAL_NAME,
                 "description": "Test credential for scaleset integration tests",
-                "base_url": "https://github.com",
+                "base_url": mock_base_url,
                 "api_base_url": mock_base_url,
                 "upload_base_url": mock_base_url,
                 "ca_cert_bundle": "",

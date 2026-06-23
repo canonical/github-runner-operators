@@ -92,10 +92,11 @@ class ScalesetReconciler:
 
         for name, scaleset in observed.items():
             if name not in all_desired_names:
-                self._delete_orphaned(name, scaleset)
+                self._delete_orphaned(scaleset)
 
-    def _delete_orphaned(self, name: str, scaleset: ScaleSet) -> None:
+    def _delete_orphaned(self, scaleset: ScaleSet) -> None:
         """Disable then delete a scaleset that is no longer in the desired set."""
+        name = scaleset.name or ""
         logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
         if scaleset.id is None:
             return
