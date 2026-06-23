@@ -37,6 +37,19 @@ waiting times from clock skew, for jobs that effectively started immediately) ar
 and matches how the histogram buckets them. Days with no started jobs simply do not appear in
 the CSV.
 
+Only jobs **we own** are counted: the query filters on `assigned_flavor IS NOT NULL`, which is
+set exactly when a job's labels matched one of our configured flavors. Jobs served by runners we
+don't manage (e.g. third-party self-hosted runners on repositories we ingest webhooks from, such
+as `spread-enabled`) never match a flavor and are excluded so they don't skew the P80.
+
+> **Caveat — data before 2026-06-19.** Case-insensitive label matching landed that day
+> (`fix(planner): match runner labels case-insensitively`, #243). Its migration re-ran flavor
+> assignment only for *in-progress* jobs; **completed** jobs that we owned but that missed
+> assignment due to label casing (e.g. job `X64` vs flavor `x64`) were left at
+> `assigned_flavor = NULL` and never backfilled. For day ranges before 2026-06-19 those jobs are
+> therefore excluded, so `sample_count` undercounts and the P80 may be skewed. Reports over
+> ranges from 2026-06-19 onward are unaffected.
+
 ## Cron example
 
 Daily at 06:00, appending yesterday's row to a running CSV (use `-no-header` so the header

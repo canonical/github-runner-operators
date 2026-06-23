@@ -2,7 +2,8 @@
 // job waiting time from the planner's PostgreSQL database into a CSV.
 //
 // It is not part of the planner charm. Run it ad hoc, from cron, or in CI. It
-// reads the planner's `job` table read-only.
+// reads the planner's `job` table read-only, and counts only jobs we own
+// (those assigned a flavor) so runners we don't manage don't skew the P80.
 //
 // Usage:
 //
@@ -125,6 +126,12 @@ func buildQuery() string {
 		FROM job
 		WHERE started_at IS NOT NULL
 		  AND created_at IS NOT NULL
+		  -- Count only jobs we own: assigned_flavor is non-NULL exactly when a
+		  -- job's labels matched one of our configured flavors. Jobs served by
+		  -- runners we don't manage (e.g. third-party self-hosted runners on
+		  -- repos we ingest webhooks from) never match a flavor, so excluding
+		  -- NULL keeps their waiting times out of our P80.
+		  AND assigned_flavor IS NOT NULL
 		  AND started_at >= @from
 		  AND started_at < @to
 		GROUP BY day, platform
