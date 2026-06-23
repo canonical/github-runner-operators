@@ -15,6 +15,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
+import garm_template
 from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
     GARM_SECRETS_LABEL,
@@ -615,81 +616,3 @@ def test_apply_charmed_template_logs_and_returns_on_garm_error():
         GarmCharm._apply_charmed_template(charm)  # must not raise
 
 
-def test_sync_charmed_template_updates_in_place_when_charmed_exists():
-    """
-    arrange: Charmed template exists; patched_data differs from current body.
-    act: Call _sync_charmed_template().
-    assert: update_template is called; create_template is NOT called.
-    """
-    charm = MagicMock()
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 42
-
-    current_template = MagicMock()
-    current_template.data = list(b"old-data")
-    client.get_template.return_value = current_template
-
-    patched_data = b"new-data"
-    GarmCharm._sync_charmed_template(charm, client, "tok", charmed, patched_data, 1)
-
-    client.update_template.assert_called_once_with("tok", 42, patched_data)
-    client.create_template.assert_not_called()
-
-
-def test_sync_charmed_template_skips_when_data_unchanged():
-    """
-    arrange: Charmed template exists; body matches the patched_data exactly.
-    act: Call _sync_charmed_template().
-    assert: Neither update_template nor create_template is called.
-    """
-    charm = MagicMock()
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 7
-
-    data = b"same-data"
-    current_template = MagicMock()
-    current_template.data = list(data)
-    client.get_template.return_value = current_template
-
-    GarmCharm._sync_charmed_template(charm, client, "tok", charmed, data, 1)
-
-    client.update_template.assert_not_called()
-    client.create_template.assert_not_called()
-
-
-def test_sync_charmed_template_creates_when_charmed_absent():
-    """
-    arrange: No existing charmed template.
-    act: Call _sync_charmed_template().
-    assert: create_template is called; update_template is NOT called.
-    """
-    charm = MagicMock()
-    client = MagicMock()
-
-    patched_data = b"script"
-    GarmCharm._sync_charmed_template(charm, client, "tok", None, patched_data, 1)
-
-    client.create_template.assert_called_once()
-    client.update_template.assert_not_called()
-
-
-def test_build_charmed_template_data_returns_none_when_data_is_null():
-    """
-    arrange: get_template returns a Template whose .data is None.
-    act: Call _build_charmed_template_data().
-    assert: Returns None without raising TypeError.
-    """
-    charm = MagicMock()
-    client = MagicMock()
-    template = MagicMock()
-    template.data = None
-    client.get_template.return_value = template
-
-    conn = SSHDebugInfo(
-        host="h", port=22, rsa_fingerprint="r", ed25519_fingerprint="e"
-    )
-    result = GarmCharm._build_charmed_template_data(charm, client, "tok", 1, [conn])
-
-    assert result is None

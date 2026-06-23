@@ -27,6 +27,8 @@ GARM_SECRETS_LABEL = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 GARM_API_PORT = 8080
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
+GARM_BASE_TEMPLATE_NAME = "github_linux"
+GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 
 
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
@@ -500,4 +502,182 @@ def test_garm_api_has_configurator_provider(
     assert any(n.startswith("garm-configurator") for n in api_provider_names), (
         f"Expected a 'garm-configurator-*' provider in GARM API, "
         f"got: {api_provider_names}"
+    )
+
+
+def _list_templates(address: str, token: str) -> list[dict]:
+    """List all runner install templates from the GARM API.
+
+    Args:
+        address: GARM unit IP address.
+        token: JWT token for authentication.
+
+    Returns:
+        List of template dicts from the GARM API.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/templates", headers=headers, timeout=30)
+    resp.raise_for_status()
+    templates = resp.json()
+    return templates if isinstance(templates, list) else []
+
+
+def _ensure_base_template(address: str, token: str) -> None:
+    """Create the github_linux base template if it does not already exist.
+
+    GARM does not ship templates in its database — they must be created via the
+    API. The charm's apply_charmed_template() requires github_linux as a base to
+    derive github_linux_charmed from, so this helper ensures it is present before
+    the debug-ssh relation is integrated.
+
+    Args:
+        address: GARM unit IP address.
+        token: JWT token for authentication.
+    """
+    templates = _list_templates(address, token)
+    if any(t.get("name") == GARM_BASE_TEMPLATE_NAME for t in templates):
+        logger.info("Base template '%s' already exists; skipping creation", GARM_BASE_TEMPLATE_NAME)
+        return
+
+    logger.info("Creating base template '%s'", GARM_BASE_TEMPLATE_NAME)
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    # Minimal shell script body — the charm only reads this to prepend the tmate snippet.
+    script = "#!/bin/bash\n# Placeholder github_linux install template\n"
+    payload = {
+        "name": GARM_BASE_TEMPLATE_NAME,
+        "description": "Base GitHub Linux runner install template (created by integration test)",
+        "forge_type": "github",
+        "os_type": "linux",
+        "data": list(script.encode("utf-8")),
+    }
+    resp = requests.post(f"{base_url}/templates", json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+    logger.info("Base template '%s' created", GARM_BASE_TEMPLATE_NAME)
+
+
+@pytest.fixture(scope="module", name="garm_with_debug_ssh")
+def integrate_garm_with_debug_ssh_fixture(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    any_charm_debug_ssh_app: str,
+) -> str:
+    """Integrate GARM with the fake tmate debug-ssh provider.
+
+    Pre-creates the github_linux base template (GARM does not ship templates in
+    its DB) so that the charm can derive github_linux_charmed from it when the
+    debug-ssh relation joins.
+
+    Returns the GARM app name after agents are idle.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    token = _garm_first_run(juju, address)
+    _ensure_base_template(address, token)
+
+    logger.info(
+        "Integrating '%s' with debug-ssh provider '%s'",
+        configurator_garm,
+        any_charm_debug_ssh_app,
+    )
+    juju.integrate(
+        f"{configurator_garm}:debug-ssh",
+        f"{any_charm_debug_ssh_app}:provide-debug-ssh",
+    )
+    juju.wait(
+        lambda status: jubilant.all_agents_idle(status, configurator_garm),
+        timeout=5 * 60,
+        delay=10,
+    )
+    return configurator_garm
+
+
+@pytest.fixture(scope="module", name="garm_without_debug_ssh")
+def remove_garm_debug_ssh_fixture(
+    juju: jubilant.Juju,
+    garm_with_debug_ssh: str,
+    any_charm_debug_ssh_app: str,
+) -> str:
+    """Remove the debug-ssh integration from GARM.
+
+    Depends on garm_with_debug_ssh so the relation exists before removal.
+    Returns the GARM app name after agents are idle.
+    """
+    garm_app = garm_with_debug_ssh
+    logger.info(
+        "Removing debug-ssh integration between '%s' and '%s'",
+        garm_app,
+        any_charm_debug_ssh_app,
+    )
+    juju.remove_relation(
+        f"{garm_app}:debug-ssh",
+        f"{any_charm_debug_ssh_app}:provide-debug-ssh",
+    )
+    juju.wait(
+        lambda status: jubilant.all_agents_idle(status, garm_app),
+        timeout=5 * 60,
+        delay=10,
+    )
+    return garm_app
+
+
+def test_garm_charmed_template_created_on_debug_ssh(
+    juju: jubilant.Juju,
+    garm_with_debug_ssh: str,
+):
+    """
+    arrange: The debug-ssh relation is integrated with a fake tmate server; the
+        github_linux base template was pre-created in GARM.
+    act: Query GET /api/v1/templates with an admin JWT.
+    assert: The github_linux_charmed template exists and its body contains
+        the tmate env-var snippet for the fake server's host and port.
+    """
+    address = _get_garm_address(juju, garm_with_debug_ssh)
+    token = _garm_first_run(juju, address)
+
+    templates = _list_templates(address, token)
+    logger.info(
+        "Templates after debug-ssh integration: %s",
+        [t.get("name") for t in templates],
+    )
+
+    charmed = next((t for t in templates if t.get("name") == GARM_CHARMED_TEMPLATE_NAME), None)
+    assert charmed is not None, (
+        f"Expected '{GARM_CHARMED_TEMPLATE_NAME}' template to exist after debug-ssh "
+        f"integration; found templates: {[t.get('name') for t in templates]}"
+    )
+
+    # The template data field is a list of byte values (JSON array of ints).
+    raw = charmed.get("data") or []
+    body = bytes(raw).decode("utf-8")
+    logger.info("Charmed template body (first 500 chars):\n%s", body[:500])
+
+    assert "TMATE_SERVER_HOST=tmate.example.com" in body, (
+        f"Expected TMATE_SERVER_HOST in charmed template body; got:\n{body[:500]}"
+    )
+    assert "TMATE_SERVER_PORT=2200" in body, (
+        f"Expected TMATE_SERVER_PORT in charmed template body; got:\n{body[:500]}"
+    )
+
+
+def test_garm_charmed_template_deleted_on_debug_ssh_removal(
+    juju: jubilant.Juju,
+    garm_without_debug_ssh: str,
+):
+    """
+    arrange: The debug-ssh relation has been removed from GARM.
+    act: Query GET /api/v1/templates with an admin JWT.
+    assert: The github_linux_charmed template is no longer present, confirming
+        the charm deleted it when the relation broke.
+    """
+    address = _get_garm_address(juju, garm_without_debug_ssh)
+    token = _garm_first_run(juju, address)
+
+    templates = _list_templates(address, token)
+    template_names = [t.get("name") for t in templates]
+    logger.info("Templates after debug-ssh removal: %s", template_names)
+
+    assert GARM_CHARMED_TEMPLATE_NAME not in template_names, (
+        f"Expected '{GARM_CHARMED_TEMPLATE_NAME}' to be deleted after debug-ssh "
+        f"relation was removed; found templates: {template_names}"
     )

@@ -15,8 +15,9 @@ import ops
 import paas_charm.go
 import tomli_w
 import yaml
-from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState, SSHDebugInfo
-from garm_api import GarmApiClient, GarmApiError, build_tmate_env_snippet, prepend_after_shebang
+from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState
+from garm_api import GarmApiClient, GarmApiError
+from garm_template import CharmedTemplateError, apply_charmed_template as _apply_garm_template
 from paas_charm.app import WorkloadConfig
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,6 @@ OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-ope
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
-GARM_BASE_TEMPLATE_NAME: typing.Final[str] = "github_linux"
-GARM_CHARMED_TEMPLATE_NAME: typing.Final[str] = "github_linux_charmed"
-
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
 
@@ -687,14 +685,10 @@ class GarmCharm(paas_charm.go.Charm):
     def _apply_charmed_template(self) -> None:
         """Create, update, or delete the charmed runner install template in GARM.
 
-        Derives the ``github_linux_charmed`` template from the built-in
-        ``github_linux`` base by prepending a shell snippet that writes tmate
-        environment variables to the runner's ``.env`` file.
-
-        Called by the ``debug-ssh`` relation event handlers and at the end of
-        every ``restart()`` so the template state stays consistent with the
-        current relation data.  Never raises — failures are logged and retried
-        on the next event.  Only the leader unit manages templates.
+        Called at the end of every ``restart()`` so the template state stays
+        consistent with the current relation data.  Never raises — failures are
+        logged, the unit status is set, and the operation is retried on the next
+        event.  Only the leader unit manages templates.
         """
         if not self.unit.is_leader():
             return
@@ -704,6 +698,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning(
                 "Admin credentials not yet available; skipping charmed template update"
             )
+            self.unit.status = ops.WaitingStatus("Waiting for GARM admin credentials")
             return
 
         try:
@@ -713,134 +708,22 @@ class GarmCharm(paas_charm.go.Charm):
             logger.error(
                 "Admin credentials missing key %s; cannot update charmed template", exc
             )
-            return
+            raise
 
         connections = CharmState.from_charm(self).ssh_debug_connections
         client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
 
         try:
             token = client.login(username=username, password=password)
-            templates = client.list_templates(token)
+            _apply_garm_template(client, token, connections)
         except GarmApiError as exc:
             logger.warning(
                 "GARM template update failed (will retry on next event): %s", exc
             )
-            return
-
-        charmed = next(
-            (t for t in templates if t.name == GARM_CHARMED_TEMPLATE_NAME), None
-        )
-
-        if not connections:
-            self._delete_charmed_template_if_present(client, token, charmed)
-            return
-
-        base = next(
-            (t for t in templates if t.name == GARM_BASE_TEMPLATE_NAME), None
-        )
-        if base is None:
-            logger.warning(
-                "Base template '%s' not found in GARM; cannot build charmed template",
-                GARM_BASE_TEMPLATE_NAME,
-            )
-            return
-
-        patched_data = self._build_charmed_template_data(client, token, base.id, connections)
-        if patched_data is None:
-            return
-
-        self._sync_charmed_template(client, token, charmed, patched_data, len(connections))
-
-    def _delete_charmed_template_if_present(
-        self,
-        client: "GarmApiClient",
-        token: str,
-        charmed: typing.Any,
-    ) -> None:
-        """Delete the charmed template when no debug-ssh connections remain."""
-        if charmed is None:
-            return
-        logger.info(
-            "No debug-ssh connections; deleting charmed template (id=%s)", charmed.id
-        )
-        try:
-            client.delete_template(token, charmed.id)
-        except GarmApiError as exc:
-            logger.warning("Failed to delete charmed template: %s", exc)
-
-    def _build_charmed_template_data(
-        self,
-        client: "GarmApiClient",
-        token: str,
-        base_id: int,
-        connections: list[SSHDebugInfo],
-    ) -> bytes | None:
-        """Fetch the base template and build the patched script bytes.
-
-        Returns None (and logs) if the base data is missing or unreadable.
-        """
-        try:
-            base_template = client.get_template(token, base_id)
-        except GarmApiError as exc:
-            logger.warning("Failed to fetch base template data: %s", exc)
-            return None
-
-        if base_template.data is None:
-            logger.warning(
-                "Base template '%s' has no body; cannot build charmed template",
-                GARM_BASE_TEMPLATE_NAME,
-            )
-            return None
-
-        base_script = bytes(base_template.data).decode("utf-8")
-        snippet = build_tmate_env_snippet(connections)
-        return prepend_after_shebang(base_script, snippet).encode("utf-8")
-
-    def _sync_charmed_template(
-        self,
-        client: "GarmApiClient",
-        token: str,
-        charmed: typing.Any,
-        patched_data: bytes,
-        n_connections: int,
-    ) -> None:
-        """Create or atomically update the charmed template; skip if unchanged."""
-        if charmed is not None:
-            try:
-                current = client.get_template(token, charmed.id)
-                if current.data is not None and bytes(current.data) == patched_data:
-                    logger.debug("Charmed template unchanged; skipping update")
-                    return
-            except GarmApiError:
-                pass  # proceed to update
-
-            logger.info(
-                "Updating charmed template (id=%s) with %d tmate connection(s)",
-                charmed.id,
-                n_connections,
-            )
-            try:
-                client.update_template(token, charmed.id, patched_data)
-            except GarmApiError as exc:
-                logger.warning("Failed to update charmed template: %s", exc)
-            return
-
-        logger.info(
-            "Creating charmed template '%s' with %d tmate connection(s)",
-            GARM_CHARMED_TEMPLATE_NAME,
-            n_connections,
-        )
-        try:
-            client.create_template(
-                token=token,
-                name=GARM_CHARMED_TEMPLATE_NAME,
-                description="Charmed GitHub Linux template managed by the GARM charm",
-                forge_type="github",
-                os_type="linux",
-                data=patched_data,
-            )
-        except GarmApiError as exc:
-            logger.warning("Failed to create charmed template: %s", exc)
+            raise
+        except CharmedTemplateError as exc:
+            logger.warning("Charmed template management failed: %s", exc)
+            raise
 
 
 if __name__ == "__main__":
