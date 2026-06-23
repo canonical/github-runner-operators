@@ -37,6 +37,10 @@ go.work.sum
 # env file
 .env
 
+# opcli generated build files
+artifacts.build.yaml
+build/
+
 # Editor/IDE
 .idea/
 .vscode/

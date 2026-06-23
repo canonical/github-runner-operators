@@ -339,6 +339,33 @@ func TestDatabase_AddJob_DefaultLabelsStripped(t *testing.T) {
 	assert.Equal(t, []string{"x64", "noble"}, jobs[0].Labels)
 }
 
+// Verify that flavor matching is case-insensitive: GitHub injects the
+// architecture/OS labels with its own casing (e.g. "X64", "Linux"), which must
+// still match flavors defined with lowercase labels.
+func TestDatabase_AddJob_CaseInsensitiveFlavorMatching(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "github-x64-noble",
+		Labels:   []string{"x64", "noble"},
+		Priority: 100,
+	}))
+
+	assert.NoError(t, db.AddJob(ctx, &Job{
+		Platform: "github",
+		ID:       "1",
+		Labels:   []string{"self-hosted", "Linux", "X64", "Noble"},
+	}))
+
+	jobs, err := db.ListJobs(ctx, "github", ListJobOptions{WithId: "1"})
+	assert.NoError(t, err)
+	assert.Equal(t, "github-x64-noble", *jobs[0].AssignedFlavor)
+	assert.Equal(t, []string{"x64", "noble"}, jobs[0].Labels)
+}
+
 func TestDatabase_AddJob_EqualPriority(t *testing.T) {
 	db := setupDatabase(t)
 	defer teardownDatabase(t)
@@ -536,6 +563,97 @@ func TestDatabase_AddFlavor(t *testing.T) {
 
 	assert.Len(t, jobs, 1)
 	assert.Equal(t, flavor.Name, *jobs[0].AssignedFlavor)
+}
+
+// Verify that flavor labels are stored lowercase so that matching against
+// (also lowercased) job labels is case-insensitive.
+func TestDatabase_AddFlavor_LowercasesLabels(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	assert.NoError(t, db.AddFlavor(ctx, &Flavor{
+		Platform: "github",
+		Name:     "amd64-large",
+		Labels:   []string{"Self-Hosted", "AMD64", "Large"},
+	}))
+
+	flavor, err := db.GetFlavor(ctx, "amd64-large")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"self-hosted", "amd64", "large"}, flavor.Labels)
+}
+
+// Verify the 0002 data backfill against rows stored the way the old
+// case-sensitive code wrote them. The backfill lives only in raw SQL (the app's
+// forward path can't be reused from golang-migrate), so this exercises the exact
+// shipped migration file: it must lowercase flavor labels, lowercase and strip
+// implicit labels from incomplete jobs, reassign jobs that only failed to match
+// because of casing, and leave completed jobs as historical data.
+func TestMigration0002_LowercaseLabels(t *testing.T) {
+	db := setupDatabase(t)
+	defer teardownDatabase(t)
+	ctx := t.Context()
+
+	// Seed pre-migration rows with raw INSERTs so mixed-case labels are stored
+	// verbatim, bypassing the lowercasing setters and reproducing production state.
+	_, err := db.conn.Exec(ctx, `
+		INSERT INTO flavor (platform, name, labels, priority)
+		VALUES ('github', 'github-x64-noble', ARRAY['X64','Noble'], 100);
+
+		INSERT INTO job (platform, id, labels, created_at, completed_at, assigned_flavor)
+		VALUES
+		  ('github', 'incomplete', ARRAY['self-hosted','Linux','X64','Noble'], now(), NULL, NULL),
+		  ('github', 'completed',  ARRAY['self-hosted','Linux','X64','Noble'], now(), now(), NULL),
+		  -- Already-normalized, unassigned job: skipped by the label-rewrite guard
+		  -- but must still be picked up by the reassignment step.
+		  ('github', 'normalized', ARRAY['x64','noble'], now(), NULL, NULL),
+		  -- Assigned but in-progress job: its labels must be normalized too (so a
+		  -- later flavor change that re-matches it still works) while keeping its
+		  -- existing assignment.
+		  ('github', 'assigned', ARRAY['X64','Noble'], now(), NULL, 'github-x64-noble');
+	`, pgx.QueryExecModeSimpleProtocol)
+	require.NoError(t, err)
+
+	migrationSQL, err := migrationsFS.ReadFile("migrations/0002_lowercase_labels.up.sql")
+	require.NoError(t, err)
+	_, err = db.conn.Exec(ctx, string(migrationSQL), pgx.QueryExecModeSimpleProtocol)
+	require.NoError(t, err)
+
+	var flavorLabels []string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels FROM flavor WHERE name = 'github-x64-noble'`).Scan(&flavorLabels))
+	assert.Equal(t, []string{"x64", "noble"}, flavorLabels)
+
+	var incLabels []string
+	var incFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'incomplete'`).Scan(&incLabels, &incFlavor))
+	assert.Equal(t, []string{"x64", "noble"}, incLabels)
+	require.NotNil(t, incFlavor)
+	assert.Equal(t, "github-x64-noble", *incFlavor)
+
+	var compLabels []string
+	var compFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'completed'`).Scan(&compLabels, &compFlavor))
+	assert.Equal(t, []string{"self-hosted", "Linux", "X64", "Noble"}, compLabels)
+	assert.Nil(t, compFlavor)
+
+	var normLabels []string
+	var normFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'normalized'`).Scan(&normLabels, &normFlavor))
+	assert.Equal(t, []string{"x64", "noble"}, normLabels)
+	require.NotNil(t, normFlavor)
+	assert.Equal(t, "github-x64-noble", *normFlavor)
+
+	var asgLabels []string
+	var asgFlavor *string
+	require.NoError(t, db.conn.QueryRow(ctx,
+		`SELECT labels, assigned_flavor FROM job WHERE id = 'assigned'`).Scan(&asgLabels, &asgFlavor))
+	assert.Equal(t, []string{"x64", "noble"}, asgLabels)
+	require.NotNil(t, asgFlavor)
+	assert.Equal(t, "github-x64-noble", *asgFlavor)
 }
 
 func TestDatabase_AddFlavor_Exists(t *testing.T) {
