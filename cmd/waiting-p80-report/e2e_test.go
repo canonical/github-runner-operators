@@ -109,8 +109,8 @@ func TestReport_EndToEnd(t *testing.T) {
 		"github", "null-started", day.Add(-999*time.Second))
 	require.NoError(t, err)
 
-	// Seed one job where started_at < created_at (negative wait) to confirm
-	// it is excluded by the started_at >= created_at guard.
+	// Seed one job where started_at < created_at (negative wait, -10s) to
+	// confirm it is clamped to 0 and kept in the population, not excluded.
 	_, err = pool.Exec(ctx, `
 		INSERT INTO job (platform, id, created_at, started_at, raw)
 		VALUES ($1, $2, $3, $4, '{}')`,
@@ -128,9 +128,11 @@ func TestReport_EndToEnd(t *testing.T) {
 	require.Len(t, rows, 2, "expected one row per day with started jobs")
 	assert.Equal(t, "2026-05-01", rows[0].Day.UTC().Format("2006-01-02"))
 	assert.Equal(t, "github", rows[0].Platform)
-	assert.Equal(t, int64(5), rows[0].SampleCount, "NULL-started and negative-wait jobs must be excluded")
-	// P80 interpolates between 40 and 300 -> 92.
-	assert.InDelta(t, 92.0, rows[0].P80Seconds, 0.01)
+	assert.Equal(t, int64(6), rows[0].SampleCount, "NULL-started excluded; negative-wait clamped to 0 and kept")
+	// The negative-wait job is clamped to 0, so the day-1 population is sorted
+	// [0,10,20,30,40,300] (n=6). percentile_cont(0.8) position 0.8*(6-1)=4.0
+	// lands exactly on index 4 -> 40.
+	assert.InDelta(t, 40.0, rows[0].P80Seconds, 0.01)
 
 	assert.Equal(t, "2026-05-02", rows[1].Day.UTC().Format("2006-01-02"))
 	assert.Equal(t, int64(1), rows[1].SampleCount)

@@ -31,9 +31,11 @@ CSV columns: `day,platform,p80_seconds,sample_count`.
 The P80 is computed SQL-side via `percentile_cont(0.8) WITHIN GROUP (...)` grouped by the UTC
 day the job *started* (the moment waiting ended), matching the population the ephemeral
 `github_runner_planner_webhook_job_waiting_seconds` histogram records. Jobs with a NULL
-`started_at` or `created_at` are excluded, as are rows where `started_at < created_at`
-(negative waiting times) which would otherwise skew the percentile. Days with no started jobs
-simply do not appear in the CSV.
+`started_at` or `created_at` are excluded. Rows where `started_at < created_at` (negative
+waiting times from clock skew, for jobs that effectively started immediately) are clamped to
+0 rather than dropped — keeping them in the population avoids biasing the percentile upward
+and matches how the histogram buckets them. Days with no started jobs simply do not appear in
+the CSV.
 
 ## Cron example
 

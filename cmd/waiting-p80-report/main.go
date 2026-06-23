@@ -120,12 +120,11 @@ func buildQuery() string {
 	return `
 		SELECT date_trunc('day', started_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day,
 		       platform,
-		       percentile_cont(0.8) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (started_at - created_at))) AS p80_seconds,
+		       percentile_cont(0.8) WITHIN GROUP (ORDER BY GREATEST(EXTRACT(EPOCH FROM (started_at - created_at)), 0)) AS p80_seconds,
 		       COUNT(*) AS sample_count
 		FROM job
 		WHERE started_at IS NOT NULL
 		  AND created_at IS NOT NULL
-		  AND started_at >= created_at
 		  AND started_at >= @from
 		  AND started_at < @to
 		GROUP BY day, platform
