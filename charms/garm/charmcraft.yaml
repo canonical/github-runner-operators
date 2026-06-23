@@ -16,6 +16,10 @@ description: |
   Deploys and manages GARM (GitHub Actions Runner Manager) using the
   12-factor app framework with PostgreSQL storage and an OpenStack runner provider.
 
+  GARM serves its API and Prometheus metrics on a single fixed port (8080), and
+  its scrape target is declared in paas-config.yaml; the framework's app-port,
+  metrics-port and metrics-path options are not used.
+
 extensions:
   - go-framework
 
@@ -24,14 +28,7 @@ requires:
     interface: postgresql_client
     optional: false
     limit: 1
+  garm-configurator:
+    interface: garm_configurator_v0
+    limit: 1
 
-config:
-  options:
-    garm-listen-address:
-      type: string
-      default: "0.0.0.0"
-      description: Address GARM API server listens on.
-    garm-listen-port:
-      type: int
-      default: 9997
-      description: Port GARM API server listens on.

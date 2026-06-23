@@ -1,4 +1,4 @@
-env_list = ["lint", "complexity", "static", "unit", "coverage-report"]
+env_list = ["fmt", "lint", "complexity", "static", "unit", "coverage-report"]
 
 [env_run_base]
 package = "skip"

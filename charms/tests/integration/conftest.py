@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 import json
 import logging
@@ -14,72 +14,66 @@ import jubilant
 import pytest
 import requests
 from tests.integration.helpers import create_github_app_client
-from tests.conftest import (
-    CHARM_FILE_PARAM,
-    GARM_IMAGE_PARAM,
-    PLANNER_IMAGE_PARAM,
-    WEBHOOK_GATEWAY_IMAGE_PARAM,
-)
 
 logger = logging.getLogger(__name__)
 
 GITHUB_PATH = "swetha1654/github-runner-operators"
 
 
+@pytest.fixture(scope="module")
+def juju() -> Iterator[jubilant.Juju]:
+    """Provide a temporary Juju model for the duration of the module.
+
+    Creates a temporary model and yields a `jubilant.Juju` handle for
+    deployments, relations, and config operations. The model is cleaned
+    up automatically at the end of the module.
+    """
+    with jubilant.temp_model() as juju:
+        yield juju
+
+
+@pytest.fixture(name="garm_charm_file", scope="module")
+def garm_charm_file_fixture(charm_paths) -> str:
+    """Return the path to the built GARM charm file."""
+    return charm_paths["garm"].path
+
+
+@pytest.fixture(name="garm_app_image", scope="module")
+def garm_app_image_fixture(charm_resource_images) -> str:
+    """Return the GARM OCI image reference for the app-image resource."""
+    image = charm_resource_images["garm"]["app-image"]
+    logger.info("GARM app image: %s", image)
+    return image
+
+
 @pytest.fixture(name="planner_charm_file", scope="module")
-def planner_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
+def planner_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built planner charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        return None
-    if len(charm) > 1:
-        planner_charm = [file for file in charm if "planner" in file]
-        return planner_charm[0]
-    return charm[0]
+    return charm_paths["github-runner-planner"].path
 
 
 @pytest.fixture(name="planner_app_image", scope="module")
-def planner_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the planner app image."""
-    app_image = pytestconfig.getoption(PLANNER_IMAGE_PARAM)
-    return app_image
+def planner_app_image_fixture(charm_resource_images) -> str:
+    """Return the OCI image reference for the planner app-image resource."""
+    return charm_resource_images["github-runner-planner"]["app-image"]
 
 
 @pytest.fixture(name="webhook_gateway_charm_file", scope="module")
-def webhook_gateway_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
+def webhook_gateway_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built webhook gateway charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        return None
-    if len(charm) > 1:
-        webhook_gateway_charm = [file for file in charm if "webhook-gateway" in file]
-        return webhook_gateway_charm[0]
-    return charm[0]
+    return charm_paths["github-runner-webhook-gateway"].path
 
 
 @pytest.fixture(name="webhook_gateway_app_image", scope="module")
-def webhook_gateway_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the webhook gateway app image."""
-    app_image = pytestconfig.getoption(WEBHOOK_GATEWAY_IMAGE_PARAM)
-    return app_image
+def webhook_gateway_app_image_fixture(charm_resource_images) -> str:
+    """Return the OCI image reference for the webhook gateway app-image resource."""
+    return charm_resource_images["github-runner-webhook-gateway"]["app-image"]
 
 
-@pytest.fixture(name="keep_models", scope="module")
-def keep_models_fixture(pytestconfig: pytest.Config) -> bool:
-    """Return whether to keep models after deploying."""
-    return pytestconfig.getoption("--keep-models")
-
-
-@pytest.fixture(scope="module")
-def juju(keep_models: bool) -> Iterator[jubilant.Juju]:
-    """Provide a temporary Juju model for the duration of the module.
-
-    Creates a temporary model (optionally kept based on --keep-models) and yields a
-    `jubilant.Juju` handle for deployments, relations, and config operations.
-    The model is cleaned up automatically at the end of the module unless kept.
-    """
-    with jubilant.temp_model(keep=keep_models) as juju:
-        yield juju
+@pytest.fixture(name="garm_configurator_charm_file", scope="module")
+def garm_configurator_charm_file_fixture(charm_paths) -> str:
+    """Return the path to the built garm-configurator charm file."""
+    return charm_paths["garm-configurator"].path
 
 
 def _generate_admin_token() -> str:
@@ -333,30 +327,6 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
-@pytest.fixture(name="garm_charm_file", scope="module")
-def garm_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the built GARM charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        return None
-    if len(charm) > 1:
-        garm_charm = [file for file in charm if "garm" in file]
-        if not garm_charm:
-            raise pytest.UsageError(
-                "No GARM charm file found in --charm-file; expected a path containing 'garm'."
-            )
-        return garm_charm[0]
-    return charm[0]
-
-
-@pytest.fixture(name="garm_app_image", scope="module")
-def garm_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the GARM OCI image reference for the app-image resource."""
-    image = pytestconfig.getoption(GARM_IMAGE_PARAM)
-    logger.info("GARM app image: %s", image)
-    return image
-
-
 def _pre_pull_garm_image(image: str) -> None:
     """Pre-pull the GARM ROCK image into microk8s containerd.
 
@@ -476,7 +446,7 @@ def integrate_garm_with_postgresql_fixture(
     logger.info("Waiting up to 600s for GARM app '%s' to reach active status", app_name)
     try:
         juju.wait(
-            lambda status: jubilant.all_active(status, app_name),
+            lambda status: jubilant.all_agents_idle(status, app_name),
             timeout=10 * 60,
             delay=10,
         )
@@ -530,3 +500,101 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
         delay=10,
     )
     return app_name
+
+
+@pytest.fixture(scope="module", name="garm_configurator_charm_file")
+def garm_configurator_charm_file_fixture(charm_paths) -> str:
+    """Return the path to the built garm-configurator charm file."""
+    return charm_paths["garm-configurator"].path
+
+
+@pytest.fixture(scope="module", name="configurator_with_image")
+def deploy_configurator_with_image_fixture(
+    juju: jubilant.Juju,
+    garm_configurator_charm_file: str,
+    any_charm_image_builder_app: str,
+) -> str:
+    """Deploy the configurator with fake-image-builder integrated and valid config.
+
+    Creates Juju secrets for the password and private key fields, deploys the
+    configurator charm, sets all required config, integrates with the fake image
+    builder, and waits for the configurator to become active (image UUID received).
+    """
+    app_name = "garm-configurator"
+
+    # Create secrets first so we can reference them in config
+    password_secret = juju.add_secret(
+        name="configurator-os-password",
+        content={"value": "test-openstack-password"},
+    )
+    private_key_secret = juju.add_secret(
+        name="configurator-github-private-key",
+        content={"value": "test-github-private-key"},
+    )
+
+    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    juju.grant_secret(password_secret, app_name)
+    juju.grant_secret(private_key_secret, app_name)
+
+    juju.config(
+        app_name,
+        values={
+            "openstack-auth-url": "https://keystone.example.com:5000/v3",
+            "openstack-username": "admin",
+            "openstack-password": password_secret,
+            "openstack-project-name": "test-project",
+            "openstack-user-domain-name": "Default",
+            "openstack-project-domain-name": "Default",
+            "openstack-region-name": "RegionOne",
+            "openstack-network": "external-net",
+            "github-app-client-id": "test-client-id",
+            "github-app-installation-id": "test-installation-id",
+            "github-app-private-key": private_key_secret,
+            "name": "test-scaleset",
+            "flavor": "m1.large",
+            "os-arch": "amd64",
+            "min-idle-runner": "0",
+            "max-runner": "5",
+            "repo": "testorg/testrepo",
+        },
+    )
+
+    juju.integrate(app_name, any_charm_image_builder_app)
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    return app_name
+
+
+@pytest.fixture(scope="module", name="configurator_garm")
+def integrate_configurator_with_garm_fixture(
+    juju: jubilant.Juju,
+    configurator_with_image: str,
+    garm_app: str,
+) -> str:
+    """Integrate the configurator with GARM and wait for both to be active.
+
+    The configurator should remain Active after integration. GARM may
+    restart when it receives the relation data (TOML change detection),
+    so we wait for GARM to settle back to active.
+
+    Returns the garm app name.
+    """
+    juju.integrate(configurator_with_image, garm_app)
+    # Wait for both apps to settle. GARM may restart (TOML hash change).
+    juju.wait(
+        lambda status: jubilant.all_active(status, garm_app)
+        and jubilant.all_active(status, configurator_with_image),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return garm_app

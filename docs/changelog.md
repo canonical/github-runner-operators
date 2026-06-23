@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-22
+
+- `waiting-p80-report`: clamp negative waiting times (clock skew, `started_at < created_at`) to 0 instead of excluding those jobs. Previously dropping them removed the fastest jobs from the population and biased the reported P80 upward.
+
+## 2026-06-19
+
+- add `waiting-p80-report` standalone CLI that extracts the daily P80 of job waiting time from the planner's PostgreSQL database into a CSV. Not part of the planner charm; no charm or migration change.
+
+## 2026-06-18
+
+- match planner runner labels case-insensitively, so jobs requesting GitHub's implicit label casing (e.g. `X64`, `Linux`) match flavors defined in lowercase. A migration converts existing labels to lowercase and reassigns jobs previously left unmatched due to casing.
+
+## 2026-06-16
+
+- Add Garm configurator relation with GARM charm and write OpenStack provider related toml configurations.
+
+## 2026-06-15
+
+- export GARM Prometheus metrics via the `metrics-endpoint` integration, with JWT authentication disabled on the `/metrics` endpoint. GARM serves its API and metrics on a single fixed port (8080); the framework's `app-port`/`metrics-port`/`metrics-path` options are not used.
+
+## 2026-06-12
+
+- add GARM HTTP API client to the GARM charm: auto-generates admin credentials on first install, calls the GARM `/first-run` endpoint automatically on startup, and stores credentials in a Juju secret (`garm-admin-credentials`).
+
 ## 2026-06-08
 
 - Implement the webhook redelivery service.
