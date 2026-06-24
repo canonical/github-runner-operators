@@ -605,7 +605,15 @@ def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
         NEXT_SCALESET_ID = [1]
 
         def _self_ip():
-            return socket.gethostbyname(socket.gethostname())
+            # Use UDP connect trick: routes without sending a packet, giving the outbound IP.
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(('10.255.255.255', 1))
+                return s.getsockname()[0]
+            except Exception:
+                return socket.gethostbyname(socket.gethostname())
+            finally:
+                s.close()
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):
@@ -664,8 +672,9 @@ def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
                 elif re.match(r"^/orgs/[^/]+/actions/runners/registration-token$", path):
                     self._send_json({"token": "FAKEREGISTRATIONTOKENXXX", "expires_at": "2099-01-01T00:00:00Z"})
                 elif path == "/actions/runner-registration":
-                    ip = _self_ip()
-                    self._send_json({"url": f"http://{ip}:8085", "token": MOCK_JWT})
+                    host = self.headers.get("Host", "")
+                    base_url = f"http://{host}" if host else f"http://{_self_ip()}:8085"
+                    self._send_json({"url": base_url, "token": MOCK_JWT})
                 elif re.match(r"^/_apis/runtime/runnerscalesets$", path):
                     sid = NEXT_SCALESET_ID[0]
                     NEXT_SCALESET_ID[0] += 1
