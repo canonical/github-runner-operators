@@ -51,6 +51,10 @@ def apply_charmed_template(
         raise CharmedTemplateError(
             f"Base template '{GARM_BASE_TEMPLATE_NAME}' not found in GARM"
         )
+    if base.id is None:
+        raise CharmedTemplateError(
+            f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no ID"
+        )
 
     patched_data = _build_charmed_template_data(client, token, base.id, connections)
     _sync_charmed_template(client, token, charmed, patched_data, len(connections))

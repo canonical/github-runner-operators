@@ -601,11 +601,11 @@ def test_apply_charmed_template_skips_when_credentials_unavailable():
     mock_client_cls.assert_not_called()
 
 
-def test_apply_charmed_template_logs_and_returns_on_garm_error():
+def test_apply_charmed_template_logs_and_raises_on_garm_error():
     """
     arrange: Leader; credentials OK; GARM login raises GarmApiError.
     act: Call _apply_charmed_template().
-    assert: Exception is swallowed (not re-raised); no crash.
+    assert: GarmApiError is logged and re-raised.
     """
     charm = MagicMock()
     charm.unit.is_leader.return_value = True
@@ -613,6 +613,7 @@ def test_apply_charmed_template_logs_and_returns_on_garm_error():
 
     with patch("charm.GarmApiClient") as mock_client_cls:
         mock_client_cls.return_value.login.side_effect = GarmApiError("timeout")
-        GarmCharm._apply_charmed_template(charm)  # must not raise
+        with pytest.raises(GarmApiError):
+            GarmCharm._apply_charmed_template(charm)
 
 

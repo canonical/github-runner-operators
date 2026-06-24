@@ -718,7 +718,7 @@ class GarmCharm(paas_charm.go.Charm):
             _apply_garm_template(client, token, connections)
         except GarmApiError as exc:
             logger.warning(
-                "GARM template update failed (will retry on next event): %s", exc
+                "GARM template update failed: %s", exc
             )
             raise
         except CharmedTemplateError as exc:
