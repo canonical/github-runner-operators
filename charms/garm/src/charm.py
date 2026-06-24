@@ -792,7 +792,10 @@ class GarmCharm(paas_charm.go.Charm):
             self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
             logger.warning("GARM API error during scaleset reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus(
+            # Use ActiveStatus (not WaitingStatus) because GARM is still serving
+            # requests; only the scaleset sync failed. WaitingStatus would block
+            # fixtures that wait for jubilant.all_active().
+            self.unit.status = ops.ActiveStatus(
                 "Scaleset sync failed; run sync-scalesets for details"
             )
             if raise_on_error:
