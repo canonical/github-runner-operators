@@ -47,8 +47,8 @@ from, such as `spread-enabled`) never match a flavor and are excluded so they do
 > entry). Its migration re-ran flavor assignment only for *in-progress* jobs; **completed** jobs
 > that we owned but that missed assignment due to label casing (for example, job label `X64` not
 > matching flavor `x64`) were left at `assigned_flavor = NULL` and never backfilled. For day
-> ranges before 2026-06-18 those jobs are therefore excluded, so `sample_count` undercounts and
-> the P80 may be skewed. Reports over ranges from 2026-06-18 onward are unaffected.
+> ranges before 2026-06-18 those jobs are therefore excluded, so `sample_count` is lower than the
+> true total and the P80 may be skewed. Reports over ranges from 2026-06-18 onward are unaffected.
 
 ## Cron example
 
