@@ -358,10 +358,16 @@ def test_scaleset_created_and_updated_via_relation(
     # on GARM → _reconcile_scalesets() runs now that URLs are configured.
     # Using max-runner=10 doubles as the update assertion below.
     juju.config(configurator_with_image, values={"max-runner": "10"})
+    # Wait for BOTH the configurator (config-changed) AND GARM (relation-changed)
+    # to finish processing. Waiting for only GARM is insufficient because GARM may
+    # already be active/idle before relation-changed fires, causing the wait to exit
+    # too early. Waiting for both apps to be simultaneously active ensures GARM has
+    # completed its relation-changed hook and run _reconcile_scalesets().
     juju.wait(
-        lambda status: jubilant.all_active(status, configurator_garm),
-        timeout=3 * 60,
-        delay=10,
+        lambda status: jubilant.all_active(status, configurator_with_image)
+        and jubilant.all_active(status, configurator_garm),
+        timeout=5 * 60,
+        delay=5,
     )
 
     scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
@@ -744,8 +750,8 @@ def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
 
 @retry(
     retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    stop=stop_after_attempt(18),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
     reraise=True,
 )
 def _wait_for_scaleset(
