@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-23
 
-- `waiting-p80-report`: count only jobs we own (those with an `assigned_flavor`). Jobs served by runners we don't manage — e.g. third-party self-hosted runners on repos we ingest webhooks from — never match a flavor and were skewing the reported P80.
+- `waiting-p80-report`: count only jobs we own (those with a non-NULL `assigned_flavor`). Jobs served by runners we don't manage — for example, third-party self-hosted runners on repos we ingest webhooks from — never match a flavor and were skewing the reported P80.
 
 ## 2026-06-22
 
