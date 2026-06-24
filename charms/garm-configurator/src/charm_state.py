@@ -289,7 +289,7 @@ class ScalesetConfig(BaseModel):
             name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
             flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
             os_arch=str(charm.config.get(SCALESET_OS_ARCH_CONFIG_NAME)).strip(),
-            os_type=str(charm.config.get(SCALESET_OS_TYPE_CONFIG_NAME, "linux")).strip() or "linux",
+            os_type=str(charm.config.get(SCALESET_OS_TYPE_CONFIG_NAME, "linux")).strip(),
             min_idle_runner=min_idle_runner,
             max_runner=max_runner,
             labels=labels,

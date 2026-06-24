@@ -12,6 +12,7 @@ from garm_client.exceptions import ApiException
 
 BASE_URL = "http://127.0.0.1:9997/api/v1"
 
+
 def _stub_api_client(client):
     """Patch _api_client on *client* to be a no-op context manager.
 
@@ -23,6 +24,7 @@ def _stub_api_client(client):
     stub.__enter__ = MagicMock(return_value=MagicMock())
     stub.__exit__ = MagicMock(return_value=False)
     return patch.object(client, "_api_client", return_value=stub)
+
 
 @pytest.mark.parametrize(
     "side_effect, expected",
@@ -46,6 +48,7 @@ def test_is_initialized(side_effect, expected):
             result = client.is_initialized()
     assert result is expected
 
+
 def test_is_initialized_raises_on_unexpected_status():
     """
     arrange: GarmApiClient with ControllerInfoApi raising ApiException(500).
@@ -59,6 +62,7 @@ def test_is_initialized_raises_on_unexpected_status():
             with pytest.raises(GarmApiError):
                 client.is_initialized()
 
+
 def test_wait_for_ready_returns_immediately_when_ready():
     """
     arrange: GarmApiClient with is_initialized returning True immediately.
@@ -68,6 +72,7 @@ def test_wait_for_ready_returns_immediately_when_ready():
     client = GarmApiClient(BASE_URL)
     with patch.object(client, "is_initialized", return_value=True):
         client.wait_for_ready(timeout=5)
+
 
 def test_wait_for_ready_raises_after_timeout():
     """
@@ -82,6 +87,7 @@ def test_wait_for_ready_raises_after_timeout():
                 with pytest.raises(GarmConnectionError, match="ready"):
                     client.wait_for_ready(timeout=30)
 
+
 def test_first_run_succeeds():
     """
     arrange: GarmApiClient with FirstRunApi returning a mock response.
@@ -93,6 +99,7 @@ def test_first_run_succeeds():
         with patch("garm_api.FirstRunApi") as MockApi:
             MockApi.return_value.first_run.return_value = MagicMock()
             client.first_run("admin", "pass", "email@example.com", "Admin")
+
 
 def test_first_run_raises_on_api_error():
     """
@@ -106,6 +113,7 @@ def test_first_run_raises_on_api_error():
             MockApi.return_value.first_run.side_effect = ApiException(status=400)
             with pytest.raises(GarmApiError):
                 client.first_run("admin", "pass", "email@example.com", "Admin")
+
 
 def test_login_returns_token():
     """
@@ -121,6 +129,7 @@ def test_login_returns_token():
             MockApi.return_value.login.return_value = mock_result
             token = client.login("admin", "password")
     assert token == "test-jwt-token"
+
 
 @pytest.mark.parametrize(
     "token_value, error_type",
@@ -145,6 +154,7 @@ def test_login_raises_when_token_missing(token_value, error_type):
             with pytest.raises(error_type, match="token"):
                 client.login("admin", "password")
 
+
 def test_login_raises_on_api_error():
     """
     arrange: GarmApiClient with LoginApi raising ApiException(401).
@@ -154,7 +164,9 @@ def test_login_raises_on_api_error():
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.LoginApi") as MockApi:
-            MockApi.return_value.login.side_effect = ApiException(status=401, reason="Unauthorized")
+            MockApi.return_value.login.side_effect = ApiException(
+                status=401, reason="Unauthorized"
+            )
             with pytest.raises(GarmApiError):
                 client.login("admin", "wrong")
 
@@ -202,6 +214,7 @@ def test_list_providers(api_response, expected_names):
             result = client.list_providers()
     assert [p.name for p in result] == expected_names
 
+
 @pytest.mark.parametrize(
     "api_response, expected_names",
     [
@@ -233,6 +246,7 @@ def test_list_scalesets(api_response, expected_names):
             result = client.list_scalesets()
     assert [ss.name for ss in result] == expected_names
 
+
 @pytest.mark.parametrize(
     "target, registered, expected",
     [
@@ -260,6 +274,7 @@ def test_find_org_id(target, registered, expected):
             MockApi.return_value.list_orgs.return_value = mocks
             result = client.find_org_id(target)
     assert result == expected
+
 
 @pytest.mark.parametrize(
     "target, registered, expected",
@@ -291,6 +306,7 @@ def test_find_repo_id(target, registered, expected):
             result = client.find_repo_id(target)
     assert result == expected
 
+
 def test_delete_scaleset_succeeds():
     """
     arrange: GarmAuthenticatedClient with ScalesetsApi stubbed.
@@ -304,6 +320,7 @@ def test_delete_scaleset_succeeds():
     MockApi.return_value.delete_scale_set.assert_called_once_with(
         scaleset_id="42", _request_timeout=30
     )
+
 
 def test_delete_scaleset_raises_on_api_error():
     """
