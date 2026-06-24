@@ -557,27 +557,27 @@ def integrate_configurator_with_garm_fixture(
     configurator_with_image: str,
     garm_app: str,
 ) -> str:
-    """Integrate the configurator with GARM and wait for both to be active.
+    """Integrate the configurator with GARM and wait for the event to be processed.
 
     The configurator should remain Active after integration. GARM may
     restart when it receives the relation data (TOML change detection),
     then run _reconcile_scalesets() which may set WaitingStatus if
     credentials/providers are not yet configured. The fixture only
     confirms that GARM has finished processing the integration event
-    (active or waiting); individual tests that need GARM fully active
+    (Juju agent idle); individual tests that need GARM fully active
     wait for all_active themselves after completing their own setup.
 
     Returns the garm app name.
     """
     juju.integrate(configurator_with_image, garm_app)
-    # GARM may be waiting (scaleset sync not yet possible — credentials not
-    # set up yet) or active (sync succeeded immediately). Either is fine here;
-    # the test itself waits for all_active after credential/org setup.
+    # GARM may end up in a split state: app_status=active (set by paas_charm)
+    # while unit workload_status=waiting (set by _reconcile_scalesets when
+    # credentials/providers are not yet configured). all_active and all_waiting
+    # both require BOTH app and unit to match, so neither would pass. Using
+    # all_agents_idle checks only that hooks have finished running, which is
+    # sufficient to confirm the integration event was processed.
     juju.wait(
-        lambda status: (
-            jubilant.all_active(status, garm_app)
-            or jubilant.all_waiting(status, garm_app)
-        )
+        lambda status: jubilant.all_agents_idle(status, garm_app)
         and jubilant.all_active(status, configurator_with_image),
         timeout=10 * 60,
         delay=10,
