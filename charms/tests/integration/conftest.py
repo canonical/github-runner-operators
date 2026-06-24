@@ -644,6 +644,7 @@ def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
 
             def do_GET(self):
                 path = self.path.split("?")[0]
+                path = re.sub(r"^/api/v3(?=/|$)", "", path)
                 if path == "/rate_limit":
                     self._send_json({"resources": {"core": {"limit": 5000, "remaining": 5000, "reset": 9999999999}}})
                 elif path == "/app":
@@ -666,6 +667,7 @@ def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
 
             def do_POST(self):
                 path = self.path.split("?")[0]
+                path = re.sub(r"^/api/v3(?=/|$)", "", path)
                 body = self._read_json()
                 if re.match(r"^/app/installations/\\d+/access_tokens$", path):
                     self._send_json({"token": "ghs_fake_installation_token", "expires_at": "2099-01-01T00:00:00Z", "permissions": {}})
