@@ -292,10 +292,6 @@ class GarmCharm(paas_charm.go.Charm):
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
             self._on_configurator_relation_changed,
         )
-        self.framework.observe(
-            self.on.sync_scalesets_action,
-            self._on_sync_scalesets_action,
-        )
         self.framework.observe(self.on.update_status, self._on_update_status)
 
     def _on_install(self, _: ops.InstallEvent) -> None:
@@ -320,18 +316,6 @@ class GarmCharm(paas_charm.go.Charm):
         """
         super()._on_update_status(event)
         self._reconcile_scalesets()
-
-    def _on_sync_scalesets_action(self, event: ops.ActionEvent) -> None:
-        """Run scaleset reconciliation on demand and surface any GARM API error.
-
-        Args:
-            event: Juju action event.
-        """
-        try:
-            self._reconcile_scalesets(raise_on_error=True)
-            event.set_results({"result": "Scaleset sync completed successfully"})
-        except GarmApiError as exc:
-            event.fail(f"Scaleset sync failed: {exc}")
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -771,13 +755,8 @@ class GarmCharm(paas_charm.go.Charm):
                 )
         return specs
 
-    def _reconcile_scalesets(self, *, raise_on_error: bool = False) -> None:
-        """Sync GARM scalesets against garm-configurator relation data.
-
-        Args:
-            raise_on_error: If True, re-raises ``GarmApiError`` after logging it.
-                Used by the ``sync-scalesets`` action to surface errors to operators.
-        """
+    def _reconcile_scalesets(self) -> None:
+        """Sync GARM scalesets against garm-configurator relation data."""
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
             logger.warning("Admin credentials not yet available; deferring scaleset reconcile")
@@ -795,11 +774,7 @@ class GarmCharm(paas_charm.go.Charm):
             self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
             logger.warning("GARM API error during scaleset reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus(
-                "Scaleset sync failed; run sync-scalesets for details"
-            )
-            if raise_on_error:
-                raise
+            self.unit.status = ops.WaitingStatus("Scaleset sync failed")
 
 
 if __name__ == "__main__":
