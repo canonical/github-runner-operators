@@ -16,7 +16,7 @@ func TestBuildQuery(t *testing.T) {
 		{"percentile_cont(0.8)", "percentile_cont(0.8)"},
 		{"started_at guard", "started_at IS NOT NULL"},
 		{"created_at guard", "created_at IS NOT NULL"},
-		{"non-negative wait guard", "started_at >= created_at"},
+		{"negative wait clamped to zero", "GREATEST(EXTRACT(EPOCH FROM (started_at - created_at)), 0)"},
 		{"day bucket", "date_trunc('day', started_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"},
 		{"group by day", "GROUP BY day, platform"},
 		{"from param", "@from"},
@@ -26,6 +26,11 @@ func TestBuildQuery(t *testing.T) {
 		if !strings.Contains(q, c.want) {
 			t.Fatalf("%s: query missing %q\nquery:\n%s", c.name, c.want, q)
 		}
+	}
+	// Negative waits are clamped to 0, not filtered out, so the row-dropping
+	// guard must be gone — otherwise fast jobs would be excluded and P80 skewed up.
+	if strings.Contains(q, "started_at >= created_at") {
+		t.Fatalf("query must not exclude negative waits; clamp to 0 instead\nquery:\n%s", q)
 	}
 }
 
