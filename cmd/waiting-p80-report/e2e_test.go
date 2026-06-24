@@ -80,11 +80,12 @@ func TestReport_EndToEnd(t *testing.T) {
 		);`)
 	require.NoError(t, err)
 
-	// Seed 5 jobs on 2026-05-01 UTC with waiting times 10,20,30,40,300s.
-	// percentile_cont(0.8) over sorted [10,20,30,40,300]: position 0.8*(5-1)=3.2,
-	// interpolating between index 3 (40) and index 4 (300): 40 + 0.2*(300-40) = 92.
-	// All counted jobs carry an assigned_flavor: the report counts only jobs we
-	// own, i.e. those whose labels matched one of our flavors.
+	// Seed 5 owned jobs on 2026-05-01 UTC with waiting times 10,20,30,40,300s.
+	// Each carries an assigned_flavor because the report counts only jobs we
+	// own (those whose labels matched one of our flavors). Over these 5 alone,
+	// percentile_cont(0.8) of sorted [10,20,30,40,300] is 40 + 0.2*(300-40) = 92
+	// (position 0.8*(5-1)=3.2). A negative-wait job seeded below joins this day's
+	// population, so the asserted day-1 P80 is 40, not 92 — see the assertion.
 	day := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	waits := []int{10, 20, 30, 40, 300}
 	for i, w := range waits {
