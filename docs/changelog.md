@@ -19,6 +19,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-06-18
 
 - match planner runner labels case-insensitively, so jobs requesting GitHub's implicit label casing (e.g. `X64`, `Linux`) match flavors defined in lowercase. A migration converts existing labels to lowercase and reassigns jobs previously left unmatched due to casing.
+- Migrated the RTD documentation URL under the Canonical domain.
 
 ## 2026-06-16
 

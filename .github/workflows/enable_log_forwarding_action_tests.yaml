@@ -50,7 +50,7 @@ jobs:
   smoke-test-self-hosted:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.action == 'true' }}
-    runs-on: [self-hosted-linux-amd64-noble-edge]
+    runs-on: [self-hosted-linux-amd64-noble-medium]
     env:
       TEST_CONFIG_FILE: 91-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
       TEST_LOG_FILE: /var/log/enable-log-forwarding-smoke-${{ github.run_id }}.log
