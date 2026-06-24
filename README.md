@@ -34,14 +34,15 @@ runner_grafana_dashboards/  # Grafana dashboards for runner VM host metrics
 
 This repository contains two charms — the **planner-operator** and the
 **webhook-gateway-operator**. See
-[Charms](https://documentation.ubuntu.com/github-runner-operators/latest/reference/charms/)
+[Charms](https://canonical.com/juju/docs/github-runner-charms/latest/reference/charms/)
 in the documentation for their roles and integrations.
 
 ## Documentation
 
-Our documentation is stored in the `docs` directory.
-It is based on the Canonical starter pack
-and hosted on [Read the Docs](https://documentation.ubuntu.com/github-runner-operators/latest/).
+Our documentation is stored in the `docs` directory
+and can be viewed at https://canonical.com/juju/docs/github-runner-charms/.
+It is based on the Canonical Sphinx Stack
+and hosted on [Read the Docs](https://about.readthedocs.com/).
 In structuring, the documentation employs the [Diátaxis](https://diataxis.fr/) approach.
 
 You may open a pull request with your documentation changes, or you can

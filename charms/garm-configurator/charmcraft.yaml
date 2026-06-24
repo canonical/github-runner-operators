@@ -10,6 +10,8 @@ platforms:
   amd64:
 
 summary: Configuration broker charm for GARM scalesets.
+links:
+  documentation: https://canonical.com/juju/docs/github-runner-charms/
 
 description: |
   Holds configuration for a single GARM scaleset and provider combination,

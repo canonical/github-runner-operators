@@ -11,6 +11,8 @@ platforms:
   amd64:
 
 summary: Receive and forward GitHub webhooks to a MQ
+links:
+  documentation: https://canonical.com/juju/docs/github-runner-charms/
 
 description: |
   This charm charms an application provides a WebService that receives GitHub webhooks and forwards
