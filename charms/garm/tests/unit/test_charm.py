@@ -4,7 +4,7 @@
 """Unit tests for GarmCharm."""
 
 import string
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import ops
 import pytest
@@ -574,8 +574,10 @@ def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
     created.id = 42
     auth_client.create_org_scaleset.return_value = created
 
-    with patch("charm.GarmAuthenticatedClient") as mock_auth_cls:
+    with patch("charm.GarmAuthenticatedClient") as mock_auth_cls, \
+         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit:
         mock_auth_cls.from_login.return_value = auth_client
+        mock_unit.return_value = MagicMock()
         charm._reconcile_scalesets()
 
     auth_client.create_org_scaleset.assert_called_once()

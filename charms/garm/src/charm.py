@@ -17,6 +17,7 @@ import paas_charm.go
 import tomli_w
 import yaml
 from paas_charm.app import WorkloadConfig
+from paas_charm.charm_utils import block_if_invalid_data
 
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
@@ -295,6 +296,7 @@ class GarmCharm(paas_charm.go.Charm):
             self.on.sync_scalesets_action,
             self._on_sync_scalesets_action,
         )
+        self.framework.observe(self.on.update_status, self._on_update_status)
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
@@ -303,6 +305,19 @@ class GarmCharm(paas_charm.go.Charm):
     def _on_leader_elected(self, _: ops.LeaderElectedEvent) -> None:
         """Ensure secrets exist when the leader is elected."""
         self._ensure_secrets()
+
+    @block_if_invalid_data
+    def _on_update_status(self, event: ops.HookEvent) -> None:
+        """Run the base update-status handling, then reconcile.
+
+        Ensures stuck deletes and transient GARM API errors self-heal
+        on the periodic poll.
+
+        Args:
+            event: Juju update-status event.
+        """
+        super()._on_update_status(event)
+        self.restart()
 
     def _on_sync_scalesets_action(self, event: ops.ActionEvent) -> None:
         """Run scaleset reconciliation on demand and surface any GARM API error.
@@ -773,14 +788,13 @@ class GarmCharm(paas_charm.go.Charm):
                 admin_creds["password"],
             )
             desired = self._build_desired_scalesets()
-            logger.info(
-                "Scaleset reconcile: %d desired spec(s): %s",
-                len(desired),
-                [s.name for s in desired],
-            )
             ScalesetReconciler(auth_client).reconcile(desired)
+            self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
             logger.warning("GARM API error during scaleset reconcile: %s", exc)
+            self.unit.status = ops.WaitingStatus(
+                "Scaleset sync failed; run sync-scalesets for details"
+            )
             if raise_on_error:
                 raise
 

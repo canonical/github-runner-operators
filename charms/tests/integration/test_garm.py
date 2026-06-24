@@ -366,34 +366,7 @@ def test_scaleset_created_and_updated_via_relation(
         delay=10,
     )
 
-    unit_name = f"{configurator_garm}/0"
-    try:
-        scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-    except AssertionError:
-        # relation_changed reconcile did not produce the scaleset.  Run the
-        # sync-scalesets action explicitly: it re-runs the same reconcile path
-        # with raise_on_error=True so any GARM API error is visible here.
-        try:
-            action_result = juju.run(unit_name, "sync-scalesets")
-            logger.error(
-                "sync-scalesets action: status=%s results=%s",
-                action_result.status,
-                action_result.results,
-            )
-        except Exception as action_exc:  # noqa: BLE001
-            logger.error("Could not run sync-scalesets action: %s", action_exc)
-        try:
-            garm_log = juju.cli(
-                "debug-log",
-                "--unit", unit_name,
-                "--replay",
-                "--level", "WARNING",
-            )
-            logger.error("=== GARM unit WARNING log ===\n%s", garm_log[-3000:])
-        except Exception as log_exc:  # noqa: BLE001
-            logger.error("Could not capture GARM log: %s", log_exc)
-        raise
-
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
     assert scaleset["name"] == _SCALESET_TEST_NAME
     assert scaleset["max_runners"] == 10
 
