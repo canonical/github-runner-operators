@@ -32,3 +32,11 @@ requires:
     limit: 1
   garm-configurator:
     interface: garm_configurator_v0
+
+actions:
+  sync-scalesets:
+    description: >
+      Manually trigger scaleset reconciliation against the current
+      garm-configurator relation data. Returns an error if the GARM API
+      rejects any operation, surfacing the failure reason.
+    additionalProperties: false
