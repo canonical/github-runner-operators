@@ -34,3 +34,7 @@ requires:
     interface: garm_configurator_v0
     limit: 1
 
+actions:
+  get-credentials:
+    description: Show the GARM admin credentials.
+

@@ -273,6 +273,9 @@ class GarmCharm(paas_charm.go.Charm):
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
             self._on_configurator_relation_changed,
         )
+        self.framework.observe(
+            self.on.get_credentials_action, self._on_get_credentials_action
+        )
 
     def _on_install(self, _: ops.InstallEvent) -> None:
         """Ensure secrets exist on first install."""
@@ -281,6 +284,18 @@ class GarmCharm(paas_charm.go.Charm):
     def _on_leader_elected(self, _: ops.LeaderElectedEvent) -> None:
         """Ensure secrets exist when the leader is elected."""
         self._ensure_secrets()
+
+    def _on_get_credentials_action(self, event: ops.ActionEvent) -> None:
+        """Return the GARM admin credentials to the operator.
+
+        Args:
+            event: The action event.
+        """
+        credentials = self._get_admin_credentials()
+        if credentials is None:
+            event.fail("GARM admin credentials are not yet available")
+            return
+        event.set_results(credentials)
 
     @property
     def _workload_config(self) -> WorkloadConfig:

@@ -501,3 +501,33 @@ def test_garm_api_has_configurator_provider(
         f"Expected a 'garm-configurator-*' provider in GARM API, "
         f"got: {api_provider_names}"
     )
+
+
+def test_garm_get_credentials_action(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed and active (leader has initialised secrets).
+    act: Run the get-credentials action on the first unit.
+    assert: The action succeeds and returns all four credential fields (username,
+        password, email, full-name), with username "admin" and email "admin@garm.local".
+    """
+    unit = f"{garm_app}/0"
+    logger.info("Running get-credentials action on unit %s", unit)
+
+    # juju.run() raises TaskError if the action fails, so a clean return means success.
+    task = juju.run(unit, "get-credentials")
+
+    logger.info("get-credentials results: %s", dict(task.results))
+    for key in ("username", "password", "email", "full-name"):
+        assert key in task.results, (
+            f"Expected '{key}' in action results, got: {list(task.results)}"
+        )
+    assert task.results["username"] == "admin", (
+        f"Expected username 'admin', got: {task.results['username']!r}"
+    )
+    assert task.results["email"] == "admin@garm.local", (
+        f"Expected email 'admin@garm.local', got: {task.results['email']!r}"
+    )
+    assert task.results["password"], "Expected non-empty password in action results"
