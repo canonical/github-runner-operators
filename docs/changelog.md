@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-24
+
+- Implement the webhook redelivery service.
+
 ## 2026-06-22
 
 - `waiting-p80-report`: clamp negative waiting times (clock skew, `started_at < created_at`) to 0 instead of excluding those jobs. Previously dropping them removed the fastest jobs from the population and biased the reported P80 upward.
@@ -34,7 +38,6 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-08
 
-- Implement the webhook redelivery service.
 - reorder the template variables in the GitHub runner VM hostmetrics dashboard.
 - add PostgreSQL relation support for persistent storage.
 

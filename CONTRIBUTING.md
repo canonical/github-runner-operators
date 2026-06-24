@@ -216,6 +216,7 @@ required by `test_boostrap_webhook_redelivery.py`:
 export TEST_GITHUB_APP_ID=<github-app-id>
 export TEST_GITHUB_APP_INSTALLATION_ID=<github-app-installation-id>
 export TEST_GITHUB_APP_PRIVATE_KEY='<pem-private-key>'
+export TEST_GITHUB_PATH=<github-org/github-repo>
 ```
 
 ```shell

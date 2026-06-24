@@ -17,6 +17,7 @@ environment:
   TEST_GITHUB_APP_ID: '$(HOST: echo "${TEST_GITHUB_APP_ID:-}")'
   TEST_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${TEST_GITHUB_APP_INSTALLATION_ID:-}")'
   TEST_GITHUB_APP_PRIVATE_KEY: '$(HOST: echo "${TEST_GITHUB_APP_PRIVATE_KEY:-}")'
+  TEST_GITHUB_PATH: '$(HOST: echo "${TEST_GITHUB_PATH:-}")'
 exclude:
 - .git
 - .tox
@@ -34,3 +35,4 @@ integration-suites:
       TEST_GITHUB_APP_ID={{ env.get("TEST_GITHUB_APP_ID", "") }}
       TEST_GITHUB_APP_INSTALLATION_ID={{ env.get("TEST_GITHUB_APP_INSTALLATION_ID", "") }}
       TEST_GITHUB_APP_PRIVATE_KEY={{ env.get("TEST_GITHUB_APP_PRIVATE_KEY", "") }}
+      TEST_GITHUB_PATH={{ env.get("TEST_GITHUB_PATH", "") }}

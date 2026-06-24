@@ -12,12 +12,11 @@ from tests.integration.helpers import (
     GITHUB_APP_ID_ENV_VAR,
     GITHUB_APP_INSTALLATION_ID_ENV_VAR,
     GITHUB_APP_PRIVATE_KEY_ENV_VAR,
+    GITHUB_PATH_ENV_VAR,
     required_env,
     required_int_env,
     trigger_failed_workflow_job_delivery,
 )
-
-from conftest import GITHUB_PATH
 
 DISPATCH_WORKFLOW_PATH = "copilot-collections-update.yml"
 
@@ -36,6 +35,7 @@ def assert_redelivery_logged(juju: jubilant.Juju, unit_name: str) -> None:
     )
     assert "redelivered failed webhooks" in result.stdout
 
+
 @pytest.mark.usefixtures("webhook_gateway_with_rabbitmq")
 def test_webhook_gateway_redelivery_daemon_start(
     juju: jubilant.Juju,
@@ -52,12 +52,13 @@ def test_webhook_gateway_redelivery_daemon_start(
         name="github-app-private-key",
         content={"value": base64.b64decode(required_env(GITHUB_APP_PRIVATE_KEY_ENV_VAR)).decode()},
     )
+    github_path = required_env(GITHUB_PATH_ENV_VAR)
     juju.grant_secret(github_app_private_key_secret_uri, webhook_gateway_app)
 
     juju.config(
         webhook_gateway_app,
         values={
-            "github-path": GITHUB_PATH,
+            "github-path": github_path,
             "webhook-id": github_test_hook.id,
             "redelivery-interval": 30,
             "github-app-id": required_int_env(GITHUB_APP_ID_ENV_VAR),
@@ -83,5 +84,5 @@ def test_webhook_gateway_redelivery_daemon_start(
     assert "redelivery daemon started" in result.stdout
     assert str(github_test_hook.id) in result.stdout
 
-    trigger_failed_workflow_job_delivery(GITHUB_PATH, DISPATCH_WORKFLOW_PATH)
+    trigger_failed_workflow_job_delivery(github_path, DISPATCH_WORKFLOW_PATH)
     assert_redelivery_logged(juju, unit_name)

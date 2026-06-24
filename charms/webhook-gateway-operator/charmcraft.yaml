@@ -28,7 +28,7 @@ config:
         The ID of the GitHub App to use for communication with GitHub.
         If provided, the other github-app-* options must also be provided.
         The GitHub App needs to have write permission for Webhooks.
-        Either this or github-token must be provided.
+        This option is required with the other github-app-* options.
     github-app-installation-id:
       type: int
       optional: true
@@ -36,7 +36,7 @@ config:
         The app installation ID of the GitHub App to use for communication with GitHub.
         If provided, the other github-app-* options must also be provided.
         The GitHub App needs to have write permission for Webhooks.
-        Either this or github-token must be provided.
+        This option is required with the other github-app-* options.
     github-app-private-key:
       type: secret
       optional: true
@@ -44,21 +44,13 @@ config:
         The juju secret id of the private key to use for communication with GitHub.
         If provided, the other github-app-* options must also be provided.
         The GitHub App needs to have write permission for Webhooks.
-        Either this or github-token must be provided.
+        This option is required with the other github-app-* options.
     github-path:
       type: string
       optional: true
       description: |
         The path of the organisation or repository where the webhooks are registered. 
         Format: <organisation> or <organisation>/<repository>.
-    github-token:
-      type: secret
-      optional: true
-      description: >-
-        The juju secret id of the token to use for communication with GitHub.
-        This can be a PAT with write admin:repo_hook or a fine-grained token
-        with write permission for Webhooks.
-        Either this or the GitHub App configuration must be provided.
     redelivery-interval:
       type: int
       optional: true
