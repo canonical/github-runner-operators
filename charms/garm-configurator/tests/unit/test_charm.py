@@ -40,6 +40,7 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "name": "my-scaleset",
         "flavor": "m1.large",
         "os-arch": "amd64",
+        "os-type": "linux",
         "min-idle-runner": 0,
         "max-runner": 5,
         "repo": "myorg/myrepo",
@@ -465,6 +466,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
         "provider_name": "garm-configurator-0",
         "flavor": "m1.large",
         "os_arch": "amd64",
+        "os_type": "linux",
         "min_idle_runner": "0",
         "max_runner": "5",
         "labels": "self-hosted,linux",
@@ -498,13 +500,11 @@ def test_reconcile_writes_full_config_to_garm_relation():
     act: config-changed fires (holistic reconcile).
     assert: The full config payload (provider, github, scaleset, image_id) is written
         to the garm-configurator relation's local unit data.
-        """
+    """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
-    image_relation = Relation(
-        endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}}
-    )
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
     garm_relation = Relation(endpoint="garm-configurator")
     state = State(
         config=_valid_config(secret, pk_secret),
@@ -538,6 +538,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert garm_out.local_unit_data["name"] == "my-scaleset"
     assert garm_out.local_unit_data["flavor"] == "m1.large"
     assert garm_out.local_unit_data["os_arch"] == "amd64"
+    assert garm_out.local_unit_data["os_type"] == "linux"
     assert garm_out.local_unit_data["min_idle_runner"] == "0"
     assert garm_out.local_unit_data["max_runner"] == "5"
     assert garm_out.local_unit_data["repo"] == "myorg/myrepo"
@@ -584,9 +585,7 @@ def test_reconcile_writes_garm_data_on_relation_joined():
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
-    image_relation = Relation(
-        endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}}
-    )
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
     garm_relation = Relation(endpoint="garm-configurator")
     state = State(
         config=_valid_config(secret, pk_secret),
@@ -618,9 +617,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     config["org"] = "myorg"
     config["runner-group"] = "my-group"
     config["pre-install-scripts"] = '{"setup.sh": "#!/bin/bash\\necho hello"}'
-    image_relation = Relation(
-        endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}}
-    )
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
     garm_relation = Relation(endpoint="garm-configurator")
     state = State(
         config=config,
@@ -633,8 +630,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
 
     assert garm_out.local_unit_data["org"] == "myorg"
     assert garm_out.local_unit_data["runner_group"] == "my-group"
-    assert (
-        garm_out.local_unit_data["pre_install_scripts"]
-        == json.dumps({"pre_install.sh": '{"setup.sh": "#!/bin/bash\\necho hello"}'})
+    assert garm_out.local_unit_data["pre_install_scripts"] == json.dumps(
+        {"pre_install.sh": '{"setup.sh": "#!/bin/bash\\necho hello"}'}
     )
     assert "repo" not in garm_out.local_unit_data
