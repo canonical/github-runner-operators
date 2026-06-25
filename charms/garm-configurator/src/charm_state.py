@@ -22,7 +22,6 @@ GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 SCALESET_NAME_CONFIG_NAME = "name"
 SCALESET_FLAVOR_CONFIG_NAME = "flavor"
 SCALESET_OS_ARCH_CONFIG_NAME = "os-arch"
-SCALESET_OS_TYPE_CONFIG_NAME = "os-type"
 SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME = "min-idle-runner"
 SCALESET_MAX_RUNNER_CONFIG_NAME = "max-runner"
 SCALESET_LABELS_CONFIG_NAME = "labels"
@@ -201,7 +200,7 @@ class ScalesetConfig(BaseModel):
         name: The name of the scaleset.
         flavor: The resource flavor for runners.
         os_arch: The CPU architecture for runners.
-        os_type: The operating system type for runners (linux or windows).
+        os_type: The operating system type for runners. Always ``linux``.
         min_idle_runner: Minimum number of idle runners.
         max_runner: Maximum number of runners.
         labels: Comma-separated list of labels for runners.
@@ -289,7 +288,6 @@ class ScalesetConfig(BaseModel):
             name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
             flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
             os_arch=str(charm.config.get(SCALESET_OS_ARCH_CONFIG_NAME)).strip(),
-            os_type=str(charm.config.get(SCALESET_OS_TYPE_CONFIG_NAME, "linux")).strip(),
             min_idle_runner=min_idle_runner,
             max_runner=max_runner,
             labels=labels,

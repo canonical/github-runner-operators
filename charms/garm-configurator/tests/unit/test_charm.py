@@ -40,7 +40,6 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "name": "my-scaleset",
         "flavor": "m1.large",
         "os-arch": "amd64",
-        "os-type": "linux",
         "min-idle-runner": 0,
         "max-runner": 5,
         "repo": "myorg/myrepo",

@@ -171,21 +171,23 @@ class ScalesetReconciler:
             self._client.create_repo_scaleset(entity_id, params)
 
     def _maybe_update(self, observed, spec: ScalesetSpec) -> None:
-        if not self._needs_update(observed, spec):
-            logger.debug("Scaleset %s is up to date", spec.name)
-            return
-
         observed_labels = sorted(t.name for t in (observed.tags or []) if t.name)
         if observed_labels != sorted(spec.labels):
             # UpdateScaleSetParams has no labels field; label changes require
-            # recreating the scaleset. Log a warning so operators are aware.
+            # recreating the scaleset. To delete a scaleset, remove the
+            # garm-configurator relation for the corresponding unit.
             logger.warning(
                 "Scaleset %s labels changed (%s -> %s) but cannot be updated in place;"
-                " delete and recreate the scaleset to apply label changes",
+                " to apply label changes, remove and re-add the garm-configurator relation"
+                " for this unit",
                 spec.name,
                 observed_labels,
                 sorted(spec.labels),
             )
+
+        if not self._needs_update(observed, spec):
+            logger.debug("Scaleset %s is up to date", spec.name)
+            return
 
         extra_specs: dict[str, object] = {}
         if spec.pre_install_scripts:
@@ -208,7 +210,6 @@ class ScalesetReconciler:
     @staticmethod
     def _needs_update(observed, spec: ScalesetSpec) -> bool:
         observed_scripts = (observed.extra_specs or {}).get("pre_install_scripts", {})
-        observed_labels = sorted(t.name for t in (observed.tags or []) if t.name)
         return (
             observed.image != spec.image
             or observed.flavor != spec.flavor
@@ -216,5 +217,4 @@ class ScalesetReconciler:
             or observed.min_idle_runners != spec.min_idle_runners
             or observed.github_runner_group != (spec.runner_group or None)
             or observed_scripts != spec.pre_install_scripts
-            or observed_labels != sorted(spec.labels)
         )

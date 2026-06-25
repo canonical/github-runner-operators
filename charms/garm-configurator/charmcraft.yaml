@@ -77,11 +77,6 @@ config:
       type: string
       description: |
         The CPU architecture for runners in the scaleset.
-    os-type:
-      type: string
-      default: linux
-      description: |
-        The operating system type for runners in the scaleset (linux or windows).
     min-idle-runner:
       type: int
       default: 0
