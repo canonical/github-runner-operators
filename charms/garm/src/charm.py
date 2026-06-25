@@ -717,13 +717,9 @@ class GarmCharm(paas_charm.go.Charm):
             token = client.login(username=username, password=password)
             _apply_garm_template(client, token, connections)
         except GarmApiError as exc:
-            logger.warning(
-                "GARM template update failed: %s", exc
-            )
-            raise
+            logger.warning("GARM template update failed: %s", exc)
         except CharmedTemplateError as exc:
             logger.warning("Charmed template management failed: %s", exc)
-            raise
 
 
 if __name__ == "__main__":

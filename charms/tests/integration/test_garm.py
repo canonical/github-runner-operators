@@ -3,6 +3,7 @@
 
 """Integration tests for the GARM charm."""
 
+import base64
 import json
 import logging
 
@@ -523,6 +524,28 @@ def _list_templates(address: str, token: str) -> list[dict]:
     return templates if isinstance(templates, list) else []
 
 
+def _get_template_body(address: str, token: str, template_id: int) -> str:
+    """Fetch a template by ID and return its decoded script body.
+
+    The GARM list API omits the ``data`` field for performance; this helper
+    fetches the individual template and base64-decodes the script bytes.
+
+    Args:
+        address: GARM unit IP address.
+        token: JWT token for authentication.
+        template_id: Numeric template ID to fetch.
+
+    Returns:
+        Decoded UTF-8 script string, or empty string if ``data`` is absent.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/templates/{template_id}", headers=headers, timeout=30)
+    resp.raise_for_status()
+    raw_b64 = resp.json().get("data") or ""
+    return base64.b64decode(raw_b64).decode("utf-8") if raw_b64 else ""
+
+
 def _ensure_base_template(address: str, token: str) -> None:
     """Create the github_linux base template if it does not already exist.
 
@@ -647,9 +670,7 @@ def test_garm_charmed_template_created_on_debug_ssh(
         f"integration; found templates: {[t.get('name') for t in templates]}"
     )
 
-    # The template data field is a list of byte values (JSON array of ints).
-    raw = charmed.get("data") or []
-    body = bytes(raw).decode("utf-8")
+    body = _get_template_body(address, token, charmed["id"])
     logger.info("Charmed template body (first 500 chars):\n%s", body[:500])
 
     assert "TMATE_SERVER_HOST=tmate.example.com" in body, (
