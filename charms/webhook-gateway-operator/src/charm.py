@@ -13,6 +13,21 @@ import paas_charm.go
 logger = logging.getLogger(__name__)
 
 
+_REDELIVERY_REQUIRED_FIELDS = (
+    "github-path",
+    "webhook-id",
+    "github-app-id",
+    "github-app-installation-id",
+    "github-app-private-key",
+)
+_REDELIVERY_INT_FIELDS = (
+    "webhook-id",
+    "github-app-id",
+    "github-app-installation-id",
+    "redelivery-interval",
+)
+
+
 class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
     """Go Charm service."""
 
@@ -23,6 +38,43 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
+
+    def is_ready(self) -> bool:
+        """Check if the charm is ready to start the workload application.
+
+        Returns:
+            True if the charm is ready to start the workload application.
+        """
+        error = self._validate_redelivery_config()
+        if error:
+            logger.error("Invalid redelivery config: %s", error)
+            self.update_app_and_unit_status(ops.BlockedStatus("Invalid redelivery config"))
+            return False
+        return super().is_ready()
+
+    def _validate_redelivery_config(self) -> str | None:
+        """Validate redelivery-related config options.
+
+        Returns:
+            An error message if validation fails, None otherwise.
+        """
+        present = [f for f in _REDELIVERY_REQUIRED_FIELDS if self.config.get(f)]
+        if not present:
+            return None
+
+        missing = [f for f in _REDELIVERY_REQUIRED_FIELDS if not self.config.get(f)]
+        if missing:
+            return f"Incomplete redelivery config: missing {', '.join(missing)}"
+
+        invalid = [
+            f
+            for f in _REDELIVERY_INT_FIELDS
+            if (val := self.config.get(f)) is not None and (not isinstance(val, int) or val <= 0)
+        ]
+        if invalid:
+            return f"Invalid config (must be positive integers): {', '.join(invalid)}"
+
+        return None
 
     def _create_app(self):
         """Patch _create_app to add OpenTelemetry and redelivery environment variables."""
