@@ -210,7 +210,7 @@ controller is active in your Juju client before running the tests. An
 example run command in the root directory is as follows:
 
 Before running `webhook-gateway-integration`, export the GitHub App credentials
-required by `test_boostrap_webhook_redelivery.py`:
+required by `test_webhook_redelivery.py`:
 
 ```shell
 export TEST_GITHUB_APP_ID=<github-app-id>
