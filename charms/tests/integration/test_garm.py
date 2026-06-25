@@ -519,7 +519,6 @@ def test_garm_get_credentials_action(
     # juju.run() raises TaskError if the action fails, so a clean return means success.
     task = juju.run(unit, "get-credentials")
 
-    logger.info("get-credentials results: %s", dict(task.results))
     for key in ("username", "password", "email", "full-name"):
         assert key in task.results, (
             f"Expected '{key}' in action results, got: {list(task.results)}"
