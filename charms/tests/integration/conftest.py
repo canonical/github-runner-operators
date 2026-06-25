@@ -1,16 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-import io
 import json
 import logging
-import pathlib
 import secrets
 import string
 import subprocess
-import tempfile
 import textwrap
-import yaml
-import zipfile
 from typing import Iterator
 
 import jubilant
@@ -482,51 +477,6 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
-_ANY_CHARM_DEBUG_SSH_CACHE = pathlib.Path(tempfile.gettempdir()) / "any-charm-debug-ssh.charm"
-
-
-def _get_any_charm_with_debug_ssh() -> str:
-    """Download any-charm and inject provide-debug-ssh; return path to the patched .charm.
-
-    Downloads any-charm (latest/beta) from Charmhub, adds the provide-debug-ssh
-    endpoint to metadata.yaml, and caches the result so repeated test runs skip
-    the download.
-    """
-    if _ANY_CHARM_DEBUG_SSH_CACHE.exists():
-        return str(_ANY_CHARM_DEBUG_SSH_CACHE)
-
-    info = requests.get(
-        "https://api.charmhub.io/v2/charms/info/any-charm",
-        params={"fields": "default-release.revision.download"},
-        timeout=30,
-    )
-    info.raise_for_status()
-    download_url = info.json()["default-release"]["revision"]["download"]["url"]
-
-    logger.info("Downloading any-charm from %s", download_url)
-    dl = requests.get(download_url, timeout=120)
-    dl.raise_for_status()
-
-    out_buf = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(dl.content), "r") as src, zipfile.ZipFile(
-        out_buf, "w", zipfile.ZIP_DEFLATED
-    ) as dst:
-        for item in src.infolist():
-            data = src.read(item.filename)
-            if item.filename == "metadata.yaml":
-                meta = yaml.safe_load(data)
-                meta.setdefault("provides", {})["provide-debug-ssh"] = {"interface": "debug-ssh"}
-                data = yaml.dump(meta).encode("utf-8")
-            out_info = zipfile.ZipInfo(item.filename)
-            out_info.compress_type = item.compress_type
-            out_info.external_attr = item.external_attr
-            dst.writestr(out_info, data)
-
-    _ANY_CHARM_DEBUG_SSH_CACHE.write_bytes(out_buf.getvalue())
-    logger.info("Cached patched any-charm at %s", _ANY_CHARM_DEBUG_SSH_CACHE)
-    return str(_ANY_CHARM_DEBUG_SSH_CACHE)
-
-
 @pytest.fixture(scope="module", name="any_charm_debug_ssh_app")
 def deploy_any_charm_debug_ssh_app_fixture(juju: jubilant.Juju) -> str:
     """Deploy any-charm as a fake tmate server providing the debug-ssh relation."""
@@ -540,7 +490,7 @@ def deploy_any_charm_debug_ssh_app_fixture(juju: jubilant.Juju) -> str:
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
                     self.framework.observe(
-                        self.on.provide_debug_ssh_relation_joined,
+                        self.on['provide-debug-ssh'].relation_joined,
                         self._on_debug_ssh_joined,
                     )
 
@@ -551,10 +501,10 @@ def deploy_any_charm_debug_ssh_app_fixture(juju: jubilant.Juju) -> str:
                     event.relation.data[self.unit]["ed25519_fingerprint"] = "SHA256:fakeed25519abcd"
             """),
     }
-    charm_file = _get_any_charm_with_debug_ssh()
     juju.deploy(
-        charm=charm_file,
+        "any-charm",
         app=app_name,
+        channel="latest/beta",
         config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
     )
     juju.wait(
