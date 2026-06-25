@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-23
+
+- `waiting-p80-report`: count only jobs we own (those with a non-NULL `assigned_flavor`). Jobs served by runners we don't manage — for example, third-party self-hosted runners on repositories we ingest webhooks from — never match a flavor and were skewing the reported P80. Caveat: for date ranges before the 2026-06-18 case-insensitive label-matching fix, some owned completed jobs were left with a NULL `assigned_flavor` and are likewise excluded, so `sample_count` may be lower than the true total for those older ranges.
+
 ## 2026-06-22
 
 - `waiting-p80-report`: clamp negative waiting times (clock skew, `started_at < created_at`) to 0 instead of excluding those jobs. Previously dropping them removed the fastest jobs from the population and biased the reported P80 upward.

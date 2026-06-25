@@ -80,16 +80,19 @@ func TestReport_EndToEnd(t *testing.T) {
 		);`)
 	require.NoError(t, err)
 
-	// Seed 5 jobs on 2026-05-01 UTC with waiting times 10,20,30,40,300s.
-	// percentile_cont(0.8) over sorted [10,20,30,40,300]: position 0.8*(5-1)=3.2,
-	// interpolating between index 3 (40) and index 4 (300): 40 + 0.2*(300-40) = 92.
+	// Seed 5 owned jobs on 2026-05-01 UTC with waiting times 10,20,30,40,300s.
+	// Each carries an assigned_flavor because the report counts only jobs we
+	// own (those whose labels matched one of our flavors). Over these 5 alone,
+	// percentile_cont(0.8) of sorted [10,20,30,40,300] is 40 + 0.2*(300-40) = 92
+	// (position 0.8*(5-1)=3.2). A negative-wait job seeded below joins this day's
+	// population, so the asserted day-1 P80 is 40, not 92 — see the assertion.
 	day := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	waits := []int{10, 20, 30, 40, 300}
 	for i, w := range waits {
 		created := day.Add(-time.Duration(w) * time.Second)
 		_, err = pool.Exec(ctx, `
-			INSERT INTO job (platform, id, created_at, started_at, raw)
-			VALUES ($1, $2, $3, $4, '{}')`,
+			INSERT INTO job (platform, id, created_at, started_at, raw, assigned_flavor)
+			VALUES ($1, $2, $3, $4, '{}', 'small')`,
 			"github", fmt.Sprintf("job-%d", i), created, day)
 		require.NoError(t, err)
 	}
@@ -97,24 +100,34 @@ func TestReport_EndToEnd(t *testing.T) {
 	// Seed one job on a different day to confirm grouping.
 	otherDay := time.Date(2026, 5, 2, 1, 0, 0, 0, time.UTC)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO job (platform, id, created_at, started_at, raw)
-		VALUES ($1, $2, $3, $4, '{}')`,
+		INSERT INTO job (platform, id, created_at, started_at, raw, assigned_flavor)
+		VALUES ($1, $2, $3, $4, '{}', 'small')`,
 		"github", "other-day", otherDay.Add(-60*time.Second), otherDay)
 	require.NoError(t, err)
 
 	// Seed one job with NULL started_at to confirm it is excluded.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO job (platform, id, created_at, started_at, raw)
-		VALUES ($1, $2, $3, NULL, '{}')`,
+		INSERT INTO job (platform, id, created_at, started_at, raw, assigned_flavor)
+		VALUES ($1, $2, $3, NULL, '{}', 'small')`,
 		"github", "null-started", day.Add(-999*time.Second))
 	require.NoError(t, err)
 
 	// Seed one job where started_at < created_at (negative wait, -10s) to
 	// confirm it is clamped to 0 and kept in the population, not excluded.
 	_, err = pool.Exec(ctx, `
+		INSERT INTO job (platform, id, created_at, started_at, raw, assigned_flavor)
+		VALUES ($1, $2, $3, $4, '{}', 'small')`,
+		"github", "negative-wait", day.Add(10*time.Second), day)
+	require.NoError(t, err)
+
+	// Seed one job we don't own (NULL assigned_flavor) on day 1 with an
+	// otherwise-valid 50s wait, to confirm it is excluded from the P80 and the
+	// sample count. Without the assigned_flavor filter this would push day-1 to
+	// 7 samples and skew the percentile.
+	_, err = pool.Exec(ctx, `
 		INSERT INTO job (platform, id, created_at, started_at, raw)
 		VALUES ($1, $2, $3, $4, '{}')`,
-		"github", "negative-wait", day.Add(10*time.Second), day)
+		"github", "unowned", day.Add(-50*time.Second), day)
 	require.NoError(t, err)
 
 	cfg := config{
@@ -128,7 +141,7 @@ func TestReport_EndToEnd(t *testing.T) {
 	require.Len(t, rows, 2, "expected one row per day with started jobs")
 	assert.Equal(t, "2026-05-01", rows[0].Day.UTC().Format("2006-01-02"))
 	assert.Equal(t, "github", rows[0].Platform)
-	assert.Equal(t, int64(6), rows[0].SampleCount, "NULL-started excluded; negative-wait clamped to 0 and kept")
+	assert.Equal(t, int64(6), rows[0].SampleCount, "NULL-started and unowned (NULL flavor) excluded; negative-wait clamped to 0 and kept")
 	// The negative-wait job is clamped to 0, so the day-1 population is sorted
 	// [0,10,20,30,40,300] (n=6). percentile_cont(0.8) position 0.8*(6-1)=4.0
 	// lands exactly on index 4 -> 40.
