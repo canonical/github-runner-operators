@@ -34,17 +34,32 @@ class TestValidateRedeliveryConfig:
         [
             pytest.param(
                 {"github-path": "my-org"},
-                ["webhook-id", "github-app-id", "github-app-installation-id", "github-app-private-key"],
+                [
+                    "webhook-id",
+                    "github-app-id",
+                    "github-app-installation-id",
+                    "github-app-private-key",
+                ],
                 id="only-github-path",
             ),
             pytest.param(
                 {"webhook-id": 123},
-                ["github-path", "github-app-id", "github-app-installation-id", "github-app-private-key"],
+                [
+                    "github-path",
+                    "github-app-id",
+                    "github-app-installation-id",
+                    "github-app-private-key",
+                ],
                 id="only-webhook-id",
             ),
             pytest.param(
                 {"github-app-id": 789},
-                ["github-path", "webhook-id", "github-app-installation-id", "github-app-private-key"],
+                [
+                    "github-path",
+                    "webhook-id",
+                    "github-app-installation-id",
+                    "github-app-private-key",
+                ],
                 id="only-app-id",
             ),
             pytest.param(
@@ -53,7 +68,12 @@ class TestValidateRedeliveryConfig:
                 id="missing-all-auth",
             ),
             pytest.param(
-                {"github-path": "my-org", "webhook-id": 123, "github-app-id": 789, "github-app-installation-id": 456},
+                {
+                    "github-path": "my-org",
+                    "webhook-id": 123,
+                    "github-app-id": 789,
+                    "github-app-installation-id": 456,
+                },
                 ["github-app-private-key"],
                 id="missing-private-key",
             ),
@@ -124,7 +144,11 @@ class TestValidateRedeliveryConfig:
         [
             pytest.param("webhook-id", "abc", id="string-webhook-id"),
             pytest.param("github-app-id", 3.14, id="float-app-id"),
-            pytest.param("github-app-installation-id", "not-a-number", id="string-installation-id"),
+            pytest.param(
+                "github-app-installation-id",
+                "not-a-number",
+                id="string-installation-id",
+            ),
             pytest.param("redelivery-interval", "fast", id="string-redelivery-interval"),
         ],
     )
