@@ -259,7 +259,7 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
         result = json.loads(raw)
         if isinstance(result, dict):
             return result
-    except (ValueError, json.JSONDecodeError):
+    except ValueError:
         pass
     return {}
 
