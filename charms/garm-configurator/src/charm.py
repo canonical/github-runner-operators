@@ -4,6 +4,7 @@
 
 """Charm entrypoint for the GARM configurator charm."""
 
+import json
 import typing
 
 import ops
@@ -29,19 +30,21 @@ class GarmConfiguratorCharm(ops.CharmBase):
         for event in [
             self.on.config_changed,
             self.on.secret_changed,
+            self.on[GARM_RELATION_NAME].relation_joined,
+            self.on[GARM_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_joined,
             self.on[IMAGE_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_broken,
-            self.on[GARM_RELATION_NAME].relation_joined,
-            self.on[GARM_RELATION_NAME].relation_changed,
         ]:
             self.framework.observe(event, self._reconcile)
 
     def _reconcile(self, event: ops.EventBase) -> None:
-        """Reconcile all charm state for every event.
+        """Handle all charm events by reconciling configuration and relation data.
 
-        Reads full current state and acts idempotently: forwards OpenStack
-        credentials to the image builder relation, and reports unit status.
+        Reads the current charm state, forwards OpenStack credentials to the
+        image-builder relation, publishes scaleset configuration (and secrets
+        when the image UUID is available) to all garm-configurator relations,
+        then sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
@@ -52,27 +55,37 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(e.msg)
             return
 
-        relation = self.model.get_relation(IMAGE_RELATION_NAME)
-        if relation is not None:
-            relation.data[self.unit].update(
-                {
-                    "auth_url": state.provider_config.auth_url,
-                    "password": state.provider_config.password,
-                    "project_domain_name": state.provider_config.project_domain_name,
-                    "project_name": state.provider_config.project_name,
-                    "user_domain_name": state.provider_config.user_domain_name,
-                    "username": state.provider_config.username,
-                }
-            )
+        self._update_image_relation(state)
+        self._configure_garm_relation(state)
 
-        if relation is None:
+        if self.model.get_relation(IMAGE_RELATION_NAME) is None:
             self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
-            return
         elif state.image_id is None:
             self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
+        else:
+            self.unit.status = ops.ActiveStatus("Ready")
+
+    def _update_image_relation(self, state: CharmState) -> None:
+        """Push OpenStack provider credentials to the image-builder relation.
+
+        Does nothing if the image-builder relation is not yet joined.
+
+        Args:
+            state: Current resolved charm state.
+        """
+        relation = self.model.get_relation(IMAGE_RELATION_NAME)
+        if relation is None:
             return
-        self._configure_garm_relation(state)
-        self.unit.status = ops.ActiveStatus("Ready")
+        relation.data[self.unit].update(
+            {
+                "auth_url": state.provider_config.auth_url,
+                "password": state.provider_config.password,
+                "project_domain_name": state.provider_config.project_domain_name,
+                "project_name": state.provider_config.project_name,
+                "user_domain_name": state.provider_config.user_domain_name,
+                "username": state.provider_config.username,
+            }
+        )
 
     def _ensure_relation_secret(
         self,
@@ -109,15 +122,51 @@ class GarmConfiguratorCharm(ops.CharmBase):
         return secret
 
     def _configure_garm_relation(self, state: CharmState) -> None:
-        """Populate the garm-configurator relation data when image_id is present.
+        """Publish scaleset configuration to the garm-configurator relation.
 
-        Reads the garm relation, creates or updates the required secrets,
-        and writes all configuration fields. Returns silently if the garm
-        relation or secrets are not yet available — status reporting is
+        Writes non-secret scaleset fields (name, provider, credentials, image,
+        flavor, arch, runner counts, labels, runner group, and pre-install
+        scripts) to the relation. The optional ``org`` and ``repo`` fields are
+        included only when set.
+
+        When the image UUID is present and this unit holds leadership, also
+        provisions Juju secrets for the OpenStack password and GitHub App
+        private key, then writes the full OpenStack provider and GitHub App
+        credential fields alongside their secret URIs.
+
+        Does nothing when no garm-configurator relation is joined yet or when
+        secrets cannot be created (non-leader unit). Status reporting is
         handled by the caller (_reconcile).
+
+        Args:
+            state: Current resolved charm state.
         """
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
+            return
+
+        pre_install = state.scaleset_config.pre_install_scripts
+        basic_data: dict[str, str] = {
+            "name": state.scaleset_config.name,
+            "provider_name": state.provider_config.provider_name,
+            "image_id": state.image_id or "",
+            "flavor": state.scaleset_config.flavor,
+            "os_arch": state.scaleset_config.os_arch,
+            "min_idle_runner": str(state.scaleset_config.min_idle_runner),
+            "max_runner": str(state.scaleset_config.max_runner),
+            "labels": state.scaleset_config.labels,
+            "runner_group": state.scaleset_config.runner_group,
+            "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
+            if pre_install
+            else "",
+        }
+        if state.scaleset_config.org:
+            basic_data["org"] = state.scaleset_config.org
+        if state.scaleset_config.repo:
+            basic_data["repo"] = state.scaleset_config.repo
+        garm_relation.data[self.unit].update(basic_data)
+
+        if state.image_id is None:
             return
 
         password_secret = self._ensure_relation_secret(
@@ -134,16 +183,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         if password_secret is None or github_key_secret is None:
             return
 
-        for key, value in {
-            "scaleset_repo": state.scaleset_config.repo,
-            "scaleset_org": state.scaleset_config.org,
-            "scaleset_pre_install_scripts": state.scaleset_config.pre_install_scripts,
-        }.items():
-            if value is not None:
-                garm_relation.data[self.unit][key] = value
-            else:
-                garm_relation.data[self.unit].pop(key, None)
-
         garm_relation.data[self.unit].update(
             {
                 "openstack_auth_url": state.provider_config.auth_url,
@@ -157,13 +196,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "github_client_id": state.github_app_config.client_id,
                 "github_installation_id": state.github_app_config.installation_id,
                 "github_private_key_secret_uri": github_key_secret.id,
-                "scaleset_name": state.scaleset_config.name,
-                "scaleset_flavor": state.scaleset_config.flavor,
-                "scaleset_os_arch": state.scaleset_config.os_arch,
-                "scaleset_min_idle_runner": str(state.scaleset_config.min_idle_runner),
-                "scaleset_max_runner": str(state.scaleset_config.max_runner),
-                "scaleset_labels": state.scaleset_config.labels,
-                "scaleset_runner_group": state.scaleset_config.runner_group,
                 "image_id": state.image_id,
             }
         )
