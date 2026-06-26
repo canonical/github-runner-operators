@@ -585,3 +585,35 @@ def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
     auth_client.update_scaleset.assert_not_called()
     auth_client.delete_scaleset.assert_not_called()
     charm.restart.assert_not_called()
+
+
+def test_restart_ensures_secrets_before_readiness_gate():
+    """
+    arrange: A GarmCharm whose workload is not ready (pebble not up yet).
+    act: Call restart().
+    assert: _ensure_secrets is invoked even though is_ready() returns False,
+            so secrets are created before pebble is up (install/leader_elected).
+    """
+    charm = object.__new__(GarmCharm)
+    charm._ensure_secrets = MagicMock()
+    charm.is_ready = MagicMock(return_value=False)
+
+    charm.restart()
+
+    charm._ensure_secrets.assert_called_once()
+
+
+def test_reconcile_calls_restart():
+    """
+    arrange: A bare GarmCharm instance with restart and _create_charm_state mocked
+             (the latter so the block_if_invalid_data decorator does not raise).
+    act: Call _reconcile.
+    assert: restart is called — every observed hook flows through _reconcile.
+    """
+    charm = object.__new__(GarmCharm)
+    charm.restart = MagicMock()
+    charm._create_charm_state = MagicMock()
+
+    GarmCharm._reconcile(charm, MagicMock())
+
+    charm.restart.assert_called_once()
