@@ -274,48 +274,30 @@ class GarmCharm(paas_charm.go.Charm):
             args: Passed through to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(self.on.install, self._on_install)
-        self.framework.observe(self.on.leader_elected, self._on_leader_elected)
+        self.framework.observe(self.on.install, self._reconcile)
+        self.framework.observe(self.on.leader_elected, self._reconcile)
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
-            self._on_configurator_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
-            self._on_configurator_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_departed,
-            self._on_configurator_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
-            self._on_configurator_relation_changed,
+            self._reconcile,
         )
-        self.framework.observe(self.on.update_status, self._on_update_status)
-
-    def _on_install(self, _: ops.InstallEvent) -> None:
-        """Ensure secrets exist on first install."""
-        self._ensure_secrets()
-
-    def _on_leader_elected(self, _: ops.LeaderElectedEvent) -> None:
-        """Ensure secrets exist when the leader is elected."""
-        self._ensure_secrets()
+        self.framework.observe(self.on.update_status, self._reconcile)
 
     @block_if_invalid_data
-    def _on_update_status(self, event: ops.HookEvent) -> None:
-        """Run the base update-status handling, then reconcile.
-
-        Ensures stuck deletes and transient GARM API errors self-heal
-        on the periodic poll. Calls _reconcile_scalesets() directly to
-        avoid triggering an unnecessary Pebble service restart — TOML
-        changes are already handled by the events that caused them.
-
-        Args:
-            event: Juju update-status event.
-        """
-        super()._on_update_status(event)
-        self._reconcile_scalesets()
+    def _reconcile(self, _: ops.EventBase) -> None:
+        """Reconcile charm state."""
+        self.restart()
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -330,23 +312,20 @@ class GarmCharm(paas_charm.go.Charm):
         """
         return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
 
-    def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
-        """Handle configurator relation joined/changed/broken by re-rendering TOML."""
-        self.restart()
-
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
 
-        Overrides the parent to inject the TOML config file and correct
-        Pebble command before each restart.
+        Ensures secrets before the readiness gate so they exist on
+        install/leader_elected before pebble is ready, then gates on
+        workload readiness before writing config and replanning.
 
         Args:
             rerun_migrations: Passed through to the parent restart.
         """
+        self._ensure_secrets()
+
         if not self.is_ready():
             return
-
-        self._ensure_secrets()
 
         # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
         # no separate metrics listener — and declares its scrape target in
