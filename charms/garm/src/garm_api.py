@@ -269,6 +269,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to update controller ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def list_providers(self) -> list[Provider]:
         """List all registered GARM providers.
@@ -313,6 +315,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to list credentials ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def list_github_endpoints(self) -> list[ForgeEndpoint]:
         """List all registered GARM GitHub endpoints.
@@ -335,6 +339,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to list github endpoints ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def create_github_endpoint(self, params: CreateGithubEndpointParams) -> ForgeEndpoint:
         """Create a new GitHub endpoint in GARM.
@@ -358,6 +364,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to create github endpoint ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def update_github_endpoint(
         self, name: str, params: UpdateGithubEndpointParams
@@ -385,6 +393,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to update github endpoint {name} ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def delete_github_endpoint(self, name: str) -> None:
         """Delete a GitHub endpoint from GARM.
@@ -405,6 +415,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to delete github endpoint {name} ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def create_credentials(self, params: CreateGithubCredentialsParams) -> ForgeCredentials:
         """Create new GitHub credentials in GARM.
@@ -428,6 +440,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to create credential ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def update_credentials(
         self, cred_id: int, params: UpdateGithubCredentialsParams
@@ -455,6 +469,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to update credential {cred_id} ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def delete_credentials(self, cred_id: int) -> None:
         """Delete GitHub credentials from GARM.
@@ -475,6 +491,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                 raise GarmApiError(
                     f"Failed to delete credential {cred_id} ({exc.status}): {exc.body}"
                 ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def list_scalesets(self) -> list[ScaleSet]:
         """List all scalesets across all entities.
