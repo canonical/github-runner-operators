@@ -52,10 +52,6 @@ config:
       type: string
       description: |
         OpenStack network name or ID to use for instances.
-    github-app-client-id:
-      type: string
-      description: |
-        GitHub App client ID.
     github-app-id:
       type: string
       description: |

@@ -193,7 +193,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "openstack_project_domain_name": state.provider_config.project_domain_name,
                 "openstack_region_name": state.provider_config.region_name,
                 "openstack_network": state.provider_config.network,
-                "github_client_id": state.github_app_config.client_id,
                 "github_app_id": state.github_app_config.app_id,
                 "github_installation_id": state.github_app_config.installation_id,
                 "github_private_key_secret_uri": github_key_secret.id,
