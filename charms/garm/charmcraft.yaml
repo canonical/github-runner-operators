@@ -32,7 +32,6 @@ requires:
     limit: 1
   garm-configurator:
     interface: garm_configurator_v0
-    limit: 1
 
 actions:
   get-credentials:
