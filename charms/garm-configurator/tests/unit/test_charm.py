@@ -465,7 +465,6 @@ def test_garm_configurator_relation_data_reflects_charm_state():
         "provider_name": "garm-configurator-0",
         "flavor": "m1.large",
         "os_arch": "amd64",
-        "os_type": "linux",
         "min_idle_runner": "0",
         "max_runner": "5",
         "labels": "self-hosted,linux",
@@ -537,7 +536,6 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert garm_out.local_unit_data["name"] == "my-scaleset"
     assert garm_out.local_unit_data["flavor"] == "m1.large"
     assert garm_out.local_unit_data["os_arch"] == "amd64"
-    assert garm_out.local_unit_data["os_type"] == "linux"
     assert garm_out.local_unit_data["min_idle_runner"] == "0"
     assert garm_out.local_unit_data["max_runner"] == "5"
     assert garm_out.local_unit_data["repo"] == "myorg/myrepo"

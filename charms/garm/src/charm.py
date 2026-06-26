@@ -714,7 +714,6 @@ class GarmCharm(paas_charm.go.Charm):
                     "image": data.get("image_id", ""),
                     "flavor": data.get("flavor", ""),
                     "os_arch": data.get("os_arch", ""),
-                    "os_type": data.get("os_type", "linux"),
                     "max_runner": data.get("max_runner", ""),
                 }
                 missing = [k for k, v in required.items() if not v]
@@ -737,7 +736,7 @@ class GarmCharm(paas_charm.go.Charm):
                         image=required["image"],
                         flavor=required["flavor"],
                         os_arch=required["os_arch"],
-                        os_type=required["os_type"],
+                        os_type="linux",
                         min_idle_runners=min_idle,
                         max_runners=max_runners,
                         entity_type=entity_type,

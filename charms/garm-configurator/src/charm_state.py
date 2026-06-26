@@ -200,7 +200,6 @@ class ScalesetConfig(BaseModel):
         name: The name of the scaleset.
         flavor: The resource flavor for runners.
         os_arch: The CPU architecture for runners.
-        os_type: The operating system type for runners. Always ``linux``.
         min_idle_runner: Minimum number of idle runners.
         max_runner: Maximum number of runners.
         labels: Comma-separated list of labels for runners.
@@ -213,7 +212,6 @@ class ScalesetConfig(BaseModel):
     name: str
     flavor: str
     os_arch: str
-    os_type: str = "linux"
     min_idle_runner: int
     max_runner: int
     labels: str = ""

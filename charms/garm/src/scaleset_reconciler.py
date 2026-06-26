@@ -24,11 +24,11 @@ class ScalesetSpec:
     image: str
     flavor: str
     os_arch: str
-    os_type: str
     min_idle_runners: int
     max_runners: int
     entity_type: str
     entity_name: str
+    os_type: str = "linux"
     labels: list[str] = field(default_factory=list)
     runner_group: str = "Default"
     pre_install_scripts: dict[str, str] = field(default_factory=dict)

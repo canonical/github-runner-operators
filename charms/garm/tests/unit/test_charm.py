@@ -554,7 +554,6 @@ def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
                 image="ubuntu-22.04",
                 flavor="m1.small",
                 os_arch="amd64",
-                os_type="linux",
                 min_idle_runners=0,
                 max_runners=5,
                 entity_type="organization",
