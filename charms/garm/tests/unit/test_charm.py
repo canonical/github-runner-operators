@@ -26,7 +26,12 @@ from charm import (
     render_garm_toml,
 )
 from charm_state import SSHDebugInfo
-from garm_api import GarmApiError, GarmConnectionError, build_tmate_env_snippet, prepend_after_shebang
+from garm_api import (
+    GarmApiError,
+    GarmConnectionError,
+    build_tmate_env_snippet,
+    prepend_after_shebang,
+)
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -615,5 +620,3 @@ def test_apply_charmed_template_logs_and_raises_on_garm_error():
         mock_client_cls.return_value.login.side_effect = GarmApiError("timeout")
         with pytest.raises(GarmApiError):
             GarmCharm._apply_charmed_template(charm)
-
-

@@ -9,6 +9,7 @@ import time
 import urllib3
 import urllib3.exceptions
 
+from charm_state import SSHDebugInfo
 from garm_client.api.controller_info_api import ControllerInfoApi
 from garm_client.api.first_run_api import FirstRunApi
 from garm_client.api.login_api import LoginApi
@@ -21,8 +22,6 @@ from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.template import Template
 from garm_client.models.update_template_params import UpdateTemplateParams
-
-from charm_state import SSHDebugInfo
 
 logger = logging.getLogger(__name__)
 
@@ -232,9 +231,7 @@ class GarmApiClient:
         with self._authenticated_api_client(token) as client:
             api = TemplatesApi(api_client=client)
             try:
-                return api.get_template(
-                    template_id=template_id, _request_timeout=_REQUEST_TIMEOUT
-                )
+                return api.get_template(template_id=template_id, _request_timeout=_REQUEST_TIMEOUT)
             except ApiException as exc:
                 raise GarmApiError(
                     f"GARM get_template({template_id}) failed ({exc.status}): {exc.body}"
@@ -329,9 +326,7 @@ class GarmApiClient:
         with self._authenticated_api_client(token) as client:
             api = TemplatesApi(api_client=client)
             try:
-                api.delete_template(
-                    template_id=template_id, _request_timeout=_REQUEST_TIMEOUT
-                )
+                api.delete_template(template_id=template_id, _request_timeout=_REQUEST_TIMEOUT)
             except ApiException as exc:
                 raise GarmApiError(
                     f"GARM delete_template({template_id}) failed ({exc.status}): {exc.body}"

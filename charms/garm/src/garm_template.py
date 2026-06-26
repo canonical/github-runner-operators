@@ -3,6 +3,7 @@
 
 """Charmed runner install template management for GARM."""
 
+import base64
 import logging
 import typing
 
@@ -48,13 +49,9 @@ def apply_charmed_template(
 
     base = next((t for t in templates if t.name == GARM_BASE_TEMPLATE_NAME), None)
     if base is None:
-        raise CharmedTemplateError(
-            f"Base template '{GARM_BASE_TEMPLATE_NAME}' not found in GARM"
-        )
+        raise CharmedTemplateError(f"Base template '{GARM_BASE_TEMPLATE_NAME}' not found in GARM")
     if base.id is None:
-        raise CharmedTemplateError(
-            f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no ID"
-        )
+        raise CharmedTemplateError(f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no ID")
 
     patched_data = _build_charmed_template_data(client, token, base.id, connections)
     _sync_charmed_template(client, token, charmed, patched_data, len(connections))
@@ -68,15 +65,11 @@ def _delete_charmed_template_if_present(
     """Delete the charmed template when no debug-ssh connections remain."""
     if charmed is None:
         return
-    logger.info(
-        "No debug-ssh connections; deleting charmed template (id=%s)", charmed.id
-    )
+    logger.info("No debug-ssh connections; deleting charmed template (id=%s)", charmed.id)
     try:
         client.delete_template(token, charmed.id)
     except GarmApiError as exc:
-        raise CharmedTemplateError(
-            f"Failed to delete charmed template (id={charmed.id})"
-        ) from exc
+        raise CharmedTemplateError(f"Failed to delete charmed template (id={charmed.id})") from exc
 
 
 def _build_charmed_template_data(
@@ -105,11 +98,10 @@ def _build_charmed_template_data(
         raise CharmedTemplateError("Failed to fetch base template data") from exc
 
     if base_template.data is None:
-        raise CharmedTemplateError(
-            f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no body"
-        )
+        raise CharmedTemplateError(f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no body")
 
-    base_script = bytes(base_template.data).decode("utf-8")
+    # GARM returns the template body as a base64-encoded string.
+    base_script = base64.b64decode(base_template.data).decode("utf-8")
     snippet = build_tmate_env_snippet(connections)
     return prepend_after_shebang(base_script, snippet).encode("utf-8")
 
@@ -125,7 +117,7 @@ def _sync_charmed_template(
     if charmed is not None:
         try:
             current = client.get_template(token, charmed.id)
-            if current.data is not None and bytes(current.data) == patched_data:
+            if current.data is not None and base64.b64decode(current.data) == patched_data:
                 logger.debug("Charmed template unchanged; skipping update")
                 return
         except GarmApiError:

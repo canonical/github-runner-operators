@@ -3,6 +3,7 @@
 
 """Unit tests for garm_template."""
 
+import base64
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -64,7 +65,9 @@ def test_apply_charmed_template_raises_when_base_template_missing():
     client = MagicMock()
     client.list_templates.return_value = []
 
-    with pytest.raises(garm_template.CharmedTemplateError, match=garm_template.GARM_BASE_TEMPLATE_NAME):
+    with pytest.raises(
+        garm_template.CharmedTemplateError, match=garm_template.GARM_BASE_TEMPLATE_NAME
+    ):
         garm_template.apply_charmed_template(client, _TOKEN, [_CONN])
 
 
@@ -85,7 +88,7 @@ def test_apply_charmed_template_syncs_when_connections_and_base_exists():
 
     # base script with shebang so prepend_after_shebang works
     base_template = MagicMock()
-    base_template.data = list(b"#!/bin/bash\necho hi\n")
+    base_template.data = base64.b64encode(b"#!/bin/bash\necho hi\n").decode()
     client.get_template.side_effect = [
         base_template,  # _build_charmed_template_data fetch
         MagicMock(data=None),  # _sync_charmed_template change-check (data=None → proceed)
@@ -184,7 +187,9 @@ def test_build_charmed_template_data_raises_when_data_is_null():
     template.data = None
     client.get_template.return_value = template
 
-    with pytest.raises(garm_template.CharmedTemplateError, match=garm_template.GARM_BASE_TEMPLATE_NAME):
+    with pytest.raises(
+        garm_template.CharmedTemplateError, match=garm_template.GARM_BASE_TEMPLATE_NAME
+    ):
         garm_template._build_charmed_template_data(client, _TOKEN, 1, [_CONN])
 
 
@@ -197,7 +202,7 @@ def test_build_charmed_template_data_prepends_snippet_after_shebang():
     client = MagicMock()
     base_script = "#!/bin/bash\necho hello\n"
     template = MagicMock()
-    template.data = list(base_script.encode())
+    template.data = base64.b64encode(base_script.encode()).decode()
     client.get_template.return_value = template
 
     result = garm_template._build_charmed_template_data(client, _TOKEN, 1, [_CONN])
@@ -226,7 +231,7 @@ def test_sync_charmed_template_updates_when_data_changed():
     charmed = MagicMock()
     charmed.id = 42
     current = MagicMock()
-    current.data = list(b"old-data")
+    current.data = base64.b64encode(b"old-data").decode()
     client.get_template.return_value = current
 
     garm_template._sync_charmed_template(client, _TOKEN, charmed, b"new-data", 1)
@@ -246,7 +251,7 @@ def test_sync_charmed_template_skips_when_data_unchanged():
     charmed.id = 7
     data = b"same-data"
     current = MagicMock()
-    current.data = list(data)
+    current.data = base64.b64encode(data).decode()
     client.get_template.return_value = current
 
     garm_template._sync_charmed_template(client, _TOKEN, charmed, data, 1)
