@@ -336,6 +336,51 @@ def test_delete_scaleset_raises_on_api_error():
                 client.delete_scaleset(99)
 
 
+def test_list_credentials_returns_list():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning one credential.
+    act: Call list_credentials().
+    assert: The returned list carries the credential.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_cred = MagicMock()
+    mock_cred.name = "app-12345-67890"
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.list_credentials.return_value = [mock_cred]
+            result = client.list_credentials()
+    assert len(result) == 1
+    assert result[0].name == "app-12345-67890"
+
+
+def test_list_credentials_returns_empty_on_none():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning None.
+    act: Call list_credentials().
+    assert: An empty list is returned.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.list_credentials.return_value = None
+            result = client.list_credentials()
+    assert result == []
+
+
+def test_list_credentials_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi raising ApiException(500).
+    act: Call list_credentials().
+    assert: GarmApiError is raised.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi:
+            MockApi.return_value.list_credentials.side_effect = ApiException(status=500)
+            with pytest.raises(GarmApiError):
+                client.list_credentials()
+
+
 def test_list_github_endpoints_returns_list():
     """
     arrange: GarmAuthenticatedClient with EndpointsApi returning one endpoint.
