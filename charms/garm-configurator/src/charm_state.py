@@ -183,6 +183,10 @@ class GithubAppConfig(BaseModel):
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_INSTALLATION_ID_CONFIG_NAME}"
             )
+        if not str(installation_id).strip().isdigit():
+            raise CharmConfigInvalidError(
+                f"{GITHUB_APP_INSTALLATION_ID_CONFIG_NAME} must be numeric"
+            )
 
         private_key_secret_id = charm.config.get(GITHUB_APP_PRIVATE_KEY_CONFIG_NAME)
         if not private_key_secret_id:
@@ -200,7 +204,7 @@ class GithubAppConfig(BaseModel):
         return cls(
             client_id=str(client_id),
             app_id=str(app_id).strip(),
-            installation_id=str(installation_id),
+            installation_id=str(installation_id).strip(),
             private_key=private_key,
         )
 
