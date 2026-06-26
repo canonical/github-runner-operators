@@ -520,35 +520,6 @@ def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: st
         ),
         None,
     )
-
-
-def test_garm_get_credentials_action(
-    juju: jubilant.Juju,
-    garm_app: str,
-):
-    """
-    arrange: The GARM charm is deployed and active (leader has initialised secrets).
-    act: Run the get-credentials action on the first unit.
-    assert: The action succeeds and returns all four credential fields (username,
-        password, email, full-name), with username "admin" and email "admin@garm.local".
-    """
-    unit = f"{garm_app}/0"
-    logger.info("Running get-credentials action on unit %s", unit)
-
-    # juju.run() raises TaskError if the action fails, so a clean return means success.
-    task = juju.run(unit, "get-credentials")
-
-    for key in ("username", "password", "email", "full-name"):
-        assert key in task.results, (
-            f"Expected '{key}' in action results, got: {list(task.results)}"
-        )
-    assert task.results["username"] == "admin", (
-        f"Expected username 'admin', got: {task.results['username']!r}"
-    )
-    assert task.results["email"] == "admin@garm.local", (
-        f"Expected email 'admin@garm.local', got: {task.results['email']!r}"
-    )
-    assert task.results["password"], "Expected non-empty password in action results"
     assert garm_secret_uri, f"{GARM_ADMIN_CREDENTIALS_LABEL} not found for {garm_app_name}"
 
     secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
@@ -799,3 +770,31 @@ def _wait_for_scaleset(
         )
     return scaleset
 
+
+def test_garm_get_credentials_action(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed and active (leader has initialized secrets).
+    act: Run the get-credentials action on the first unit.
+    assert: The action succeeds and returns all four credential fields (username,
+        password, email, full-name), with username "admin" and email "admin@garm.local".
+    """
+    unit = f"{garm_app}/0"
+    logger.info("Running get-credentials action on unit %s", unit)
+
+    # juju.run() raises TaskError if the action fails, so a clean return means success.
+    task = juju.run(unit, "get-credentials")
+
+    for key in ("username", "password", "email", "full-name"):
+        assert key in task.results, (
+            f"Expected '{key}' in action results, got: {list(task.results)}"
+        )
+    assert task.results["username"] == "admin", (
+        f"Expected username 'admin', got: {task.results['username']!r}"
+    )
+    assert task.results["email"] == "admin@garm.local", (
+        f"Expected email 'admin@garm.local', got: {task.results['email']!r}"
+    )
+    assert task.results["password"], "Expected non-empty password in action results"
