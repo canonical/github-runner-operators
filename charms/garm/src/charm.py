@@ -394,8 +394,11 @@ class GarmCharm(paas_charm.go.Charm):
         previous_hash = self._get_on_disk_toml_hash(provider_files)
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping service restart")
-            self._reconcile_scalesets()
+            # GitHub reconcile first: it sets the controller URLs that GARM requires before
+            # any operational call (else 409 urls_required) and creates the credentials that
+            # scalesets reference, so it must run before the scaleset reconcile.
             self._reconcile_github()
+            self._reconcile_scalesets()
             return
 
         # Log non-sensitive metadata about the config change.
@@ -427,8 +430,10 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
-        self._reconcile_scalesets()
+        # GitHub reconcile sets the controller URLs and creates the credentials that scalesets
+        # reference, so it must run before the scaleset reconcile (see the unchanged-TOML path).
         self._reconcile_github()
+        self._reconcile_scalesets()
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
