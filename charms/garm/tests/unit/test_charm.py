@@ -637,7 +637,13 @@ def _github_charm(units_data, private_key="-----PEM-----"):
 
 
 def test_build_desired_github_builds_credential_from_relation():
-    """Relation data yields one App credential with the private key resolved from a secret."""
+    """
+    arrange: A charm whose configurator relation exposes one unit with app id, installation id
+        and a private-key secret URI.
+    act: Call _build_desired_github.
+    assert: One App credential is built (named app-<app_id>-<installation_id>) on the built-in
+        github.com endpoint, with the private key resolved from the secret.
+    """
     charm = _github_charm(
         [
             {
@@ -663,7 +669,11 @@ def test_build_desired_github_builds_credential_from_relation():
 
 
 def test_build_desired_github_dedupes_per_app_installation():
-    """Two configurator units sharing an App/installation collapse to a single credential."""
+    """
+    arrange: A charm whose configurator relation exposes two units sharing one App/installation.
+    act: Call _build_desired_github.
+    assert: The two units collapse to a single credential.
+    """
     unit_data = {
         "github_app_id": "1",
         "github_installation_id": "2",
@@ -677,7 +687,11 @@ def test_build_desired_github_dedupes_per_app_installation():
 
 
 def test_build_desired_github_skips_incomplete_unit():
-    """A unit missing required GitHub fields is skipped."""
+    """
+    arrange: A charm whose configurator relation exposes a unit missing required GitHub fields.
+    act: Call _build_desired_github.
+    assert: No credential is built.
+    """
     charm = _github_charm([{"github_app_id": "1"}])
 
     _, credentials = GarmCharm._build_desired_github(charm)
@@ -686,7 +700,12 @@ def test_build_desired_github_skips_incomplete_unit():
 
 
 def test_build_desired_github_skips_when_secret_unavailable():
-    """A credential is skipped when the private key secret resolves to empty."""
+    """
+    arrange: A charm whose configurator unit is complete but whose private-key secret resolves
+        to an empty string.
+    act: Call _build_desired_github.
+    assert: No credential is built.
+    """
     charm = _github_charm(
         [
             {
@@ -704,7 +723,11 @@ def test_build_desired_github_skips_when_secret_unavailable():
 
 
 def test_build_desired_github_skips_non_numeric_ids():
-    """A unit with a non-numeric app/installation id is skipped."""
+    """
+    arrange: A charm whose configurator unit has a non-numeric app/installation id.
+    act: Call _build_desired_github.
+    assert: No credential is built.
+    """
     charm = _github_charm(
         [
             {
@@ -721,7 +744,11 @@ def test_build_desired_github_skips_non_numeric_ids():
 
 
 def test_reconcile_github_skips_when_no_admin_credentials():
-    """GitHub reconciliation exits early when admin credentials are unavailable."""
+    """
+    arrange: A charm whose admin credentials are not yet available.
+    act: Call _reconcile_github.
+    assert: It exits early without constructing a GARM API client.
+    """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(return_value=None)
 
@@ -732,7 +759,12 @@ def test_reconcile_github_skips_when_no_admin_credentials():
 
 
 def test_reconcile_github_calls_reconciler_without_restart():
-    """GitHub reconciliation logs in over the local listener and never restarts the workload."""
+    """
+    arrange: A charm with admin credentials available and the desired github specs stubbed.
+    act: Call _reconcile_github.
+    assert: It logs in over the local listener, configures controller URLs, runs the reconciler
+        with the desired specs, and never restarts the workload.
+    """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(
         return_value={"username": "admin", "password": "TestPass-123!"}
@@ -763,7 +795,11 @@ def test_reconcile_github_calls_reconciler_without_restart():
 
 
 def test_ensure_controller_urls_sets_urls_from_base_url():
-    """Controller URLs are derived from the framework's base URL and pushed to GARM."""
+    """
+    arrange: A charm whose _base_url is an ingress URL.
+    act: Call _ensure_controller_urls.
+    assert: update_controller is called once with metadata/callback/webhook URLs derived from it.
+    """
     charm = MagicMock(spec=GarmCharm)
     charm._base_url = "https://garm.example.com"
     auth_client = MagicMock()
@@ -778,7 +814,11 @@ def test_ensure_controller_urls_sets_urls_from_base_url():
 
 
 def test_ensure_controller_urls_strips_trailing_slash_from_base_url():
-    """A trailing slash on the ingress URL does not produce double slashes in the paths."""
+    """
+    arrange: A charm whose _base_url is an ingress URL with a trailing slash.
+    act: Call _ensure_controller_urls.
+    assert: The pushed URLs have no double slashes in their paths.
+    """
     charm = MagicMock(spec=GarmCharm)
     charm._base_url = "https://garm.example.com/"
     auth_client = MagicMock()

@@ -75,6 +75,11 @@ def _cred_spec(
 
 
 def test_create_endpoint_when_missing():
+    """
+    arrange: A reconciler whose client reports no existing endpoints.
+    act: Reconcile a single desired endpoint spec.
+    assert: create_github_endpoint is called once with the spec's URLs.
+    """
     client = _mock_client(endpoints=[], credentials=[])
     reconciler = GithubReconciler(client)
     reconciler.reconcile([_endpoint_spec()], [])
@@ -87,6 +92,11 @@ def test_create_endpoint_when_missing():
 
 
 def test_no_create_or_delete_when_empty():
+    """
+    arrange: A reconciler whose client reports no existing endpoints or credentials.
+    act: Reconcile with empty desired endpoints and credentials.
+    assert: No create or delete calls are made.
+    """
     client = _mock_client(endpoints=[], credentials=[])
     reconciler = GithubReconciler(client)
     reconciler.reconcile([], [])
@@ -97,8 +107,12 @@ def test_no_create_or_delete_when_empty():
 
 
 def test_endpoints_never_deleted():
-    # The charm does not own endpoints, so neither the built-in github.com endpoint nor any
-    # operator-configured endpoint is ever deleted.
+    """
+    arrange: A client reporting the built-in github.com endpoint plus an operator-configured one.
+    act: Reconcile with no desired endpoints.
+    assert: delete_github_endpoint is never called — the charm does not own endpoints, so neither
+        the built-in github.com nor any operator-configured endpoint is removed.
+    """
     client = _mock_client(
         endpoints=[{"name": "github.com"}, {"name": "enterprise-ep"}],
         credentials=[],
@@ -109,6 +123,11 @@ def test_endpoints_never_deleted():
 
 
 def test_update_endpoint_when_base_url_changed():
+    """
+    arrange: A client reporting an endpoint whose base_url differs from the desired spec.
+    act: Reconcile the desired endpoint spec.
+    assert: update_github_endpoint is called once for that endpoint name.
+    """
     existing = {
         "name": "my-endpoint",
         "base_url": "https://old.example.com",
@@ -125,6 +144,11 @@ def test_update_endpoint_when_base_url_changed():
 
 
 def test_no_update_endpoint_when_unchanged():
+    """
+    arrange: A client reporting an endpoint identical to the desired spec.
+    act: Reconcile the desired endpoint spec.
+    assert: Neither update_github_endpoint nor create_github_endpoint is called.
+    """
     existing = {
         "name": "my-endpoint",
         "base_url": "https://github.example.com",
@@ -140,6 +164,11 @@ def test_no_update_endpoint_when_unchanged():
 
 
 def test_create_credential_when_missing():
+    """
+    arrange: A reconciler whose client reports no existing credentials.
+    act: Reconcile a single desired App credential spec.
+    assert: create_credentials is called once with the spec's app auth fields.
+    """
     client = _mock_client(endpoints=[], credentials=[])
     reconciler = GithubReconciler(client)
     reconciler.reconcile([], [_cred_spec()])
@@ -154,8 +183,11 @@ def test_create_credential_when_missing():
 
 
 def test_update_adoptable_credential_when_description_changed():
-    # An observed credential with no description is unclaimed and adoptable; a non-empty desired
-    # description triggers an update.
+    """
+    arrange: A client reporting a credential with no description (unclaimed, so adoptable).
+    act: Reconcile a desired credential carrying the managed description.
+    assert: update_credentials is called once for that credential id.
+    """
     existing = {"name": "my-cred", "id": 7, "description": None}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
@@ -165,8 +197,12 @@ def test_update_adoptable_credential_when_description_changed():
 
 
 def test_update_skipped_for_unmanaged_credential():
-    # A credential with a different description is operator-owned and must not be overwritten,
-    # even when its name matches a desired credential.
+    """
+    arrange: A client reporting a credential whose description marks it operator-owned, with a
+        name matching a desired credential.
+    act: Reconcile the desired managed credential of the same name.
+    assert: update_credentials is not called — operator-owned credentials are never overwritten.
+    """
     existing = {"name": "app-1-2", "id": 7, "description": "operator owned"}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
@@ -177,16 +213,25 @@ def test_update_skipped_for_unmanaged_credential():
 
 
 def test_no_update_credential_when_unchanged():
+    """
+    arrange: A client reporting a credential with no description.
+    act: Reconcile a desired credential with description="" (which maps to None, matching observed).
+    assert: Neither update_credentials nor create_credentials is called.
+    """
     existing = {"name": "my-cred", "id": 7, "description": None}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
-    # description="" maps to None, so this matches the observed None
     reconciler.reconcile([], [_cred_spec(description="")])
     client.update_credentials.assert_not_called()
     client.create_credentials.assert_not_called()
 
 
 def test_delete_managed_orphan_credential():
+    """
+    arrange: A client reporting a managed credential that is absent from the desired set.
+    act: Reconcile with no desired credentials.
+    assert: delete_credentials is called once with the orphan's id.
+    """
     existing = {"name": "stale-cred", "id": 42, "description": MANAGED_CREDENTIAL_DESCRIPTION}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
@@ -195,7 +240,11 @@ def test_delete_managed_orphan_credential():
 
 
 def test_unmanaged_orphan_credential_preserved():
-    # A credential without the managed marker (e.g. operator-created PAT) is never deleted.
+    """
+    arrange: A client reporting a credential without the managed marker (e.g. an operator PAT).
+    act: Reconcile with no desired credentials.
+    assert: delete_credentials is not called — unmanaged credentials are never deleted.
+    """
     existing = {"name": "operator-pat", "id": 99, "description": "set up by hand"}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
@@ -204,7 +253,12 @@ def test_unmanaged_orphan_credential_preserved():
 
 
 def test_nameless_observed_credential_ignored():
-    # A credential GARM returns without a name must not become a None map key or be deleted.
+    """
+    arrange: A client reporting a managed credential that GARM returns without a name.
+    act: Reconcile with no desired credentials.
+    assert: delete_credentials is not called — a nameless credential must not become a None map
+        key or be treated as a managed orphan.
+    """
     existing = {"name": None, "id": 5, "description": MANAGED_CREDENTIAL_DESCRIPTION}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
@@ -213,6 +267,11 @@ def test_nameless_observed_credential_ignored():
 
 
 def test_update_skipped_when_observed_credential_has_no_id():
+    """
+    arrange: A client reporting a managed credential whose id is None.
+    act: Reconcile a desired credential of the same name with a changed description.
+    assert: update_credentials is not called — there is no id to update against.
+    """
     existing = {"name": "app-1-2", "id": None, "description": MANAGED_CREDENTIAL_DESCRIPTION}
     client = _mock_client(endpoints=[], credentials=[existing])
     reconciler = GithubReconciler(client)
@@ -221,7 +280,13 @@ def test_update_skipped_when_observed_credential_has_no_id():
 
 
 def test_endpoints_reconciled_before_credentials():
-    # Record the call order on a shared parent mock to verify endpoints come first.
+    """
+    arrange: A shared parent mock recording all client calls, with one desired endpoint and
+        one desired credential.
+    act: Reconcile both.
+    assert: The endpoint call is recorded before the credential call (credentials may reference
+        endpoints, so endpoints must exist first).
+    """
     parent = MagicMock()
     parent.list_github_endpoints.return_value = []
     parent.list_credentials.return_value = []
