@@ -101,7 +101,7 @@ config:
         Organization to register runners to. Mutually exclusive with repo.
     runner-group:
       type: string
-      default: default
+      default: Default
       description: |
         Runner group for org registration. Ignored when repo is set.
     pre-install-scripts:

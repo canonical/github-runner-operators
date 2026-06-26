@@ -63,6 +63,7 @@ class ProviderConfig(BaseModel):
         project_domain_name: OpenStack project domain name.
         region_name: OpenStack region name.
         network: OpenStack network name or ID.
+        provider_name: GARM provider name. Defaults to the Juju unit name with "/" replaced by "-".
     """
 
     auth_url: str
@@ -73,6 +74,7 @@ class ProviderConfig(BaseModel):
     project_domain_name: str
     region_name: str
     network: str
+    provider_name: str
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ProviderConfig":
@@ -129,6 +131,7 @@ class ProviderConfig(BaseModel):
             project_domain_name=str(charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)),
             region_name=str(charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME)),
             network=str(charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME)),
+            provider_name=charm.unit.name.replace("/", "-"),
         )
 
 
@@ -214,7 +217,7 @@ class ScalesetConfig(BaseModel):
     labels: str = ""
     repo: str | None = None
     org: str | None = None
-    runner_group: str = "default"
+    runner_group: str = "Default"
     pre_install_scripts: str | None = None
 
     @classmethod
@@ -261,7 +264,7 @@ class ScalesetConfig(BaseModel):
         repo = str(repo).strip() if repo else None
         org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
         org = str(org).strip() if org else None
-        runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "default")).strip()
+        runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "Default")).strip()
 
         if repo and org:
             raise CharmConfigInvalidError(
