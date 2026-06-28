@@ -8,3 +8,4 @@ The following guides cover key processes and common tasks for managing and using
 
    Contribute <contribute>
    Enable log forwarding <enable-log-forwarding>
+   Retrieve GARM admin credentials <retrieve-garm-credentials>
