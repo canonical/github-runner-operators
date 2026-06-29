@@ -12,6 +12,7 @@ from typing import Iterator
 import jubilant
 import pytest
 import requests
+from tests.integration.helpers import TEST_RSA_PRIVATE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -505,7 +506,7 @@ def deploy_configurator_with_image_fixture(
     )
     private_key_secret = juju.add_secret(
         name="configurator-github-private-key",
-        content={"value": "test-github-private-key"},
+        content={"value": TEST_RSA_PRIVATE_KEY},
     )
 
     juju.deploy(charm=garm_configurator_charm_file, app=app_name)
@@ -529,8 +530,8 @@ def deploy_configurator_with_image_fixture(
             "openstack-project-domain-name": "Default",
             "openstack-region-name": "RegionOne",
             "openstack-network": "external-net",
-            "github-app-client-id": "test-client-id",
-            "github-app-installation-id": "test-installation-id",
+            "github-app-id": "12345",
+            "github-app-installation-id": "67890",
             "github-app-private-key": private_key_secret,
             "name": "test-scaleset",
             "flavor": "m1.large",
@@ -561,7 +562,7 @@ def integrate_configurator_with_garm_fixture(
 
     The configurator should remain Active after integration. GARM may
     restart when it receives the relation data (TOML change detection),
-    then run _reconcile_scalesets() which may set WaitingStatus if
+    then run _reconcile_runners() which may set WaitingStatus if
     credentials/providers are not yet configured. The fixture only
     confirms that GARM has finished processing the integration event
     (Juju agent idle); individual tests that need GARM fully active
@@ -571,7 +572,7 @@ def integrate_configurator_with_garm_fixture(
     """
     juju.integrate(configurator_with_image, garm_app)
     # GARM may end up in a split state: app_status=active (set by paas_charm)
-    # while unit workload_status=waiting (set by _reconcile_scalesets when
+    # while unit workload_status=waiting (set by _reconcile_runners when
     # credentials/providers are not yet configured). all_active and all_waiting
     # both require BOTH app and unit to match, so neither would pass. Using
     # all_agents_idle checks only that hooks have finished running, which is

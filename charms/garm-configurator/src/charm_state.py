@@ -15,7 +15,7 @@ OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME = "openstack-project-domain-name"
 OPENSTACK_REGION_NAME_CONFIG_NAME = "openstack-region-name"
 OPENSTACK_NETWORK_CONFIG_NAME = "openstack-network"
 
-GITHUB_APP_CLIENT_ID_CONFIG_NAME = "github-app-client-id"
+GITHUB_APP_ID_CONFIG_NAME = "github-app-id"
 GITHUB_APP_INSTALLATION_ID_CONFIG_NAME = "github-app-installation-id"
 GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 
@@ -139,13 +139,13 @@ class GithubAppConfig(BaseModel):
     """GitHub App configuration.
 
     Attributes:
-        client_id: GitHub App client ID.
+        app_id: GitHub App ID (numeric).
         installation_id: GitHub App installation ID.
         private_key: GitHub App private key (resolved from secret).
     """
 
-    client_id: str
-    installation_id: str
+    app_id: int
+    installation_id: int
     private_key: str
 
     @classmethod
@@ -161,14 +161,14 @@ class GithubAppConfig(BaseModel):
         Returns:
             The parsed GitHub App configuration.
         """
-        client_id = charm.config.get(GITHUB_APP_CLIENT_ID_CONFIG_NAME)
-        if not client_id or not str(client_id).strip():
+        app_id = charm.config.get(GITHUB_APP_ID_CONFIG_NAME)
+        if app_id is None:
             raise CharmConfigInvalidError(
-                f"Missing required configuration: {GITHUB_APP_CLIENT_ID_CONFIG_NAME}"
+                f"Missing required configuration: {GITHUB_APP_ID_CONFIG_NAME}"
             )
 
         installation_id = charm.config.get(GITHUB_APP_INSTALLATION_ID_CONFIG_NAME)
-        if not installation_id or not str(installation_id).strip():
+        if installation_id is None:
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_INSTALLATION_ID_CONFIG_NAME}"
             )
@@ -187,8 +187,8 @@ class GithubAppConfig(BaseModel):
             ) from e
 
         return cls(
-            client_id=str(client_id),
-            installation_id=str(installation_id),
+            app_id=int(app_id),
+            installation_id=int(installation_id),
             private_key=private_key,
         )
 

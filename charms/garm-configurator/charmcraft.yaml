@@ -52,12 +52,12 @@ config:
       type: string
       description: |
         OpenStack network name or ID to use for instances.
-    github-app-client-id:
-      type: string
+    github-app-id:
+      type: int
       description: |
-        GitHub App client ID.
+        GitHub App ID (numeric).
     github-app-installation-id:
-      type: string
+      type: int
       description: |
         GitHub App installation ID.
     github-app-private-key:
