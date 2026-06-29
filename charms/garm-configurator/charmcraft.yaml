@@ -59,7 +59,7 @@ config:
     github-app-installation-id:
       type: int
       description: |
-        GitHub App installation ID (numeric).
+        GitHub App installation ID.
     github-app-private-key:
       type: secret
       description: |

@@ -140,7 +140,7 @@ class GithubAppConfig(BaseModel):
 
     Attributes:
         app_id: GitHub App ID (numeric).
-        installation_id: GitHub App installation ID (numeric).
+        installation_id: GitHub App installation ID.
         private_key: GitHub App private key (resolved from secret).
     """
 
@@ -161,8 +161,6 @@ class GithubAppConfig(BaseModel):
         Returns:
             The parsed GitHub App configuration.
         """
-        # app/installation ids are ``int`` config options, so Juju rejects non-numeric
-        # values at config-set time; here we only guard against them being unset.
         app_id = charm.config.get(GITHUB_APP_ID_CONFIG_NAME)
         if app_id is None:
             raise CharmConfigInvalidError(
