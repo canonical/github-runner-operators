@@ -16,6 +16,7 @@ func TestBuildQuery(t *testing.T) {
 		{"percentile_cont(0.8)", "percentile_cont(0.8)"},
 		{"started_at guard", "started_at IS NOT NULL"},
 		{"created_at guard", "created_at IS NOT NULL"},
+		{"only jobs we own", "assigned_flavor IS NOT NULL"},
 		{"negative wait clamped to zero", "GREATEST(EXTRACT(EPOCH FROM (started_at - created_at)), 0)"},
 		{"day bucket", "date_trunc('day', started_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"},
 		{"group by day", "GROUP BY day, platform"},

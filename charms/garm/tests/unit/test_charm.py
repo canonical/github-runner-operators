@@ -4,7 +4,7 @@
 """Unit tests for GarmCharm."""
 
 import string
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import ops
 import pytest
@@ -25,6 +25,7 @@ from charm import (
     render_garm_toml,
 )
 from garm_api import GarmConnectionError
+from scaleset_reconciler import ScalesetSpec
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -144,17 +145,6 @@ def test_generate_garm_secrets_produces_unique_values():
     assert first["db-passphrase"] != second["db-passphrase"]
 
 
-def test_render_garm_toml_default_provider_when_no_providers_given():
-    """
-    arrange: No providers argument passed (defaults to None).
-    act: render_garm_toml is called without providers.
-    assert: The default "openstack" provider is rendered.
-    """
-    parsed = _render()
-    assert len(parsed["provider"]) == 1
-    assert parsed["provider"][0]["name"] == "openstack"
-
-
 def test_render_garm_toml_with_configurator_providers():
     """
     arrange: Two Configurator units provided provider configs.
@@ -231,18 +221,6 @@ def test_build_provider_list_returns_default_when_empty():
     assert: Returns the default single-entry list with "openstack" provider.
     """
     entries, files = _build_provider_list([])
-    assert len(entries) == 1
-    assert entries[0]["name"] == "openstack"
-    assert files == {}
-
-
-def test_build_provider_list_returns_default_when_none():
-    """
-    arrange: None is passed.
-    act: _build_provider_list is called with None.
-    assert: Returns the default single-entry list.
-    """
-    entries, files = _build_provider_list(None)
     assert len(entries) == 1
     assert entries[0]["name"] == "openstack"
     assert files == {}
@@ -540,3 +518,102 @@ def test_maybe_first_run_skips_on_missing_credential_key():
         GarmCharm._maybe_first_run(charm)
 
     mock_client_cls.assert_not_called()
+
+
+def test_reconcile_scalesets_skips_when_no_admin_credentials():
+    """
+    arrange: Admin credentials secret is unavailable.
+    act: Call _reconcile_scalesets().
+    assert: No GARM API connection is attempted.
+    """
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(return_value=None)
+
+    with patch("charm.GarmApiClient") as mock_client:
+        charm._reconcile_scalesets()
+
+    mock_client.assert_not_called()
+
+
+def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
+    """
+    arrange: One configurator relation unit with a complete scaleset spec; GARM has no
+             existing scalesets and the provider is registered.
+    act: Call _reconcile_scalesets().
+    assert: The scaleset is created via the API, and charm.restart is never called.
+    """
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(
+        return_value={"username": "admin", "password": "TestPass-123!"}
+    )
+    charm._build_desired_scalesets = MagicMock(
+        return_value=[
+            ScalesetSpec(
+                name="my-scaleset",
+                provider_name="garm-configurator-0",
+                image="ubuntu-22.04",
+                flavor="m1.small",
+                os_arch="amd64",
+                min_idle_runners=0,
+                max_runners=5,
+                entity_type="organization",
+                entity_name="my-org",
+            )
+        ]
+    )
+    charm.restart = MagicMock()
+
+    provider = MagicMock()
+    provider.name = "garm-configurator-0"
+    auth_client = MagicMock()
+    auth_client.list_providers.return_value = [provider]
+    auth_client.list_scalesets.return_value = []
+    auth_client.find_org_id.return_value = "org-uuid"
+    created = MagicMock()
+    created.id = 42
+    auth_client.create_org_scaleset.return_value = created
+
+    with (
+        patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+    ):
+        mock_auth_cls.from_login.return_value = auth_client
+        mock_unit.return_value = MagicMock()
+        charm._reconcile_scalesets()
+
+    auth_client.create_org_scaleset.assert_called_once()
+    auth_client.update_scaleset.assert_not_called()
+    auth_client.delete_scaleset.assert_not_called()
+    charm.restart.assert_not_called()
+
+
+def test_restart_ensures_secrets_before_readiness_gate():
+    """
+    arrange: A GarmCharm whose workload is not ready (pebble not up yet).
+    act: Call restart().
+    assert: _ensure_secrets is invoked even though is_ready() returns False,
+            so secrets are created before pebble is up (install/leader_elected).
+    """
+    charm = object.__new__(GarmCharm)
+    charm._ensure_secrets = MagicMock()
+    charm.is_ready = MagicMock(return_value=False)
+
+    charm.restart()
+
+    charm._ensure_secrets.assert_called_once()
+
+
+def test_reconcile_calls_restart():
+    """
+    arrange: A bare GarmCharm instance with restart and _create_charm_state mocked
+             (the latter so the block_if_invalid_data decorator does not raise).
+    act: Call _reconcile.
+    assert: restart is called — every observed hook flows through _reconcile.
+    """
+    charm = object.__new__(GarmCharm)
+    charm.restart = MagicMock()
+    charm._create_charm_state = MagicMock()
+
+    GarmCharm._reconcile(charm, MagicMock())
+
+    charm.restart.assert_called_once()

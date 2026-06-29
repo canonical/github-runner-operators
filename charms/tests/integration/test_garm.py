@@ -3,8 +3,12 @@
 
 """Integration tests for the GARM charm."""
 
+import base64
 import json
 import logging
+import secrets
+import urllib.error
+import urllib.request
 
 import jubilant
 import pytest
@@ -28,182 +32,28 @@ GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 GARM_API_PORT = 8080
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 
+# Generated once per session so all test functions that call _garm_first_run use
+# the same credentials. Format guarantees GARM's strong-password requirements:
+# uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
+_GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
+_SCALESET_TEST_NAME = "test-scaleset"
+_SCALESET_TEST_CREDENTIAL_NAME = "github-app-12345"
 
-def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
-    """Run a command inside the workload container via pebble exec.
-
-    Args:
-        juju: Jubilant Juju handle.
-        unit: Unit name (e.g. "github-runner-garm/0").
-        command: Shell command to execute inside the container.
-
-    Returns:
-        ExecResult with stdout/stderr.
-    """
-    return juju.exec(f"{PEBBLE_PREFIX} exec -- {command}", unit=unit)
-
-
-def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
-    """Get the IP address of the GARM unit.
-
-    Args:
-        juju: Jubilant Juju handle.
-        app_name: GARM application name.
-
-    Returns:
-        IP address string.
-    """
-    status = juju.status()
-    unit_name = f"{app_name}/0"
-    return status.apps[app_name].units[unit_name].address
-
-
-def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
-    """Retrieve GARM admin credentials from the garm-admin-credentials Juju secret.
-
-    Args:
-        juju: Jubilant Juju handle.
-
-    Returns:
-        Dict with at least ``username`` and ``password`` keys as stored by the charm.
-    """
-    secrets_json = juju.cli("secrets", "--format=json")
-    all_secrets = json.loads(secrets_json)
-    admin_creds_uri = None
-    for uri, info in all_secrets.items():
-        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
-            admin_creds_uri = uri
-            break
-    assert (
-        admin_creds_uri is not None
-    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
-    secret_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
-    secret = json.loads(secret_json)
-    content = secret[admin_creds_uri]["content"]["Data"]
-    for key in ("username", "password"):
-        assert (
-            key in content
-        ), f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
-    return content
-
-
-def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
-    """Log in to GARM with charm-managed credentials and return an admin JWT.
-
-    The charm creates the admin user automatically via _maybe_first_run().
-    This function reads credentials from the garm-admin-credentials Juju secret,
-    logs in to obtain a JWT, and configures required controller URLs so GARM will
-    serve operational API endpoints.
-
-    Retries with backoff to allow GARM time to finish starting and the charm's
-    first-run initialization to complete.
-
-    Args:
-        juju: Jubilant Juju handle (used to read admin credentials from Juju secret).
-        address: GARM unit IP address.
-
-    Returns:
-        JWT token string for authenticated API calls.
-    """
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    creds = _get_admin_credentials(juju)
-
-    session = requests.Session()
-    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
-    session.mount("http://", HTTPAdapter(max_retries=retries))
-
-    class _LoginRetryable(Exception):
-        pass
-
-    @retry(
-        retry=retry_if_exception_type(
-            (requests.exceptions.ConnectionError, _LoginRetryable)
-        ),
-        wait=wait_exponential(multiplier=1, min=1, max=30),
-        stop=stop_after_attempt(10),
-        reraise=True,
-    )
-    def _do_login() -> str:
-        resp = session.post(
-            f"{base_url}/auth/login",
-            json={"username": creds["username"], "password": creds["password"]},
-            timeout=30,
-        )
-        logger.info(
-            "login response: status=%d body=%s", resp.status_code, resp.text[:500]
-        )
-        if resp.status_code != 200:
-            raise _LoginRetryable(
-                f"Unexpected login status {resp.status_code}: {resp.text[:200]}"
-            )
-        token = resp.json().get("token", "")
-        assert token, "Expected non-empty JWT token from login"
-        return token
-
-    token = _do_login()
-
-    # Configure controller URLs — GARM requires metadata_url and callback_url
-    # before it will serve operational endpoints (returns 409 otherwise)
-    headers = {"Authorization": f"Bearer {token}"}
-    controller_payload = {
-        "metadata_url": f"http://{address}:{GARM_API_PORT}/api/v1/metadata",
-        "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
-        "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
-    }
-    resp = session.put(
-        f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
-    )
-    logger.info(
-        "controller setup response: status=%d body=%s",
-        resp.status_code,
-        resp.text[:300],
-    )
-    resp.raise_for_status()
-
-    return token
-
-
-class _MetricsNotReady(Exception):
-    """Raised while GARM's /metrics is still warming up (retryable)."""
-
-
-@retry(
-    retry=retry_if_exception_type(
-        (requests.exceptions.ConnectionError, _MetricsNotReady)
-    ),
-    wait=wait_exponential(multiplier=1, min=1, max=30),
-    stop=stop_after_attempt(10),
-    reraise=True,
-)
-def _scrape_metrics_until_ready(metrics_url: str) -> requests.Response:
-    """Scrape GARM's /metrics (no auth) and retry until the metrics are populated.
-
-    garm_health is the reliable signal that GARM's own metrics (not just the Go
-    runtime metrics) are exported: it is populated by an immediate collection at
-    startup and refreshed every tick, so retry briefly to absorb that startup
-    window. Other metric names are documented in GARM's monitoring spec.
-
-    Args:
-        metrics_url: Full URL of GARM's /metrics endpoint.
-
-    Returns:
-        The successful (HTTP 200) response, which contains garm_health.
-    """
-    # No Authorization header: a 200 proves JWT auth is disabled on /metrics.
-    response = requests.get(metrics_url, timeout=30)
-    # A 5xx may occur briefly while GARM is still warming up, so retry it. A 4xx
-    # (e.g. 401/403 if auth were required, 404 for a wrong path) is a real
-    # regression and must surface immediately rather than being masked as a
-    # metrics-warm-up timeout.
-    if response.status_code >= 500:
-        raise _MetricsNotReady()
-    assert response.status_code == requests.codes.ok, (
-        f"Expected 200 without a JWT token, got {response.status_code}: "
-        f"{response.text[:200]}"
-    )
-    if "garm_health" not in response.text:
-        raise _MetricsNotReady()
-    return response
+_TEST_RSA_PRIVATE_KEY = """-----BEGIN RSA PRIVATE KEY-----
+MIICXwIBAAKBgQC2tCW5B18y5VnqqokOeamJgasI3H1405WWv7FmWl31I1Cgabhi
+MFcHdNECXFUC3wtqo/bXyCQbANRBkpZudJfSGos3+1iOJK1fd+MU8ntHVtgpvb5j
+whdFSVJ9EL4/2u0K0S+fIyilD9q7K5mhk0MYLYWumPIRLkbtwr9a7LgY5wIDAQAB
+AoGBAKIQGCoRjPNjmCfdT6fEaYtstt8sXiwQWu+WaHDnFdL9mWZBgOmwAXK+vyt9
+5XafjMvyV2I+yTAewyjLM58U0xlslJu6Bk0Zw920sTmK9Qvvq/2mjsqw+PWr9rRx
+qZFDCefAlB0Npo9tXHAf3ec5+vlm4QsEl6dty+Wx6aSHHMRpAkEA8e5IwkJZFcWO
+aCc8Z+cnoidomlkvGlruncXMG1KhisQTleQVc1bM8tIZq2nNUG1zKJqHeCacQLiV
+LKALnZDSCwJBAMFUIHd7ikYaAgTvrAKmzOZlMKVuGr2SHPODWoaWkEagEsrOw+H2
+PYonSYkbzPyXH6iKUOhWH+ZA1r6K1lhdWhUCQQCquaTOsVN8cbVU+ps+F3l4jKbc
+hSMgThsla3flsCIfcs7/b71Tb2Wh1XIX7Mnef95MQQBoYZbSdW+P1kFcJ96RAkEA
+oSyuqI4BGDJkjpL1l3xSBJ5F8RUbDAI9SrKujNgHTinzoMrCOabdZUkdoEXiHo8r
+IIq3qwrqKz7RCSecTSz+hQJBAJDKODanbnrPxNDgmIp52BMtiYI4vv7gKp/MSW0N
+PG8an+PHNVGDEj1cOOwp/YNQieRp/WPH6bpBtwwe0r6pQZQ=
+-----END RSA PRIVATE KEY-----"""
 
 
 def test_garm_blocks_without_postgresql(
@@ -287,14 +137,17 @@ def test_garm_charm_reaches_active(
     arrange: The GARM charm is deployed with postgresql & garm-configurator integrated.
     act: Observe the Juju application status.
     assert: The application is in active status, confirming a successful install.
+
+    Note: the unit workload status may be ``waiting`` at this point because
+    _reconcile_scalesets() runs on integration and fails until first-run
+    initialises GARM via the API.  The app-level status is what paas_charm
+    sets, confirming the service is up.
     """
     status = juju.status()
     current = status.apps[configurator_garm].app_status.current
     logger.info("GARM app status: %s", current)
 
-    assert jubilant.all_active(
-        status, configurator_garm
-    ), f"Expected {configurator_garm} to be active, got: {current}"
+    assert current == "active", f"Expected {configurator_garm} to be active, got: {current}"
 
 
 def test_garm_api_controller_info(
@@ -474,30 +327,446 @@ def test_garm_metrics_endpoint_no_auth(
     )
 
 
-def test_garm_api_has_configurator_provider(
+def test_scaleset_created_and_updated_via_relation(
     juju: jubilant.Juju,
     configurator_garm: str,
+    configurator_with_image: str,
+    fake_github_api_url: str,
 ):
     """
-    arrange: Configurator with OpenStack config is integrated with GARM.
-    act: Query the GARM REST API for registered providers.
-    assert: A provider named 'garm-configurator-*' is registered and visible
-        via the GARM API, confirming the configurator relation data was
-        consumed and the provider was loaded.
+    arrange: GARM and garm-configurator are integrated and both active.
+    act: Verify the scaleset is created and reflects updated config.
+    assert: After a config change the scaleset exists with the new max_runners value.
     """
     address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+
+    # _garm_first_run sets the controller callback/metadata URLs that GARM requires
+    # before it will serve operational endpoints (returns 409 otherwise).  The
+    # configurator_garm fixture integrates the charms before these URLs exist, so
+    # the first reconcile defers.  Calling _garm_first_run here is idempotent (PUT).
     token = _garm_first_run(juju, address)
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{base_url}/providers", headers=headers, timeout=30)
-    resp.raise_for_status()
-    api_providers = resp.json()
-    logger.info("Providers response: %s", json.dumps(api_providers, indent=2))
-    assert isinstance(
-        api_providers, list
-    ), f"Expected list response from GARM API, got: {type(api_providers)}"
-    api_provider_names = [p.get("name", "") for p in api_providers]
-    assert any(n.startswith("garm-configurator") for n in api_provider_names), (
-        f"Expected a 'garm-configurator-*' provider in GARM API, "
-        f"got: {api_provider_names}"
+
+    # Restore system templates so GARM can find a linux/github template when
+    # CreateEntityScaleSet calls findTemplate internally.
+    _restore_system_templates(base_url, token)
+
+    # Create credential and org pointed at the mock GitHub API server so that
+    # GARM's GitHub App calls (installation token, runner-groups, etc.) hit our
+    # mock instead of real GitHub.
+    _create_test_credential(base_url, token, fake_github_api_url)
+    _create_test_org(base_url, token, "test-org")
+
+    # A config change triggers config_changed on the configurator → relation_changed
+    # on GARM → _reconcile_scalesets() runs now that URLs are configured.
+    # Using max-runner=10 doubles as the update assertion below.
+    juju.config(configurator_with_image, values={"max-runner": "10"})
+    # Wait for GARM to settle. GARM is already active so this exits after one poll
+    # (delay=10s), then _wait_for_scaleset polls while relation_changed fires.
+    juju.wait(
+        lambda status: jubilant.all_active(status, configurator_garm),
+        timeout=3 * 60,
+        delay=10,
     )
+
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    assert scaleset["name"] == _SCALESET_TEST_NAME
+    assert scaleset["max_runners"] == 10
+
+
+def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
+    """Run a command inside the workload container via pebble exec.
+
+    Args:
+        juju: Jubilant Juju handle.
+        unit: Unit name (e.g. "github-runner-garm/0").
+        command: Shell command to execute inside the container.
+
+    Returns:
+        ExecResult with stdout/stderr.
+    """
+    return juju.exec(f"{PEBBLE_PREFIX} exec -- {command}", unit=unit)
+
+
+def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
+    """Get the IP address of the GARM unit.
+
+    Args:
+        juju: Jubilant Juju handle.
+        app_name: GARM application name.
+
+    Returns:
+        IP address string.
+    """
+    status = juju.status()
+    unit_name = f"{app_name}/0"
+    return status.apps[app_name].units[unit_name].address
+
+
+def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
+    """Retrieve GARM admin credentials from the garm-admin-credentials Juju secret.
+
+    Args:
+        juju: Jubilant Juju handle.
+
+    Returns:
+        Dict with at least ``username`` and ``password`` keys as stored by the charm.
+    """
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+    admin_creds_uri = None
+    for uri, info in all_secrets.items():
+        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
+            admin_creds_uri = uri
+            break
+    assert (
+        admin_creds_uri is not None
+    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
+    secret = json.loads(secret_json)
+    content = secret[admin_creds_uri]["content"]["Data"]
+    for key in ("username", "password"):
+        assert (
+            key in content
+        ), f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
+    return content
+
+
+def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
+    """Log in to GARM with charm-managed credentials and return an admin JWT.
+
+    The charm creates the admin user automatically via _maybe_first_run().
+    This function reads credentials from the garm-admin-credentials Juju secret,
+    logs in to obtain a JWT, and configures required controller URLs so GARM will
+    serve operational API endpoints.
+
+    Retries with backoff to allow GARM time to finish starting and the charm's
+    first-run initialization to complete.
+
+    Args:
+        juju: Jubilant Juju handle (used to read admin credentials from Juju secret).
+        address: GARM unit IP address.
+
+    Returns:
+        JWT token string for authenticated API calls.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    creds = _get_admin_credentials(juju)
+
+    session = requests.Session()
+    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+
+    class _LoginRetryable(Exception):
+        pass
+
+    @retry(
+        retry=retry_if_exception_type(
+            (requests.exceptions.ConnectionError, _LoginRetryable)
+        ),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(10),
+        reraise=True,
+    )
+    def _do_login() -> str:
+        resp = session.post(
+            f"{base_url}/auth/login",
+            json={"username": creds["username"], "password": creds["password"]},
+            timeout=30,
+        )
+        logger.info(
+            "login response: status=%d body=%s", resp.status_code, resp.text[:500]
+        )
+        if resp.status_code != 200:
+            raise _LoginRetryable(
+                f"Unexpected login status {resp.status_code}: {resp.text[:200]}"
+            )
+        token = resp.json().get("token", "")
+        assert token, "Expected non-empty JWT token from login"
+        return token
+
+    token = _do_login()
+
+    # Configure controller URLs — GARM requires metadata_url and callback_url
+    # before it will serve operational endpoints (returns 409 otherwise)
+    headers = {"Authorization": f"Bearer {token}"}
+    controller_payload = {
+        "metadata_url": f"http://{address}:{GARM_API_PORT}/api/v1/metadata",
+        "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
+        "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
+    }
+    resp = session.put(
+        f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
+    )
+    logger.info(
+        "controller setup response: status=%d body=%s",
+        resp.status_code,
+        resp.text[:300],
+    )
+    resp.raise_for_status()
+
+    return token
+
+
+def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
+    """Log into the GARM API using admin credentials stored in Juju secrets."""
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+    garm_secret_uri = next(
+        (
+            uri
+            for uri, info in all_secrets.items()
+            if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL
+        ),
+        None,
+    )
+    assert garm_secret_uri, f"{GARM_ADMIN_CREDENTIALS_LABEL} not found for {garm_app_name}"
+
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", garm_secret_uri)
+    secret_data = json.loads(secret_json)
+    content = secret_data[garm_secret_uri]["content"]["Data"]
+    admin_username = content["username"]
+    admin_password = content["password"]
+
+    base_url = garm_url.rstrip("/")
+    if not base_url.endswith("/api/v1"):
+        base_url = f"{base_url}/api/v1"
+
+    resp = requests.post(
+        f"{base_url}/auth/login",
+        json={"username": admin_username, "password": admin_password},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    token = resp.json().get("token", "")
+    assert token, "Expected non-empty JWT token from GARM login"
+    return token
+
+
+class _MetricsNotReady(Exception):
+    """Raised while GARM's /metrics is still warming up (retryable)."""
+
+
+@retry(
+    retry=retry_if_exception_type(
+        (requests.exceptions.ConnectionError, _MetricsNotReady)
+    ),
+    wait=wait_exponential(multiplier=1, min=1, max=30),
+    stop=stop_after_attempt(10),
+    reraise=True,
+)
+def _scrape_metrics_until_ready(metrics_url: str) -> requests.Response:
+    """Scrape GARM's /metrics (no auth) and retry until the metrics are populated.
+
+    garm_health is the reliable signal that GARM's own metrics (not just the Go
+    runtime metrics) are exported: it is populated by an immediate collection at
+    startup and refreshed every tick, so retry briefly to absorb that startup
+    window. Other metric names are documented in GARM's monitoring spec.
+
+    Args:
+        metrics_url: Full URL of GARM's /metrics endpoint.
+
+    Returns:
+        The successful (HTTP 200) response, which contains garm_health.
+    """
+    # No Authorization header: a 200 proves JWT auth is disabled on /metrics.
+    response = requests.get(metrics_url, timeout=30)
+    # A 5xx may occur briefly while GARM is still warming up, so retry it. A 4xx
+    # (e.g. 401/403 if auth were required, 404 for a wrong path) is a real
+    # regression and must surface immediately rather than being masked as a
+    # metrics-warm-up timeout.
+    if response.status_code >= 500:
+        raise _MetricsNotReady()
+    assert response.status_code == requests.codes.ok, (
+        f"Expected 200 without a JWT token, got {response.status_code}: "
+        f"{response.text[:200]}"
+    )
+    if "garm_health" not in response.text:
+        raise _MetricsNotReady()
+    return response
+
+def _garm_api_base_url(address: str) -> str:
+    """Return the GARM v1 API base URL for a unit address."""
+    return f"http://{address}:{GARM_API_PORT}/api/v1"
+
+
+def _garm_auth_headers(token: str) -> dict[str, str]:
+    """Return authorization headers for GARM API requests."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _list_scalesets(base_url: str, token: str) -> list[dict]:
+    """List GARM scalesets via the REST API."""
+    resp = requests.get(f"{base_url}/scalesets", headers=_garm_auth_headers(token), timeout=30)
+    resp.raise_for_status()
+    scalesets = resp.json()
+    assert isinstance(scalesets, list), f"Expected list response, got: {type(scalesets)}"
+    return scalesets
+
+
+def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
+    """Return the first scaleset with the requested name."""
+    return next((scaleset for scaleset in scalesets if scaleset.get("name") == name), None)
+
+
+_SCALESET_TEST_ENDPOINT_NAME = "mock-github-endpoint"
+
+
+def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> str:
+    """Create a GitHub App credential in GARM pointing at the mock server.
+
+    Uses a dedicated endpoint name ``mock-github-endpoint`` (not the built-in
+    ``github.com`` one) so that GARM routes all GitHub API calls to our mock
+    instead of the real api.github.com.
+    """
+
+    def _request(
+        path: str, payload: dict, *, method: str = "POST", allow_conflict: bool = True
+    ) -> dict | None:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            f"{garm_url}{path}",
+            data=data,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = resp.read()
+                return json.loads(body) if body else None
+        except urllib.error.HTTPError as exc:
+            if allow_conflict and exc.code == 409:
+                return None
+            raise
+
+    try:
+        # Create a dedicated endpoint pointing at the mock server.
+        # GARM ships with a default "github.com" endpoint wired to
+        # api.github.com; we use a different name so our credential is
+        # guaranteed to use the mock URL for every GitHub API call.
+        _request(
+            "/github/endpoints",
+            {
+                "name": _SCALESET_TEST_ENDPOINT_NAME,
+                "description": "Mock GitHub API endpoint for integration tests",
+                "base_url": mock_base_url,
+                "api_base_url": mock_base_url,
+                "upload_base_url": mock_base_url,
+            },
+        )
+        _request(
+            "/github/credentials",
+            {
+                "name": _SCALESET_TEST_CREDENTIAL_NAME,
+                "description": "Test credential for scaleset integration tests",
+                "endpoint": _SCALESET_TEST_ENDPOINT_NAME,
+                "auth_type": "app",
+                "app": {
+                    "app_id": 12345,
+                    "installation_id": 67890,
+                    "private_key_bytes": base64.b64encode(
+                        _TEST_RSA_PRIVATE_KEY.encode()
+                    ).decode(),
+                },
+            },
+        )
+    except urllib.error.HTTPError:
+        _request(
+            "/credentials",
+            {
+                "name": _SCALESET_TEST_CREDENTIAL_NAME,
+                "description": "Test credential for scaleset integration tests",
+                "base_url": mock_base_url,
+                "api_base_url": mock_base_url,
+                "upload_base_url": mock_base_url,
+                "ca_cert_bundle": "",
+                "credentials": {
+                    "name": "test-creds",
+                    "description": "test",
+                    "type": "github_app",
+                    "payload": {
+                        "app_id": 12345,
+                        "installation_id": 67890,
+                        "private_key": _TEST_RSA_PRIVATE_KEY,
+                    },
+                },
+            },
+            allow_conflict=True,
+        )
+    return _SCALESET_TEST_CREDENTIAL_NAME
+
+
+
+def _restore_system_templates(garm_url: str, token: str) -> None:
+    """Restore GARM's built-in system templates so scaleset creation can find a template.
+
+    GARM requires a matching template (os_type=linux, forge_type=github) to exist
+    before CreateEntityScaleSet proceeds. This call restores all system templates.
+    Silently succeeds if templates already exist.
+    """
+    data = json.dumps({"restore_all": True}).encode()
+    req = urllib.request.Request(
+        f"{garm_url}/templates/restore",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30):
+        pass
+
+
+def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
+    """Register a GitHub organization in GARM with the test credential.
+
+    GARM requires an organization to be registered before a scaleset can be
+    created for it.  Silently skips if the org already exists (409 Conflict).
+    agent_mode=True prevents GARM from attempting to install a webhook using
+    the fake credential, which would fail against the mock server.
+    """
+    data = json.dumps(
+        {
+            "name": org_name,
+            "credentials_name": _SCALESET_TEST_CREDENTIAL_NAME,
+            "webhook_secret": "test-webhook-secret",
+            "agent_mode": True,
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"{garm_url}/organizations",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise
+
+
+
+@retry(
+    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
+    reraise=True,
+)
+def _wait_for_scaleset(
+    base_url: str,
+    token: str,
+    name: str,
+    *,
+    image_id: str | None = None,
+) -> dict:
+    """Wait until a named scaleset exists and optionally reflects a new image."""
+    scaleset = _find_scaleset(_list_scalesets(base_url, token), name)
+    assert scaleset is not None, f"Expected scaleset {name!r} to exist"
+    if image_id is not None:
+        observed_image = scaleset.get("image_id") or scaleset.get("image")
+        assert observed_image == image_id, (
+            f"Expected scaleset {name!r} image/image_id to be {image_id!r}, "
+            f"got {observed_image!r}"
+        )
+    return scaleset
+
