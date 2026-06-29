@@ -6,13 +6,15 @@ import secrets
 import string
 import subprocess
 import textwrap
+from contextlib import suppress
 import time
 from typing import Iterator
+from uuid import uuid4
 
 import jubilant
 import pytest
 import requests
-from tests.integration.helpers import TEST_RSA_PRIVATE_KEY
+from tests.integration.helpers import GITHUB_PATH_ENV_VAR, create_github_app_client, required_env, TEST_RSA_PRIVATE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +214,25 @@ def integrate_webhook_gateway_rabbitmq_fixture(
         delay=30,
     )
     return webhook_gateway_app
+
+@pytest.fixture(name="github_test_hook")
+def github_test_hook_fixture():
+    """Create and cleanup a temporary webhook in the test repository."""
+    github_path = required_env(GITHUB_PATH_ENV_VAR)
+    github_client = create_github_app_client()
+    repo = github_client.get_repo(github_path)
+    hook = repo.create_hook(
+        name="web",
+        events=["workflow_job"],
+        config={
+            "url": f"http://unreachable.url/{uuid4().hex}",
+            "content_type": "json",
+            "insecure_ssl": "0",
+        },
+    )
+    yield hook
+    with suppress(Exception):
+        hook.delete()
 
 
 @pytest.fixture(scope="module", name="postgresql")
@@ -483,7 +504,6 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
 def garm_configurator_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built garm-configurator charm file."""
     return charm_paths["garm-configurator"].path
-
 
 @pytest.fixture(scope="module", name="configurator_with_image")
 def deploy_configurator_with_image_fixture(

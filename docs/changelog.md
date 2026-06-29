@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-29
+
+- Implement the webhook redelivery service.
+
 ## 2026-06-26
 
 - Sync GARM GitHub App credentials from the garm-configurator relation over the GARM REST API, without restarting the service. Only the built-in `github.com` endpoint is supported.

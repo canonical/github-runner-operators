@@ -14,6 +14,10 @@ backends:
 environment:
   CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
   OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'
+  TEST_GITHUB_APP_ID: '$(HOST: echo "${TEST_GITHUB_APP_ID:-}")'
+  TEST_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${TEST_GITHUB_APP_INSTALLATION_ID:-}")'
+  TEST_GITHUB_APP_PRIVATE_KEY: '$(HOST: echo "${TEST_GITHUB_APP_PRIVATE_KEY:-}")'
+  TEST_GITHUB_PATH: '$(HOST: echo "${TEST_GITHUB_PATH:-}")'
 exclude:
 - .git
 - .tox
@@ -27,3 +31,8 @@ integration-suites:
     - integration-test
     environment:
       TOX_ENV: charms-integration
+    pytest-environment-template: |
+      TEST_GITHUB_APP_ID={{ env.get("TEST_GITHUB_APP_ID", "") }}
+      TEST_GITHUB_APP_INSTALLATION_ID={{ env.get("TEST_GITHUB_APP_INSTALLATION_ID", "") }}
+      TEST_GITHUB_APP_PRIVATE_KEY={{ env.get("TEST_GITHUB_APP_PRIVATE_KEY", "") }}
+      TEST_GITHUB_PATH={{ env.get("TEST_GITHUB_PATH", "") }}
