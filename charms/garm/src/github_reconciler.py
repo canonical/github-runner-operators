@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 # supported; custom (e.g. GitHub Enterprise) endpoints are not configurable by this charm.
 DEFAULT_GITHUB_ENDPOINT = "github.com"
 
-# Description stamped on credentials this charm manages. Reconcile only deletes credentials
-# carrying this marker, so operator- or otherwise out-of-band-managed credentials are left alone.
-MANAGED_CREDENTIAL_DESCRIPTION = "Managed by garm-configurator"
+MANAGED_CREDENTIAL_DESCRIPTION = "Managed by garm"
 
 
 @dataclass
