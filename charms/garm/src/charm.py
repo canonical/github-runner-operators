@@ -20,6 +20,12 @@ from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from github_reconciler import (
+    DEFAULT_GITHUB_ENDPOINT,
+    MANAGED_CREDENTIAL_DESCRIPTION,
+    CredentialSpec,
+    GithubReconciler,
+)
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -387,7 +393,7 @@ class GarmCharm(paas_charm.go.Charm):
         previous_hash = self._get_on_disk_toml_hash(provider_files)
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping service restart")
-            self._reconcile_scalesets()
+            self._reconcile_runners()
             return
 
         # Log non-sensitive metadata about the config change.
@@ -419,7 +425,7 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
-        self._reconcile_scalesets()
+        self._reconcile_runners()
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
@@ -733,26 +739,107 @@ class GarmCharm(paas_charm.go.Charm):
                 )
         return specs
 
-    def _reconcile_scalesets(self) -> None:
-        """Sync GARM scalesets against garm-configurator relation data."""
+    def _build_desired_credentials(self) -> list[CredentialSpec]:
+        """Build desired GitHub credentials from configurator relation data.
+
+        Credentials are deduped per (app_id, installation_id) so multiple configurator
+        units sharing one GitHub App yield a single GARM credential. The App private key
+        is sourced only from the Juju secret referenced by ``github_private_key_secret_uri``
+        — never from plaintext relation data. Credentials attach to GARM's built-in
+        ``github.com`` endpoint.
+
+        Returns:
+            The full desired set of GitHub credential specs.
+        """
+        credentials: dict[tuple[int, int], CredentialSpec] = {}
+        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
+            for unit in relation.units:
+                data = relation.data[unit]
+                app_id_raw = data.get("github_app_id", "")
+                installation_id_raw = data.get("github_installation_id", "")
+                key_secret_uri = data.get("github_private_key_secret_uri", "")
+                if not (app_id_raw and installation_id_raw and key_secret_uri):
+                    continue
+                try:
+                    app_id = int(app_id_raw)
+                    installation_id = int(installation_id_raw)
+                except ValueError:
+                    logger.warning(
+                        "Skipping GitHub credential from %s: non-numeric app/installation id "
+                        "(app_id=%r, installation_id=%r)",
+                        unit.name,
+                        app_id_raw,
+                        installation_id_raw,
+                    )
+                    continue
+
+                dedupe_key = (app_id, installation_id)
+                if dedupe_key in credentials:
+                    continue
+
+                private_key = self._resolve_secret_value(str(key_secret_uri))
+                if not private_key:
+                    logger.warning(
+                        "Skipping GitHub credential for app %s: private key secret unavailable",
+                        app_id,
+                    )
+                    continue
+
+                credentials[dedupe_key] = CredentialSpec(
+                    name=f"app-{app_id}-{installation_id}",
+                    endpoint=DEFAULT_GITHUB_ENDPOINT,
+                    app_id=app_id,
+                    installation_id=installation_id,
+                    private_key_bytes=list(private_key.encode()),
+                    description=MANAGED_CREDENTIAL_DESCRIPTION,
+                )
+
+        return list(credentials.values())
+
+    def _reconcile_runners(self) -> None:
+        """Sync GARM controller URLs, GitHub credentials, then scalesets from relation data.
+
+        The three steps are ordered, not independent: GARM rejects every operational call with
+        409 ``urls_required`` until the controller URLs are set, and scalesets reference the
+        GitHub credentials. So a single authenticated client configures the URLs and reconciles
+        credentials before scalesets are reconciled against the same client.
+        """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
-            logger.warning("Admin credentials not yet available; deferring scaleset reconcile")
+            logger.warning("Admin credentials not yet available; deferring reconcile")
             return
 
-        garm_url = f"http://127.0.0.1:{GARM_PORT}"
+        # Talk to GARM over its fixed local listener (same target as first-run), rather than
+        # _get_garm_url() which depends on charm config that is not set for the local API.
+        base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
         try:
             auth_client = GarmAuthenticatedClient.from_login(
-                f"{garm_url}/api/v1",
-                admin_creds["username"],
-                admin_creds["password"],
+                base_url, admin_creds["username"], admin_creds["password"]
             )
-            desired = self._build_desired_scalesets()
-            ScalesetReconciler(auth_client).reconcile(desired)
+            self._ensure_controller_urls(auth_client)
+            GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
+            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
             self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
-            logger.warning("GARM API error during scaleset reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus("Scaleset sync failed")
+            logger.warning("GARM API error during reconcile: %s", exc)
+            self.unit.status = ops.WaitingStatus("GARM sync failed")
+
+    def _ensure_controller_urls(self, auth_client: GarmAuthenticatedClient) -> None:
+        """Configure the GARM controller URLs that gate its operational API.
+
+        GARM returns 409 ``urls_required`` on credential/endpoint/scaleset operations until
+        the metadata and callback URLs are set. The base is the application's reachable URL
+        provided by the go framework: the external ingress URL when an ingress relation is
+        present, otherwise the in-cluster Kubernetes service URL. Runners reach the
+        metadata/callback paths through it, and GitHub reaches the webhook path; both require
+        the public ingress URL, so this is re-run when ingress becomes ready or is revoked.
+        """
+        base = self._base_url.rstrip("/")
+        auth_client.update_controller(
+            metadata_url=f"{base}/api/v1/metadata",
+            callback_url=f"{base}/api/v1/callbacks",
+            webhook_url=f"{base}/webhooks",
+        )
 
 
 if __name__ == "__main__":
