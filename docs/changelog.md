@@ -10,8 +10,8 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-06-26
 
-- Sync GARM GitHub App credentials and endpoints from the garm-configurator relation over the GARM REST API, without restarting the service.
-- `garm-configurator`: add a new required `github-app-id` config option (the numeric GitHub App ID, which GARM uses to authenticate the App) and remove the unused `github-app-client-id` option (GARM authenticates Apps by app ID, not the OAuth client ID). Existing deployments must set `github-app-id`.
+- Sync GARM GitHub App credentials from the garm-configurator relation over the GARM REST API, without restarting the service. Only the built-in `github.com` endpoint is supported.
+- `garm-configurator`: add a new required `github-app-id` config option (the numeric GitHub App ID, which GARM uses to authenticate the App) and remove the unused `github-app-client-id` option (GARM authenticates Apps by app ID, not the OAuth client ID). Existing deployments must set `github-app-id`. The `github-app-id` and `github-app-installation-id` options are now integer-typed, so non-numeric values are rejected at config-set time.
 
 ## 2026-06-23
 
