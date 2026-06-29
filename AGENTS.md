@@ -50,7 +50,7 @@ Read full current state, act idempotently, and set unit status once.
 
 For **`paas_charm` charms** (`garm`, `planner-operator`, `webhook-gateway-operator`) — the base class already runs the holistic flow (`PaasCharm.restart()`):
 
-- **DON'T** add a `_reconcile` method.
+- **DON'T** implement a separate reconcile — `restart()` already is the reconcile. A thin `_reconcile` dispatcher that just calls `self.restart()` is fine for routing multiple hook observers through one entry point; a `_reconcile` that implements its own reconcile logic is not.
 - **DO** inject behaviour by overriding a framework hook and calling `super()` — e.g. `restart()` (`garm`: write config + first-run; `planner-operator`: sync relation endpoints) or `_create_app()` (`planner-operator`/`webhook-gateway-operator`: inject OTel env).
 - **DO** gate on readiness with an early return (`if not self.is_ready(): return`); **DON'T** call `event.defer()`.
 
@@ -79,7 +79,7 @@ We borrow from the canonical
 [`charm-engineer.agent.md`](https://github.com/canonical/copilot-collections/blob/main/groups/platform-engineering/agents/charm-engineer.agent.md),
 but some of its rules assume a hand-written `ops` charm and do **not** apply to our paas charms:
 
-- **No second `_reconcile`** — the `paas_charm` base class reconciles (see above).
+- **No separate reconcile logic** — `restart()` is the reconcile (see above). A thin `_reconcile` dispatcher that just calls `self.restart()` is fine; don't implement reconcile logic outside `restart()`.
 - **No hand-authored `workload.py` / Pebble layer** — the `go-framework` extension owns the
   workload; touch Pebble only inside a `restart()` override when strictly necessary.
 - **`state.py` Pydantic abstraction is optional** — only `garm-configurator` has a real

@@ -13,7 +13,6 @@ from charm_state import SSHDebugInfo
 from garm_api import GarmApiError
 
 _CONN = SSHDebugInfo(host="h", port=10022, rsa_fingerprint="rsa-fp", ed25519_fingerprint="ed-fp")
-_TOKEN = "jwt-token"
 
 
 # ---------------------------------------------------------------------------
@@ -33,9 +32,9 @@ def test_apply_charmed_template_deletes_when_no_connections_and_charmed_exists()
     charmed.id = 5
     client.list_templates.return_value = [charmed]
 
-    garm_template.apply_charmed_template(client, _TOKEN, [])
+    garm_template.apply_charmed_template(client, [])
 
-    client.delete_template.assert_called_once_with(_TOKEN, charmed.id)
+    client.delete_template.assert_called_once_with(charmed.id)
     client.create_template.assert_not_called()
     client.update_template.assert_not_called()
 
@@ -49,7 +48,7 @@ def test_apply_charmed_template_no_op_when_no_connections_and_no_charmed():
     client = MagicMock()
     client.list_templates.return_value = []
 
-    garm_template.apply_charmed_template(client, _TOKEN, [])
+    garm_template.apply_charmed_template(client, [])
 
     client.delete_template.assert_not_called()
     client.create_template.assert_not_called()
@@ -68,7 +67,7 @@ def test_apply_charmed_template_raises_when_base_template_missing():
     with pytest.raises(
         garm_template.CharmedTemplateError, match=garm_template.GARM_BASE_TEMPLATE_NAME
     ):
-        garm_template.apply_charmed_template(client, _TOKEN, [_CONN])
+        garm_template.apply_charmed_template(client, [_CONN])
 
 
 def test_apply_charmed_template_syncs_when_connections_and_base_exists():
@@ -94,7 +93,7 @@ def test_apply_charmed_template_syncs_when_connections_and_base_exists():
         MagicMock(data=None),  # _sync_charmed_template change-check (data=None → proceed)
     ]
 
-    garm_template.apply_charmed_template(client, _TOKEN, [_CONN])
+    garm_template.apply_charmed_template(client, [_CONN])
 
     client.update_template.assert_called_once()
 
@@ -109,7 +108,7 @@ def test_apply_charmed_template_propagates_garm_api_error_from_list_templates():
     client.list_templates.side_effect = GarmApiError("boom")
 
     with pytest.raises(GarmApiError):
-        garm_template.apply_charmed_template(client, _TOKEN, [_CONN])
+        garm_template.apply_charmed_template(client, [_CONN])
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +123,7 @@ def test_delete_charmed_template_if_present_no_op_when_charmed_is_none():
     assert: delete_template is not called.
     """
     client = MagicMock()
-    garm_template._delete_charmed_template_if_present(client, _TOKEN, None)
+    garm_template._delete_charmed_template_if_present(client, None)
     client.delete_template.assert_not_called()
 
 
@@ -138,9 +137,9 @@ def test_delete_charmed_template_if_present_calls_delete_when_charmed_exists():
     charmed = MagicMock()
     charmed.id = 99
 
-    garm_template._delete_charmed_template_if_present(client, _TOKEN, charmed)
+    garm_template._delete_charmed_template_if_present(client, charmed)
 
-    client.delete_template.assert_called_once_with(_TOKEN, 99)
+    client.delete_template.assert_called_once_with(99)
 
 
 def test_delete_charmed_template_if_present_raises_on_api_error():
@@ -155,7 +154,7 @@ def test_delete_charmed_template_if_present_raises_on_api_error():
     client.delete_template.side_effect = GarmApiError("network error")
 
     with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._delete_charmed_template_if_present(client, _TOKEN, charmed)
+        garm_template._delete_charmed_template_if_present(client, charmed)
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +172,7 @@ def test_build_charmed_template_data_raises_on_api_error():
     client.get_template.side_effect = GarmApiError("timeout")
 
     with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._build_charmed_template_data(client, _TOKEN, 1, [_CONN])
+        garm_template._build_charmed_template_data(client, 1, [_CONN])
 
 
 def test_build_charmed_template_data_raises_when_data_is_null():
@@ -190,7 +189,7 @@ def test_build_charmed_template_data_raises_when_data_is_null():
     with pytest.raises(
         garm_template.CharmedTemplateError, match=garm_template.GARM_BASE_TEMPLATE_NAME
     ):
-        garm_template._build_charmed_template_data(client, _TOKEN, 1, [_CONN])
+        garm_template._build_charmed_template_data(client, 1, [_CONN])
 
 
 def test_build_charmed_template_data_prepends_snippet_after_shebang():
@@ -205,7 +204,7 @@ def test_build_charmed_template_data_prepends_snippet_after_shebang():
     template.data = base64.b64encode(base_script.encode()).decode()
     client.get_template.return_value = template
 
-    result = garm_template._build_charmed_template_data(client, _TOKEN, 1, [_CONN])
+    result = garm_template._build_charmed_template_data(client, 1, [_CONN])
 
     decoded = result.decode()
     assert decoded.startswith("#!/bin/bash\n")
@@ -234,9 +233,9 @@ def test_sync_charmed_template_updates_when_data_changed():
     current.data = base64.b64encode(b"old-data").decode()
     client.get_template.return_value = current
 
-    garm_template._sync_charmed_template(client, _TOKEN, charmed, b"new-data", 1)
+    garm_template._sync_charmed_template(client, charmed, b"new-data", 1)
 
-    client.update_template.assert_called_once_with(_TOKEN, 42, b"new-data")
+    client.update_template.assert_called_once_with(42, b"new-data")
     client.create_template.assert_not_called()
 
 
@@ -254,7 +253,7 @@ def test_sync_charmed_template_skips_when_data_unchanged():
     current.data = base64.b64encode(data).decode()
     client.get_template.return_value = current
 
-    garm_template._sync_charmed_template(client, _TOKEN, charmed, data, 1)
+    garm_template._sync_charmed_template(client, charmed, data, 1)
 
     client.update_template.assert_not_called()
     client.create_template.assert_not_called()
@@ -271,9 +270,9 @@ def test_sync_charmed_template_updates_when_get_raises():
     charmed.id = 11
     client.get_template.side_effect = GarmApiError("unreachable")
 
-    garm_template._sync_charmed_template(client, _TOKEN, charmed, b"data", 1)
+    garm_template._sync_charmed_template(client, charmed, b"data", 1)
 
-    client.update_template.assert_called_once_with(_TOKEN, 11, b"data")
+    client.update_template.assert_called_once_with(11, b"data")
 
 
 def test_sync_charmed_template_raises_when_update_fails():
@@ -289,7 +288,7 @@ def test_sync_charmed_template_raises_when_update_fails():
     client.update_template.side_effect = GarmApiError("write error")
 
     with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._sync_charmed_template(client, _TOKEN, charmed, b"data", 1)
+        garm_template._sync_charmed_template(client, charmed, b"data", 1)
 
 
 def test_sync_charmed_template_creates_when_charmed_absent():
@@ -300,7 +299,7 @@ def test_sync_charmed_template_creates_when_charmed_absent():
     """
     client = MagicMock()
 
-    garm_template._sync_charmed_template(client, _TOKEN, None, b"script", 1)
+    garm_template._sync_charmed_template(client, None, b"script", 1)
 
     client.create_template.assert_called_once()
     client.update_template.assert_not_called()
@@ -316,4 +315,4 @@ def test_sync_charmed_template_raises_when_create_fails():
     client.create_template.side_effect = GarmApiError("quota exceeded")
 
     with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._sync_charmed_template(client, _TOKEN, None, b"script", 1)
+        garm_template._sync_charmed_template(client, None, b"script", 1)
