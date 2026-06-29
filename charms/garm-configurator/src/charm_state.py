@@ -140,12 +140,12 @@ class GithubAppConfig(BaseModel):
 
     Attributes:
         app_id: GitHub App ID (numeric).
-        installation_id: GitHub App installation ID.
+        installation_id: GitHub App installation ID (numeric).
         private_key: GitHub App private key (resolved from secret).
     """
 
-    app_id: str
-    installation_id: str
+    app_id: int
+    installation_id: int
     private_key: str
 
     @classmethod
@@ -161,22 +161,18 @@ class GithubAppConfig(BaseModel):
         Returns:
             The parsed GitHub App configuration.
         """
+        # app/installation ids are ``int`` config options, so Juju rejects non-numeric
+        # values at config-set time; here we only guard against them being unset.
         app_id = charm.config.get(GITHUB_APP_ID_CONFIG_NAME)
-        if not app_id or not str(app_id).strip():
+        if app_id is None:
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_ID_CONFIG_NAME}"
             )
-        if not str(app_id).strip().isdigit():
-            raise CharmConfigInvalidError(f"{GITHUB_APP_ID_CONFIG_NAME} must be numeric")
 
         installation_id = charm.config.get(GITHUB_APP_INSTALLATION_ID_CONFIG_NAME)
-        if not installation_id or not str(installation_id).strip():
+        if installation_id is None:
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_INSTALLATION_ID_CONFIG_NAME}"
-            )
-        if not str(installation_id).strip().isdigit():
-            raise CharmConfigInvalidError(
-                f"{GITHUB_APP_INSTALLATION_ID_CONFIG_NAME} must be numeric"
             )
 
         private_key_secret_id = charm.config.get(GITHUB_APP_PRIVATE_KEY_CONFIG_NAME)
@@ -193,8 +189,8 @@ class GithubAppConfig(BaseModel):
             ) from e
 
         return cls(
-            app_id=str(app_id).strip(),
-            installation_id=str(installation_id).strip(),
+            app_id=int(app_id),
+            installation_id=int(installation_id),
             private_key=private_key,
         )
 

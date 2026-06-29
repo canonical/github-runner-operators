@@ -34,8 +34,8 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "openstack-project-domain-name": "Default",
         "openstack-region-name": "RegionOne",
         "openstack-network": "external-net",
-        "github-app-id": "99999",
-        "github-app-installation-id": "67890",
+        "github-app-id": 99999,
+        "github-app-installation-id": 67890,
         "github-app-private-key": private_key_secret.id,
         "name": "my-scaleset",
         "flavor": "m1.large",
@@ -93,19 +93,9 @@ _MISSING_CONFIG_SENTINEL = object()
             id="missing-github-app-id",
         ),
         pytest.param(
-            {"github-app-id": "not-a-number"},
-            "github-app-id must be numeric",
-            id="non-numeric-github-app-id",
-        ),
-        pytest.param(
             {"github-app-installation-id": _MISSING_CONFIG_SENTINEL},
             "Missing required configuration: github-app-installation-id",
             id="missing-github-app-installation-id",
-        ),
-        pytest.param(
-            {"github-app-installation-id": "not-a-number"},
-            "github-app-installation-id must be numeric",
-            id="non-numeric-github-app-installation-id",
         ),
         pytest.param(
             {"github-app-private-key": _MISSING_CONFIG_SENTINEL},
