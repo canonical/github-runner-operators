@@ -1,4 +1,5 @@
 jubilant
+PyGithub
 ops
 pytest
 pytest-asyncio

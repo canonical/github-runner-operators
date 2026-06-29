@@ -209,6 +209,16 @@ You would need an LXD and MicroK8s cloud to run the tests. Ensure the `microk8s`
 controller is active in your Juju client before running the tests. An
 example run command in the root directory is as follows:
 
+Before running `webhook-gateway-integration`, export the GitHub App credentials
+required by `test_webhook_redelivery.py`:
+
+```shell
+export TEST_GITHUB_APP_ID=<github-app-id>
+export TEST_GITHUB_APP_INSTALLATION_ID=<github-app-installation-id>
+export TEST_GITHUB_APP_PRIVATE_KEY='<pem-private-key>'
+export TEST_GITHUB_PATH=<github-org/github-repo>
+```
+
 ```shell
 tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
 ```
