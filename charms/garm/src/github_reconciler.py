@@ -2,37 +2,25 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""GitHub reconciler: diffs desired vs observed GARM GitHub endpoints and credentials."""
+"""GitHub reconciler: diffs desired vs observed GARM GitHub credentials."""
 
 import logging
 from dataclasses import dataclass, field
 
 from garm_api import GarmAuthenticatedClient
 from garm_client.models.create_github_credentials_params import CreateGithubCredentialsParams
-from garm_client.models.create_github_endpoint_params import CreateGithubEndpointParams
 from garm_client.models.github_app import GithubApp
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
-from garm_client.models.update_github_endpoint_params import UpdateGithubEndpointParams
 
 logger = logging.getLogger(__name__)
 
-# The built-in GARM GitHub endpoint that must never be deleted.
+# GARM's built-in GitHub endpoint that all managed credentials attach to. Only github.com is
+# supported; custom (e.g. GitHub Enterprise) endpoints are not configurable by this charm.
 DEFAULT_GITHUB_ENDPOINT = "github.com"
 
 # Description stamped on credentials this charm manages. Reconcile only deletes credentials
 # carrying this marker, so operator- or otherwise out-of-band-managed credentials are left alone.
 MANAGED_CREDENTIAL_DESCRIPTION = "Managed by garm-configurator"
-
-
-@dataclass
-class EndpointSpec:
-    """Desired state for one GARM GitHub endpoint."""
-
-    name: str
-    base_url: str = ""
-    api_base_url: str = ""
-    upload_base_url: str = ""
-    description: str = ""
 
 
 @dataclass
@@ -48,7 +36,7 @@ class CredentialSpec:
 
 
 class GithubReconciler:
-    """Reconciles GARM GitHub endpoints and credentials against desired spec lists."""
+    """Reconciles GARM GitHub credentials against a desired spec list."""
 
     def __init__(self, client: GarmAuthenticatedClient) -> None:
         """Initialise the reconciler.
@@ -58,70 +46,16 @@ class GithubReconciler:
         """
         self._client = client
 
-    def reconcile(self, endpoints: list[EndpointSpec], credentials: list[CredentialSpec]) -> None:
-        """Sync GARM GitHub endpoints and credentials to match the desired state.
+    def reconcile(self, credentials: list[CredentialSpec]) -> None:
+        """Sync GARM GitHub credentials to match the desired state.
 
-        Endpoints are reconciled first because credentials reference them.
-        Performs the minimum set of CREATE / UPDATE / DELETE operations.
+        Credentials attach to GARM's built-in github.com endpoint. Performs the minimum
+        set of CREATE / UPDATE / DELETE operations.
 
         Args:
-            endpoints: The full desired set of GitHub endpoints.
             credentials: The full desired set of GitHub credentials.
         """
-        self._reconcile_endpoints(endpoints)
         self._reconcile_credentials(credentials)
-
-    def _reconcile_endpoints(self, desired: list[EndpointSpec]) -> None:
-        # The charm creates/updates the endpoints it is asked to manage but never deletes
-        # endpoints it did not create: doing so would remove the built-in github.com endpoint
-        # or any enterprise endpoints an operator configured out of band. Endpoint deletion
-        # belongs with explicit custom-endpoint management, which is not in scope here.
-        observed = {e.name: e for e in self._client.list_github_endpoints() if e.name}
-        for spec in desired:
-            if spec.name in observed:
-                self._maybe_update_endpoint(observed[spec.name], spec)
-            else:
-                self._create_endpoint(spec)
-
-    def _create_endpoint(self, spec: EndpointSpec) -> None:
-        kwargs: dict = {"name": spec.name}
-        if spec.base_url:
-            kwargs["base_url"] = spec.base_url
-        if spec.api_base_url:
-            kwargs["api_base_url"] = spec.api_base_url
-        if spec.upload_base_url:
-            kwargs["upload_base_url"] = spec.upload_base_url
-        if spec.description:
-            kwargs["description"] = spec.description
-        params = CreateGithubEndpointParams(**kwargs)
-        logger.info("Creating GitHub endpoint '%s'", spec.name)
-        self._client.create_github_endpoint(params)
-
-    def _maybe_update_endpoint(self, observed, spec: EndpointSpec) -> None:
-        if not self._endpoint_needs_update(observed, spec):
-            logger.debug("GitHub endpoint '%s' is up to date", spec.name)
-            return
-        params = UpdateGithubEndpointParams(
-            base_url=spec.base_url or None,
-            api_base_url=spec.api_base_url or None,
-            upload_base_url=spec.upload_base_url or None,
-            description=spec.description or None,
-        )
-        logger.info("Updating GitHub endpoint '%s'", spec.name)
-        self._client.update_github_endpoint(spec.name, params)
-
-    @staticmethod
-    def _endpoint_needs_update(observed, spec: EndpointSpec) -> bool:
-        # An empty spec field means "unmanaged": only diff fields the spec actually sets, so we
-        # don't fire no-op updates (UpdateGithubEndpointParams omits None fields when serialized).
-        return any(
-            (
-                bool(spec.base_url) and observed.base_url != spec.base_url,
-                bool(spec.api_base_url) and observed.api_base_url != spec.api_base_url,
-                bool(spec.upload_base_url) and observed.upload_base_url != spec.upload_base_url,
-                bool(spec.description) and observed.description != spec.description,
-            )
-        )
 
     def _reconcile_credentials(self, desired: list[CredentialSpec]) -> None:
         observed = {c.name: c for c in self._client.list_credentials() if c.name}
