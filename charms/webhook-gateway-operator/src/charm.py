@@ -9,27 +9,68 @@ import typing
 
 import ops
 import paas_charm.go
+from pydantic import Field, model_validator
 
 logger = logging.getLogger(__name__)
 
 
-_REDELIVERY_REQUIRED_FIELDS = (
-    "github-path",
-    "webhook-id",
-    "github-app-id",
-    "github-app-installation-id",
-    "github-app-private-key",
-)
-_REDELIVERY_INT_FIELDS = (
-    "webhook-id",
-    "github-app-id",
-    "github-app-installation-id",
-    "redelivery-interval",
-)
+class WebhookGatewayConfig(paas_charm.go.Charm.framework_config_class):
+    """Framework config with redelivery validation.
+
+    Attrs:
+        github_path: GitHub org or org/repo path for webhook redelivery.
+        webhook_id: ID of the webhook to check deliveries for.
+        github_app_id: GitHub App ID for authentication.
+        github_app_installation_id: GitHub App installation ID.
+        redelivery_interval: Interval in seconds between redelivery checks.
+    """
+
+    github_path: str | None = Field(alias="github-path", default=None)
+    webhook_id: int | None = Field(alias="webhook-id", default=None, gt=0)
+    github_app_id: int | None = Field(alias="github-app-id", default=None, gt=0)
+    github_app_installation_id: int | None = Field(
+        alias="github-app-installation-id", default=None, gt=0
+    )
+    redelivery_interval: int = Field(alias="redelivery-interval", default=600, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_redelivery_all_or_nothing(cls, data: dict) -> dict:
+        """Validate that redelivery fields are all set or all unset.
+
+        Note: github-app-private-key is a secret-type config handled by paas_charm's
+        user_defined_config path (not as a framework config field), so we check for
+        it here in the raw input data.
+
+        Args:
+            data: raw input data.
+
+        Returns:
+            The unmodified input data.
+
+        Raises:
+            ValueError: if some redelivery fields are set but others are missing.
+        """
+        fields = (
+            "github-path",
+            "webhook-id",
+            "github-app-id",
+            "github-app-installation-id",
+            "github-app-private-key",
+        )
+        present = [f for f in fields if data.get(f)]
+        if not present:
+            return data
+        missing = [f for f in fields if not data.get(f)]
+        if missing:
+            raise ValueError(f"Incomplete redelivery config: missing {', '.join(missing)}")
+        return data
 
 
 class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
     """Go Charm service."""
+
+    framework_config_class = WebhookGatewayConfig
 
     def __init__(self, *args: typing.Any) -> None:
         """Initialize the instance.
@@ -39,45 +80,8 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
         """
         super().__init__(*args)
 
-    def is_ready(self) -> bool:
-        """Check if the charm is ready to start the workload application.
-
-        Returns:
-            True if the charm is ready to start the workload application.
-        """
-        error = self._validate_redelivery_config()
-        if error:
-            logger.error("Invalid redelivery config: %s", error)
-            self.update_app_and_unit_status(ops.BlockedStatus("Invalid redelivery config"))
-            return False
-        return super().is_ready()
-
-    def _validate_redelivery_config(self) -> str | None:
-        """Validate redelivery-related config options.
-
-        Returns:
-            An error message if validation fails, None otherwise.
-        """
-        present = [f for f in _REDELIVERY_REQUIRED_FIELDS if self.config.get(f)]
-        if not present:
-            return None
-
-        missing = [f for f in _REDELIVERY_REQUIRED_FIELDS if not self.config.get(f)]
-        if missing:
-            return f"Incomplete redelivery config: missing {', '.join(missing)}"
-
-        invalid = [
-            f
-            for f in _REDELIVERY_INT_FIELDS
-            if (val := self.config.get(f)) is not None and (not isinstance(val, int) or val <= 0)
-        ]
-        if invalid:
-            return f"Invalid config (must be positive integers): {', '.join(invalid)}"
-
-        return None
-
     def _create_app(self):
-        """Patch _create_app to add OpenTelemetry and redelivery environment variables."""
+        """Patch _create_app to add OpenTelemetry environment variables."""
         original_app = super()._create_app()
         charm = self
 
@@ -95,23 +99,6 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
                 del env["OTEL_EXPORTER_OTLP_ENDPOINT"]
                 env["OTEL_TRACES_EXPORTER"] = "otlp"
                 env["OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"] = "http/protobuf"
-
-            if charm.config.get("github-path"):
-                github_path = str(charm.config["github-path"])
-                parts = github_path.split("/", 1)
-                env["APP_WEBHOOK_GITHUB_ORG"] = parts[0]
-                if len(parts) > 1:
-                    env["APP_WEBHOOK_GITHUB_REPO"] = parts[1]
-            if charm.config.get("webhook-id"):
-                env["APP_WEBHOOK_ID"] = str(charm.config["webhook-id"])
-            if charm.config.get("redelivery-interval"):
-                env["APP_REDELIVERY_INTERVAL_SECONDS"] = str(charm.config["redelivery-interval"])
-            if charm.config.get("github-app-id"):
-                env["APP_GITHUB_APP_ID"] = str(charm.config["github-app-id"])
-            if charm.config.get("github-app-installation-id"):
-                env["APP_GITHUB_APP_INSTALLATION_ID"] = str(
-                    charm.config["github-app-installation-id"]
-                )
 
             return env
 

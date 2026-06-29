@@ -19,7 +19,7 @@ func TestConfigFromEnvReturnsNilWhenMissingRequiredFields(t *testing.T) {
 		act: Build config from environment.
 		assert: Nil config is returned because redelivery is not configured.
 	*/
-	t.Setenv(WebhookGitHubOrgEnvVar, "")
+	t.Setenv(GitHubPathEnvVar, "")
 	t.Setenv(WebhookIDEnvVar, "")
 
 	cfg, err := ConfigFromEnv()
@@ -34,7 +34,7 @@ func TestConfigFromEnvParsesAppAuthFields(t *testing.T) {
 		act: Build config from environment.
 		assert: App auth fields are parsed into config.
 	*/
-	t.Setenv(WebhookGitHubOrgEnvVar, "test-org")
+	t.Setenv(GitHubPathEnvVar, "test-org")
 	t.Setenv(WebhookIDEnvVar, "7")
 	t.Setenv(GitHubAppIDEnvVar, "99")
 	t.Setenv(GitHubAppInstallationIDEnvVar, "100")
@@ -44,6 +44,8 @@ func TestConfigFromEnvParsesAppAuthFields(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
+	assert.Equal(t, "test-org", cfg.GitHubOrg)
+	assert.Equal(t, "", cfg.GitHubRepo)
 	assert.Equal(t, int64(99), cfg.GitHubAppID)
 	assert.Equal(t, int64(100), cfg.GitHubAppInstallationID)
 	assert.Equal(t, "private-key", cfg.GitHubAppPrivateKey)
@@ -55,7 +57,7 @@ func TestConfigFromEnvReturnsErrorOnInvalidWebhookID(t *testing.T) {
 		act: Build config from environment.
 		assert: Parsing error is returned.
 	*/
-	t.Setenv(WebhookGitHubOrgEnvVar, "test-org")
+	t.Setenv(GitHubPathEnvVar, "test-org")
 	t.Setenv(WebhookIDEnvVar, "not-a-number")
 
 	cfg, err := ConfigFromEnv()
@@ -89,4 +91,40 @@ func TestNewDaemonRejectsInvalidConfig(t *testing.T) {
 
 	assert.Nil(t, daemon)
 	assert.ErrorContains(t, err, "invalid redelivery config")
+}
+
+func TestConfigFromEnvParsesGitHubPathWithRepo(t *testing.T) {
+	/*
+		arrange: Set github path with org/repo format.
+		act: Build config from environment.
+		assert: Org and repo are parsed correctly.
+	*/
+	t.Setenv(GitHubPathEnvVar, "my-org/my-repo")
+	t.Setenv(WebhookIDEnvVar, "42")
+
+	cfg, err := ConfigFromEnv()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	assert.Equal(t, "my-org", cfg.GitHubOrg)
+	assert.Equal(t, "my-repo", cfg.GitHubRepo)
+}
+
+func TestParseGitHubPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		wantOrg  string
+		wantRepo string
+	}{
+		{name: "org only", path: "my-org", wantOrg: "my-org", wantRepo: ""},
+		{name: "org and repo", path: "my-org/my-repo", wantOrg: "my-org", wantRepo: "my-repo"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			org, repo := parseGitHubPath(tc.path)
+			assert.Equal(t, tc.wantOrg, org)
+			assert.Equal(t, tc.wantRepo, repo)
+		})
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,18 +18,17 @@ const (
 	GitHubAppIDEnvVar             = "APP_GITHUB_APP_ID"
 	GitHubAppInstallationIDEnvVar = "APP_GITHUB_APP_INSTALLATION_ID"
 	GitHubAppPrivateKeyEnvVar     = "APP_GITHUB_APP_PRIVATE_KEY_VALUE"
-	WebhookGitHubOrgEnvVar        = "APP_WEBHOOK_GITHUB_ORG"
-	WebhookGitHubRepoEnvVar       = "APP_WEBHOOK_GITHUB_REPO"
+	GitHubPathEnvVar              = "APP_GITHUB_PATH"
 	WebhookIDEnvVar               = "APP_WEBHOOK_ID"
-	RedeliveryIntervalEnvVar      = "APP_REDELIVERY_INTERVAL_SECONDS"
+	RedeliveryIntervalEnvVar      = "APP_REDELIVERY_INTERVAL"
 )
 
 // ConfigFromEnv builds a redelivery config from environment variables.
-// Returns nil if redelivery is not configured (missing org or webhook ID).
+// Returns nil if redelivery is not configured (missing github path or webhook ID).
 func ConfigFromEnv() (*Config, error) {
-	githubOrg := os.Getenv(WebhookGitHubOrgEnvVar)
+	githubPath := os.Getenv(GitHubPathEnvVar)
 	webhookIDStr := os.Getenv(WebhookIDEnvVar)
-	if githubOrg == "" || webhookIDStr == "" {
+	if githubPath == "" || webhookIDStr == "" {
 		return nil, nil
 	}
 
@@ -37,9 +37,11 @@ func ConfigFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("invalid %s value: %w", WebhookIDEnvVar, err)
 	}
 
+	org, repo := parseGitHubPath(githubPath)
+
 	cfg := &Config{
-		GitHubOrg:  githubOrg,
-		GitHubRepo: os.Getenv(WebhookGitHubRepoEnvVar),
+		GitHubOrg:  org,
+		GitHubRepo: repo,
 		WebhookID:  webhookID,
 	}
 
@@ -89,4 +91,11 @@ func configureInterval(cfg *Config) error {
 	cfg.Interval = time.Duration(seconds) * time.Second
 
 	return nil
+}
+
+// parseGitHubPath splits a github path of the form "org" or "org/repo"
+// into its org and optional repo components.
+func parseGitHubPath(path string) (org, repo string) {
+	org, repo, _ = strings.Cut(path, "/")
+	return org, repo
 }
