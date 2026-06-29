@@ -1,10 +1,9 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import MagicMock, patch
-
+import ops
+import ops.testing
 import pytest
-from paas_charm.exceptions import CharmConfigInvalidError
 from pydantic import ValidationError
 
 from charm import GithubRunnerWebhookGatewayCharm, WebhookGatewayConfig
@@ -135,33 +134,36 @@ class TestWebhookGatewayConfig:
             WebhookGatewayConfig.model_validate(config)
 
 
-_PATCH_CONFIG_GET = patch(
-    "paas_charm.charm.config_get_with_secret",
-    side_effect=lambda _charm, k: _charm.config.get(k),
-)
-
-
 class TestCharmBlockedStatus:
-    """Tests verifying invalid config raises CharmConfigInvalidError (→ BlockedStatus)."""
+    """Tests verifying the charm enters BlockedStatus on invalid redelivery config."""
 
-    @_PATCH_CONFIG_GET
-    def test_blocked_on_incomplete_redelivery_config(self, _mock_config_get):
-        """get_framework_config raises CharmConfigInvalidError on partial redelivery config.
+    def test_blocked_on_incomplete_redelivery_config(self):
+        ctx = ops.testing.Context(GithubRunnerWebhookGatewayCharm)
+        webhook_secret = ops.testing.Secret(tracked_content={"value": "s3cr3t"})
+        state = ops.testing.State(
+            config={"github-path": "my-org", "webhook-secret": webhook_secret.id},
+            containers=[ops.testing.Container(name="app", can_connect=True)],
+            secrets=[webhook_secret],
+        )
+        out = ctx.run(ctx.on.config_changed(), state)
+        assert out.unit_status == ops.BlockedStatus("Invalid redelivery config")
 
-        paas_charm's restart() catches this and sets BlockedStatus.
-        """
-        charm = MagicMock()
-        charm.framework_config_class = WebhookGatewayConfig
-        charm.config = {"github-path": "my-org", "redelivery-interval": 600}
-
-        with pytest.raises(CharmConfigInvalidError):
-            GithubRunnerWebhookGatewayCharm.get_framework_config(charm)
-
-    @_PATCH_CONFIG_GET
-    def test_not_blocked_when_all_redelivery_fields_present(self, _mock_config_get):
-        charm = MagicMock()
-        charm.framework_config_class = WebhookGatewayConfig
-        charm.config = {**_VALID_REDELIVERY_CONFIG, "redelivery-interval": 600}
-
-        result = GithubRunnerWebhookGatewayCharm.get_framework_config(charm)
-        assert result.github_path == "my-org"
+    def test_blocked_on_complete_but_invalid_redelivery_config(self):
+        ctx = ops.testing.Context(GithubRunnerWebhookGatewayCharm)
+        webhook_secret = ops.testing.Secret(tracked_content={"value": "s3cr3t"})
+        app_private_key = ops.testing.Secret(tracked_content={"value": "pem-content"})
+        state = ops.testing.State(
+            config={
+                "github-path": "my-org",
+                "webhook-id": 123,
+                "github-app-id": 789,
+                "github-app-installation-id": 456,
+                "github-app-private-key": app_private_key.id,
+                "redelivery-interval": 0,
+                "webhook-secret": webhook_secret.id,
+            },
+            containers=[ops.testing.Container(name="app", can_connect=True)],
+            secrets=[webhook_secret, app_private_key],
+        )
+        out = ctx.run(ctx.on.config_changed(), state)
+        assert out.unit_status == ops.BlockedStatus("Invalid redelivery config")

@@ -9,13 +9,22 @@ import typing
 
 import ops
 import paas_charm.go
-from pydantic import Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 logger = logging.getLogger(__name__)
 
 
-class WebhookGatewayConfig(paas_charm.go.Charm.framework_config_class):
-    """Framework config with redelivery validation.
+_REDELIVERY_FIELDS = (
+    "github-path",
+    "webhook-id",
+    "github-app-id",
+    "github-app-installation-id",
+    "github-app-private-key",
+)
+
+
+class WebhookGatewayConfig(BaseModel):
+    """Redelivery config validation model.
 
     Attrs:
         github_path: GitHub org or org/repo path for webhook redelivery.
@@ -24,6 +33,8 @@ class WebhookGatewayConfig(paas_charm.go.Charm.framework_config_class):
         github_app_installation_id: GitHub App installation ID.
         redelivery_interval: Interval in seconds between redelivery checks.
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     github_path: str | None = Field(alias="github-path", default=None)
     webhook_id: int | None = Field(alias="webhook-id", default=None, gt=0)
@@ -35,33 +46,13 @@ class WebhookGatewayConfig(paas_charm.go.Charm.framework_config_class):
 
     @model_validator(mode="before")
     @classmethod
-    def _validate_redelivery_all_or_nothing(cls, data: dict) -> dict:
-        """Validate that redelivery fields are all set or all unset.
-
-        Note: github-app-private-key is a secret-type config handled by paas_charm's
-        user_defined_config path (not as a framework config field), so we check for
-        it here in the raw input data.
-
-        Args:
-            data: raw input data.
-
-        Returns:
-            The unmodified input data.
-
-        Raises:
-            ValueError: if some redelivery fields are set but others are missing.
-        """
-        fields = (
-            "github-path",
-            "webhook-id",
-            "github-app-id",
-            "github-app-installation-id",
-            "github-app-private-key",
-        )
-        present = [f for f in fields if data.get(f)]
+    def validate_all_or_nothing(cls, data: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        """Validate that redelivery fields are all set or all unset."""
+        present = [field for field in _REDELIVERY_FIELDS if data.get(field)]
         if not present:
             return data
-        missing = [f for f in fields if not data.get(f)]
+
+        missing = [field for field in _REDELIVERY_FIELDS if not data.get(field)]
         if missing:
             raise ValueError(f"Incomplete redelivery config: missing {', '.join(missing)}")
         return data
@@ -70,8 +61,6 @@ class WebhookGatewayConfig(paas_charm.go.Charm.framework_config_class):
 class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
     """Go Charm service."""
 
-    framework_config_class = WebhookGatewayConfig
-
     def __init__(self, *args: typing.Any) -> None:
         """Initialize the instance.
 
@@ -79,6 +68,21 @@ class GithubRunnerWebhookGatewayCharm(paas_charm.go.Charm):
             args: passthrough to CharmBase.
         """
         super().__init__(*args)
+
+    def is_ready(self) -> bool:
+        """Validate redelivery config before deferring to base readiness checks.
+
+        Returns:
+            True if the charm is ready to start.
+        """
+        try:
+            WebhookGatewayConfig.model_validate(dict(self.config))
+        except ValidationError as exc:
+            logger.error("Invalid redelivery config:\n%s", exc)
+            self.update_app_and_unit_status(ops.BlockedStatus("Invalid redelivery config"))
+            return False
+
+        return super().is_ready()
 
     def _create_app(self):
         """Patch _create_app to add OpenTelemetry environment variables."""
