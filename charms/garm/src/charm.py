@@ -424,9 +424,11 @@ class GarmCharm(paas_charm.go.Charm):
         # The proxy variable *names* are rendered into the TOML (each provider's
         # environment_variables allowlist), so toggling the proxy on or off changes the
         # config hash below and triggers a restart. The proxy *values* live only in the
-        # Pebble service environment; changing a value without changing which variables are
-        # set is not detected here and applies on the next config change. This is a known
-        # limitation to be revisited when GARM startup moves to an env-driven wrapper script.
+        # Pebble service environment and are not part of that hash, so changing a value while
+        # the same variables stay set is not detected here and applies on the next config
+        # change. Detecting it properly means gating the replan on the Pebble layer
+        # environment (e.g. always replan and let Pebble diff the service env) instead of on
+        # the on-disk TOML hash; deferred to the env-driven GARM startup refactor.
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
