@@ -187,7 +187,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             {
                 "openstack_auth_url": state.provider_config.auth_url,
                 "openstack_username": state.provider_config.username,
-                "openstack_password_secret_uri": password_secret.id,
+                "openstack_password_secret_uri": str(password_secret.id),
                 "openstack_project_name": state.provider_config.project_name,
                 "openstack_user_domain_name": state.provider_config.user_domain_name,
                 "openstack_project_domain_name": state.provider_config.project_domain_name,
@@ -195,7 +195,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "openstack_network": state.provider_config.network,
                 "github_app_id": str(state.github_app_config.app_id),
                 "github_installation_id": str(state.github_app_config.installation_id),
-                "github_private_key_secret_uri": github_key_secret.id,
+                "github_private_key_secret_uri": str(github_key_secret.id),
                 "image_id": state.image_id,
             }
         )
