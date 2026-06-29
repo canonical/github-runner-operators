@@ -8,9 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
-## 2026-06-22
+## 2026-06-29
 
 - route the GARM charm's outbound traffic through the Juju model proxy: model-level `juju-http-proxy`/`juju-https-proxy`/`juju-no-proxy` settings are now applied to GARM and forwarded to the OpenStack provider executable, so OpenStack and GitHub API calls egress via the proxy.
+
+## 2026-06-26
+
+- Sync GARM GitHub App credentials from the garm-configurator relation over the GARM REST API, without restarting the service. Only the built-in `github.com` endpoint is supported.
+- `garm-configurator`: add a new required `github-app-id` config option (the numeric GitHub App ID, which GARM uses to authenticate the App) and remove the unused `github-app-client-id` option (GARM authenticates Apps by app ID, not the OAuth client ID). Existing deployments must set `github-app-id`. The `github-app-id` and `github-app-installation-id` options are now integer-typed, so non-numeric values are rejected at config-set time.
+
+## 2026-06-23
+
+- `waiting-p80-report`: count only jobs we own (those with a non-NULL `assigned_flavor`). Jobs served by runners we don't manage — for example, third-party self-hosted runners on repositories we ingest webhooks from — never match a flavor and were skewing the reported P80. Caveat: for date ranges before the 2026-06-18 case-insensitive label-matching fix, some owned completed jobs were left with a NULL `assigned_flavor` and are likewise excluded, so `sample_count` may be lower than the true total for those older ranges.
+
+## 2026-06-22
+
+- `waiting-p80-report`: clamp negative waiting times (clock skew, `started_at < created_at`) to 0 instead of excluding those jobs. Previously dropping them removed the fastest jobs from the population and biased the reported P80 upward.
+
+## 2026-06-19
+
+- add `waiting-p80-report` standalone CLI that extracts the daily P80 of job waiting time from the planner's PostgreSQL database into a CSV. Not part of the planner charm; no charm or migration change.
+
+## 2026-06-18
+
+- match planner runner labels case-insensitively, so jobs requesting GitHub's implicit label casing (e.g. `X64`, `Linux`) match flavors defined in lowercase. A migration converts existing labels to lowercase and reassigns jobs previously left unmatched due to casing.
+- Migrated the RTD documentation URL under the Canonical domain.
 
 ## 2026-06-16
 

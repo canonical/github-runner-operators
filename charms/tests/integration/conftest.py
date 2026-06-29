@@ -6,75 +6,71 @@ import secrets
 import string
 import subprocess
 import textwrap
+import time
 from typing import Iterator
 
 import jubilant
 import pytest
 import requests
-from tests.conftest import (
-    CHARM_FILE_PARAM,
-    GARM_IMAGE_PARAM,
-    PLANNER_IMAGE_PARAM,
-    WEBHOOK_GATEWAY_IMAGE_PARAM,
-)
+from tests.integration.helpers import TEST_RSA_PRIVATE_KEY
 
 logger = logging.getLogger(__name__)
 
 
+@pytest.fixture(scope="module")
+def juju() -> Iterator[jubilant.Juju]:
+    """Provide a temporary Juju model for the duration of the module.
+
+    Creates a temporary model and yields a `jubilant.Juju` handle for
+    deployments, relations, and config operations. The model is cleaned
+    up automatically at the end of the module.
+    """
+    with jubilant.temp_model() as juju:
+        yield juju
+
+
+@pytest.fixture(name="garm_charm_file", scope="module")
+def garm_charm_file_fixture(charm_paths) -> str:
+    """Return the path to the built GARM charm file."""
+    return charm_paths["garm"].path
+
+
+@pytest.fixture(name="garm_app_image", scope="module")
+def garm_app_image_fixture(charm_resource_images) -> str:
+    """Return the GARM OCI image reference for the app-image resource."""
+    image = charm_resource_images["garm"]["app-image"]
+    logger.info("GARM app image: %s", image)
+    return image
+
+
 @pytest.fixture(name="planner_charm_file", scope="module")
-def planner_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
+def planner_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built planner charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        return None
-    if len(charm) > 1:
-        planner_charm = [file for file in charm if "planner" in file]
-        return planner_charm[0]
-    return charm[0]
+    return charm_paths["github-runner-planner"].path
 
 
 @pytest.fixture(name="planner_app_image", scope="module")
-def planner_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the planner app image."""
-    app_image = pytestconfig.getoption(PLANNER_IMAGE_PARAM)
-    return app_image
+def planner_app_image_fixture(charm_resource_images) -> str:
+    """Return the OCI image reference for the planner app-image resource."""
+    return charm_resource_images["github-runner-planner"]["app-image"]
 
 
 @pytest.fixture(name="webhook_gateway_charm_file", scope="module")
-def webhook_gateway_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
+def webhook_gateway_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built webhook gateway charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        return None
-    if len(charm) > 1:
-        webhook_gateway_charm = [file for file in charm if "webhook-gateway" in file]
-        return webhook_gateway_charm[0]
-    return charm[0]
+    return charm_paths["github-runner-webhook-gateway"].path
 
 
 @pytest.fixture(name="webhook_gateway_app_image", scope="module")
-def webhook_gateway_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the webhook gateway app image."""
-    app_image = pytestconfig.getoption(WEBHOOK_GATEWAY_IMAGE_PARAM)
-    return app_image
+def webhook_gateway_app_image_fixture(charm_resource_images) -> str:
+    """Return the OCI image reference for the webhook gateway app-image resource."""
+    return charm_resource_images["github-runner-webhook-gateway"]["app-image"]
 
 
-@pytest.fixture(name="keep_models", scope="module")
-def keep_models_fixture(pytestconfig: pytest.Config) -> bool:
-    """Return whether to keep models after deploying."""
-    return pytestconfig.getoption("--keep-models")
-
-
-@pytest.fixture(scope="module")
-def juju(keep_models: bool) -> Iterator[jubilant.Juju]:
-    """Provide a temporary Juju model for the duration of the module.
-
-    Creates a temporary model (optionally kept based on --keep-models) and yields a
-    `jubilant.Juju` handle for deployments, relations, and config operations.
-    The model is cleaned up automatically at the end of the module unless kept.
-    """
-    with jubilant.temp_model(keep=keep_models) as juju:
-        yield juju
+@pytest.fixture(name="garm_configurator_charm_file", scope="module")
+def garm_configurator_charm_file_fixture(charm_paths) -> str:
+    """Return the path to the built garm-configurator charm file."""
+    return charm_paths["garm-configurator"].path
 
 
 def _generate_admin_token() -> str:
@@ -308,30 +304,6 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
-@pytest.fixture(name="garm_charm_file", scope="module")
-def garm_charm_file_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the path to the built GARM charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        return None
-    if len(charm) > 1:
-        garm_charm = [file for file in charm if "garm" in file]
-        if not garm_charm:
-            raise pytest.UsageError(
-                "No GARM charm file found in --charm-file; expected a path containing 'garm'."
-            )
-        return garm_charm[0]
-    return charm[0]
-
-
-@pytest.fixture(name="garm_app_image", scope="module")
-def garm_app_image_fixture(pytestconfig: pytest.Config) -> str | None:
-    """Return the GARM OCI image reference for the app-image resource."""
-    image = pytestconfig.getoption(GARM_IMAGE_PARAM)
-    logger.info("GARM app image: %s", image)
-    return image
-
-
 def _pre_pull_garm_image(image: str) -> None:
     """Pre-pull the GARM ROCK image into microk8s containerd.
 
@@ -508,23 +480,9 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
 
 
 @pytest.fixture(scope="module", name="garm_configurator_charm_file")
-def garm_configurator_charm_file_fixture(pytestconfig: pytest.Config) -> str:
+def garm_configurator_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built garm-configurator charm file."""
-    charm = pytestconfig.getoption(CHARM_FILE_PARAM)
-    if not charm:
-        pytest.skip(
-            f"missing required {CHARM_FILE_PARAM} option for garm-configurator "
-            "integration tests"
-        )
-    if len(charm) > 1:
-        configurator_charm = [file for file in charm if "garm-configurator" in file]
-        if not configurator_charm:
-            raise pytest.UsageError(
-                "No garm-configurator charm file found in --charm-file; "
-                "expected a path containing 'garm-configurator'"
-            )
-        return configurator_charm[0]
-    return charm[0]
+    return charm_paths["garm-configurator"].path
 
 
 @pytest.fixture(scope="module", name="configurator_with_image")
@@ -548,7 +506,7 @@ def deploy_configurator_with_image_fixture(
     )
     private_key_secret = juju.add_secret(
         name="configurator-github-private-key",
-        content={"value": "test-github-private-key"},
+        content={"value": TEST_RSA_PRIVATE_KEY},
     )
 
     juju.deploy(charm=garm_configurator_charm_file, app=app_name)
@@ -572,15 +530,15 @@ def deploy_configurator_with_image_fixture(
             "openstack-project-domain-name": "Default",
             "openstack-region-name": "RegionOne",
             "openstack-network": "external-net",
-            "github-app-client-id": "test-client-id",
-            "github-app-installation-id": "test-installation-id",
+            "github-app-id": "12345",
+            "github-app-installation-id": "67890",
             "github-app-private-key": private_key_secret,
             "name": "test-scaleset",
             "flavor": "m1.large",
             "os-arch": "amd64",
             "min-idle-runner": "0",
             "max-runner": "5",
-            "repo": "testorg/testrepo",
+            "org": "test-org",
         },
     )
 
@@ -600,20 +558,238 @@ def integrate_configurator_with_garm_fixture(
     configurator_with_image: str,
     garm_app: str,
 ) -> str:
-    """Integrate the configurator with GARM and wait for both to be active.
+    """Integrate the configurator with GARM and wait for the event to be processed.
 
     The configurator should remain Active after integration. GARM may
     restart when it receives the relation data (TOML change detection),
-    so we wait for GARM to settle back to active.
+    then run _reconcile_runners() which may set WaitingStatus if
+    credentials/providers are not yet configured. The fixture only
+    confirms that GARM has finished processing the integration event
+    (Juju agent idle); individual tests that need GARM fully active
+    wait for all_active themselves after completing their own setup.
 
     Returns the garm app name.
     """
     juju.integrate(configurator_with_image, garm_app)
-    # Wait for both apps to settle. GARM may restart (TOML hash change).
+    # GARM may end up in a split state: app_status=active (set by paas_charm)
+    # while unit workload_status=waiting (set by _reconcile_runners when
+    # credentials/providers are not yet configured). all_active and all_waiting
+    # both require BOTH app and unit to match, so neither would pass. Using
+    # all_agents_idle checks only that hooks have finished running, which is
+    # sufficient to confirm the integration event was processed.
     juju.wait(
-        lambda status: jubilant.all_active(status, garm_app)
+        lambda status: jubilant.all_agents_idle(status, garm_app)
         and jubilant.all_active(status, configurator_with_image),
         timeout=10 * 60,
         delay=10,
     )
     return garm_app
+
+
+@pytest.fixture(scope="module", name="fake_github_api_url")
+def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
+    """Deploy a mock GitHub API server as an any-charm unit.
+
+    Starts a Python HTTP server on port 8085 inside the any-charm pod.
+    Returns the base URL (http://{pod_ip}:8085) so GARM credentials
+    can be pointed at it instead of api.github.com.
+    """
+    app_name = "fake-github-api"
+
+    mock_server_script = textwrap.dedent("""\
+        #!/usr/bin/env python3
+        import http.server
+        import json
+        import re
+        import socket
+        import base64
+
+        def _make_jwt():
+            header = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').rstrip(b'=').decode()
+            payload = base64.urlsafe_b64encode(b'{"exp":4070908800}').rstrip(b'=').decode()
+            sig = base64.urlsafe_b64encode(b'x' * 32).rstrip(b'=').decode()
+            return f"{header}.{payload}.{sig}"
+
+        MOCK_JWT = _make_jwt()
+        SCALESETS = {}
+        NEXT_SCALESET_ID = [1]
+
+        def _self_ip():
+            # Use UDP connect trick: routes without sending a packet, giving the outbound IP.
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(('10.255.255.255', 1))
+                return s.getsockname()[0]
+            except Exception:
+                return socket.gethostbyname(socket.gethostname())
+            finally:
+                s.close()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass
+
+            def _send_json(self, data, status=200):
+                body = json.dumps(data).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _send_no_content(self):
+                self.send_response(204)
+                self.end_headers()
+
+            def _send_not_found(self):
+                self.send_response(404)
+                body = b'{"error":"not found"}'
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _read_json(self):
+                length = int(self.headers.get("Content-Length", 0))
+                return json.loads(self.rfile.read(length)) if length else {}
+
+            def do_GET(self):
+                path = self.path.split("?")[0]
+                path = re.sub(r"^/api/v3(?=/|$)", "", path)
+                if path == "/rate_limit":
+                    self._send_json({"resources": {"core": {"limit": 5000, "remaining": 5000, "reset": 9999999999}}})
+                elif path == "/app":
+                    self._send_json({"id": 12345, "name": "test-app", "slug": "test-app"})
+                elif re.match(r"^/orgs/[^/]+/actions/runner-groups$", path):
+                    self._send_json({
+                        "total_count": 1,
+                        "runner_groups": [{
+                            "id": 1, "name": "Default", "visibility": "all",
+                            "default": True, "runners_url": "", "inherited": False,
+                            "allows_public_repositories": False,
+                        }],
+                    })
+                elif re.match(r"^/_apis/runtime/runnerscalesets(/|$)", path):
+                    self._send_json({"count": len(SCALESETS), "value": list(SCALESETS.values())})
+                elif re.match(r"^/_apis/runtime/runnergroups/", path):
+                    self._send_json({"count": 1, "value": [{"id": 1, "name": "Default"}]})
+                else:
+                    self._send_not_found()
+
+            def do_POST(self):
+                path = self.path.split("?")[0]
+                path = re.sub(r"^/api/v3(?=/|$)", "", path)
+                body = self._read_json()
+                if re.match(r"^/app/installations/\\d+/access_tokens$", path):
+                    self._send_json({"token": "ghs_fake_installation_token", "expires_at": "2099-01-01T00:00:00Z", "permissions": {}})
+                elif re.match(r"^/orgs/[^/]+/actions/runners/registration-token$", path):
+                    self._send_json({"token": "FAKEREGISTRATIONTOKENXXX", "expires_at": "2099-01-01T00:00:00Z"})
+                elif path == "/actions/runner-registration":
+                    host = self.headers.get("Host", "")
+                    base_url = f"http://{host}" if host else f"http://{_self_ip()}:8085"
+                    self._send_json({"url": base_url, "token": MOCK_JWT})
+                elif re.match(r"^/_apis/runtime/runnerscalesets$", path):
+                    sid = NEXT_SCALESET_ID[0]
+                    NEXT_SCALESET_ID[0] += 1
+                    ss = {
+                        "id": sid,
+                        "name": body.get("name", ""),
+                        "runnerGroupId": body.get("runnerGroupId", 1),
+                        "runnerGroupName": "Default",
+                        "labels": body.get("labels", []),
+                        "RunnerSetting": body.get("RunnerSetting", {}),
+                    }
+                    SCALESETS[sid] = ss
+                    self._send_json(ss)
+                else:
+                    self._send_not_found()
+
+            def do_DELETE(self):
+                path = self.path.split("?")[0]
+                m = re.match(r"^/_apis/runtime/runnerscalesets/(\\d+)$", path)
+                if m:
+                    SCALESETS.pop(int(m.group(1)), None)
+                    self._send_no_content()
+                else:
+                    self._send_not_found()
+
+            def do_PATCH(self):
+                path = self.path.split("?")[0]
+                m = re.match(r"^/_apis/runtime/runnerscalesets/(\\d+)$", path)
+                if m:
+                    body = self._read_json()
+                    sid = int(m.group(1))
+                    if sid in SCALESETS:
+                        SCALESETS[sid].update({k: v for k, v in body.items() if v is not None})
+                        self._send_json(SCALESETS[sid])
+                    else:
+                        self._send_not_found()
+                else:
+                    self._send_not_found()
+
+        if __name__ == "__main__":
+            server = http.server.HTTPServer(("0.0.0.0", 8085), Handler)
+            server.serve_forever()
+    """)
+
+    any_charm_src_overwrite = {
+        "any_charm.py": textwrap.dedent("""\
+            from any_charm_base import AnyCharmBase
+            import os
+            import pathlib
+            import subprocess
+            import sys
+
+            _SERVER_SCRIPT = pathlib.Path(__file__).parent / "github_mock_server.py"
+            _PID_FILE = pathlib.Path("/tmp/github_mock_server.pid")
+
+            class AnyCharm(AnyCharmBase):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self._ensure_server_running()
+
+                def _ensure_server_running(self):
+                    if _PID_FILE.exists():
+                        try:
+                            os.kill(int(_PID_FILE.read_text().strip()), 0)
+                            return
+                        except (ProcessLookupError, ValueError, OSError):
+                            pass
+                    proc = subprocess.Popen(
+                        [sys.executable, str(_SERVER_SCRIPT)],
+                        start_new_session=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    _PID_FILE.write_text(str(proc.pid))
+        """),
+        "github_mock_server.py": mock_server_script,
+    }
+
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+        config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=10 * 60,
+        delay=10,
+    )
+
+    status = juju.status()
+    pod_ip = status.apps[app_name].units[f"{app_name}/0"].address
+
+    for _ in range(10):
+        try:
+            result = juju.exec(
+                "curl -sf http://localhost:8085/rate_limit",
+                unit=f"{app_name}/0",
+            )
+            if result.stdout.strip():
+                break
+        except Exception:
+            pass
+        time.sleep(3)
+
+    return f"http://{pod_ip}:8085"

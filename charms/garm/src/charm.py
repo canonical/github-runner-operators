@@ -6,6 +6,7 @@
 
 import dataclasses
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -16,8 +17,17 @@ import ops
 import paas_charm.go
 import tomli_w
 import yaml
-from garm_api import GarmApiClient, GarmApiError
 from paas_charm.app import WorkloadConfig
+from paas_charm.charm_utils import block_if_invalid_data
+
+from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from github_reconciler import (
+    DEFAULT_GITHUB_ENDPOINT,
+    MANAGED_CREDENTIAL_DESCRIPTION,
+    CredentialSpec,
+    GithubReconciler,
+)
+from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +35,11 @@ GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
+GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
-GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 
@@ -154,9 +164,7 @@ def _build_provider_list(
             "project_domain_name": provider["project_domain_name"],
         }
 
-        clouds_yaml = _render_clouds_yaml(
-            unit_name, auth_block, provider["region_name"]
-        )
+        clouds_yaml = _render_clouds_yaml(unit_name, auth_block, provider["region_name"])
 
         provider_files[provider_toml_path] = provider_toml
         provider_files[clouds_yaml_path] = clouds_yaml
@@ -294,6 +302,19 @@ def _generate_admin_password() -> str:
     return "".join(chars)
 
 
+def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
+    """Parse pre_install_scripts from JSON relation data string."""
+    if not raw:
+        return {}
+    try:
+        result = json.loads(raw)
+        if isinstance(result, dict):
+            return result
+    except ValueError:
+        pass
+    return {}
+
+
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -304,28 +325,30 @@ class GarmCharm(paas_charm.go.Charm):
             args: Passed through to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(self.on.install, self._on_install)
-        self.framework.observe(self.on.leader_elected, self._on_leader_elected)
+        self.framework.observe(self.on.install, self._reconcile)
+        self.framework.observe(self.on.leader_elected, self._reconcile)
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
-            self._on_configurator_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
-            self._on_configurator_relation_changed,
+            self._reconcile,
+        )
+        self.framework.observe(
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_departed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
-            self._on_configurator_relation_changed,
+            self._reconcile,
         )
+        self.framework.observe(self.on.update_status, self._reconcile)
 
-    def _on_install(self, _: ops.InstallEvent) -> None:
-        """Ensure secrets exist on first install."""
-        self._ensure_secrets()
-
-    def _on_leader_elected(self, _: ops.LeaderElectedEvent) -> None:
-        """Ensure secrets exist when the leader is elected."""
-        self._ensure_secrets()
+    @block_if_invalid_data
+    def _reconcile(self, _: ops.EventBase) -> None:
+        """Reconcile charm state."""
+        self.restart()
 
     @property
     def _workload_config(self) -> WorkloadConfig:
@@ -338,27 +361,22 @@ class GarmCharm(paas_charm.go.Charm):
         paas-config.yaml, so metrics_target is set to None to suppress the
         framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(
-            super()._workload_config, port=GARM_PORT, metrics_target=None
-        )
-
-    def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
-        """Handle configurator relation joined/changed/broken by re-rendering TOML."""
-        self.restart()
+        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
 
-        Overrides the parent to inject the TOML config file and correct
-        Pebble command before each restart.
+        Ensures secrets before the readiness gate so they exist on
+        install/leader_elected before pebble is ready, then gates on
+        workload readiness before writing config and replanning.
 
         Args:
             rerun_migrations: Passed through to the parent restart.
         """
+        self._ensure_secrets()
+
         if not self.is_ready():
             return
-
-        self._ensure_secrets()
 
         # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
         # no separate metrics listener — and declares its scrape target in
@@ -393,20 +411,22 @@ class GarmCharm(paas_charm.go.Charm):
 
         secrets_data = self._get_secrets()
         if secrets_data is None:
-            logger.info(
-                "GARM secrets not yet available; blocking until leader initialises"
-            )
+            logger.info("GARM secrets not yet available; blocking until leader initialises")
             self.unit.status = ops.WaitingStatus("Waiting for GARM secrets")
             return
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
-            self.unit.status = ops.WaitingStatus(
-                "Waiting for garm-configurator relation"
-            )
+            self.unit.status = ops.WaitingStatus("Waiting for garm-configurator relation")
             return
 
         proxy_env = _proxy_environment()
+        # The proxy variable *names* are rendered into the TOML (each provider's
+        # environment_variables allowlist), so toggling the proxy on or off changes the
+        # config hash below and triggers a restart. The proxy *values* live only in the
+        # Pebble service environment; changing a value without changing which variables are
+        # set is not detected here and applies on the next config change. This is a known
+        # limitation to be revisited when GARM startup moves to an env-driven wrapper script.
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
@@ -420,17 +440,13 @@ class GarmCharm(paas_charm.go.Charm):
         hash_input = (
             toml_content
             + "\n"
-            + "\n".join(
-                f"{path}\n{content}" for path, content in sorted(provider_files.items())
-            )
+            + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
         new_hash = self._hash_toml(hash_input)
-        # The TOML/provider files live on disk, but the proxy values live only in
-        # the Pebble service environment. Compare each against where it is stored
-        # and skip the restart only when neither changed.
-        config_unchanged = self._get_on_disk_toml_hash(provider_files) == new_hash
-        if config_unchanged and self._get_applied_proxy_env() == proxy_env:
-            logger.debug("GARM config and proxy unchanged; skipping restart")
+        previous_hash = self._get_on_disk_toml_hash(provider_files)
+        if previous_hash == new_hash:
+            logger.debug("TOML config unchanged; skipping service restart")
+            self._reconcile_runners()
             return
 
         # Log non-sensitive metadata about the config change.
@@ -440,9 +456,7 @@ class GarmCharm(paas_charm.go.Charm):
         logger.info("Updating GARM config for providers: %s", provider_names)
 
         container = self.unit.get_container(CONTAINER_NAME)
-        container.push(
-            GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True
-        )
+        container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
 
@@ -465,6 +479,7 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
+        self._reconcile_runners()
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
@@ -509,24 +524,6 @@ class GarmCharm(paas_charm.go.Charm):
 
         hash_input = existing_toml + "\n" + "\n".join(existing_provider_parts)
         return self._hash_toml(hash_input)
-
-    def _get_applied_proxy_env(self) -> dict[str, str]:
-        """Return the proxy vars currently set on the running Pebble service.
-
-        Proxy values are never written to disk; they live only in the service
-        environment, so the applied state must be read back from the plan to
-        detect a proxy change. Every env var the charm sets other than
-        config_hash is a proxy var.
-
-        Returns:
-            The applied proxy env mapping, empty if the service is not yet in
-            the plan.
-        """
-        container = self.unit.get_container(CONTAINER_NAME)
-        service = container.get_plan().services.get(PEBBLE_SERVICE_NAME)
-        if service is None:
-            return {}
-        return {k: v for k, v in service.environment.items() if k != "config_hash"}
 
     def _ensure_secrets(self) -> None:
         """Create garm-secrets and garm-admin-credentials juju secrets (leader only)."""
@@ -653,9 +650,7 @@ class GarmCharm(paas_charm.go.Charm):
                     "password": password,
                     "project_name": data.get("openstack_project_name", ""),
                     "user_domain_name": data.get("openstack_user_domain_name", ""),
-                    "project_domain_name": data.get(
-                        "openstack_project_domain_name", ""
-                    ),
+                    "project_domain_name": data.get("openstack_project_domain_name", ""),
                     "region_name": data.get("openstack_region_name", ""),
                     "network": data.get("openstack_network", ""),
                 }
@@ -699,9 +694,7 @@ class GarmCharm(paas_charm.go.Charm):
             return
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
-            logger.warning(
-                "Admin credentials secret not yet available; skipping first-run check"
-            )
+            logger.warning("Admin credentials secret not yet available; skipping first-run check")
             return
 
         try:
@@ -732,6 +725,175 @@ class GarmCharm(paas_charm.go.Charm):
         except GarmApiError as exc:
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
+
+    def _build_desired_scalesets(self) -> list[ScalesetSpec]:
+        """Build the desired scaleset list from all garm-configurator relation units."""
+        specs = []
+        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
+            for unit in relation.units:
+                data = relation.data[unit]
+                name = data.get("name", "")
+                if not name:
+                    continue
+
+                org = data.get("org", "")
+                repo = data.get("repo", "")
+                if org:
+                    entity_type = "organization"
+                    entity_name = org
+                elif repo:
+                    entity_type = "repository"
+                    entity_name = repo
+                else:
+                    logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
+                    continue
+
+                required = {
+                    "provider_name": data.get("provider_name", ""),
+                    "image": data.get("image_id", ""),
+                    "flavor": data.get("flavor", ""),
+                    "os_arch": data.get("os_arch", ""),
+                    "max_runner": data.get("max_runner", ""),
+                }
+                missing = [k for k, v in required.items() if not v]
+                if missing:
+                    logger.warning(
+                        "Skipping scaleset %s: missing required fields %s",
+                        name,
+                        missing,
+                    )
+                    continue
+                try:
+                    min_idle = int(data.get("min_idle_runner", "0"))
+                    max_runners = int(required["max_runner"])
+                except ValueError:
+                    continue
+                specs.append(
+                    ScalesetSpec(
+                        name=name,
+                        provider_name=required["provider_name"],
+                        image=required["image"],
+                        flavor=required["flavor"],
+                        os_arch=required["os_arch"],
+                        os_type="linux",
+                        min_idle_runners=min_idle,
+                        max_runners=max_runners,
+                        entity_type=entity_type,
+                        entity_name=entity_name,
+                        labels=[
+                            label.strip()
+                            for label in data.get("labels", "").split(",")
+                            if label.strip()
+                        ],
+                        runner_group=data.get("runner_group", ""),
+                        pre_install_scripts=_parse_pre_install_scripts(
+                            data.get("pre_install_scripts", "")
+                        ),
+                    )
+                )
+        return specs
+
+    def _build_desired_credentials(self) -> list[CredentialSpec]:
+        """Build desired GitHub credentials from configurator relation data.
+
+        Credentials are deduped per (app_id, installation_id) so multiple configurator
+        units sharing one GitHub App yield a single GARM credential. The App private key
+        is sourced only from the Juju secret referenced by ``github_private_key_secret_uri``
+        — never from plaintext relation data. Credentials attach to GARM's built-in
+        ``github.com`` endpoint.
+
+        Returns:
+            The full desired set of GitHub credential specs.
+        """
+        credentials: dict[tuple[int, int], CredentialSpec] = {}
+        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
+            for unit in relation.units:
+                data = relation.data[unit]
+                app_id_raw = data.get("github_app_id", "")
+                installation_id_raw = data.get("github_installation_id", "")
+                key_secret_uri = data.get("github_private_key_secret_uri", "")
+                if not (app_id_raw and installation_id_raw and key_secret_uri):
+                    continue
+                try:
+                    app_id = int(app_id_raw)
+                    installation_id = int(installation_id_raw)
+                except ValueError:
+                    logger.warning(
+                        "Skipping GitHub credential from %s: non-numeric app/installation id "
+                        "(app_id=%r, installation_id=%r)",
+                        unit.name,
+                        app_id_raw,
+                        installation_id_raw,
+                    )
+                    continue
+
+                dedupe_key = (app_id, installation_id)
+                if dedupe_key in credentials:
+                    continue
+
+                private_key = self._resolve_secret_value(str(key_secret_uri))
+                if not private_key:
+                    logger.warning(
+                        "Skipping GitHub credential for app %s: private key secret unavailable",
+                        app_id,
+                    )
+                    continue
+
+                credentials[dedupe_key] = CredentialSpec(
+                    name=f"app-{app_id}-{installation_id}",
+                    endpoint=DEFAULT_GITHUB_ENDPOINT,
+                    app_id=app_id,
+                    installation_id=installation_id,
+                    private_key_bytes=list(private_key.encode()),
+                    description=MANAGED_CREDENTIAL_DESCRIPTION,
+                )
+
+        return list(credentials.values())
+
+    def _reconcile_runners(self) -> None:
+        """Sync GARM controller URLs, GitHub credentials, then scalesets from relation data.
+
+        The three steps are ordered, not independent: GARM rejects every operational call with
+        409 ``urls_required`` until the controller URLs are set, and scalesets reference the
+        GitHub credentials. So a single authenticated client configures the URLs and reconciles
+        credentials before scalesets are reconciled against the same client.
+        """
+        admin_creds = self._get_admin_credentials()
+        if not admin_creds:
+            logger.warning("Admin credentials not yet available; deferring reconcile")
+            return
+
+        # Talk to GARM over its fixed local listener (same target as first-run), rather than
+        # _get_garm_url() which depends on charm config that is not set for the local API.
+        base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+        try:
+            auth_client = GarmAuthenticatedClient.from_login(
+                base_url, admin_creds["username"], admin_creds["password"]
+            )
+            self._ensure_controller_urls(auth_client)
+            GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
+            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
+            self.unit.status = ops.ActiveStatus()
+        except GarmApiError as exc:
+            logger.warning("GARM API error during reconcile: %s", exc)
+            self.unit.status = ops.WaitingStatus("GARM sync failed")
+
+    def _ensure_controller_urls(self, auth_client: GarmAuthenticatedClient) -> None:
+        """Configure the GARM controller URLs that gate its operational API.
+
+        GARM returns 409 ``urls_required`` on credential/endpoint/scaleset operations until
+        the metadata and callback URLs are set. The base is the application's reachable URL
+        provided by the go framework: the external ingress URL when an ingress relation is
+        present, otherwise the in-cluster Kubernetes service URL. Runners reach the
+        metadata/callback paths through it, and GitHub reaches the webhook path; both require
+        the public ingress URL, so this is re-run when ingress becomes ready or is revoked.
+        """
+        base = self._base_url.rstrip("/")
+        auth_client.update_controller(
+            metadata_url=f"{base}/api/v1/metadata",
+            callback_url=f"{base}/api/v1/callbacks",
+            webhook_url=f"{base}/webhooks",
+        )
 
 
 if __name__ == "__main__":

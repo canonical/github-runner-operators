@@ -11,6 +11,8 @@ platforms:
   amd64:
 
 summary: GARM — GitHub Actions Runner Manager charm.
+links:
+  documentation: https://canonical.com/juju/docs/github-runner-charms/
 
 description: |
   Deploys and manages GARM (GitHub Actions Runner Manager) using the
@@ -30,5 +32,3 @@ requires:
     limit: 1
   garm-configurator:
     interface: garm_configurator_v0
-    limit: 1
-

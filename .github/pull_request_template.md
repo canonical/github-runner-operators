@@ -15,6 +15,8 @@
 - [ ] **If this PR involves a Grafana dashboard:** I added a screenshot of the dashboard
 - [ ] **If this PR involves Terraform:** `terraform fmt` passes and `tflint` reports no errors
 - [ ] **If this PR involves Rockcraft:** I updated the version
+- [ ] **If this PR adds/removes a charm, or changes a charm's base class, conventions, tooling, or repo structure:** I updated the relevant `AGENTS.md`
+- [ ] **If this PR changes `.copilot-collections.yaml` or `.github/instructions/`:** I re-checked whether the `AGENTS.md` "12-factor divergences" guidance still matches the upstream copilot-collections guidance
 
 <!--  
 You can adjust the checklist to match the project.

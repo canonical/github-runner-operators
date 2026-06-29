@@ -17,7 +17,7 @@ jobs:
     outputs:
       action: ${{ steps.filter.outputs.action }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -31,7 +31,7 @@ jobs:
     if: ${{ needs.detect-changes.outputs.action == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -50,12 +50,12 @@ jobs:
   smoke-test-self-hosted:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.action == 'true' }}
-    runs-on: [self-hosted-linux-amd64-noble-edge]
+    runs-on: [self-hosted-linux-amd64-noble-medium]
     env:
       TEST_CONFIG_FILE: 91-enable-log-forwarding-smoke-${{ github.run_id }}-${{ github.run_attempt }}.yaml
       TEST_LOG_FILE: /var/log/enable-log-forwarding-smoke-${{ github.run_id }}.log
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Run enable log forwarding action
         uses: ./actions/enable-log-forwarding
@@ -83,7 +83,7 @@ jobs:
     if: ${{ needs.detect-changes.outputs.action == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Run enable log forwarding action on github-hosted runner
         uses: ./actions/enable-log-forwarding

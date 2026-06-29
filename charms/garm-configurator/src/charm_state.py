@@ -15,7 +15,7 @@ OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME = "openstack-project-domain-name"
 OPENSTACK_REGION_NAME_CONFIG_NAME = "openstack-region-name"
 OPENSTACK_NETWORK_CONFIG_NAME = "openstack-network"
 
-GITHUB_APP_CLIENT_ID_CONFIG_NAME = "github-app-client-id"
+GITHUB_APP_ID_CONFIG_NAME = "github-app-id"
 GITHUB_APP_INSTALLATION_ID_CONFIG_NAME = "github-app-installation-id"
 GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 
@@ -63,6 +63,7 @@ class ProviderConfig(BaseModel):
         project_domain_name: OpenStack project domain name.
         region_name: OpenStack region name.
         network: OpenStack network name or ID.
+        provider_name: GARM provider name. Defaults to the Juju unit name with "/" replaced by "-".
     """
 
     auth_url: str
@@ -73,6 +74,7 @@ class ProviderConfig(BaseModel):
     project_domain_name: str
     region_name: str
     network: str
+    provider_name: str
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ProviderConfig":
@@ -129,6 +131,7 @@ class ProviderConfig(BaseModel):
             project_domain_name=str(charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)),
             region_name=str(charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME)),
             network=str(charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME)),
+            provider_name=charm.unit.name.replace("/", "-"),
         )
 
 
@@ -136,13 +139,13 @@ class GithubAppConfig(BaseModel):
     """GitHub App configuration.
 
     Attributes:
-        client_id: GitHub App client ID.
+        app_id: GitHub App ID (numeric).
         installation_id: GitHub App installation ID.
         private_key: GitHub App private key (resolved from secret).
     """
 
-    client_id: str
-    installation_id: str
+    app_id: int
+    installation_id: int
     private_key: str
 
     @classmethod
@@ -158,14 +161,14 @@ class GithubAppConfig(BaseModel):
         Returns:
             The parsed GitHub App configuration.
         """
-        client_id = charm.config.get(GITHUB_APP_CLIENT_ID_CONFIG_NAME)
-        if not client_id or not str(client_id).strip():
+        app_id = charm.config.get(GITHUB_APP_ID_CONFIG_NAME)
+        if app_id is None:
             raise CharmConfigInvalidError(
-                f"Missing required configuration: {GITHUB_APP_CLIENT_ID_CONFIG_NAME}"
+                f"Missing required configuration: {GITHUB_APP_ID_CONFIG_NAME}"
             )
 
         installation_id = charm.config.get(GITHUB_APP_INSTALLATION_ID_CONFIG_NAME)
-        if not installation_id or not str(installation_id).strip():
+        if installation_id is None:
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_INSTALLATION_ID_CONFIG_NAME}"
             )
@@ -184,8 +187,8 @@ class GithubAppConfig(BaseModel):
             ) from e
 
         return cls(
-            client_id=str(client_id),
-            installation_id=str(installation_id),
+            app_id=int(app_id),
+            installation_id=int(installation_id),
             private_key=private_key,
         )
 
@@ -214,7 +217,7 @@ class ScalesetConfig(BaseModel):
     labels: str = ""
     repo: str | None = None
     org: str | None = None
-    runner_group: str = "default"
+    runner_group: str = "Default"
     pre_install_scripts: str | None = None
 
     @classmethod
@@ -261,7 +264,7 @@ class ScalesetConfig(BaseModel):
         repo = str(repo).strip() if repo else None
         org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
         org = str(org).strip() if org else None
-        runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "default")).strip()
+        runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "Default")).strip()
 
         if repo and org:
             raise CharmConfigInvalidError(

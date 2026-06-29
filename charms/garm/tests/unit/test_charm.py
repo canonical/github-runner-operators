@@ -5,7 +5,7 @@
 
 import os
 import string
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import ops
 import pytest
@@ -18,6 +18,7 @@ except ImportError:
 
 from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
+    GARM_PORT,
     GARM_SECRETS_LABEL,
     GarmCharm,
     _build_provider_list,
@@ -27,6 +28,7 @@ from charm import (
     render_garm_toml,
 )
 from garm_api import GarmConnectionError
+from github_reconciler import DEFAULT_GITHUB_ENDPOINT
 
 _DEFAULT_PG_CONFIG = {
     "username": "u",
@@ -146,17 +148,6 @@ def test_generate_garm_secrets_produces_unique_values():
     assert first["db-passphrase"] != second["db-passphrase"]
 
 
-def test_render_garm_toml_default_provider_when_no_providers_given():
-    """
-    arrange: No providers argument passed (defaults to None).
-    act: render_garm_toml is called without providers.
-    assert: The default "openstack" provider is rendered.
-    """
-    parsed = _render()
-    assert len(parsed["provider"]) == 1
-    assert parsed["provider"][0]["name"] == "openstack"
-
-
 def test_render_garm_toml_with_configurator_providers():
     """
     arrange: Two Configurator units provided provider configs.
@@ -233,18 +224,6 @@ def test_build_provider_list_returns_default_when_empty():
     assert: Returns the default single-entry list with "openstack" provider.
     """
     entries, files = _build_provider_list([])
-    assert len(entries) == 1
-    assert entries[0]["name"] == "openstack"
-    assert files == {}
-
-
-def test_build_provider_list_returns_default_when_none():
-    """
-    arrange: None is passed.
-    act: _build_provider_list is called with None.
-    assert: Returns the default single-entry list.
-    """
-    entries, files = _build_provider_list(None)
     assert len(entries) == 1
     assert entries[0]["name"] == "openstack"
     assert files == {}
@@ -788,39 +767,6 @@ def test_restart_proxy_vars_appear_in_pebble_layer():
     assert "config_hash" in service_env
 
 
-def test_restart_replans_when_only_proxy_value_changes():
-    """
-    arrange: The on-disk TOML is unchanged, but the proxy value applied in the
-             running plan differs from the newly configured one (same whitelist,
-             so the config hash is identical).
-    act: Call restart().
-    assert: A new layer is still applied -- the proxy value is compared against
-            the plan, not the on-disk config, so a value-only change replans.
-    """
-    charm = _make_restart_charm()
-    old_proxy = {"JUJU_CHARM_HTTP_PROXY": "http://old.example.com:3128"}
-    new_proxy = {"JUJU_CHARM_HTTP_PROXY": "http://new.example.com:3128"}
-
-    charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
-    with patch.dict(os.environ, old_proxy, clear=True):
-        with patch("charm.GarmApiClient"):
-            with pytest.raises(StopIteration):
-                GarmCharm.restart(charm)
-    applied_env = _layer_service_env(charm)
-    applied_hash = applied_env["config_hash"]
-    applied_proxy = {k: v for k, v in applied_env.items() if k != "config_hash"}
-
-    charm.unit.get_container.return_value.add_layer.reset_mock()
-    charm._get_on_disk_toml_hash.return_value = applied_hash
-    charm._get_applied_proxy_env.return_value = applied_proxy
-    with patch.dict(os.environ, new_proxy, clear=True):
-        with patch("charm.GarmApiClient"):
-            with pytest.raises(StopIteration):
-                GarmCharm.restart(charm)
-
-    charm.unit.get_container.return_value.add_layer.assert_called_once()
-
-
 def test_restart_no_proxy_hash_matches_on_disk_format():
     """
     arrange: No proxy vars are set; the charm renders config for one provider.
@@ -870,66 +816,246 @@ def test_render_garm_toml_default_provider_applies_proxy_var_names():
     assert parsed["provider"][0]["external"]["environment_variables"] == proxy_var_names
 
 
-def test_restart_skips_replan_when_config_and_proxy_unchanged():
+def test_reconcile_runners_skips_when_no_admin_credentials():
     """
-    arrange: First apply records the config_hash and proxy env; the plan then
-             reports the same on-disk config and the same applied proxy.
-    act: Call restart() a second time with the identical proxy/config.
-    assert: No new layer is added -- nothing changed, so the service is left
-            running undisturbed.
+    arrange: Admin credentials secret is unavailable.
+    act: Call _reconcile_runners().
+    assert: No GARM API connection is attempted.
     """
-    charm = _make_restart_charm()
-    proxy_env = {"JUJU_CHARM_HTTP_PROXY": "http://proxy.example.com:3128"}
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(return_value=None)
 
-    charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
-    with patch.dict(os.environ, proxy_env, clear=True):
-        with patch("charm.GarmApiClient"):
-            with pytest.raises(StopIteration):
-                GarmCharm.restart(charm)
-    applied_env = _layer_service_env(charm)
-    applied_hash = applied_env["config_hash"]
-    applied_proxy = {k: v for k, v in applied_env.items() if k != "config_hash"}
+    with patch("charm.GarmAuthenticatedClient") as mock_auth_cls:
+        charm._reconcile_runners()
 
-    charm.unit.get_container.return_value.add_layer.reset_mock()
-    charm._get_on_disk_toml_hash.return_value = applied_hash
-    charm._get_applied_proxy_env.return_value = applied_proxy
-    charm._maybe_first_run.side_effect = None
-    with patch.dict(os.environ, proxy_env, clear=True):
-        with patch("charm.GarmApiClient"):
-            GarmCharm.restart(charm)
-
-    charm.unit.get_container.return_value.add_layer.assert_not_called()
+    mock_auth_cls.from_login.assert_not_called()
 
 
-def test_get_applied_proxy_env_returns_proxy_vars():
+def test_reconcile_runners_reconciles_github_then_scalesets():
     """
-    arrange: The Pebble plan reports the app service whose env holds config_hash
-             alongside proxy vars.
-    act: Call _get_applied_proxy_env().
-    assert: Only the proxy vars are returned; config_hash is excluded.
+    arrange: Admin credentials are available and the desired credential/scaleset specs are stubbed.
+    act: Call _reconcile_runners().
+    assert: On a single authenticated client it configures controller URLs, reconciles GitHub
+        credentials, then reconciles scalesets, reports ActiveStatus, and never restarts.
     """
-    charm = MagicMock()
-    service = MagicMock()
-    service.environment = {
-        "config_hash": "deadbeef",
-        "http_proxy": "http://proxy.example.com:3128",
-        "HTTP_PROXY": "http://proxy.example.com:3128",
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(
+        return_value={"username": "admin", "password": "TestPass-123!"}
+    )
+    credentials = [object()]
+    scalesets = [object()]
+    charm._build_desired_credentials = MagicMock(return_value=credentials)
+    charm._build_desired_scalesets = MagicMock(return_value=scalesets)
+    charm._ensure_controller_urls = MagicMock()
+    charm.restart = MagicMock()
+
+    with (
+        patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
+        patch("charm.GithubReconciler") as mock_github_cls,
+        patch("charm.ScalesetReconciler") as mock_scaleset_cls,
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+    ):
+        mock_unit.return_value = MagicMock()
+        charm._reconcile_runners()
+
+    expected_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+    mock_auth_cls.from_login.assert_called_once_with(expected_url, "admin", "TestPass-123!")
+    auth_client = mock_auth_cls.from_login.return_value
+    # Controller URLs must be configured before any operational call, or GARM returns 409.
+    charm._ensure_controller_urls.assert_called_once_with(auth_client)
+    mock_github_cls.assert_called_once_with(auth_client)
+    mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
+    mock_scaleset_cls.assert_called_once_with(auth_client)
+    mock_scaleset_cls.return_value.reconcile.assert_called_once_with(scalesets)
+    charm.restart.assert_not_called()
+
+
+def test_restart_ensures_secrets_before_readiness_gate():
+    """
+    arrange: A GarmCharm whose workload is not ready (pebble not up yet).
+    act: Call restart().
+    assert: _ensure_secrets is invoked even though is_ready() returns False,
+            so secrets are created before pebble is up (install/leader_elected).
+    """
+    charm = object.__new__(GarmCharm)
+    charm._ensure_secrets = MagicMock()
+    charm.is_ready = MagicMock(return_value=False)
+
+    charm.restart()
+
+    charm._ensure_secrets.assert_called_once()
+
+
+def test_reconcile_calls_restart():
+    """
+    arrange: A bare GarmCharm instance with restart and _create_charm_state mocked
+             (the latter so the block_if_invalid_data decorator does not raise).
+    act: Call _reconcile.
+    assert: restart is called — every observed hook flows through _reconcile.
+    """
+    charm = object.__new__(GarmCharm)
+    charm.restart = MagicMock()
+    charm._create_charm_state = MagicMock()
+
+    GarmCharm._reconcile(charm, MagicMock())
+
+    charm.restart.assert_called_once()
+
+
+def _github_charm(units_data, private_key="-----PEM-----"):
+    """Build a GarmCharm stub whose configurator relation exposes the given unit databags."""
+    charm = MagicMock(spec=GarmCharm)
+    relation = MagicMock()
+    data_map = {}
+    for unit_data in units_data:
+        unit = MagicMock()
+        data_map[unit] = unit_data
+    relation.units = list(data_map)
+    relation.data = data_map
+    charm.model.relations.get.return_value = [relation]
+    charm._resolve_secret_value.return_value = private_key
+    return charm
+
+
+def test_build_desired_credentials_builds_credential_from_relation():
+    """
+    arrange: A charm whose configurator relation exposes one unit with app id, installation id
+        and a private-key secret URI.
+    act: Call _build_desired_credentials.
+    assert: One App credential is built (named app-<app_id>-<installation_id>) on the built-in
+        github.com endpoint, with the private key resolved from the secret.
+    """
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "12345",
+                "github_installation_id": "67890",
+                "github_private_key_secret_uri": "secret:abc",
+            }
+        ],
+        private_key="PEMDATA",
+    )
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert len(credentials) == 1
+    cred = credentials[0]
+    assert cred.name == "app-12345-67890"
+    assert cred.endpoint == DEFAULT_GITHUB_ENDPOINT
+    assert cred.app_id == 12345
+    assert cred.installation_id == 67890
+    assert cred.private_key_bytes == list(b"PEMDATA")
+    charm._resolve_secret_value.assert_called_once_with("secret:abc")
+
+
+def test_build_desired_credentials_dedupes_per_app_installation():
+    """
+    arrange: A charm whose configurator relation exposes two units sharing one App/installation.
+    act: Call _build_desired_credentials.
+    assert: The two units collapse to a single credential.
+    """
+    unit_data = {
+        "github_app_id": "1",
+        "github_installation_id": "2",
+        "github_private_key_secret_uri": "secret:k",
     }
-    charm.unit.get_container.return_value.get_plan.return_value.services = {"app": service}
+    charm = _github_charm([dict(unit_data), dict(unit_data)])
 
-    assert GarmCharm._get_applied_proxy_env(charm) == {
-        "http_proxy": "http://proxy.example.com:3128",
-        "HTTP_PROXY": "http://proxy.example.com:3128",
-    }
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert len(credentials) == 1
 
 
-def test_get_applied_proxy_env_returns_empty_when_service_absent():
+def test_build_desired_credentials_skips_incomplete_unit():
     """
-    arrange: The Pebble plan has no app service yet.
-    act: Call _get_applied_proxy_env().
-    assert: An empty dict is returned, treated as "no proxy applied".
+    arrange: A charm whose configurator relation exposes a unit missing required GitHub fields.
+    act: Call _build_desired_credentials.
+    assert: No credential is built.
     """
-    charm = MagicMock()
-    charm.unit.get_container.return_value.get_plan.return_value.services = {}
+    charm = _github_charm([{"github_app_id": "1"}])
 
-    assert GarmCharm._get_applied_proxy_env(charm) == {}
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert credentials == []
+
+
+def test_build_desired_credentials_skips_when_secret_unavailable():
+    """
+    arrange: A charm whose configurator unit is complete but whose private-key secret resolves
+        to an empty string.
+    act: Call _build_desired_credentials.
+    assert: No credential is built.
+    """
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "1",
+                "github_installation_id": "2",
+                "github_private_key_secret_uri": "secret:k",
+            }
+        ],
+        private_key="",
+    )
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert credentials == []
+
+
+def test_build_desired_credentials_skips_non_numeric_ids():
+    """
+    arrange: A charm whose configurator unit has a non-numeric app/installation id.
+    act: Call _build_desired_credentials.
+    assert: No credential is built.
+    """
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "not-a-number",
+                "github_installation_id": "2",
+                "github_private_key_secret_uri": "secret:k",
+            }
+        ]
+    )
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert credentials == []
+
+
+def test_ensure_controller_urls_sets_urls_from_base_url():
+    """
+    arrange: A charm whose _base_url is an ingress URL.
+    act: Call _ensure_controller_urls.
+    assert: update_controller is called once with metadata/callback/webhook URLs derived from it.
+    """
+    charm = MagicMock(spec=GarmCharm)
+    charm._base_url = "https://garm.example.com"
+    auth_client = MagicMock()
+
+    GarmCharm._ensure_controller_urls(charm, auth_client)
+
+    auth_client.update_controller.assert_called_once_with(
+        metadata_url="https://garm.example.com/api/v1/metadata",
+        callback_url="https://garm.example.com/api/v1/callbacks",
+        webhook_url="https://garm.example.com/webhooks",
+    )
+
+
+def test_ensure_controller_urls_strips_trailing_slash_from_base_url():
+    """
+    arrange: A charm whose _base_url is an ingress URL with a trailing slash.
+    act: Call _ensure_controller_urls.
+    assert: The pushed URLs have no double slashes in their paths.
+    """
+    charm = MagicMock(spec=GarmCharm)
+    charm._base_url = "https://garm.example.com/"
+    auth_client = MagicMock()
+
+    GarmCharm._ensure_controller_urls(charm, auth_client)
+
+    auth_client.update_controller.assert_called_once_with(
+        metadata_url="https://garm.example.com/api/v1/metadata",
+        callback_url="https://garm.example.com/api/v1/callbacks",
+        webhook_url="https://garm.example.com/webhooks",
+    )
