@@ -24,7 +24,6 @@ from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
     MANAGED_CREDENTIAL_DESCRIPTION,
     CredentialSpec,
-    EndpointSpec,
     GithubReconciler,
 )
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
@@ -394,11 +393,7 @@ class GarmCharm(paas_charm.go.Charm):
         previous_hash = self._get_on_disk_toml_hash(provider_files)
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping service restart")
-            # GitHub reconcile first: it sets the controller URLs that GARM requires before
-            # any operational call (else 409 urls_required) and creates the credentials that
-            # scalesets reference, so it must run before the scaleset reconcile.
-            self._reconcile_github()
-            self._reconcile_scalesets()
+            self._reconcile_runners()
             return
 
         # Log non-sensitive metadata about the config change.
@@ -430,10 +425,7 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
-        # GitHub reconcile sets the controller URLs and creates the credentials that scalesets
-        # reference, so it must run before the scaleset reconcile (see the unchanged-TOML path).
-        self._reconcile_github()
-        self._reconcile_scalesets()
+        self._reconcile_runners()
         super().restart(rerun_migrations=rerun_migrations)
 
     @staticmethod
@@ -747,19 +739,17 @@ class GarmCharm(paas_charm.go.Charm):
                 )
         return specs
 
-    def _build_desired_github(self) -> tuple[list[EndpointSpec], list[CredentialSpec]]:
-        """Build desired GitHub endpoints and credentials from configurator relation data.
+    def _build_desired_credentials(self) -> list[CredentialSpec]:
+        """Build desired GitHub credentials from configurator relation data.
 
         Credentials are deduped per (app_id, installation_id) so multiple configurator
         units sharing one GitHub App yield a single GARM credential. The App private key
         is sourced only from the Juju secret referenced by ``github_private_key_secret_uri``
-        — never from plaintext relation data.
-
-        Configurator does not currently advertise a custom GitHub URL, so no endpoints are
-        derived: credentials attach to GARM's built-in ``github.com`` endpoint.
+        — never from plaintext relation data. Credentials attach to GARM's built-in
+        ``github.com`` endpoint.
 
         Returns:
-            A ``(endpoints, credentials)`` tuple of desired specs.
+            The full desired set of GitHub credential specs.
         """
         credentials: dict[tuple[int, int], CredentialSpec] = {}
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
@@ -804,29 +794,35 @@ class GarmCharm(paas_charm.go.Charm):
                     description=MANAGED_CREDENTIAL_DESCRIPTION,
                 )
 
-        return [], list(credentials.values())
+        return list(credentials.values())
 
-    def _reconcile_github(self) -> None:
-        """Sync GARM GitHub endpoints/credentials against configurator relation data."""
+    def _reconcile_runners(self) -> None:
+        """Sync GARM controller URLs, GitHub credentials, then scalesets from relation data.
+
+        The three steps are ordered, not independent: GARM rejects every operational call with
+        409 ``urls_required`` until the controller URLs are set, and scalesets reference the
+        GitHub credentials. So a single authenticated client configures the URLs and reconciles
+        credentials before scalesets are reconciled against the same client.
+        """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
-            logger.warning(
-                "Admin credentials not yet available; skipping GitHub reconcile "
-                "until a later event"
-            )
+            logger.warning("Admin credentials not yet available; deferring reconcile")
             return
 
         # Talk to GARM over its fixed local listener (same target as first-run), rather than
         # _get_garm_url() which depends on charm config that is not set for the local API.
         base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
         try:
-            token = GarmApiClient(base_url).login(admin_creds["username"], admin_creds["password"])
-            auth_client = GarmAuthenticatedClient(base_url, token)
+            auth_client = GarmAuthenticatedClient.from_login(
+                base_url, admin_creds["username"], admin_creds["password"]
+            )
             self._ensure_controller_urls(auth_client)
-            endpoints, credentials = self._build_desired_github()
-            GithubReconciler(auth_client).reconcile(endpoints, credentials)
+            GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
+            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
+            self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
-            logger.warning("GARM API error during github reconcile: %s", exc)
+            logger.warning("GARM API error during reconcile: %s", exc)
+            self.unit.status = ops.WaitingStatus("GARM sync failed")
 
     def _ensure_controller_urls(self, auth_client: GarmAuthenticatedClient) -> None:
         """Configure the GARM controller URLs that gate its operational API.
@@ -844,27 +840,6 @@ class GarmCharm(paas_charm.go.Charm):
             callback_url=f"{base}/api/v1/callbacks",
             webhook_url=f"{base}/webhooks",
         )
-
-    def _reconcile_scalesets(self) -> None:
-        """Sync GARM scalesets against garm-configurator relation data."""
-        admin_creds = self._get_admin_credentials()
-        if not admin_creds:
-            logger.warning("Admin credentials not yet available; deferring scaleset reconcile")
-            return
-
-        garm_url = f"http://127.0.0.1:{GARM_PORT}"
-        try:
-            auth_client = GarmAuthenticatedClient.from_login(
-                f"{garm_url}/api/v1",
-                admin_creds["username"],
-                admin_creds["password"],
-            )
-            desired = self._build_desired_scalesets()
-            ScalesetReconciler(auth_client).reconcile(desired)
-            self.unit.status = ops.ActiveStatus()
-        except GarmApiError as exc:
-            logger.warning("GARM API error during scaleset reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus("Scaleset sync failed")
 
 
 if __name__ == "__main__":

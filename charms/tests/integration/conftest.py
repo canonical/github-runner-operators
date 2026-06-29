@@ -562,7 +562,7 @@ def integrate_configurator_with_garm_fixture(
 
     The configurator should remain Active after integration. GARM may
     restart when it receives the relation data (TOML change detection),
-    then run _reconcile_scalesets() which may set WaitingStatus if
+    then run _reconcile_runners() which may set WaitingStatus if
     credentials/providers are not yet configured. The fixture only
     confirms that GARM has finished processing the integration event
     (Juju agent idle); individual tests that need GARM fully active
@@ -572,7 +572,7 @@ def integrate_configurator_with_garm_fixture(
     """
     juju.integrate(configurator_with_image, garm_app)
     # GARM may end up in a split state: app_status=active (set by paas_charm)
-    # while unit workload_status=waiting (set by _reconcile_scalesets when
+    # while unit workload_status=waiting (set by _reconcile_runners when
     # credentials/providers are not yet configured). all_active and all_waiting
     # both require BOTH app and unit to match, so neither would pass. Using
     # all_agents_idle checks only that hooks have finished running, which is

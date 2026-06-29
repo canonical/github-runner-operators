@@ -128,7 +128,7 @@ def test_garm_charm_reaches_active(
     assert: The application is in active status, confirming a successful install.
 
     Note: the unit workload status may be ``waiting`` at this point because
-    _reconcile_scalesets() runs on integration and fails until first-run
+    _reconcile_runners() runs on integration and fails until first-run
     initialises GARM via the API.  The app-level status is what paas_charm
     sets, confirming the service is up.
     """
@@ -347,7 +347,7 @@ def test_scaleset_created_and_updated_via_relation(
     _create_test_org(base_url, token, "test-org")
 
     # A config change triggers config_changed on the configurator → relation_changed
-    # on GARM → _reconcile_scalesets() runs now that URLs are configured.
+    # on GARM → _reconcile_runners() runs now that URLs are configured.
     # Using max-runner=10 doubles as the update assertion below.
     juju.config(configurator_with_image, values={"max-runner": "10"})
     # Wait for GARM to settle. GARM is already active so this exits after one poll
