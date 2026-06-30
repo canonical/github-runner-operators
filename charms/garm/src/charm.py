@@ -295,15 +295,15 @@ class GarmCharm(paas_charm.go.Charm):
         )
         self.framework.observe(
             self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
-            self._on_debug_ssh_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[DEBUG_SSH_INTEGRATION_NAME].relation_changed,
-            self._on_debug_ssh_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(
             self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
-            self._on_debug_ssh_relation_changed,
+            self._reconcile,
         )
         self.framework.observe(self.on.update_status, self._reconcile)
 
@@ -324,14 +324,6 @@ class GarmCharm(paas_charm.go.Charm):
         framework's default metrics-port scrape job.
         """
         return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
-
-    def _on_configurator_relation_changed(self, _: ops.EventBase) -> None:
-        """Handle configurator relation joined/changed/broken by re-rendering TOML."""
-        self.restart()
-
-    def _on_debug_ssh_relation_changed(self, _: ops.EventBase) -> None:
-        """Handle debug-ssh relation joined/changed/broken by updating the charmed template."""
-        self.restart()
 
     def restart(self, rerun_migrations: bool = False) -> None:
         """Write GARM config then restart the workload.
