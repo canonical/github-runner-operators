@@ -877,12 +877,12 @@ class GarmCharm(paas_charm.go.Charm):
         Each entity is bound to the GitHub App credential the github reconciler creates for the
         same configurator unit (``app-<app_id>-<installation_id>``). A unit naming an org or repo
         but lacking the App ids is skipped — its credential name cannot be derived. Entities are
-        deduped by name so several units sharing one org yield a single registration.
+        deduped by (type, name) so several units sharing one org yield a single registration.
 
         Returns:
             The full desired set of entity specs.
         """
-        entities: dict[str, EntitySpec] = {}
+        entities: dict[tuple[str, str], EntitySpec] = {}
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
             for unit in relation.units:
                 data = relation.data[unit]
@@ -915,10 +915,26 @@ class GarmCharm(paas_charm.go.Charm):
                     )
                     continue
 
-                entities[entity_name] = EntitySpec(
+                # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide.
+                # Keep the first spec seen and warn if a later one derives a different credential,
+                # since multiple configurator relations make iteration order non-deterministic.
+                key = (entity_type, entity_name)
+                credentials_name = _credential_name(app_id, installation_id)
+                existing = entities.get(key)
+                if existing is not None:
+                    if existing.credentials_name != credentials_name:
+                        logger.warning(
+                            "Conflicting credential for %s '%s' (%s vs %s); keeping the first",
+                            entity_type,
+                            entity_name,
+                            existing.credentials_name,
+                            credentials_name,
+                        )
+                    continue
+                entities[key] = EntitySpec(
                     entity_type=entity_type,
                     entity_name=entity_name,
-                    credentials_name=_credential_name(app_id, installation_id),
+                    credentials_name=credentials_name,
                 )
         return list(entities.values())
 

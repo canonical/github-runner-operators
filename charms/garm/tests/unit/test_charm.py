@@ -1089,6 +1089,28 @@ def test_build_desired_entities_dedupes_by_name():
     assert len(entities) == 1
 
 
+def test_build_desired_entities_distinguishes_org_and_repo_with_same_name():
+    """
+    arrange: A configurator relation exposing an org and a repo that share the same raw name.
+    act: Call _build_desired_entities.
+    assert: Two distinct entities are produced — dedup is by (type, name), not name alone, so the
+        org and repo do not collide.
+    """
+    charm = _github_charm(
+        [
+            {"org": "shared", "github_app_id": "1", "github_installation_id": "2"},
+            {"repo": "shared", "github_app_id": "1", "github_installation_id": "2"},
+        ]
+    )
+
+    entities = GarmCharm._build_desired_entities(charm)
+
+    assert {(e.entity_type, e.entity_name) for e in entities} == {
+        ("organization", "shared"),
+        ("repository", "shared"),
+    }
+
+
 @pytest.mark.parametrize(
     "unit_data",
     [
