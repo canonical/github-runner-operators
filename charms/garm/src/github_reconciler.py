@@ -7,7 +7,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from garm_api import GarmAuthenticatedClient
+from garm_api import GarmApiError, GarmAuthenticatedClient
 from garm_client.models.create_github_credentials_params import CreateGithubCredentialsParams
 from garm_client.models.github_app import GithubApp
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
@@ -80,7 +80,18 @@ class GithubReconciler:
                 and cred.description == MANAGED_CREDENTIAL_DESCRIPTION
             ):
                 logger.info("Deleting orphaned GitHub credential '%s' (id=%s)", name, cred.id)
-                self._client.delete_credentials(cred.id)
+                try:
+                    self._client.delete_credentials(cred.id)
+                except GarmApiError as exc:
+                    # GARM rejects deleting a credential still referenced by an org/repo entity.
+                    # The entity reconciler removes the orphaned entity in this same pass, so the
+                    # credential becomes deletable on the next reconcile — don't abort this one.
+                    logger.warning(
+                        "Could not delete GitHub credential '%s' (still referenced; will retry):"
+                        " %s",
+                        name,
+                        exc,
+                    )
 
     def _create_credential(self, spec: CredentialSpec) -> None:
         params = CreateGithubCredentialsParams(
