@@ -365,6 +365,26 @@ def _recommend_flavor(
     return None
 
 
+def _identify_current_flavor(
+    prov_cores: float | None,
+    prov_ram: float | None,
+    flavors: list[dict],
+) -> dict | None:
+    """Reverse-map measured provisioned resources back to a catalog flavor.
+
+    The metrics carry no flavor label, so the flavor a workflow selected is
+    inferred from its resource shape: vCPU count matches the logical-core count
+    exactly, while measured total RAM sits slightly below the advertised flavor
+    RAM (kernel/firmware reserve some), so among same-vCPU flavors we pick the
+    one whose advertised RAM is nearest the measurement.
+    """
+    if not flavors or prov_cores is None or prov_ram is None:
+        return None
+    cores = round(prov_cores)
+    candidates = [f for f in flavors if f["vcpus"] == cores] or flavors
+    return min(candidates, key=lambda f: abs(f["ram_bytes"] - prov_ram))
+
+
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
@@ -386,6 +406,9 @@ def _build_output_rows(
         avg_mem = g.get("avg_mem_util")
 
         rec_name = rec_vcpus = rec_ram_gb = downsize = "N/A"
+
+        current = _identify_current_flavor(prov_cores, prov_ram, flavors)
+        current_name = current["name"] if current else "N/A"
 
         if flavors and peak_load_p95 is not None and peak_mem_p95 is not None:
             cores_needed = math.ceil(peak_load_p95 * (1 + headroom))
@@ -413,6 +436,7 @@ def _build_output_rows(
                 "avg_cpu_util%": _fmt_pct(avg_cpu),
                 "p95_peak_mem_gb": _fmt_bytes_gb(peak_mem_p95),
                 "avg_mem%": _fmt_pct(avg_mem),
+                "current_flavor": current_name,
                 "recommended_flavor": rec_name,
                 "rec_vcpus": rec_vcpus,
                 "rec_ram_gb": rec_ram_gb,

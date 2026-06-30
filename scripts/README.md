@@ -95,6 +95,7 @@ handled case-insensitively.
 | `avg_cpu_util%` | Mean CPU utilization across runs |
 | `p95_peak_mem_gb` | p95 of per-run peak memory usage (GiB) |
 | `avg_mem%` | Mean memory utilization across runs |
+| `current_flavor` | Catalog flavor matching the measured shape (see note) |
 | `recommended_flavor` | Smallest flavor that fits (or `none-fits` / `N/A`) |
 | `rec_vcpus` | vCPUs of recommended flavor |
 | `rec_ram_gb` | RAM of recommended flavor (GiB) |
@@ -102,3 +103,11 @@ handled case-insensitively.
 
 Rows are sorted lowest average CPU utilization first so the biggest
 right-sizing opportunities appear at the top.
+
+> **Note on `current_flavor`.** The hostmetrics carry no flavor label, so the selected flavor
+> is inferred by reverse-mapping the measured resource shape (`system_cpu_logical_count` →
+> vCPUs, total `system_memory_usage_bytes` → RAM) onto the `--flavors` catalog: vCPUs match
+> exactly, and since the OS reports slightly less than the advertised RAM, the same-vCPU flavor
+> with the nearest advertised RAM is chosen. If two catalog flavors share the same vCPU/RAM
+> shape this is ambiguous, and without a `--flavors` catalog the column is `N/A` (read the raw
+> `prov_cores` / `prov_ram_gb` instead).
