@@ -895,17 +895,23 @@ class GarmCharm(paas_charm.go.Charm):
                 else:
                     continue
 
+                app_id_raw = data.get("github_app_id", "")
+                installation_id_raw = data.get("github_installation_id", "")
+                # Skip quietly while the App ids are merely absent (the configurator publishes the
+                # entity name before them during bring-up); warn only on malformed values.
+                if not (app_id_raw and installation_id_raw):
+                    continue
                 try:
-                    app_id = int(data.get("github_app_id", ""))
-                    installation_id = int(data.get("github_installation_id", ""))
+                    app_id = int(app_id_raw)
+                    installation_id = int(installation_id_raw)
                 except ValueError:
                     logger.warning(
                         "Skipping entity %s from %s: non-numeric app/installation id "
                         "(app_id=%r, installation_id=%r)",
                         entity_name,
                         unit.name,
-                        data.get("github_app_id", ""),
-                        data.get("github_installation_id", ""),
+                        app_id_raw,
+                        installation_id_raw,
                     )
                     continue
 
