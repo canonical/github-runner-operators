@@ -3,8 +3,10 @@
 
 """Charm state parsing for the GARM charm.
 
-Consolidates the desired GARM state derived from charm relations into a single ``CharmState``
-value (built via ``CharmState.from_charm``), keeping ``charm.py`` free of relation-parsing detail.
+Builds the desired GARM org/repo entities from the garm-configurator relation into a
+``CharmState`` value (via ``CharmState.from_charm``), keeping that relation-parsing out of
+``charm.py``. Credential and scaleset specs are still built in ``charm.py`` today; they can move
+here under the same pattern as the state grows.
 """
 
 import dataclasses
@@ -107,7 +109,7 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
 
 @dataclasses.dataclass(frozen=True)
 class CharmState:
-    """Consolidated desired state for the GARM charm.
+    """Desired GARM state derived from charm relations.
 
     Attributes:
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
