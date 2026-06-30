@@ -50,6 +50,8 @@ def apply_charmed_template(
     """
     templates = client.list_templates()
     charmed = next((t for t in templates if t.name == GARM_CHARMED_TEMPLATE_NAME), None)
+    if charmed is not None and charmed.id is None:
+        raise CharmedTemplateError(f"Charmed template '{GARM_CHARMED_TEMPLATE_NAME}' has no ID")
 
     base = next((t for t in templates if t.name == GARM_BASE_TEMPLATE_NAME), None)
     if base is None:

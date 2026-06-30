@@ -21,6 +21,7 @@ from paas_charm.charm_utils import block_if_invalid_data
 
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
@@ -838,6 +839,9 @@ class GarmCharm(paas_charm.go.Charm):
             template_id = _apply_garm_template(auth_client, connections)
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
             self.unit.status = ops.ActiveStatus()
+        except CharmedTemplateError as exc:
+            logger.warning("GARM charmed template error during reconcile: %s", exc)
+            self.unit.status = ops.WaitingStatus(str(exc))
         except GarmApiError as exc:
             logger.warning("GARM API error during reconcile: %s", exc)
             self.unit.status = ops.WaitingStatus("GARM sync failed")

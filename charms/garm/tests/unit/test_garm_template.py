@@ -4,7 +4,7 @@
 """Unit tests for garm_template."""
 
 import base64
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -187,99 +187,112 @@ def test_build_charmed_template_data_prepends_snippet_after_shebang():
 # ---------------------------------------------------------------------------
 
 
-def test_sync_charmed_template_updates_when_data_changed():
+_PATCHED = b"patched-data"
+
+
+@pytest.mark.parametrize(
+    "charmed_exists, current_data, get_side_effect, write_side_effect, expected",
+    [
+        pytest.param(
+            True,
+            base64.b64encode(b"different").decode(),
+            None,
+            None,
+            "update",
+            id="exists-data-changed-updates",
+        ),
+        pytest.param(
+            True,
+            base64.b64encode(_PATCHED).decode(),
+            None,
+            None,
+            "skip",
+            id="exists-data-unchanged-skips",
+        ),
+        pytest.param(
+            True,
+            None,
+            GarmApiError("unreachable"),
+            None,
+            "update",
+            id="exists-get-raises-updates-anyway",
+        ),
+        pytest.param(
+            True,
+            None,
+            None,
+            GarmApiError("write error"),
+            "raise",
+            id="exists-update-fails-raises",
+        ),
+        pytest.param(False, None, None, None, "create", id="absent-creates"),
+        pytest.param(
+            False,
+            None,
+            None,
+            GarmApiError("quota exceeded"),
+            "raise",
+            id="absent-create-fails-raises",
+        ),
+    ],
+)
+def test_sync_charmed_template(
+    charmed_exists, current_data, get_side_effect, write_side_effect, expected
+):
     """
-    arrange: Charmed template exists; patched_data differs from current body.
-    act: Call _sync_charmed_template().
-    assert: update_template is called; create_template is NOT called.
+    arrange: A charmed template (present or absent) plus the parametrized GARM behaviour.
+    act: Call _sync_charmed_template() with a fixed patched body.
+    assert: The expected GARM write happens (update/create/skip) or CharmedTemplateError raised.
     """
     client = MagicMock()
+    charmed = None
+    if charmed_exists:
+        charmed = MagicMock()
+        charmed.id = 42
+        if get_side_effect is not None:
+            client.get_template.side_effect = get_side_effect
+        else:
+            client.get_template.return_value = MagicMock(data=current_data)
+    if write_side_effect is not None:
+        target = client.update_template if charmed_exists else client.create_template
+        target.side_effect = write_side_effect
+
+    if expected == "raise":
+        with pytest.raises(garm_template.CharmedTemplateError):
+            garm_template._sync_charmed_template(client, charmed, _PATCHED, 1)
+        return
+
+    result = garm_template._sync_charmed_template(client, charmed, _PATCHED, 1)
+
+    if expected == "update":
+        client.update_template.assert_called_once_with(42, _PATCHED)
+        client.create_template.assert_not_called()
+        assert result == 42
+    elif expected == "skip":
+        client.update_template.assert_not_called()
+        client.create_template.assert_not_called()
+        assert result == 42
+    elif expected == "create":
+        client.create_template.assert_called_once()
+        client.update_template.assert_not_called()
+
+
+def test_apply_charmed_template_raises_when_charmed_has_no_id():
+    """
+    arrange: list_templates returns the base plus a charmed template whose id is None.
+    act: Call apply_charmed_template().
+    assert: CharmedTemplateError is raised (symmetric with the base-id guard).
+    """
+    client = MagicMock()
+    base = MagicMock()
+    base.name = garm_template.GARM_BASE_TEMPLATE_NAME
+    base.id = 1
     charmed = MagicMock()
-    charmed.id = 42
-    current = MagicMock()
-    current.data = base64.b64encode(b"old-data").decode()
-    client.get_template.return_value = current
+    charmed.name = garm_template.GARM_CHARMED_TEMPLATE_NAME
+    charmed.id = None
+    client.list_templates.return_value = [base, charmed]
 
-    garm_template._sync_charmed_template(client, charmed, b"new-data", 1)
-
-    client.update_template.assert_called_once_with(42, b"new-data")
-    client.create_template.assert_not_called()
-
-
-def test_sync_charmed_template_skips_when_data_unchanged():
-    """
-    arrange: Charmed template exists; body matches patched_data exactly.
-    act: Call _sync_charmed_template().
-    assert: Neither update_template nor create_template is called.
-    """
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 7
-    data = b"same-data"
-    current = MagicMock()
-    current.data = base64.b64encode(data).decode()
-    client.get_template.return_value = current
-
-    garm_template._sync_charmed_template(client, charmed, data, 1)
-
-    client.update_template.assert_not_called()
-    client.create_template.assert_not_called()
-
-
-def test_sync_charmed_template_updates_when_get_raises():
-    """
-    arrange: get_template raises GarmApiError (can't verify current state).
-    act: Call _sync_charmed_template().
-    assert: update_template is called anyway (safe to overwrite).
-    """
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 11
-    client.get_template.side_effect = GarmApiError("unreachable")
-
-    garm_template._sync_charmed_template(client, charmed, b"data", 1)
-
-    client.update_template.assert_called_once_with(11, b"data")
-
-
-def test_sync_charmed_template_raises_when_update_fails():
-    """
-    arrange: Charmed template exists; update_template raises GarmApiError.
-    act: Call _sync_charmed_template().
-    assert: CharmedTemplateError is raised.
-    """
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 13
-    client.get_template.return_value = MagicMock(data=None)
-    client.update_template.side_effect = GarmApiError("write error")
-
-    with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._sync_charmed_template(client, charmed, b"data", 1)
-
-
-def test_sync_charmed_template_creates_when_charmed_absent():
-    """
-    arrange: No existing charmed template (charmed=None).
-    act: Call _sync_charmed_template().
-    assert: create_template is called; update_template is NOT called.
-    """
-    client = MagicMock()
-
-    garm_template._sync_charmed_template(client, None, b"script", 1)
-
-    client.create_template.assert_called_once()
-    client.update_template.assert_not_called()
-
-
-def test_sync_charmed_template_raises_when_create_fails():
-    """
-    arrange: No existing charmed template; create_template raises GarmApiError.
-    act: Call _sync_charmed_template().
-    assert: CharmedTemplateError is raised.
-    """
-    client = MagicMock()
-    client.create_template.side_effect = GarmApiError("quota exceeded")
-
-    with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._sync_charmed_template(client, None, b"script", 1)
+    with pytest.raises(
+        garm_template.CharmedTemplateError, match=garm_template.GARM_CHARMED_TEMPLATE_NAME
+    ):
+        garm_template.apply_charmed_template(client, [])

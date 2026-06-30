@@ -614,6 +614,43 @@ def test_reconcile_runners_reconciles_github_then_scalesets():
     charm.restart.assert_not_called()
 
 
+def test_reconcile_runners_charmed_template_error_sets_waiting_status():
+    """
+    arrange: Admin credentials are available but _apply_garm_template raises CharmedTemplateError.
+    act: Call _reconcile_runners().
+    assert: The unit degrades to WaitingStatus carrying the error message (not an error state),
+        and scalesets are never reconciled.
+    """
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(
+        return_value={"username": "admin", "password": "TestPass-123!"}
+    )
+    charm._build_desired_credentials = MagicMock(return_value=[])
+    charm._build_desired_scalesets = MagicMock(return_value=[])
+    charm._ensure_controller_urls = MagicMock()
+
+    with (
+        patch("charm.GarmAuthenticatedClient"),
+        patch("charm.GithubReconciler"),
+        patch("charm.ScalesetReconciler") as mock_scaleset_cls,
+        patch(
+            "charm._apply_garm_template",
+            side_effect=garm_template.CharmedTemplateError("base template missing"),
+        ),
+        patch("charm.CharmState") as mock_state,
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+    ):
+        mock_state.from_charm.return_value.ssh_debug_connections = []
+        mock_unit.return_value = MagicMock()
+        charm._reconcile_runners()  # must not raise
+
+        status = mock_unit.return_value.status
+        mock_scaleset_cls.return_value.reconcile.assert_not_called()
+
+    assert isinstance(status, ops.WaitingStatus)
+    assert status.message == "base template missing"
+
+
 def test_restart_ensures_secrets_before_readiness_gate():
     """
     arrange: A GarmCharm whose workload is not ready (pebble not up yet).

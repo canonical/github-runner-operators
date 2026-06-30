@@ -140,24 +140,27 @@ def test_login_returns_token():
 class TestIsInitialized:
     """Tests for GarmApiClient.is_initialized grouped for node-ID compatibility."""
 
-    def test_returns_true_when_controller_info_succeeds(self, client):
-        """is_initialized returns True when controller_info returns 200."""
+    @pytest.mark.parametrize(
+        "side_effect, expected, raises_match",
+        [
+            pytest.param(None, True, None, id="200-returns-true"),
+            pytest.param(ApiException(status=409), False, None, id="409-returns-false"),
+            pytest.param(ApiException(status=500), None, "500", id="500-raises"),
+        ],
+    )
+    def test_is_initialized(self, client, side_effect, expected, raises_match):
+        """is_initialized maps controller_info outcome to True/False or raises GarmApiError."""
         with patch("garm_api.ControllerInfoApi") as mock_cls:
-            mock_cls.return_value.controller_info.return_value = MagicMock()
-            assert client.is_initialized() is True
+            if side_effect is not None:
+                mock_cls.return_value.controller_info.side_effect = side_effect
+            else:
+                mock_cls.return_value.controller_info.return_value = MagicMock()
 
-    def test_returns_false_on_409(self, client):
-        """is_initialized returns False when GARM returns 409 (not yet initialised)."""
-        with patch("garm_api.ControllerInfoApi") as mock_cls:
-            mock_cls.return_value.controller_info.side_effect = ApiException(status=409)
-            assert client.is_initialized() is False
-
-    def test_raises_garm_api_error_on_unexpected_status(self, client):
-        """is_initialized raises GarmApiError on unexpected HTTP status."""
-        with patch("garm_api.ControllerInfoApi") as mock_cls:
-            mock_cls.return_value.controller_info.side_effect = ApiException(status=500)
-            with pytest.raises(GarmApiError, match="500"):
-                client.is_initialized()
+            if raises_match is not None:
+                with pytest.raises(GarmApiError, match=raises_match):
+                    client.is_initialized()
+            else:
+                assert client.is_initialized() is expected
 
 
 class TestFirstRun:
