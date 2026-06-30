@@ -872,6 +872,10 @@ def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
     auth_client = mock_auth_cls.from_login.return_value
     # Controller URLs must be configured before any operational call, or GARM returns 409.
     charm._ensure_controller_urls.assert_called_once_with(auth_client)
+    # Each reconciler must be built against the same authenticated client.
+    mock_github_cls.assert_called_once_with(auth_client)
+    mock_entity_cls.assert_called_once_with(auth_client)
+    mock_scaleset_cls.assert_called_once_with(auth_client)
     mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
     mock_entity_cls.return_value.reconcile.assert_called_once_with(entities)
     mock_scaleset_cls.return_value.reconcile.assert_called_once_with(scalesets)

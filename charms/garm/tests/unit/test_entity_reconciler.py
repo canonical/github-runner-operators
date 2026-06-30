@@ -165,6 +165,19 @@ def test_delete_orphan_repo_when_managed():
     client.delete_repo.assert_called_once_with("repo-uuid")
 
 
+def test_repo_without_owner_is_skipped_not_created():
+    """
+    arrange: A desired repository whose name has no 'owner/repo' slash.
+    act: Reconcile it.
+    assert: create_repo is not called — a malformed name is skipped rather than registered with
+        an empty name and deferred forever.
+    """
+    client = _client(repos=[])
+    _reconcile(client, [EntitySpec("repository", "no-slash", "app-1-2")])
+
+    client.create_repo.assert_not_called()
+
+
 def test_create_failure_is_deferred_not_fatal():
     """
     arrange: Two desired orgs where registering the first raises GarmApiError (GARM cannot reach

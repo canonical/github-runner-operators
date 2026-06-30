@@ -106,6 +106,11 @@ class EntityReconciler:
             try:
                 if existing is None:
                     owner, _, name = full_name.partition("/")
+                    if not (owner and name):
+                        logger.warning(
+                            "Skipping repository '%s': expected 'owner/repo' format", full_name
+                        )
+                        continue
                     logger.info("Registering repository '%s' in GARM", full_name)
                     self._client.create_repo(
                         CreateRepoParams(

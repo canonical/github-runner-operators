@@ -899,6 +899,14 @@ class GarmCharm(paas_charm.go.Charm):
                     app_id = int(data.get("github_app_id", ""))
                     installation_id = int(data.get("github_installation_id", ""))
                 except ValueError:
+                    logger.warning(
+                        "Skipping entity %s from %s: non-numeric app/installation id "
+                        "(app_id=%r, installation_id=%r)",
+                        entity_name,
+                        unit.name,
+                        data.get("github_app_id", ""),
+                        data.get("github_installation_id", ""),
+                    )
                     continue
 
                 entities[entity_name] = EntitySpec(
