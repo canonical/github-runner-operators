@@ -48,9 +48,10 @@ Credentials can also be provided via environment variables `GRAFANA_URL` and
 | `--window` | `14d` | Look-back window (PromQL duration string) |
 | `--repository` | all | Filter by `github_repository` label (PromQL regex) |
 | `--flavors` | none | JSON flavor catalog (see below) |
+| `--flavor-name-filter` | none | Regex restricting the catalog to real runner flavors (e.g. `^github-runner-`) |
 | `--headroom` | `0.3` | Safety margin added to resource requirements (30 %) |
 | `--min-runs` | `5` | Minimum run count to include a workflow in the report |
-| `--format` | `table` | Output format: `table`, `csv`, or `json` |
+| `--format` | `table` | Output format: `table`, `csv`, `json`, or `summary` |
 | `--output` | stdout | Write output to a file |
 | `--print-queries` / `--dry-run` | — | Print PromQL and exit; no credentials needed |
 | `-v` | — | Verbose diagnostic output to stderr |
@@ -99,10 +100,20 @@ handled case-insensitively.
 | `recommended_flavor` | Smallest flavor that fits (or `none-fits` / `N/A`) |
 | `rec_vcpus` | vCPUs of recommended flavor |
 | `rec_ram_gb` | RAM of recommended flavor (GiB) |
-| `downsize` | `Y` if the recommendation is smaller than the current provisioning |
+| `verdict` | `downsize`, `upsize`, `mixed`, `ok`, or `none-fits` (recommended vs current flavor) |
 
 Rows are sorted lowest average CPU utilization first so the biggest
-right-sizing opportunities appear at the top.
+right-sizing opportunities appear at the top. `--format summary` collapses the
+whole report into verdict counts, the `p95_peak_load` distribution, and the top
+`downsize` transitions — handy for a quick "how over-provisioned are we?" read.
+
+> **Catalog hygiene.** `verdict` compares the recommended flavor against the
+> `current_flavor`, so only entries runners can actually launch belong in the
+> catalog. A wholesale `openstack flavor list` dump includes generic project
+> flavors (e.g. `shared.*`); without filtering, the recommender may point a
+> workflow at a flavor that isn't a valid runner option. Use `--flavor-name-filter`
+> (e.g. `^github-runner-`) to restrict the catalog. Malformed entries (non-numeric
+> or zero vCPUs/RAM) are dropped automatically.
 
 > **Note on `current_flavor`.** The hostmetrics carry no flavor label, so the selected flavor
 > is inferred by reverse-mapping the measured resource shape (`system_cpu_logical_count` →

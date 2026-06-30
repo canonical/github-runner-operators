@@ -14,10 +14,12 @@ Credentials are not required for --print-queries / --dry-run; all other modes ne
 """
 
 import argparse
+import collections
 import csv
 import json
 import math
 import os
+import re
 import statistics
 import sys
 import urllib.error
@@ -64,7 +66,7 @@ def main() -> None:
     per_run = _join_vectors(raw_vectors)
     groups = _aggregate_by_workflow(per_run, args.min_runs)
 
-    flavors = _load_flavors(args.flavors) if args.flavors else []
+    flavors = _load_flavors(args.flavors, args.flavor_name_filter) if args.flavors else []
     rows = _build_output_rows(groups, flavors, args.headroom)
 
     _emit(rows, args.format, args.output)
@@ -313,13 +315,18 @@ def _p95_or_max(values: list[float]) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def _load_flavors(path: str) -> list[dict]:
+def _load_flavors(path: str, name_filter: str | None = None) -> list[dict]:
     """Load and normalize a flavor catalog from a JSON file.
 
     Accepts both the `openstack flavor list -f json` shape (list of objects with
     capitalized keys like Name/VCPUs/RAM) and a plain list with lowercase keys
     (name/vcpus/ram). RAM is in MiB (OpenStack convention) and is converted to
     bytes here so downstream comparisons use consistent units.
+
+    A wholesale `openstack flavor list` dump contains flavors that runners never
+    use (generic project flavors) and occasionally malformed rows; entries with
+    non-numeric or zero vCPUs/RAM are dropped, and name_filter (a regex) restricts
+    the catalog to the flavors runners actually provision.
     """
     try:
         with open(path) as fh:
@@ -327,26 +334,33 @@ def _load_flavors(path: str) -> list[dict]:
     except (OSError, json.JSONDecodeError) as exc:
         sys.exit(f"error: could not load flavor file {path!r}: {exc}")
 
+    pattern = re.compile(name_filter) if name_filter else None
     flavors = []
     for item in raw:
         # Normalize keys case-insensitively
         lowered = {k.lower(): v for k, v in item.items()}
         name = lowered.get("name")
-        vcpus = lowered.get("vcpus")
-        ram_mib = lowered.get("ram")
-        if name is None or vcpus is None or ram_mib is None:
+        try:
+            vcpus = int(lowered.get("vcpus"))
+            ram_mib = int(lowered.get("ram"))
+        except (TypeError, ValueError):
+            continue  # malformed or missing numeric fields
+        if name is None or vcpus <= 0 or ram_mib <= 0:
+            continue
+        if pattern and not pattern.search(str(name)):
             continue
         flavors.append(
             {
                 "name": str(name),
-                "vcpus": int(vcpus),
-                "ram_bytes": int(ram_mib) * 1024 * 1024,  # MiB → bytes
+                "vcpus": vcpus,
+                "ram_bytes": ram_mib * 1024 * 1024,  # MiB → bytes
                 "disk": lowered.get("disk"),
             }
         )
 
     if not flavors:
-        sys.exit(f"error: flavor file {path!r} contained no usable entries")
+        hint = f" matching {name_filter!r}" if name_filter else ""
+        sys.exit(f"error: flavor file {path!r} contained no usable entries{hint}")
 
     # Pre-sort so the selection loop's "first fit" gives the smallest flavor.
     flavors.sort(key=lambda f: (f["vcpus"], f["ram_bytes"]))
@@ -405,7 +419,7 @@ def _build_output_rows(
         avg_cpu = g.get("avg_cpu_util")
         avg_mem = g.get("avg_mem_util")
 
-        rec_name = rec_vcpus = rec_ram_gb = downsize = "N/A"
+        rec_name = rec_vcpus = rec_ram_gb = verdict = "N/A"
 
         current = _identify_current_flavor(prov_cores, prov_ram, flavors)
         current_name = current["name"] if current else "N/A"
@@ -418,12 +432,9 @@ def _build_output_rows(
                 rec_name = rec["name"]
                 rec_vcpus = rec["vcpus"]
                 rec_ram_gb = round(rec["ram_bytes"] / (1024 ** 3), 2)
-                downsize = "Y" if (
-                    (prov_cores is not None and rec["vcpus"] < prov_cores)
-                    or (prov_ram is not None and rec["ram_bytes"] < prov_ram)
-                ) else "N"
+                verdict = _classify_verdict(current, rec)
             else:
-                rec_name = "none-fits"
+                rec_name = verdict = "none-fits"
 
         rows.append(
             {
@@ -440,13 +451,34 @@ def _build_output_rows(
                 "recommended_flavor": rec_name,
                 "rec_vcpus": rec_vcpus,
                 "rec_ram_gb": rec_ram_gb,
-                "downsize": downsize,
+                "verdict": verdict,
             }
         )
 
     # Biggest downsizes / lowest utilization first: sort by avg_cpu_util% ascending.
     rows.sort(key=lambda r: float(r["avg_cpu_util%"].rstrip("%")) if r["avg_cpu_util%"] not in ("N/A", "") else 999)
     return rows
+
+
+def _classify_verdict(current: dict | None, rec: dict) -> str:
+    """Classify the recommendation relative to the current flavor.
+
+    Comparing the recommended catalog flavor against the reverse-mapped *current*
+    flavor (rather than the raw measurement) keeps the verdict consistent with the
+    current→recommended transition the report shows, so a memory-bound workflow
+    sent to a larger flavor reads as 'upsize' instead of being mislabeled.
+    """
+    if current is None:
+        return "?"
+    smaller = rec["vcpus"] < current["vcpus"] or rec["ram_bytes"] < current["ram_bytes"]
+    larger = rec["vcpus"] > current["vcpus"] or rec["ram_bytes"] > current["ram_bytes"]
+    if smaller and larger:
+        return "mixed"  # fewer of one resource, more of another
+    if smaller:
+        return "downsize"
+    if larger:
+        return "upsize"
+    return "ok"
 
 
 def _emit(rows: list[dict], fmt: str, output_path: str | None) -> None:
@@ -462,6 +494,8 @@ def _emit(rows: list[dict], fmt: str, output_path: str | None) -> None:
             writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
             writer.writeheader()
             writer.writerows(rows)
+        elif fmt == "summary":
+            _print_summary(rows, fh)
         else:  # table
             if not rows:
                 print("(no data)", file=fh)
@@ -470,6 +504,37 @@ def _emit(rows: list[dict], fmt: str, output_path: str | None) -> None:
     finally:
         if output_path:
             fh.close()
+
+
+def _print_summary(rows: list[dict], fh: Any) -> None:
+    """Print an aggregate breakdown: verdict counts, peak-load spread, transitions."""
+    if not rows:
+        print("(no data)", file=fh)
+        return
+
+    verdicts = collections.Counter(r["verdict"] for r in rows)
+    loads = [float(r["p95_peak_load"]) for r in rows if r["p95_peak_load"] not in ("N/A", "")]
+
+    print(f"{len(rows)} workflows", file=fh)
+    for verdict, n in verdicts.most_common():
+        print(f"  {verdict:<10} {n:>4}  ({100 * n // len(rows)}%)", file=fh)
+
+    if loads:
+        print(
+            f"\np95_peak_load: mean={statistics.mean(loads):.2f} "
+            f"median={statistics.median(loads):.2f} max={max(loads):.2f}",
+            file=fh,
+        )
+
+    transitions = collections.Counter(
+        (r["current_flavor"], r["recommended_flavor"])
+        for r in rows
+        if r["verdict"] == "downsize"
+    )
+    if transitions:
+        print("\ntop downsize transitions (current -> recommended):", file=fh)
+        for (cur, rec), n in transitions.most_common(15):
+            print(f"  {n:>4}  {cur} -> {rec}", file=fh)
 
 
 def _print_table(rows: list[dict], fh: Any) -> None:
@@ -542,12 +607,15 @@ Examples:
                    help="Filter by github_repository label (PromQL regex, e.g. 'canonical/.*')")
     p.add_argument("--flavors", metavar="FILE",
                    help="JSON flavor catalog for right-sizing recommendations")
+    p.add_argument("--flavor-name-filter", metavar="REGEX",
+                   help="Restrict the catalog to flavor names matching REGEX "
+                        "(e.g. '^github-runner-' to exclude generic project flavors)")
     p.add_argument("--headroom", type=float, default=0.3, metavar="FRACTION",
                    help="Safety headroom fraction added to resource requirements (default: 0.3)")
     p.add_argument("--min-runs", type=int, default=5, metavar="N",
                    help="Minimum run count to include a workflow in output (default: 5)")
-    p.add_argument("--format", choices=("table", "csv", "json"), default="table",
-                   help="Output format (default: table)")
+    p.add_argument("--format", choices=("table", "csv", "json", "summary"), default="table",
+                   help="Output format (default: table); 'summary' prints an aggregate breakdown")
     p.add_argument("--output", metavar="FILE",
                    help="Write output to FILE instead of stdout")
     p.add_argument("--print-queries", "--dry-run", action="store_true",
