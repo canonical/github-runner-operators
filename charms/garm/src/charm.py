@@ -86,28 +86,6 @@ def _proxy_environment() -> dict[str, str]:
     return env
 
 
-def _build_external_block(
-    config_file: str, proxy_var_names: list[str] | None
-) -> dict[str, typing.Any]:
-    """Build a provider ``external`` block, whitelisting proxy vars when set.
-
-    Args:
-        config_file: Path to the provider-specific TOML config file.
-        proxy_var_names: Optional environment variable names to forward to the
-            child provider process. When None or empty, the key is omitted.
-
-    Returns:
-        The ``external`` dict for a GARM [[provider]] entry.
-    """
-    external: dict[str, typing.Any] = {
-        "config_file": config_file,
-        "provider_executable": OPENSTACK_PROVIDER_BINARY,
-    }
-    if proxy_var_names:
-        external["environment_variables"] = proxy_var_names
-    return external
-
-
 def _build_provider_list(
     providers: list[dict[str, str]] | None,
     proxy_var_names: list[str] | None = None,
@@ -194,6 +172,28 @@ def _build_provider_list(
             }
         )
     return result, provider_files
+
+
+def _build_external_block(
+    config_file: str, proxy_var_names: list[str] | None
+) -> dict[str, typing.Any]:
+    """Build a provider ``external`` block, whitelisting proxy vars when set.
+
+    Args:
+        config_file: Path to the provider-specific TOML config file.
+        proxy_var_names: Optional environment variable names to forward to the
+            child provider process. When None or empty, the key is omitted.
+
+    Returns:
+        The ``external`` dict for a GARM [[provider]] entry.
+    """
+    external: dict[str, typing.Any] = {
+        "config_file": config_file,
+        "provider_executable": OPENSTACK_PROVIDER_BINARY,
+    }
+    if proxy_var_names:
+        external["environment_variables"] = proxy_var_names
+    return external
 
 
 def _render_clouds_yaml(cloud_name: str, auth: dict[str, str], region_name: str) -> str:
