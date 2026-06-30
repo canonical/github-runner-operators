@@ -831,20 +831,24 @@ def test_reconcile_runners_skips_when_no_admin_credentials():
     mock_auth_cls.from_login.assert_not_called()
 
 
-def test_reconcile_runners_reconciles_github_then_scalesets():
+def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
     """
-    arrange: Admin credentials are available and the desired credential/scaleset specs are stubbed.
+    arrange: Admin credentials are available and the desired credential/entity/scaleset specs are
+        stubbed.
     act: Call _reconcile_runners().
-    assert: On a single authenticated client it configures controller URLs, reconciles GitHub
-        credentials, then reconciles scalesets, reports ActiveStatus, and never restarts.
+    assert: On a single authenticated client it configures controller URLs, then reconciles
+        credentials, entities, and scalesets in that dependency order, reports ActiveStatus, and
+        never restarts.
     """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(
         return_value={"username": "admin", "password": "TestPass-123!"}
     )
     credentials = [object()]
+    entities = [object()]
     scalesets = [object()]
     charm._build_desired_credentials = MagicMock(return_value=credentials)
+    charm._build_desired_entities = MagicMock(return_value=entities)
     charm._build_desired_scalesets = MagicMock(return_value=scalesets)
     charm._ensure_controller_urls = MagicMock()
     charm.restart = MagicMock()
@@ -852,10 +856,15 @@ def test_reconcile_runners_reconciles_github_then_scalesets():
     with (
         patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
         patch("charm.GithubReconciler") as mock_github_cls,
+        patch("charm.EntityReconciler") as mock_entity_cls,
         patch("charm.ScalesetReconciler") as mock_scaleset_cls,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
     ):
         mock_unit.return_value = MagicMock()
+        order = MagicMock()
+        order.attach_mock(mock_github_cls.return_value.reconcile, "github")
+        order.attach_mock(mock_entity_cls.return_value.reconcile, "entity")
+        order.attach_mock(mock_scaleset_cls.return_value.reconcile, "scaleset")
         charm._reconcile_runners()
 
     expected_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
@@ -863,10 +872,11 @@ def test_reconcile_runners_reconciles_github_then_scalesets():
     auth_client = mock_auth_cls.from_login.return_value
     # Controller URLs must be configured before any operational call, or GARM returns 409.
     charm._ensure_controller_urls.assert_called_once_with(auth_client)
-    mock_github_cls.assert_called_once_with(auth_client)
     mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
-    mock_scaleset_cls.assert_called_once_with(auth_client)
+    mock_entity_cls.return_value.reconcile.assert_called_once_with(entities)
     mock_scaleset_cls.return_value.reconcile.assert_called_once_with(scalesets)
+    # Entities depend on credentials and scalesets depend on entities, so order matters.
+    assert [name for name, _, _ in order.mock_calls] == ["github", "entity", "scaleset"]
     charm.restart.assert_not_called()
 
 
@@ -1021,6 +1031,78 @@ def test_build_desired_credentials_skips_non_numeric_ids():
     credentials = GarmCharm._build_desired_credentials(charm)
 
     assert credentials == []
+
+
+@pytest.mark.parametrize(
+    "unit_data, expected_type, expected_name",
+    [
+        (
+            {"org": "canonical", "github_app_id": "12345", "github_installation_id": "67890"},
+            "organization",
+            "canonical",
+        ),
+        (
+            {"repo": "canonical/runner", "github_app_id": "1", "github_installation_id": "2"},
+            "repository",
+            "canonical/runner",
+        ),
+    ],
+    ids=["org-entity", "repo-entity"],
+)
+def test_build_desired_entities_builds_entity_from_relation(
+    unit_data, expected_type, expected_name
+):
+    """
+    arrange: A charm whose configurator relation exposes a unit naming an org or repo plus the
+        GitHub App ids.
+    act: Call _build_desired_entities.
+    assert: One entity is built with the right type/name, bound to the app-<id>-<id> credential.
+    """
+    charm = _github_charm([unit_data])
+
+    entities = GarmCharm._build_desired_entities(charm)
+
+    assert len(entities) == 1
+    entity = entities[0]
+    assert entity.entity_type == expected_type
+    assert entity.entity_name == expected_name
+    assert entity.credentials_name == "app-{}-{}".format(
+        unit_data["github_app_id"], unit_data["github_installation_id"]
+    )
+
+
+def test_build_desired_entities_dedupes_by_name():
+    """
+    arrange: A charm whose configurator relation exposes two units naming the same org.
+    act: Call _build_desired_entities.
+    assert: The two units collapse to a single entity registration.
+    """
+    unit_data = {"org": "canonical", "github_app_id": "1", "github_installation_id": "2"}
+    charm = _github_charm([dict(unit_data), dict(unit_data)])
+
+    entities = GarmCharm._build_desired_entities(charm)
+
+    assert len(entities) == 1
+
+
+@pytest.mark.parametrize(
+    "unit_data",
+    [
+        {"github_app_id": "1", "github_installation_id": "2"},
+        {"org": "canonical", "github_installation_id": "2"},
+        {"org": "canonical", "github_app_id": "x", "github_installation_id": "2"},
+    ],
+    ids=["no-org-or-repo", "missing-app-id", "non-numeric-id"],
+)
+def test_build_desired_entities_skips_incomplete_unit(unit_data):
+    """
+    arrange: A charm whose configurator unit lacks an entity name or valid GitHub App ids.
+    act: Call _build_desired_entities.
+    assert: No entity is built.
+    """
+    charm = _github_charm([unit_data])
+
+    assert GarmCharm._build_desired_entities(charm) == []
 
 
 def test_ensure_controller_urls_sets_urls_from_base_url():

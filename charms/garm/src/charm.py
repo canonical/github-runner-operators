@@ -20,6 +20,7 @@ import yaml
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
+from entity_reconciler import EntityReconciler, EntitySpec
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
@@ -322,6 +323,15 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     except ValueError:
         pass
     return {}
+
+
+def _credential_name(app_id: int, installation_id: int) -> str:
+    """Return the GARM credential name for a GitHub App installation.
+
+    The org/repo entity reconciler binds entities to credentials by this name, so both must
+    derive it identically.
+    """
+    return f"app-{app_id}-{installation_id}"
 
 
 class GarmCharm(paas_charm.go.Charm):
@@ -851,7 +861,7 @@ class GarmCharm(paas_charm.go.Charm):
                     continue
 
                 credentials[dedupe_key] = CredentialSpec(
-                    name=f"app-{app_id}-{installation_id}",
+                    name=_credential_name(app_id, installation_id),
                     endpoint=DEFAULT_GITHUB_ENDPOINT,
                     app_id=app_id,
                     installation_id=installation_id,
@@ -861,13 +871,51 @@ class GarmCharm(paas_charm.go.Charm):
 
         return list(credentials.values())
 
-    def _reconcile_runners(self) -> None:
-        """Sync GARM controller URLs, GitHub credentials, then scalesets from relation data.
+    def _build_desired_entities(self) -> list[EntitySpec]:
+        """Build desired GARM org/repo entities from configurator relation data.
 
-        The three steps are ordered, not independent: GARM rejects every operational call with
-        409 ``urls_required`` until the controller URLs are set, and scalesets reference the
-        GitHub credentials. So a single authenticated client configures the URLs and reconciles
-        credentials before scalesets are reconciled against the same client.
+        Each entity is bound to the GitHub App credential the github reconciler creates for the
+        same configurator unit (``app-<app_id>-<installation_id>``). A unit naming an org or repo
+        but lacking the App ids is skipped — its credential name cannot be derived. Entities are
+        deduped by name so several units sharing one org yield a single registration.
+
+        Returns:
+            The full desired set of entity specs.
+        """
+        entities: dict[str, EntitySpec] = {}
+        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
+            for unit in relation.units:
+                data = relation.data[unit]
+                org = data.get("org", "")
+                repo = data.get("repo", "")
+                if org:
+                    entity_type, entity_name = "organization", org
+                elif repo:
+                    entity_type, entity_name = "repository", repo
+                else:
+                    continue
+
+                try:
+                    app_id = int(data.get("github_app_id", ""))
+                    installation_id = int(data.get("github_installation_id", ""))
+                except ValueError:
+                    continue
+
+                entities[entity_name] = EntitySpec(
+                    entity_type=entity_type,
+                    entity_name=entity_name,
+                    credentials_name=_credential_name(app_id, installation_id),
+                )
+        return list(entities.values())
+
+    def _reconcile_runners(self) -> None:
+        """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
+
+        The steps are ordered, not independent: GARM rejects every operational call with 409
+        ``urls_required`` until the controller URLs are set; org/repo entities reference a
+        credential by name; and scalesets are created under a registered entity. So a single
+        authenticated client configures the URLs and reconciles credentials, then entities, then
+        scalesets — each dependency before its dependants.
         """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
@@ -883,6 +931,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
+            EntityReconciler(auth_client).reconcile(self._build_desired_entities())
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
             self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
