@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
-def _credential_name(app_id: int, installation_id: int) -> str:
+def credential_name(app_id: int, installation_id: int) -> str:
     """Return the GARM credential name for a GitHub App installation.
 
     The org/repo entity reconciler binds entities to credentials by this name, so both the
@@ -87,7 +87,7 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
             # the first spec seen (iteration is ordered above) and warn if a later one derives a
             # different credential.
             key = (entity_type, entity_name)
-            credentials_name = _credential_name(app_id, installation_id)
+            credentials_name = credential_name(app_id, installation_id)
             existing = entities.get(key)
             if existing is not None:
                 if existing.credentials_name != credentials_name:

@@ -20,7 +20,7 @@ import yaml
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
-from charm_state import GARM_CONFIGURATOR_RELATION_NAME, CharmState, _credential_name
+from charm_state import GARM_CONFIGURATOR_RELATION_NAME, CharmState, credential_name
 from entity_reconciler import EntityReconciler
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from github_reconciler import (
@@ -852,7 +852,7 @@ class GarmCharm(paas_charm.go.Charm):
                     continue
 
                 credentials[dedupe_key] = CredentialSpec(
-                    name=_credential_name(app_id, installation_id),
+                    name=credential_name(app_id, installation_id),
                     endpoint=DEFAULT_GITHUB_ENDPOINT,
                     app_id=app_id,
                     installation_id=installation_id,
