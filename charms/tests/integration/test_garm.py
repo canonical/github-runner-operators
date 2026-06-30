@@ -33,7 +33,6 @@ GARM_SECRETS_LABEL = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 GARM_API_PORT = 8080
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
-GARM_BASE_TEMPLATE_NAME = "github_linux"
 GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 
 # Generated once per session so all test functions that call _garm_first_run use
@@ -413,40 +412,6 @@ def _get_template_body(address: str, token: str, template_id: int) -> str:
     return base64.b64decode(raw_b64).decode("utf-8") if raw_b64 else ""
 
 
-def _ensure_base_template(address: str, token: str) -> None:
-    """Create the github_linux base template if it does not already exist.
-
-    GARM does not ship templates in its database — they must be created via the
-    API. The charm's apply_charmed_template() requires github_linux as a base to
-    derive github_linux_charmed from, so this helper ensures it is present before
-    the debug-ssh relation is integrated.
-
-    Args:
-        address: GARM unit IP address.
-        token: JWT token for authentication.
-    """
-    templates = _list_templates(address, token)
-    if any(t.get("name") == GARM_BASE_TEMPLATE_NAME for t in templates):
-        logger.info("Base template '%s' already exists; skipping creation", GARM_BASE_TEMPLATE_NAME)
-        return
-
-    logger.info("Creating base template '%s'", GARM_BASE_TEMPLATE_NAME)
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    headers = {"Authorization": f"Bearer {token}"}
-    # Minimal shell script body — the charm only reads this to prepend the tmate snippet.
-    script = "#!/bin/bash\n# Placeholder github_linux install template\n"
-    payload = {
-        "name": GARM_BASE_TEMPLATE_NAME,
-        "description": "Base GitHub Linux runner install template (created by integration test)",
-        "forge_type": "github",
-        "os_type": "linux",
-        "data": list(script.encode("utf-8")),
-    }
-    resp = requests.post(f"{base_url}/templates", json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
-    logger.info("Base template '%s' created", GARM_BASE_TEMPLATE_NAME)
-
-
 @pytest.fixture(scope="module", name="garm_with_debug_ssh")
 def integrate_garm_with_debug_ssh_fixture(
     juju: jubilant.Juju,
@@ -455,15 +420,13 @@ def integrate_garm_with_debug_ssh_fixture(
 ) -> str:
     """Integrate GARM with the fake tmate debug-ssh provider.
 
-    Pre-creates the github_linux base template (GARM does not ship templates in
-    its DB) so that the charm can derive github_linux_charmed from it when the
-    debug-ssh relation joins.
+    GARM seeds the github_linux base template itself on first-start DB migration,
+    so the charm can derive github_linux_charmed from it when the debug-ssh
+    relation joins — no test-side base template creation is needed.
 
     Returns the GARM app name after agents are idle.
     """
-    address = _get_garm_address(juju, configurator_garm)
-    token = _garm_first_run(juju, address)
-    _ensure_base_template(address, token)
+    _garm_first_run(juju, _get_garm_address(juju, configurator_garm))
 
     logger.info(
         "Integrating '%s' with debug-ssh provider '%s'",
