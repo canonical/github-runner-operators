@@ -20,7 +20,8 @@ import yaml
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
-from entity_reconciler import EntityReconciler, EntitySpec
+from charm_state import GARM_CONFIGURATOR_RELATION_NAME, CharmState, _credential_name
+from entity_reconciler import EntityReconciler
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
@@ -36,7 +37,6 @@ GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
-GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -323,15 +323,6 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     except ValueError:
         pass
     return {}
-
-
-def _credential_name(app_id: int, installation_id: int) -> str:
-    """Return the GARM credential name for a GitHub App installation.
-
-    The org/repo entity reconciler binds entities to credentials by this name, so both must
-    derive it identically.
-    """
-    return f"app-{app_id}-{installation_id}"
 
 
 class GarmCharm(paas_charm.go.Charm):
@@ -871,82 +862,8 @@ class GarmCharm(paas_charm.go.Charm):
 
         return list(credentials.values())
 
-    def _build_desired_entities(self) -> list[EntitySpec]:
-        """Build desired GARM org/repo entities from configurator relation data.
-
-        Each entity is bound to the GitHub App credential the github reconciler creates for the
-        same configurator unit (``app-<app_id>-<installation_id>``). A unit naming an org or repo
-        but lacking the App ids is skipped — its credential name cannot be derived. Entities are
-        deduped by (type, name) so several units sharing one org yield a single registration.
-
-        Returns:
-            The full desired set of entity specs.
-        """
-        entities: dict[tuple[str, str], EntitySpec] = {}
-        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
-            for unit in relation.units:
-                data = relation.data[unit]
-                org = data.get("org", "")
-                repo = data.get("repo", "")
-                if org:
-                    entity_type, entity_name = "organization", org
-                elif repo:
-                    entity_type, entity_name = "repository", repo
-                else:
-                    continue
-
-                app_id_raw = data.get("github_app_id", "")
-                installation_id_raw = data.get("github_installation_id", "")
-                # Skip quietly while the App ids are merely absent (the configurator publishes the
-                # entity name before them during bring-up); warn only on malformed values.
-                if not (app_id_raw and installation_id_raw):
-                    continue
-                try:
-                    app_id = int(app_id_raw)
-                    installation_id = int(installation_id_raw)
-                except ValueError:
-                    logger.warning(
-                        "Skipping entity %s from %s: non-numeric app/installation id "
-                        "(app_id=%r, installation_id=%r)",
-                        entity_name,
-                        unit.name,
-                        app_id_raw,
-                        installation_id_raw,
-                    )
-                    continue
-
-                # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide.
-                # Keep the first spec seen and warn if a later one derives a different credential,
-                # since multiple configurator relations make iteration order non-deterministic.
-                key = (entity_type, entity_name)
-                credentials_name = _credential_name(app_id, installation_id)
-                existing = entities.get(key)
-                if existing is not None:
-                    if existing.credentials_name != credentials_name:
-                        logger.warning(
-                            "Conflicting credential for %s '%s' (%s vs %s); keeping the first",
-                            entity_type,
-                            entity_name,
-                            existing.credentials_name,
-                            credentials_name,
-                        )
-                    continue
-                entities[key] = EntitySpec(
-                    entity_type=entity_type,
-                    entity_name=entity_name,
-                    credentials_name=credentials_name,
-                )
-        return list(entities.values())
-
     def _reconcile_runners(self) -> None:
-        """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
-
-        The steps are ordered, not independent: GARM rejects every operational call with 409
-        ``urls_required`` until the controller URLs are set; org/repo entities reference a
-        credential by name; and scalesets are created under a registered entity. So a single
-        authenticated client configures the URLs and reconciles credentials, then entities, then
-        scalesets — each dependency before its dependants.
-        """
+        """Reconcile GARM controller URLs, GitHub credentials, entities, and scalesets."""
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
             logger.warning("Admin credentials not yet available; deferring reconcile")
@@ -959,9 +876,14 @@ class GarmCharm(paas_charm.go.Charm):
             auth_client = GarmAuthenticatedClient.from_login(
                 base_url, admin_creds["username"], admin_creds["password"]
             )
+            # The steps are ordered, not independent: GARM rejects every operational call with 409
+            # ``urls_required`` until the controller URLs are set; org/repo entities reference a
+            # credential by name; and scalesets are created under a registered entity. So a single
+            # authenticated client configures the URLs and reconciles credentials, then entities,
+            # then scalesets — each dependency before its dependants.
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
-            EntityReconciler(auth_client).reconcile(self._build_desired_entities())
+            EntityReconciler(auth_client).reconcile(CharmState.from_charm(self).desired_entities)
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
             self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
