@@ -11,6 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-06-29
 
 - Implement the webhook redelivery service.
+- route the GARM charm's outbound traffic through the Juju model proxy: model-level `juju-http-proxy`/`juju-https-proxy`/`juju-no-proxy` settings are now applied to GARM and forwarded to the OpenStack provider executable, so OpenStack and GitHub API calls egress via the proxy.
 
 ## 2026-06-26
 
