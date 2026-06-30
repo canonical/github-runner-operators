@@ -30,6 +30,7 @@ class _FakeScaleset:
         github_runner_group=None,
         extra_specs=None,
         tags=None,
+        template_id=None,
     ):
         self.name = name
         self.id = sid
@@ -40,6 +41,7 @@ class _FakeScaleset:
         self.github_runner_group = github_runner_group
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
+        self.template_id = template_id
 
 
 class FakeGarmClient:
@@ -62,6 +64,7 @@ class FakeGarmClient:
                 github_runner_group=ss.get("github_runner_group", None),
                 extra_specs=ss.get("extra_specs", {}),
                 tags=ss.get("tags", []),
+                template_id=ss.get("template_id", None),
             )
             for ss in (scalesets or [])
         ]
@@ -109,6 +112,7 @@ def _spec(
     labels=None,
     runner_group="",
     pre_install_scripts=None,
+    template_id=None,
 ):
     return ScalesetSpec(
         name=name,
@@ -123,6 +127,7 @@ def _spec(
         labels=labels or [],
         runner_group=runner_group,
         pre_install_scripts=pre_install_scripts or {},
+        template_id=template_id,
     )
 
 
@@ -208,8 +213,15 @@ def _existing_scaleset(**overrides):
         ("flavor", "m1.large", {"flavor": "m1.large"}),
         ("max_runners", 10, {"max_runners": 10}),
         ("min_idle_runners", 2, {"min_idle": 2}),
+        ("template_id", 7, {"template_id": 7}),
     ],
-    ids=["image-changed", "flavor-changed", "max-runners-changed", "min-idle-changed"],
+    ids=[
+        "image-changed",
+        "flavor-changed",
+        "max-runners-changed",
+        "min-idle-changed",
+        "template-id-changed",
+    ],
 )
 def test_update_when_field_changed(changed_field, new_value, spec_kwarg):
     """

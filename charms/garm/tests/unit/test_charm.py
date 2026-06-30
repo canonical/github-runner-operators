@@ -553,53 +553,6 @@ def test_ssh_debug_info_env_vars():
     assert "echo 'hello'" in patched
 
 
-def test_apply_charmed_template_skips_on_non_leader():
-    """
-    arrange: Unit is not the Juju leader.
-    act: Call _apply_charmed_template().
-    assert: No GARM API call is made.
-    """
-    charm = MagicMock()
-    charm.unit.is_leader.return_value = False
-
-    with patch("charm.GarmApiClient") as mock_client_cls:
-        GarmCharm._apply_charmed_template(charm)
-
-    mock_client_cls.assert_not_called()
-
-
-def test_apply_charmed_template_skips_when_credentials_unavailable():
-    """
-    arrange: Leader unit; admin credentials secret does not exist.
-    act: Call _apply_charmed_template().
-    assert: No GARM API call is made.
-    """
-    charm = MagicMock()
-    charm.unit.is_leader.return_value = True
-    charm._get_admin_credentials.return_value = None
-
-    with patch("charm.GarmApiClient") as mock_client_cls:
-        GarmCharm._apply_charmed_template(charm)
-
-    mock_client_cls.assert_not_called()
-
-
-def test_apply_charmed_template_logs_and_raises_on_garm_error():
-    """
-    arrange: Leader; credentials OK; GARM login raises GarmApiError.
-    act: Call _apply_charmed_template().
-    assert: GarmApiError is logged and re-raised.
-    """
-    charm = MagicMock()
-    charm.unit.is_leader.return_value = True
-    charm._get_admin_credentials.return_value = _MOCK_ADMIN_CREDS
-
-    with patch("charm.GarmAuthenticatedClient") as mock_client_cls:
-        mock_client_cls.from_login.side_effect = GarmApiError("timeout")
-        with pytest.raises(GarmApiError):
-            GarmCharm._apply_charmed_template(charm)
-
-
 def test_reconcile_scalesets_skips_when_no_admin_credentials():
     """
     arrange: Admin credentials secret is unavailable.
@@ -655,12 +608,17 @@ def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
 
     with (
         patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
+        patch("charm._apply_garm_template", return_value=99) as mock_apply,
+        patch("charm.CharmState") as mock_state,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
     ):
         mock_auth_cls.from_login.return_value = auth_client
+        mock_state.from_charm.return_value.ssh_debug_connections = []
         mock_unit.return_value = MagicMock()
         charm._reconcile_scalesets()
 
+    mock_apply.assert_called_once()
+    charm._build_desired_scalesets.assert_called_once_with(99)
     auth_client.create_org_scaleset.assert_called_once()
     auth_client.update_scaleset.assert_not_called()
     auth_client.delete_scaleset.assert_not_called()

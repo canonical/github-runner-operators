@@ -28,27 +28,28 @@ class CharmedTemplateError(Exception):
 def apply_charmed_template(
     client: GarmAuthenticatedClient,
     connections: list[SSHDebugInfo],
-) -> None:
-    """Create, update, or delete the charmed runner install template in GARM.
+) -> int:
+    """Create or update the charmed runner install template and return its id.
 
-    Derives ``github_linux_charmed`` from the built-in ``github_linux`` base
-    by prepending a shell snippet that writes tmate environment variables to
-    the runner's ``.env`` file.
+    Derives ``github_linux_charmed`` from the built-in ``github_linux`` base by
+    prepending shell snippets. The debug-ssh snippet (tmate env vars) is added
+    only when connections are present; with none the charmed template is still
+    maintained as a snippet-free copy of the base so scalesets can reference it
+    unconditionally (future snippets attach the same way).
 
     Args:
         client: Authenticated GARM API client.
-        connections: Current debug-ssh connections; empty list triggers deletion.
+        connections: Current debug-ssh connections; empty means no tmate snippet.
+
+    Returns:
+        The id of the charmed template.
 
     Raises:
-        CharmedTemplateError: If any template operation fails.
+        CharmedTemplateError: If any template operation fails or base is missing.
         GarmApiError: If the GARM API call to list templates fails.
     """
     templates = client.list_templates()
     charmed = next((t for t in templates if t.name == GARM_CHARMED_TEMPLATE_NAME), None)
-
-    if not connections:
-        _delete_charmed_template_if_present(client, charmed)
-        return
 
     base = next((t for t in templates if t.name == GARM_BASE_TEMPLATE_NAME), None)
     if base is None:
@@ -57,21 +58,7 @@ def apply_charmed_template(
         raise CharmedTemplateError(f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no ID")
 
     patched_data = _build_charmed_template_data(client, base.id, connections)
-    _sync_charmed_template(client, charmed, patched_data, len(connections))
-
-
-def _delete_charmed_template_if_present(
-    client: GarmAuthenticatedClient,
-    charmed: typing.Any,
-) -> None:
-    """Delete the charmed template when no debug-ssh connections remain."""
-    if charmed is None:
-        return
-    logger.info("No debug-ssh connections; deleting charmed template (id=%s)", charmed.id)
-    try:
-        client.delete_template(charmed.id)
-    except GarmApiError as exc:
-        raise CharmedTemplateError(f"Failed to delete charmed template (id={charmed.id})") from exc
+    return _sync_charmed_template(client, charmed, patched_data, len(connections))
 
 
 def _build_charmed_template_data(
@@ -103,6 +90,8 @@ def _build_charmed_template_data(
     # GARM returns the template body as a base64-encoded string.
     base_script = base64.b64decode(base_template.data).decode("utf-8")
     snippet = build_tmate_env_snippet(connections)
+    if not snippet:
+        return base_script.encode("utf-8")
     return prepend_after_shebang(base_script, snippet).encode("utf-8")
 
 
@@ -111,14 +100,14 @@ def _sync_charmed_template(
     charmed: typing.Any,
     patched_data: bytes,
     n_connections: int,
-) -> None:
-    """Create or atomically update the charmed template; skip if unchanged."""
+) -> int:
+    """Create or atomically update the charmed template; return its id."""
     if charmed is not None:
         try:
             current = client.get_template(charmed.id)
             if current.data is not None and base64.b64decode(current.data) == patched_data:
                 logger.debug("Charmed template unchanged; skipping update")
-                return
+                return charmed.id
         except GarmApiError:
             pass  # proceed to update
 
@@ -133,7 +122,7 @@ def _sync_charmed_template(
             raise CharmedTemplateError(
                 f"Failed to update charmed template (id={charmed.id})"
             ) from exc
-        return
+        return charmed.id
 
     logger.info(
         "Creating charmed template '%s' with %d tmate connection(s)",
@@ -141,7 +130,7 @@ def _sync_charmed_template(
         n_connections,
     )
     try:
-        client.create_template(
+        created = client.create_template(
             name=GARM_CHARMED_TEMPLATE_NAME,
             description="Charmed GitHub Linux template managed by the GARM charm",
             forge_type="github",
@@ -152,3 +141,8 @@ def _sync_charmed_template(
         raise CharmedTemplateError(
             f"Failed to create charmed template '{GARM_CHARMED_TEMPLATE_NAME}'"
         ) from exc
+    if created.id is None:
+        raise CharmedTemplateError(
+            f"Created charmed template '{GARM_CHARMED_TEMPLATE_NAME}' has no ID"
+        )
+    return created.id

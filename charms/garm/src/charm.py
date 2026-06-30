@@ -21,7 +21,6 @@ from paas_charm.charm_utils import block_if_invalid_data
 
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
-from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
@@ -410,7 +409,6 @@ class GarmCharm(paas_charm.go.Charm):
         if previous_hash == new_hash:
             logger.debug("TOML config unchanged; skipping service restart")
             self._reconcile_scalesets()
-            self._apply_charmed_template()
             return
 
         # Log non-sensitive metadata about the config change.
@@ -444,7 +442,6 @@ class GarmCharm(paas_charm.go.Charm):
         self._maybe_first_run()
         self._reconcile_scalesets()
         super().restart(rerun_migrations=rerun_migrations)
-        self._apply_charmed_template()
 
     @staticmethod
     def _hash_toml(toml_content: str) -> str:
@@ -690,47 +687,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _apply_charmed_template(self) -> None:
-        """Create, update, or delete the charmed runner install template in GARM.
-
-        Called at the end of every ``restart()`` so the template state stays
-        consistent with the current relation data.  Never raises — failures are
-        logged, the unit status is set, and the operation is retried on the next
-        event.  Only the leader unit manages templates.
-        """
-        if not self.unit.is_leader():
-            return
-
-        admin_creds = self._get_admin_credentials()
-        if not admin_creds:
-            logger.warning("Admin credentials not yet available; skipping charmed template update")
-            self.unit.status = ops.WaitingStatus("Waiting for GARM admin credentials")
-            return
-
-        try:
-            username = admin_creds["username"]
-            password = admin_creds["password"]
-        except KeyError as exc:
-            logger.error("Admin credentials missing key %s; cannot update charmed template", exc)
-            raise
-
-        connections = CharmState.from_charm(self).ssh_debug_connections
-
-        try:
-            client = GarmAuthenticatedClient.from_login(
-                f"http://127.0.0.1:{GARM_PORT}/api/v1",
-                username=username,
-                password=password,
-            )
-            _apply_garm_template(client, connections)
-        except GarmApiError as exc:
-            logger.warning("GARM template update failed: %s", exc)
-            raise
-        except CharmedTemplateError as exc:
-            logger.warning("Charmed template management failed: %s", exc)
-            raise
-
-    def _build_desired_scalesets(self) -> list[ScalesetSpec]:
+    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
@@ -793,30 +750,34 @@ class GarmCharm(paas_charm.go.Charm):
                         pre_install_scripts=_parse_pre_install_scripts(
                             data.get("pre_install_scripts", "")
                         ),
+                        template_id=template_id,
                     )
                 )
         return specs
 
     def _reconcile_scalesets(self) -> None:
-        """Sync GARM scalesets against garm-configurator relation data."""
+        """Sync GARM scalesets against garm-configurator relation data.
+
+        Ensures the ``github_linux_charmed`` template exists first, then makes
+        every scaleset reference it. GARM API and template errors re-raise so the
+        hook errors and Juju retries on the next event.
+        """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
             logger.warning("Admin credentials not yet available; deferring scaleset reconcile")
             return
 
         garm_url = f"http://127.0.0.1:{GARM_PORT}"
-        try:
-            auth_client = GarmAuthenticatedClient.from_login(
-                f"{garm_url}/api/v1",
-                admin_creds["username"],
-                admin_creds["password"],
-            )
-            desired = self._build_desired_scalesets()
-            ScalesetReconciler(auth_client).reconcile(desired)
-            self.unit.status = ops.ActiveStatus()
-        except GarmApiError as exc:
-            logger.warning("GARM API error during scaleset reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus("Scaleset sync failed")
+        auth_client = GarmAuthenticatedClient.from_login(
+            f"{garm_url}/api/v1",
+            admin_creds["username"],
+            admin_creds["password"],
+        )
+        connections = CharmState.from_charm(self).ssh_debug_connections
+        template_id = _apply_garm_template(auth_client, connections)
+        desired = self._build_desired_scalesets(template_id)
+        ScalesetReconciler(auth_client).reconcile(desired)
+        self.unit.status = ops.ActiveStatus()
 
 
 if __name__ == "__main__":

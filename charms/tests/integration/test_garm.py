@@ -375,6 +375,14 @@ def test_scaleset_created_and_updated_via_relation(
     assert scaleset["name"] == _SCALESET_TEST_NAME
     assert scaleset["max_runners"] == 10
 
+    templates = _list_templates(address, token)
+    charmed = next((t for t in templates if t.get("name") == GARM_CHARMED_TEMPLATE_NAME), None)
+    assert charmed is not None, "charmed template should always be maintained by reconcile"
+    assert scaleset.get("template_id") == charmed["id"], (
+        f"scaleset should reference charmed template id {charmed['id']}; "
+        f"got {scaleset.get('template_id')}"
+    )
+
 
 def _list_templates(address: str, token: str) -> list[dict]:
     """List all runner install templates from the GARM API.
@@ -551,15 +559,15 @@ def test_garm_charmed_template_created_on_debug_ssh(
     )
 
 
-def test_garm_charmed_template_deleted_on_debug_ssh_removal(
+def test_garm_charmed_template_persists_without_tmate_on_debug_ssh_removal(
     juju: jubilant.Juju,
     garm_without_debug_ssh: str,
 ):
     """
     arrange: The debug-ssh relation has been removed from GARM.
     act: Query GET /api/v1/templates with an admin JWT.
-    assert: The github_linux_charmed template is no longer present, confirming
-        the charm deleted it when the relation broke.
+    assert: The github_linux_charmed template still exists (scalesets always
+        reference it) but its body no longer contains the tmate env-var snippet.
     """
     address = _get_garm_address(juju, garm_without_debug_ssh)
     token = _garm_first_run(juju, address)
@@ -568,9 +576,16 @@ def test_garm_charmed_template_deleted_on_debug_ssh_removal(
     template_names = [t.get("name") for t in templates]
     logger.info("Templates after debug-ssh removal: %s", template_names)
 
-    assert GARM_CHARMED_TEMPLATE_NAME not in template_names, (
-        f"Expected '{GARM_CHARMED_TEMPLATE_NAME}' to be deleted after debug-ssh "
-        f"relation was removed; found templates: {template_names}"
+    charmed = next((t for t in templates if t.get("name") == GARM_CHARMED_TEMPLATE_NAME), None)
+    assert charmed is not None, (
+        f"Expected '{GARM_CHARMED_TEMPLATE_NAME}' to persist after debug-ssh "
+        f"relation removal; found templates: {template_names}"
+    )
+
+    body = _get_template_body(address, token, charmed["id"])
+    assert "TMATE_SERVER_HOST" not in body, (
+        f"Expected tmate snippet removed from charmed template after debug-ssh "
+        f"removal; got:\n{body[:500]}"
     )
 
 

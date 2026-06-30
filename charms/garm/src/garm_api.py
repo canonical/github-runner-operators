@@ -591,8 +591,11 @@ def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
         connections: List of SSHDebugInfo from the debug-ssh relation.
 
     Returns:
-        A shell snippet string (no shebang) to be prepended to the base template.
+        A shell snippet string (no shebang) to be prepended to the base template,
+        or an empty string when there are no connections.
     """
+    if not connections:
+        return ""
     conn = connections[0]
     runner_env = "/home/ubuntu/actions-runner/.env"
     lines = [

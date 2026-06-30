@@ -20,39 +20,52 @@ _CONN = SSHDebugInfo(host="h", port=10022, rsa_fingerprint="rsa-fp", ed25519_fin
 # ---------------------------------------------------------------------------
 
 
-def test_apply_charmed_template_deletes_when_no_connections_and_charmed_exists():
+def test_apply_charmed_template_maintains_when_no_connections_and_charmed_exists():
     """
-    arrange: list_templates returns a charmed template; no debug-ssh connections.
+    arrange: list_templates returns base + charmed; no debug-ssh connections.
     act: Call apply_charmed_template() with an empty connections list.
-    assert: delete_template is called; no create/update.
+    assert: charmed template id is returned; template is not deleted.
     """
     client = MagicMock()
+    base = MagicMock()
+    base.name = garm_template.GARM_BASE_TEMPLATE_NAME
+    base.id = 1
     charmed = MagicMock()
     charmed.name = garm_template.GARM_CHARMED_TEMPLATE_NAME
     charmed.id = 5
-    client.list_templates.return_value = [charmed]
+    client.list_templates.return_value = [base, charmed]
+    base_template = MagicMock()
+    base_template.data = base64.b64encode(b"#!/bin/bash\necho hi\n").decode()
+    client.get_template.side_effect = [base_template, MagicMock(data=None)]
 
-    garm_template.apply_charmed_template(client, [])
+    result = garm_template.apply_charmed_template(client, [])
 
-    client.delete_template.assert_called_once_with(charmed.id)
-    client.create_template.assert_not_called()
-    client.update_template.assert_not_called()
-
-
-def test_apply_charmed_template_no_op_when_no_connections_and_no_charmed():
-    """
-    arrange: list_templates returns no charmed template; no connections.
-    act: Call apply_charmed_template() with an empty connections list.
-    assert: No delete/create/update calls are made.
-    """
-    client = MagicMock()
-    client.list_templates.return_value = []
-
-    garm_template.apply_charmed_template(client, [])
-
+    assert result == 5
     client.delete_template.assert_not_called()
     client.create_template.assert_not_called()
-    client.update_template.assert_not_called()
+
+
+def test_apply_charmed_template_creates_when_no_connections_and_no_charmed():
+    """
+    arrange: list_templates returns only the base template; no connections.
+    act: Call apply_charmed_template() with an empty connections list.
+    assert: charmed template is created and its id returned.
+    """
+    client = MagicMock()
+    base = MagicMock()
+    base.name = garm_template.GARM_BASE_TEMPLATE_NAME
+    base.id = 1
+    client.list_templates.return_value = [base]
+    base_template = MagicMock()
+    base_template.data = base64.b64encode(b"#!/bin/bash\necho hi\n").decode()
+    client.get_template.return_value = base_template
+    client.create_template.return_value = MagicMock(id=7)
+
+    result = garm_template.apply_charmed_template(client, [])
+
+    assert result == 7
+    client.delete_template.assert_not_called()
+    client.create_template.assert_called_once()
 
 
 def test_apply_charmed_template_raises_when_base_template_missing():
@@ -109,52 +122,6 @@ def test_apply_charmed_template_propagates_garm_api_error_from_list_templates():
 
     with pytest.raises(GarmApiError):
         garm_template.apply_charmed_template(client, [_CONN])
-
-
-# ---------------------------------------------------------------------------
-# _delete_charmed_template_if_present
-# ---------------------------------------------------------------------------
-
-
-def test_delete_charmed_template_if_present_no_op_when_charmed_is_none():
-    """
-    arrange: charmed is None (template does not exist).
-    act: Call _delete_charmed_template_if_present().
-    assert: delete_template is not called.
-    """
-    client = MagicMock()
-    garm_template._delete_charmed_template_if_present(client, None)
-    client.delete_template.assert_not_called()
-
-
-def test_delete_charmed_template_if_present_calls_delete_when_charmed_exists():
-    """
-    arrange: charmed template exists.
-    act: Call _delete_charmed_template_if_present().
-    assert: delete_template is called with the correct id.
-    """
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 99
-
-    garm_template._delete_charmed_template_if_present(client, charmed)
-
-    client.delete_template.assert_called_once_with(99)
-
-
-def test_delete_charmed_template_if_present_raises_on_api_error():
-    """
-    arrange: delete_template raises GarmApiError.
-    act: Call _delete_charmed_template_if_present().
-    assert: CharmedTemplateError is raised.
-    """
-    client = MagicMock()
-    charmed = MagicMock()
-    charmed.id = 3
-    client.delete_template.side_effect = GarmApiError("network error")
-
-    with pytest.raises(garm_template.CharmedTemplateError):
-        garm_template._delete_charmed_template_if_present(client, charmed)
 
 
 # ---------------------------------------------------------------------------
