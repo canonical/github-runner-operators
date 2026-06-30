@@ -43,8 +43,14 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
         The full desired set of entity specs.
     """
     entities: dict[tuple[str, str], EntitySpec] = {}
-    for relation in charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
-        for unit in relation.units:
+    # Iterate relations and units in a stable order so the "keep the first" tie-break below is
+    # deterministic: relation.units is an unordered set, so without sorting two units naming the
+    # same entity with different credentials would flip-flop across reconciles.
+    relations = sorted(
+        charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []), key=lambda r: r.id
+    )
+    for relation in relations:
+        for unit in sorted(relation.units, key=lambda unit: unit.name):
             data = relation.data[unit]
             org = data.get("org", "")
             repo = data.get("repo", "")
@@ -76,8 +82,8 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
                 continue
 
             # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
-            # the first spec seen and warn if a later one derives a different credential, since
-            # multiple configurator relations make iteration order non-deterministic.
+            # the first spec seen (iteration is ordered above) and warn if a later one derives a
+            # different credential.
             key = (entity_type, entity_name)
             credentials_name = _credential_name(app_id, installation_id)
             existing = entities.get(key)

@@ -11,12 +11,17 @@ from charm_state import CharmState
 
 
 def _charm(units_data):
-    """Build a mock charm whose configurator relation exposes the given unit databags."""
+    """Build a mock charm whose configurator relation exposes the given unit databags.
+
+    Units carry real, ordered names so the reconciler's stable-sort tie-break is exercised.
+    """
     charm = MagicMock()
     relation = MagicMock()
+    relation.id = 0
     data_map = {}
-    for unit_data in units_data:
+    for i, unit_data in enumerate(units_data):
         unit = MagicMock()
+        unit.name = f"garm-configurator/{i}"
         data_map[unit] = unit_data
     relation.units = list(data_map)
     relation.data = data_map
