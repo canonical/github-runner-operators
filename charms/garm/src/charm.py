@@ -86,6 +86,28 @@ def _proxy_environment() -> dict[str, str]:
     return env
 
 
+def _build_external_block(
+    config_file: str, proxy_var_names: list[str] | None
+) -> dict[str, typing.Any]:
+    """Build a provider ``external`` block, whitelisting proxy vars when set.
+
+    Args:
+        config_file: Path to the provider-specific TOML config file.
+        proxy_var_names: Optional environment variable names to forward to the
+            child provider process. When None or empty, the key is omitted.
+
+    Returns:
+        The ``external`` dict for a GARM [[provider]] entry.
+    """
+    external: dict[str, typing.Any] = {
+        "config_file": config_file,
+        "provider_executable": OPENSTACK_PROVIDER_BINARY,
+    }
+    if proxy_var_names:
+        external["environment_variables"] = proxy_var_names
+    return external
+
+
 def _build_provider_list(
     providers: list[dict[str, str]] | None,
     proxy_var_names: list[str] | None = None,
@@ -117,18 +139,12 @@ def _build_provider_list(
           contents (provider TOML + clouds.yaml for each provider).
     """
     if not providers:
-        default_external: dict[str, typing.Any] = {
-            "config_file": "",
-            "provider_executable": OPENSTACK_PROVIDER_BINARY,
-        }
-        if proxy_var_names:
-            default_external["environment_variables"] = proxy_var_names
         return [
             {
                 "name": "openstack",
                 "provider_type": "external",
                 "description": "OpenStack provider",
-                "external": default_external,
+                "external": _build_external_block("", proxy_var_names),
             }
         ], {}
 
@@ -169,19 +185,12 @@ def _build_provider_list(
         provider_files[provider_toml_path] = provider_toml
         provider_files[clouds_yaml_path] = clouds_yaml
 
-        external: dict[str, typing.Any] = {
-            "config_file": provider_toml_path,
-            "provider_executable": OPENSTACK_PROVIDER_BINARY,
-        }
-        if proxy_var_names:
-            external["environment_variables"] = proxy_var_names
-
         result.append(
             {
                 "name": unit_name,
                 "provider_type": "external",
                 "description": f"OpenStack provider ({unit_name})",
-                "external": external,
+                "external": _build_external_block(provider_toml_path, proxy_var_names),
             }
         )
     return result, provider_files
