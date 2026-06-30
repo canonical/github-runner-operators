@@ -18,6 +18,7 @@ except ImportError:
 import garm_template
 from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
+    GARM_PORT,
     GARM_SECRETS_LABEL,
     GarmCharm,
     _build_provider_list,
@@ -32,6 +33,7 @@ from garm_api import (
     build_tmate_env_snippet,
     prepend_after_shebang,
 )
+from github_reconciler import DEFAULT_GITHUB_ENDPOINT
 from scaleset_reconciler import ScalesetSpec
 
 _DEFAULT_PG_CONFIG = {
@@ -553,75 +555,62 @@ def test_ssh_debug_info_env_vars():
     assert "echo 'hello'" in patched
 
 
-def test_reconcile_scalesets_skips_when_no_admin_credentials():
+def test_reconcile_runners_skips_when_no_admin_credentials():
     """
     arrange: Admin credentials secret is unavailable.
-    act: Call _reconcile_scalesets().
+    act: Call _reconcile_runners().
     assert: No GARM API connection is attempted.
     """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(return_value=None)
 
-    with patch("charm.GarmApiClient") as mock_client:
-        charm._reconcile_scalesets()
+    with patch("charm.GarmAuthenticatedClient") as mock_auth_cls:
+        charm._reconcile_runners()
 
-    mock_client.assert_not_called()
+    mock_auth_cls.from_login.assert_not_called()
 
 
-def test_reconcile_scalesets_creates_scaleset_and_skips_restart():
+def test_reconcile_runners_reconciles_github_then_scalesets():
     """
-    arrange: One configurator relation unit with a complete scaleset spec; GARM has no
-             existing scalesets and the provider is registered.
-    act: Call _reconcile_scalesets().
-    assert: The scaleset is created via the API, and charm.restart is never called.
+    arrange: Admin credentials are available and the desired credential/scaleset specs are stubbed.
+    act: Call _reconcile_runners().
+    assert: On a single authenticated client it configures controller URLs, reconciles GitHub
+        credentials, then reconciles scalesets, reports ActiveStatus, and never restarts.
     """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(
         return_value={"username": "admin", "password": "TestPass-123!"}
     )
-    charm._build_desired_scalesets = MagicMock(
-        return_value=[
-            ScalesetSpec(
-                name="my-scaleset",
-                provider_name="garm-configurator-0",
-                image="ubuntu-22.04",
-                flavor="m1.small",
-                os_arch="amd64",
-                min_idle_runners=0,
-                max_runners=5,
-                entity_type="organization",
-                entity_name="my-org",
-            )
-        ]
-    )
+    credentials = [object()]
+    scalesets = [object()]
+    charm._build_desired_credentials = MagicMock(return_value=credentials)
+    charm._build_desired_scalesets = MagicMock(return_value=scalesets)
+    charm._ensure_controller_urls = MagicMock()
     charm.restart = MagicMock()
-
-    provider = MagicMock()
-    provider.name = "garm-configurator-0"
-    auth_client = MagicMock()
-    auth_client.list_providers.return_value = [provider]
-    auth_client.list_scalesets.return_value = []
-    auth_client.find_org_id.return_value = "org-uuid"
-    created = MagicMock()
-    created.id = 42
-    auth_client.create_org_scaleset.return_value = created
 
     with (
         patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
+        patch("charm.GithubReconciler") as mock_github_cls,
+        patch("charm.ScalesetReconciler") as mock_scaleset_cls,
         patch("charm._apply_garm_template", return_value=99) as mock_apply,
         patch("charm.CharmState") as mock_state,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
     ):
-        mock_auth_cls.from_login.return_value = auth_client
         mock_state.from_charm.return_value.ssh_debug_connections = []
         mock_unit.return_value = MagicMock()
-        charm._reconcile_scalesets()
+        charm._reconcile_runners()
 
+    expected_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+    mock_auth_cls.from_login.assert_called_once_with(expected_url, "admin", "TestPass-123!")
+    auth_client = mock_auth_cls.from_login.return_value
+    # Controller URLs must be configured before any operational call, or GARM returns 409.
+    charm._ensure_controller_urls.assert_called_once_with(auth_client)
+    mock_github_cls.assert_called_once_with(auth_client)
+    mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
     mock_apply.assert_called_once()
     charm._build_desired_scalesets.assert_called_once_with(99)
-    auth_client.create_org_scaleset.assert_called_once()
-    auth_client.update_scaleset.assert_not_called()
-    auth_client.delete_scaleset.assert_not_called()
+    mock_scaleset_cls.assert_called_once_with(auth_client)
+    mock_scaleset_cls.return_value.reconcile.assert_called_once_with(scalesets)
     charm.restart.assert_not_called()
 
 
@@ -655,3 +644,162 @@ def test_reconcile_calls_restart():
     GarmCharm._reconcile(charm, MagicMock())
 
     charm.restart.assert_called_once()
+
+
+def _github_charm(units_data, private_key="-----PEM-----"):
+    """Build a GarmCharm stub whose configurator relation exposes the given unit databags."""
+    charm = MagicMock(spec=GarmCharm)
+    relation = MagicMock()
+    data_map = {}
+    for unit_data in units_data:
+        unit = MagicMock()
+        data_map[unit] = unit_data
+    relation.units = list(data_map)
+    relation.data = data_map
+    charm.model.relations.get.return_value = [relation]
+    charm._resolve_secret_value.return_value = private_key
+    return charm
+
+
+def test_build_desired_credentials_builds_credential_from_relation():
+    """
+    arrange: A charm whose configurator relation exposes one unit with app id, installation id
+        and a private-key secret URI.
+    act: Call _build_desired_credentials.
+    assert: One App credential is built (named app-<app_id>-<installation_id>) on the built-in
+        github.com endpoint, with the private key resolved from the secret.
+    """
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "12345",
+                "github_installation_id": "67890",
+                "github_private_key_secret_uri": "secret:abc",
+            }
+        ],
+        private_key="PEMDATA",
+    )
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert len(credentials) == 1
+    cred = credentials[0]
+    assert cred.name == "app-12345-67890"
+    assert cred.endpoint == DEFAULT_GITHUB_ENDPOINT
+    assert cred.app_id == 12345
+    assert cred.installation_id == 67890
+    assert cred.private_key_bytes == list(b"PEMDATA")
+    charm._resolve_secret_value.assert_called_once_with("secret:abc")
+
+
+def test_build_desired_credentials_dedupes_per_app_installation():
+    """
+    arrange: A charm whose configurator relation exposes two units sharing one App/installation.
+    act: Call _build_desired_credentials.
+    assert: The two units collapse to a single credential.
+    """
+    unit_data = {
+        "github_app_id": "1",
+        "github_installation_id": "2",
+        "github_private_key_secret_uri": "secret:k",
+    }
+    charm = _github_charm([dict(unit_data), dict(unit_data)])
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert len(credentials) == 1
+
+
+def test_build_desired_credentials_skips_incomplete_unit():
+    """
+    arrange: A charm whose configurator relation exposes a unit missing required GitHub fields.
+    act: Call _build_desired_credentials.
+    assert: No credential is built.
+    """
+    charm = _github_charm([{"github_app_id": "1"}])
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert credentials == []
+
+
+def test_build_desired_credentials_skips_when_secret_unavailable():
+    """
+    arrange: A charm whose configurator unit is complete but whose private-key secret resolves
+        to an empty string.
+    act: Call _build_desired_credentials.
+    assert: No credential is built.
+    """
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "1",
+                "github_installation_id": "2",
+                "github_private_key_secret_uri": "secret:k",
+            }
+        ],
+        private_key="",
+    )
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert credentials == []
+
+
+def test_build_desired_credentials_skips_non_numeric_ids():
+    """
+    arrange: A charm whose configurator unit has a non-numeric app/installation id.
+    act: Call _build_desired_credentials.
+    assert: No credential is built.
+    """
+    charm = _github_charm(
+        [
+            {
+                "github_app_id": "not-a-number",
+                "github_installation_id": "2",
+                "github_private_key_secret_uri": "secret:k",
+            }
+        ]
+    )
+
+    credentials = GarmCharm._build_desired_credentials(charm)
+
+    assert credentials == []
+
+
+def test_ensure_controller_urls_sets_urls_from_base_url():
+    """
+    arrange: A charm whose _base_url is an ingress URL.
+    act: Call _ensure_controller_urls.
+    assert: update_controller is called once with metadata/callback/webhook URLs derived from it.
+    """
+    charm = MagicMock(spec=GarmCharm)
+    charm._base_url = "https://garm.example.com"
+    auth_client = MagicMock()
+
+    GarmCharm._ensure_controller_urls(charm, auth_client)
+
+    auth_client.update_controller.assert_called_once_with(
+        metadata_url="https://garm.example.com/api/v1/metadata",
+        callback_url="https://garm.example.com/api/v1/callbacks",
+        webhook_url="https://garm.example.com/webhooks",
+    )
+
+
+def test_ensure_controller_urls_strips_trailing_slash_from_base_url():
+    """
+    arrange: A charm whose _base_url is an ingress URL with a trailing slash.
+    act: Call _ensure_controller_urls.
+    assert: The pushed URLs have no double slashes in their paths.
+    """
+    charm = MagicMock(spec=GarmCharm)
+    charm._base_url = "https://garm.example.com/"
+    auth_client = MagicMock()
+
+    GarmCharm._ensure_controller_urls(charm, auth_client)
+
+    auth_client.update_controller.assert_called_once_with(
+        metadata_url="https://garm.example.com/api/v1/metadata",
+        callback_url="https://garm.example.com/api/v1/callbacks",
+        webhook_url="https://garm.example.com/webhooks",
+    )

@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-06-29
+
+- Implement the webhook redelivery service.
+
+## 2026-06-26
+
+- Sync GARM GitHub App credentials from the garm-configurator relation over the GARM REST API, without restarting the service. Only the built-in `github.com` endpoint is supported.
+- `garm-configurator`: add a new required `github-app-id` config option (the numeric GitHub App ID, which GARM uses to authenticate the App) and remove the unused `github-app-client-id` option (GARM authenticates Apps by app ID, not the OAuth client ID). Existing deployments must set `github-app-id`. The `github-app-id` and `github-app-installation-id` options are now integer-typed, so non-numeric values are rejected at config-set time.
+
 ## 2026-06-24
 
 - Add debug-ssh relation support for the GARM charm. This allows the GARM charm to be integrated with the tmate-ssh-server charm to enable remote debugging of the runner spawned by the GARM charm.
