@@ -30,6 +30,7 @@ class _FakeScaleset:
         github_runner_group=None,
         extra_specs=None,
         tags=None,
+        template_id=None,
     ):
         self.name = name
         self.id = sid
@@ -40,6 +41,7 @@ class _FakeScaleset:
         self.github_runner_group = github_runner_group
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
+        self.template_id = template_id
 
 
 class FakeGarmClient:
@@ -62,6 +64,7 @@ class FakeGarmClient:
                 github_runner_group=ss.get("github_runner_group", None),
                 extra_specs=ss.get("extra_specs", {}),
                 tags=ss.get("tags", []),
+                template_id=ss.get("template_id"),
             )
             for ss in (scalesets or [])
         ]
@@ -95,6 +98,23 @@ class FakeGarmClient:
     def delete_scaleset(self, scaleset_id):
         self.deleted.append(scaleset_id)
 
+    # Template stubs: return empty results so the reconciler's template path
+    # is a no-op when no runner config is set.
+    def list_templates(self, partial_name=None, os_type=None):
+        return []
+
+    def get_template(self, template_id):
+        return None
+
+    def create_template(self, name, data, description="", os_type="linux") -> object:
+        return None
+
+    def update_template(self, template_id, data):
+        return None
+
+    def delete_template(self, template_id):
+        pass
+
 
 def _spec(
     name="my-scaleset",
@@ -109,7 +129,10 @@ def _spec(
     labels=None,
     runner_group="",
     pre_install_scripts=None,
+    runner_config=None,
 ):
+    from runner_template import RunnerConfig
+
     return ScalesetSpec(
         name=name,
         provider_name=provider_name,
@@ -123,6 +146,7 @@ def _spec(
         labels=labels or [],
         runner_group=runner_group,
         pre_install_scripts=pre_install_scripts or {},
+        runner_config=runner_config or RunnerConfig(),
     )
 
 
@@ -295,3 +319,173 @@ def test_pre_install_scripts_passed_in_create():
     assert len(client.created) == 1
     _, _, params = client.created[0]
     assert params.extra_specs == {"pre_install_scripts": scripts}
+
+
+# ---------------------------------------------------------------------------
+# Runner template lifecycle tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeTemplate:
+    """Minimal fake for the GARM Template model used in template lifecycle tests."""
+
+    def __init__(self, name, tid, data=b"", description=""):
+        self.name = name
+        self.id = tid
+        self.data = list(data) if data else None
+        self.description = description
+
+
+class _TemplateTrackingClient(FakeGarmClient):
+    """FakeGarmClient variant that tracks template create/update/delete operations."""
+
+    def __init__(self, templates=None, **kwargs):
+        super().__init__(**kwargs)
+        self._templates = list(templates or [])
+        self.created_templates: list[tuple[str, bytes, str]] = []
+        self.updated_templates: list[tuple[int, bytes]] = []
+        self.deleted_templates: list[int] = []
+
+    def list_templates(self, partial_name=None, os_type=None):
+        if partial_name is None:
+            return list(self._templates)
+        return [t for t in self._templates if t.name and partial_name in t.name]
+
+    def get_template(self, template_id):
+        for t in self._templates:
+            if t.id == template_id:
+                return t
+        return None
+
+    def create_template(self, name, data, description="", os_type="linux") -> _FakeTemplate:  # type: ignore[override]
+        tid = max((t.id for t in self._templates), default=0) + 1
+        template = _FakeTemplate(name, tid, data, description)
+        self._templates.append(template)
+        self.created_templates.append((name, data, description))
+        return template
+
+    def update_template(self, template_id, data):
+        for t in self._templates:
+            if t.id == template_id:
+                t.data = list(data)
+                break
+        self.updated_templates.append((template_id, data))
+
+    def delete_template(self, template_id):
+        self._templates = [t for t in self._templates if t.id != template_id]
+        self.deleted_templates.append(template_id)
+
+
+_SYSTEM_TEMPLATE = _FakeTemplate("github_linux", tid=1, data=b"#!/bin/bash\nset -e\necho base\n")
+
+
+def _spec_with_runner_config(**rc_kwargs):
+    """Build a spec with runner_config populated from the given kwargs."""
+    from runner_template import RunnerConfig
+
+    return _spec(runner_config=RunnerConfig(**rc_kwargs))
+
+
+def test_template_created_when_runner_config_set():
+    """
+    arrange: No existing scalesets or custom templates; system template exists.
+    act: Reconcile a spec with runner options (dockerhub_mirror).
+    assert: A custom template is created and the scaleset references it via template_id.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[],
+        templates=[_SYSTEM_TEMPLATE],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://mirror.example.com")],
+    )
+
+    assert len(client.created_templates) == 1
+    name, data, _ = client.created_templates[0]
+    assert name == "github_linux-my-scaleset"
+    assert b"registry-mirrors" in data
+    assert len(client.created) == 1
+    _, _, params = client.created[0]
+    # The created template's id is 2 (system=1, first custom=2)
+    assert params.template_id == 2
+
+
+def test_template_updated_when_runner_config_changes():
+    """
+    arrange: A scaleset with an existing custom template.
+    act: Reconcile with a changed runner config.
+    assert: The custom template is updated (not recreated); the scaleset template_id is unchanged.
+    """
+    from runner_template import build_template_data
+    from runner_template import RunnerConfig
+
+    old_config = RunnerConfig(dockerhub_mirror="https://old.example.com")
+    custom_template = _FakeTemplate(
+        "github_linux-my-scaleset",
+        tid=2,
+        data=build_template_data(b"#!/bin/bash\nset -e\necho base\n", old_config),
+    )
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[_SYSTEM_TEMPLATE, custom_template],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://new.example.com")],
+    )
+
+    assert len(client.updated_templates) == 1
+    template_id, data = client.updated_templates[0]
+    assert template_id == 2
+    assert b"new.example.com" in data
+    assert b"old.example.com" not in data
+    # Scaleset should not be updated just because template content changed.
+    assert client.updated == []
+
+
+def test_template_detached_when_runner_config_cleared():
+    """
+    arrange: A scaleset with an existing custom template.
+    act: Reconcile with no runner options.
+    assert: The scaleset is updated with template_id=0 (detach), and the custom template is deleted.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate("github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"),
+        ],
+    )
+    _reconcile(client, [_spec()])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.template_id == 0
+    assert 2 in client.deleted_templates
+
+
+def test_template_kept_when_system_template_missing():
+    """
+    arrange: A scaleset with an existing custom template, but the system template is not listed.
+    act: Reconcile with runner options still set.
+    assert: The existing custom template is kept (not destroyed); no create/update/delete on templates.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[
+            _FakeTemplate("github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"),
+        ],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://m.example.com")],
+    )
+
+    assert client.created_templates == []
+    assert client.updated_templates == []
+    assert client.deleted_templates == []

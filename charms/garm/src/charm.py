@@ -29,6 +29,7 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
+from runner_template import RunnerConfig
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -801,6 +802,7 @@ class GarmCharm(paas_charm.go.Charm):
                         pre_install_scripts=_parse_pre_install_scripts(
                             data.get("pre_install_scripts", "")
                         ),
+                        runner_config=RunnerConfig.from_databag(data),
                     )
                 )
         return specs

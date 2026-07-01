@@ -109,6 +109,30 @@ config:
       description: |
         A Python dict-like string containing key-value pairs of script name
         to bash script to be run prior to runner installation.
+    dockerhub-mirror:
+      type: string
+      description: |
+        Optional Docker registry mirror URL for runners. Must be a valid http(s) address.
+    runner-http-proxy:
+      type: string
+      description: |
+        HTTP proxy that aproxy forwards to. Must be a valid http(s) URL.
+    aproxy-exclude-addresses:
+      type: string
+      description: |
+        Comma-separated IPv4 addresses/CIDRs to exclude from aproxy forwarding.
+    aproxy-redirect-ports:
+      type: string
+      description: |
+        Comma-separated ports or port ranges (e.g. 80,443,8000-9000) to forward to aproxy.
+    otel-collector-endpoint:
+      type: string
+      description: |
+        The OTEL exporter address for the otel-collector to connect to. Must be a valid http(s) URL.
+    pre-job-script:
+      type: string
+      description: |
+        A bash script appended to the end of the runner pre-job script.
 
 requires:
   image:

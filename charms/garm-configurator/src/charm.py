@@ -146,6 +146,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             return
 
         pre_install = state.scaleset_config.pre_install_scripts
+        rc = state.runner_config
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
@@ -159,6 +160,12 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
             if pre_install
             else "",
+            "dockerhub_mirror": rc.dockerhub_mirror or "",
+            "runner_http_proxy": rc.runner_http_proxy or "",
+            "aproxy_exclude_addresses": rc.aproxy_exclude_addresses or "",
+            "aproxy_redirect_ports": rc.aproxy_redirect_ports or "",
+            "otel_collector_endpoint": rc.otel_collector_endpoint or "",
+            "pre_job_script": rc.pre_job_script or "",
         }
         if state.scaleset_config.org:
             basic_data["org"] = state.scaleset_config.org

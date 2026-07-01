@@ -18,6 +18,7 @@ from garm_client.api.organizations_api import OrganizationsApi
 from garm_client.api.providers_api import ProvidersApi
 from garm_client.api.repositories_api import RepositoriesApi
 from garm_client.api.scalesets_api import ScalesetsApi
+from garm_client.api.templates_api import TemplatesApi
 from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
@@ -25,6 +26,7 @@ from garm_client.models.create_github_credentials_params import CreateGithubCred
 from garm_client.models.create_org_params import CreateOrgParams
 from garm_client.models.create_repo_params import CreateRepoParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
+from garm_client.models.create_template_params import CreateTemplateParams
 from garm_client.models.forge_credentials import ForgeCredentials
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.organization import Organization
@@ -32,10 +34,12 @@ from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.provider import Provider
 from garm_client.models.repository import Repository
 from garm_client.models.scale_set import ScaleSet
+from garm_client.models.template import Template
 from garm_client.models.update_controller_params import UpdateControllerParams
 from garm_client.models.update_entity_params import UpdateEntityParams
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
+from garm_client.models.update_template_params import UpdateTemplateParams
 
 logger = logging.getLogger(__name__)
 
@@ -777,6 +781,155 @@ class GarmAuthenticatedClient(GarmApiClient):
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_templates(
+        self,
+        partial_name: str | None = None,
+        os_type: str | None = None,
+    ) -> list[Template]:
+        """List GARM runner templates, optionally filtered by partial name.
+
+        Args:
+            partial_name: Optional partial or full template name to filter by.
+            os_type: Optional OS type filter (e.g. "linux").
+
+        Returns:
+            List of Template model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    TemplatesApi(api_client=client).list_templates(
+                        partial_name=partial_name,
+                        os_type=os_type,
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list templates ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def get_template(self, template_id: int) -> Template:
+        """Fetch a single template by ID.
+
+        Args:
+            template_id: Integer template ID.
+
+        Returns:
+            The Template model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return TemplatesApi(api_client=client).get_template(
+                    template_id=template_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to get template {template_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_template(
+        self,
+        name: str,
+        data: bytes,
+        description: str = "",
+        os_type: str = "linux",
+    ) -> Template:
+        """Create a new runner template.
+
+        Args:
+            name: Template name.
+            data: Template script bytes.
+            description: Optional description.
+            os_type: OS type (default "linux").
+
+        Returns:
+            The created Template model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        params = CreateTemplateParams(
+            name=name,
+            data=list(data),
+            description=description or None,
+            os_type=os_type,
+        )
+        with self._api_client() as client:
+            try:
+                return TemplatesApi(api_client=client).create_template(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create template {name!r} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_template(self, template_id: int, data: bytes) -> Template:
+        """Update an existing template's script content.
+
+        Args:
+            template_id: Integer template ID.
+            data: New template script bytes.
+
+        Returns:
+            The updated Template model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        params = UpdateTemplateParams(data=list(data))
+        with self._api_client() as client:
+            try:
+                return TemplatesApi(api_client=client).update_template(
+                    template_id=template_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update template {template_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_template(self, template_id: int) -> None:
+        """Delete a template by ID.
+
+        Args:
+            template_id: Integer template ID.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                TemplatesApi(api_client=client).delete_template(
+                    template_id=template_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete template {template_id} ({exc.status}): {exc.body}"
                 ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
