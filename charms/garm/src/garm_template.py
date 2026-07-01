@@ -147,27 +147,43 @@ def _sync_charmed_template(
 ) -> int:
     """Create or atomically update the charmed template; return its id."""
     if charmed is not None:
-        try:
-            current = client.get_template(charmed.id)
-            if current.data is not None and base64.b64decode(current.data) == patched_data:
-                logger.debug("Charmed template unchanged; skipping update")
-                return charmed.id
-        except GarmApiError:
-            pass  # proceed to update
+        return _update_charmed_template(client, charmed, patched_data, n_connections)
+    return _create_charmed_template(client, patched_data, n_connections)
 
-        logger.info(
-            "Updating charmed template (id=%s) with %d tmate connection(s)",
-            charmed.id,
-            n_connections,
-        )
-        try:
-            client.update_template(charmed.id, patched_data)
-        except GarmApiError as exc:
-            raise CharmedTemplateError(
-                f"Failed to update charmed template (id={charmed.id})"
-            ) from exc
-        return charmed.id
 
+def _update_charmed_template(
+    client: GarmAuthenticatedClient,
+    charmed: typing.Any,
+    patched_data: bytes,
+    n_connections: int,
+) -> int:
+    """Update the charmed template in place if its data changed; return its id."""
+    try:
+        current = client.get_template(charmed.id)
+        if current.data is not None and base64.b64decode(current.data) == patched_data:
+            logger.debug("Charmed template unchanged; skipping update")
+            return charmed.id
+    except GarmApiError:
+        pass  # proceed to update
+
+    logger.info(
+        "Updating charmed template (id=%s) with %d tmate connection(s)",
+        charmed.id,
+        n_connections,
+    )
+    try:
+        client.update_template(charmed.id, patched_data)
+    except GarmApiError as exc:
+        raise CharmedTemplateError(f"Failed to update charmed template (id={charmed.id})") from exc
+    return charmed.id
+
+
+def _create_charmed_template(
+    client: GarmAuthenticatedClient,
+    patched_data: bytes,
+    n_connections: int,
+) -> int:
+    """Create the charmed template; return its id."""
     logger.info(
         "Creating charmed template '%s' with %d tmate connection(s)",
         GARM_CHARMED_TEMPLATE_NAME,
