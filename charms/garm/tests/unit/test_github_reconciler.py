@@ -5,11 +5,8 @@
 
 from unittest.mock import MagicMock
 
-from github_reconciler import (
-    MANAGED_CREDENTIAL_DESCRIPTION,
-    CredentialSpec,
-    GithubReconciler,
-)
+from garm_api import GarmApiError
+from github_reconciler import MANAGED_CREDENTIAL_DESCRIPTION, CredentialSpec, GithubReconciler
 
 
 def _mock_client(credentials=None):
@@ -158,6 +155,23 @@ def test_nameless_observed_credential_ignored():
     reconciler = GithubReconciler(client)
     reconciler.reconcile([])
     client.delete_credentials.assert_not_called()
+
+
+def test_orphan_credential_delete_is_non_fatal():
+    """
+    arrange: A managed orphan credential whose deletion raises GarmApiError (an entity still
+        references it).
+    act: Reconcile with no desired credentials.
+    assert: reconcile swallows the error so the pass continues; delete_credentials was attempted.
+    """
+    existing = {"name": "stale-cred", "id": 42, "description": MANAGED_CREDENTIAL_DESCRIPTION}
+    client = _mock_client(credentials=[existing])
+    client.delete_credentials.side_effect = GarmApiError("credential still in use")
+    reconciler = GithubReconciler(client)
+
+    reconciler.reconcile([])  # must not raise
+
+    client.delete_credentials.assert_called_once_with(42)
 
 
 def test_update_skipped_when_observed_credential_has_no_id():

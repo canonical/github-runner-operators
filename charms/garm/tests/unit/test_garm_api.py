@@ -501,3 +501,111 @@ def test_update_controller_raises_on_api_error():
                     callback_url="http://garm/api/v1/callbacks",
                     webhook_url="http://garm/webhooks",
                 )
+
+
+@pytest.mark.parametrize(
+    "method, api_name, list_attr",
+    [
+        ("list_orgs", "OrganizationsApi", "list_orgs"),
+        ("list_repos", "RepositoriesApi", "list_repos"),
+    ],
+    ids=["list-orgs", "list-repos"],
+)
+def test_list_entities_returns_list_or_empty(method, api_name, list_attr):
+    """
+    arrange: GarmAuthenticatedClient with the entity API returning one item, then None.
+    act: Call the list wrapper.
+    assert: The item is returned; a None API response maps to an empty list.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    item = MagicMock()
+    item.name = "canonical"
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_name}") as MockApi:
+            getattr(MockApi.return_value, list_attr).return_value = [item]
+            assert [e.name for e in getattr(client, method)()] == ["canonical"]
+            getattr(MockApi.return_value, list_attr).return_value = None
+            assert getattr(client, method)() == []
+
+
+@pytest.mark.parametrize(
+    "method, api_name, api_method, args",
+    [
+        ("create_org", "OrganizationsApi", "create_org", (MagicMock(),)),
+        ("update_org", "OrganizationsApi", "update_org", ("org-uuid", MagicMock())),
+        ("create_repo", "RepositoriesApi", "create_repo", (MagicMock(),)),
+        ("update_repo", "RepositoriesApi", "update_repo", ("repo-uuid", MagicMock())),
+    ],
+    ids=["create-org", "update-org", "create-repo", "update-repo"],
+)
+def test_entity_write_returns_model(method, api_name, api_method, args):
+    """
+    arrange: GarmAuthenticatedClient with the entity API returning a model with id=7.
+    act: Call the create/update wrapper.
+    assert: The returned model is propagated.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    result_model = MagicMock()
+    result_model.id = 7
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_name}") as MockApi:
+            getattr(MockApi.return_value, api_method).return_value = result_model
+            assert getattr(client, method)(*args).id == 7
+
+
+@pytest.mark.parametrize(
+    "method, api_name, api_method, args",
+    [
+        ("list_orgs", "OrganizationsApi", "list_orgs", ()),
+        ("create_org", "OrganizationsApi", "create_org", (MagicMock(),)),
+        ("update_org", "OrganizationsApi", "update_org", ("org-uuid", MagicMock())),
+        ("delete_org", "OrganizationsApi", "delete_org", ("org-uuid",)),
+        ("list_repos", "RepositoriesApi", "list_repos", ()),
+        ("create_repo", "RepositoriesApi", "create_repo", (MagicMock(),)),
+        ("update_repo", "RepositoriesApi", "update_repo", ("repo-uuid", MagicMock())),
+        ("delete_repo", "RepositoriesApi", "delete_repo", ("repo-uuid",)),
+    ],
+    ids=[
+        "list-orgs",
+        "create-org",
+        "update-org",
+        "delete-org",
+        "list-repos",
+        "create-repo",
+        "update-repo",
+        "delete-repo",
+    ],
+)
+def test_entity_wrapper_raises_on_api_error(method, api_name, api_method, args):
+    """
+    arrange: GarmAuthenticatedClient with the entity API raising ApiException.
+    act: Call the wrapper.
+    assert: The ApiException is translated to GarmApiError.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_name}") as MockApi:
+            getattr(MockApi.return_value, api_method).side_effect = ApiException(status=400)
+            with pytest.raises(GarmApiError):
+                getattr(client, method)(*args)
+
+
+@pytest.mark.parametrize(
+    "method, api_name, api_method, arg",
+    [
+        ("delete_org", "OrganizationsApi", "delete_org", "org-uuid"),
+        ("delete_repo", "RepositoriesApi", "delete_repo", "repo-uuid"),
+    ],
+    ids=["delete-org", "delete-repo"],
+)
+def test_entity_delete_calls_api(method, api_name, api_method, arg):
+    """
+    arrange: GarmAuthenticatedClient with the entity API stubbed.
+    act: Call the delete wrapper.
+    assert: The generated delete method is invoked once.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_name}") as MockApi:
+            getattr(client, method)(arg)
+            getattr(MockApi.return_value, api_method).assert_called_once()

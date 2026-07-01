@@ -831,18 +831,21 @@ def test_reconcile_runners_skips_when_no_admin_credentials():
     mock_auth_cls.from_login.assert_not_called()
 
 
-def test_reconcile_runners_reconciles_github_then_scalesets():
+def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
     """
-    arrange: Admin credentials are available and the desired credential/scaleset specs are stubbed.
+    arrange: Admin credentials are available and the desired credential/entity/scaleset specs are
+        stubbed.
     act: Call _reconcile_runners().
-    assert: On a single authenticated client it configures controller URLs, reconciles GitHub
-        credentials, then reconciles scalesets, reports ActiveStatus, and never restarts.
+    assert: On a single authenticated client it configures controller URLs, then reconciles
+        credentials, entities, and scalesets in that dependency order, reports ActiveStatus, and
+        never restarts.
     """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(
         return_value={"username": "admin", "password": "TestPass-123!"}
     )
     credentials = [object()]
+    entities = [object()]
     scalesets = [object()]
     charm._build_desired_credentials = MagicMock(return_value=credentials)
     charm._build_desired_scalesets = MagicMock(return_value=scalesets)
@@ -852,10 +855,17 @@ def test_reconcile_runners_reconciles_github_then_scalesets():
     with (
         patch("charm.GarmAuthenticatedClient") as mock_auth_cls,
         patch("charm.GithubReconciler") as mock_github_cls,
+        patch("charm.EntityReconciler") as mock_entity_cls,
         patch("charm.ScalesetReconciler") as mock_scaleset_cls,
+        patch("charm.CharmState") as mock_charm_state_cls,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
     ):
+        mock_charm_state_cls.from_charm.return_value.desired_entities = entities
         mock_unit.return_value = MagicMock()
+        order = MagicMock()
+        order.attach_mock(mock_github_cls.return_value.reconcile, "github")
+        order.attach_mock(mock_entity_cls.return_value.reconcile, "entity")
+        order.attach_mock(mock_scaleset_cls.return_value.reconcile, "scaleset")
         charm._reconcile_runners()
 
     expected_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
@@ -863,10 +873,15 @@ def test_reconcile_runners_reconciles_github_then_scalesets():
     auth_client = mock_auth_cls.from_login.return_value
     # Controller URLs must be configured before any operational call, or GARM returns 409.
     charm._ensure_controller_urls.assert_called_once_with(auth_client)
+    # Each reconciler must be built against the same authenticated client.
     mock_github_cls.assert_called_once_with(auth_client)
-    mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
+    mock_entity_cls.assert_called_once_with(auth_client)
     mock_scaleset_cls.assert_called_once_with(auth_client)
+    mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
+    mock_entity_cls.return_value.reconcile.assert_called_once_with(entities)
     mock_scaleset_cls.return_value.reconcile.assert_called_once_with(scalesets)
+    # Entities depend on credentials and scalesets depend on entities, so order matters.
+    assert [name for name, _, _ in order.mock_calls] == ["github", "entity", "scaleset"]
     charm.restart.assert_not_called()
 
 

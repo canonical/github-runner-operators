@@ -83,4 +83,5 @@ Diátaxis
 hostmetrics
 configurator
 scaleset
+scalesets
 OAuth
