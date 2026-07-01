@@ -363,6 +363,10 @@ class GarmCharm(paas_charm.go.Charm):
             self._reconcile,
         )
         self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_departed,
+            self._reconcile,
+        )
+        self.framework.observe(
             self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
             self._reconcile,
         )
