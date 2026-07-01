@@ -3,6 +3,7 @@
 
 """Unit tests for garm_api.py."""
 
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -581,3 +582,39 @@ def test_update_controller_raises_on_api_error():
                     callback_url="http://garm/api/v1/callbacks",
                     webhook_url="http://garm/webhooks",
                 )
+
+
+def test_create_template_base64_encodes_data():
+    """
+    arrange: GarmAuthenticatedClient with TemplatesApi stubbed.
+    act: Call create_template() with raw script bytes.
+    assert: The request body carries the data base64-encoded, matching GARM's wire format.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    data = b"#!/bin/bash\necho hi\n"
+    with _stub_api_client(client):
+        with patch("garm_api.TemplatesApi") as MockApi:
+            client.create_template(
+                name="github_linux_charmed",
+                description="charmed template",
+                forge_type="github",
+                os_type="linux",
+                data=data,
+            )
+    body = MockApi.return_value.create_template.call_args.kwargs["body"]
+    assert body.data == base64.b64encode(data).decode("utf-8")
+
+
+def test_update_template_base64_encodes_data():
+    """
+    arrange: GarmAuthenticatedClient with TemplatesApi stubbed.
+    act: Call update_template() with raw script bytes.
+    assert: The request body carries the data base64-encoded, matching GARM's wire format.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    data = b"#!/bin/bash\necho updated\n"
+    with _stub_api_client(client):
+        with patch("garm_api.TemplatesApi") as MockApi:
+            client.update_template(template_id=3, data=data)
+    body = MockApi.return_value.update_template.call_args.kwargs["body"]
+    assert body.data == base64.b64encode(data).decode("utf-8")

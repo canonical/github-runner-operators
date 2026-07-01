@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
@@ -27,7 +27,7 @@ class UpdateTemplateParams(BaseModel):
     """
     UpdateTemplateParams
     """ # noqa: E501
-    data: Optional[List[StrictInt]] = None
+    data: Optional[StrictStr] = None
     description: Optional[StrictStr] = None
     name: Optional[StrictStr] = None
     __properties: ClassVar[List[str]] = ["data", "description", "name"]

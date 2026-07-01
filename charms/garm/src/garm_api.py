@@ -3,6 +3,7 @@
 
 """Thin wrapper over the generated GARM API client for charm use."""
 
+import base64
 import logging
 import time
 
@@ -316,7 +317,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                         description=description,
                         forge_type=forge_type,
                         os_type=os_type,
-                        data=list(data),
+                        data=base64.b64encode(data).decode("utf-8"),
                     ),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
@@ -667,7 +668,7 @@ class GarmAuthenticatedClient(GarmApiClient):
             try:
                 return api.update_template(
                     template_id=template_id,
-                    body=UpdateTemplateParams(data=list(data)),
+                    body=UpdateTemplateParams(data=base64.b64encode(data).decode("utf-8")),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
