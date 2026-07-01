@@ -775,3 +775,78 @@ def test_github_credentials_synced_from_relation(
     assert "github.com" in endpoint_names, (
         f"Built-in github.com endpoint must be preserved; got {sorted(endpoint_names)}"
     )
+
+
+def _get_template_data(base_url: str, token: str, template_id: int) -> str:
+    """Fetch a GARM template and return its decoded (base64) script content.
+
+    Args:
+        base_url: GARM API base URL.
+        token: JWT token for authentication.
+        template_id: Integer template ID.
+
+    Returns:
+        The decoded template script as a string.
+    """
+    resp = requests.get(
+        f"{base_url}/templates/{template_id}",
+        headers=_garm_auth_headers(token),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json().get("data", "")
+    return base64.b64decode(data).decode() if data else ""
+
+
+def test_runner_options_render_into_scaleset_template(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+    fake_github_api_url: str,
+):
+    """
+    arrange: GARM and garm-configurator are integrated, with a credential and org
+        registered so a scaleset can be created.
+    act: Set the runner-behaviour config options on the configurator charm.
+    assert: The scaleset references a custom template whose rendered content
+        reflects each runner option — proving the options reach GARM via live
+        reconcile (no upgrade).
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+    _restore_system_templates(base_url, token)
+    _create_test_credential(base_url, token, fake_github_api_url)
+    _create_test_org(base_url, token, "test-org")
+
+    juju.config(
+        configurator_with_image,
+        values={
+            "dockerhub-mirror": "https://mirror.example.com",
+            "runner-http-proxy": "http://proxy.example.com:3128",
+            "aproxy-redirect-ports": "80,443",
+            "otel-collector-endpoint": "http://otel.example.com:4318",
+            "pre-job-script": "echo integration-marker",
+        },
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, configurator_garm, configurator_with_image),
+        timeout=3 * 60,
+        delay=10,
+    )
+
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    template_id = scaleset.get("template_id")
+    assert template_id, f"Expected scaleset to reference a custom template, got: {scaleset}"
+
+    rendered = _get_template_data(base_url, token, template_id)
+    for expected in (
+        "registry-mirrors",
+        "https://mirror.example.com",
+        "http://proxy.example.com:3128",
+        "OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
+        "echo integration-marker",
+    ):
+        assert expected in rendered, (
+            f"Expected {expected!r} in rendered template, got:\n{rendered}"
+        )
