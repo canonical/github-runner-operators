@@ -8,12 +8,7 @@ import logging
 import typing
 
 from charm_state import SSHDebugInfo
-from garm_api import (
-    GarmApiError,
-    GarmAuthenticatedClient,
-    build_tmate_env_snippet,
-    prepend_after_shebang,
-)
+from garm_api import GarmApiError, GarmAuthenticatedClient
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +56,53 @@ def apply_charmed_template(
 
     patched_data = _build_charmed_template_data(client, base.id, connections)
     return _sync_charmed_template(client, charmed, patched_data, len(connections))
+
+
+def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
+    """Build a shell snippet that writes tmate env vars to the runner's .env file.
+
+    Uses only the first connection (caller must sort for stability).
+
+    Args:
+        connections: List of SSHDebugInfo from the debug-ssh relation.
+
+    Returns:
+        A shell snippet string (no shebang) to be prepended to the base template,
+        or an empty string when there are no connections.
+    """
+    if not connections:
+        return ""
+    conn = connections[0]
+    runner_env = "/home/runner/.env"
+    lines = [
+        f"mkdir -p $(dirname {runner_env})",
+        f'cat >> {runner_env} << "EOF"',
+        f"TMATE_SERVER_HOST={conn.host}",
+        f"TMATE_SERVER_PORT={conn.port}",
+        f"TMATE_SERVER_RSA_FINGERPRINT={conn.rsa_fingerprint}",
+        f"TMATE_SERVER_ED25519_FINGERPRINT={conn.ed25519_fingerprint}",
+        "EOF",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def prepend_after_shebang(script: str, snippet: str) -> str:
+    """Insert *snippet* immediately after the shebang line of *script*.
+
+    If no shebang is present the snippet is prepended at the very start.
+
+    Args:
+        script: The original shell script (may start with ``#!``).
+        snippet: The shell code to inject.
+
+    Returns:
+        The modified script string.
+    """
+    lines = script.split("\n")
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + "\n" + snippet + "\n".join(lines[1:])
+    return snippet + script
 
 
 def _build_charmed_template_data(

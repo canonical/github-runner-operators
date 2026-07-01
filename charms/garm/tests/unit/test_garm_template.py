@@ -15,9 +15,30 @@ from garm_api import GarmApiError
 _CONN = SSHDebugInfo(host="h", port=10022, rsa_fingerprint="rsa-fp", ed25519_fingerprint="ed-fp")
 
 
-# ---------------------------------------------------------------------------
-# apply_charmed_template
-# ---------------------------------------------------------------------------
+def test_ssh_debug_info_env_vars():
+    """
+    arrange: One SSHDebugInfo connection.
+    act: Call build_tmate_env_snippet() and prepend_after_shebang().
+    assert: The patched script starts with the shebang, then contains
+            all four TMATE_SERVER_* variables with correct values.
+    """
+    conn = SSHDebugInfo(
+        host="10.10.0.5",
+        port=2222,
+        rsa_fingerprint="SHA256:rsa",
+        ed25519_fingerprint="SHA256:ed",
+    )
+    base_script = "#!/bin/bash\necho 'hello'\n"
+
+    snippet = garm_template.build_tmate_env_snippet([conn])
+    patched = garm_template.prepend_after_shebang(base_script, snippet)
+
+    assert patched.startswith("#!/bin/bash\n")
+    assert "TMATE_SERVER_HOST=10.10.0.5" in patched
+    assert "TMATE_SERVER_PORT=2222" in patched
+    assert "TMATE_SERVER_RSA_FINGERPRINT=SHA256:rsa" in patched
+    assert "TMATE_SERVER_ED25519_FINGERPRINT=SHA256:ed" in patched
+    assert "echo 'hello'" in patched
 
 
 def test_apply_charmed_template_maintains_when_no_connections_and_charmed_exists():
@@ -124,11 +145,6 @@ def test_apply_charmed_template_propagates_garm_api_error_from_list_templates():
         garm_template.apply_charmed_template(client, [_CONN])
 
 
-# ---------------------------------------------------------------------------
-# _build_charmed_template_data
-# ---------------------------------------------------------------------------
-
-
 def test_build_charmed_template_data_raises_on_api_error():
     """
     arrange: get_template raises GarmApiError.
@@ -180,11 +196,6 @@ def test_build_charmed_template_data_prepends_snippet_after_shebang():
     assert f"TMATE_SERVER_RSA_FINGERPRINT={_CONN.rsa_fingerprint}" in decoded
     assert f"TMATE_SERVER_ED25519_FINGERPRINT={_CONN.ed25519_fingerprint}" in decoded
     assert "echo hello" in decoded
-
-
-# ---------------------------------------------------------------------------
-# _sync_charmed_template
-# ---------------------------------------------------------------------------
 
 
 _PATCHED = b"patched-data"

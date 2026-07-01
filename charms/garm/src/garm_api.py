@@ -10,7 +10,6 @@ import time
 import urllib3
 import urllib3.exceptions
 
-from charm_state import SSHDebugInfo
 from garm_client.api.controller_api import ControllerApi
 from garm_client.api.controller_info_api import ControllerInfoApi
 from garm_client.api.credentials_api import CredentialsApi
@@ -719,50 +718,3 @@ class GarmAuthenticatedClient(GarmApiClient):
                 ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
-
-
-def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
-    """Build a shell snippet that writes tmate env vars to the runner's .env file.
-
-    Uses only the first connection (caller must sort for stability).
-
-    Args:
-        connections: List of SSHDebugInfo from the debug-ssh relation.
-
-    Returns:
-        A shell snippet string (no shebang) to be prepended to the base template,
-        or an empty string when there are no connections.
-    """
-    if not connections:
-        return ""
-    conn = connections[0]
-    runner_env = "/home/ubuntu/actions-runner/.env"
-    lines = [
-        f"mkdir -p $(dirname {runner_env})",
-        f'cat >> {runner_env} << "EOF"',
-        f"TMATE_SERVER_HOST={conn.host}",
-        f"TMATE_SERVER_PORT={conn.port}",
-        f"TMATE_SERVER_RSA_FINGERPRINT={conn.rsa_fingerprint}",
-        f"TMATE_SERVER_ED25519_FINGERPRINT={conn.ed25519_fingerprint}",
-        "EOF",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def prepend_after_shebang(script: str, snippet: str) -> str:
-    """Insert *snippet* immediately after the shebang line of *script*.
-
-    If no shebang is present the snippet is prepended at the very start.
-
-    Args:
-        script: The original shell script (may start with ``#!``).
-        snippet: The shell code to inject.
-
-    Returns:
-        The modified script string.
-    """
-    lines = script.split("\n")
-    if lines and lines[0].startswith("#!"):
-        return lines[0] + "\n" + snippet + "\n".join(lines[1:])
-    return snippet + script
