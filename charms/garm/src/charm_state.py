@@ -53,7 +53,7 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
         rsa_fingerprint = data.get("rsa_fingerprint")
         ed25519_fingerprint = data.get("ed25519_fingerprint")
 
-        if not host or not port_str or not rsa_fingerprint or not ed25519_fingerprint:
+        if not (host and port_str and rsa_fingerprint and ed25519_fingerprint):
             logger.warning(
                 "%s relation data for %s not yet ready.",
                 DEBUG_SSH_INTEGRATION_NAME,
