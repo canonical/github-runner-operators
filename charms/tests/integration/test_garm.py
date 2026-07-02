@@ -370,7 +370,7 @@ def test_charm_registers_org_via_reconciler(
         if org is not None and org.get("id"):
             try:
                 _delete_org(base_url, token, org["id"])
-            except requests.HTTPError as exc:
+            except requests.exceptions.RequestException as exc:
                 logger.warning("Best-effort org cleanup skipped: %s", exc)
 
 
