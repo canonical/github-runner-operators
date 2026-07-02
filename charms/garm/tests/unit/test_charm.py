@@ -398,6 +398,23 @@ def test_get_webhook_secret_returns_none_when_secret_not_found():
     assert result is None
 
 
+@pytest.mark.parametrize("content", [{}, {"webhook-secret": ""}], ids=["missing-key", "blank"])
+def test_get_webhook_secret_returns_none_when_content_missing_or_blank(content):
+    """
+    arrange: garm-webhook-secret secret exists but its content lacks a usable webhook-secret.
+    act: Call _get_webhook_secret().
+    assert: Returns None rather than raising, so _reconcile_runners defers instead of crashing.
+    """
+    charm = MagicMock()
+    mock_secret = MagicMock()
+    mock_secret.get_content.return_value = content
+    charm.model.get_secret.return_value = mock_secret
+
+    result = GarmCharm._get_webhook_secret(charm)
+
+    assert result is None
+
+
 def test_ensure_secrets_skips_when_not_leader():
     """
     arrange: Unit is not the Juju leader.

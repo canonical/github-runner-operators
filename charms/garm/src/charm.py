@@ -716,7 +716,7 @@ class GarmCharm(paas_charm.go.Charm):
         """
         try:
             secret = self.model.get_secret(label=GARM_WEBHOOK_SECRET_LABEL)
-            return secret.get_content()["webhook-secret"]
+            return secret.get_content().get("webhook-secret") or None
         except ops.SecretNotFoundError:
             return None
 
