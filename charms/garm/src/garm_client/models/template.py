@@ -29,7 +29,7 @@ class Template(BaseModel):
     Template
     """ # noqa: E501
     created_at: Optional[datetime] = None
-    data: Optional[List[StrictInt]] = None
+    data: Optional[StrictStr] = None
     description: Optional[StrictStr] = None
     forge_type: Optional[StrictStr] = None
     id: Optional[StrictInt] = None

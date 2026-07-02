@@ -32,3 +32,6 @@ requires:
     limit: 1
   garm-configurator:
     interface: garm_configurator_v0
+  debug-ssh:
+    interface: debug-ssh
+    limit: 1

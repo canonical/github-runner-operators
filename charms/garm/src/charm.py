@@ -20,9 +20,16 @@ import yaml
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
-from charm_state import GARM_CONFIGURATOR_RELATION_NAME, CharmState, credential_name
+from charm_state import (
+    DEBUG_SSH_INTEGRATION_NAME,
+    GARM_CONFIGURATOR_RELATION_NAME,
+    CharmState,
+    credential_name,
+)
 from entity_reconciler import EntityReconciler
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from garm_template import CharmedTemplateError
+from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
     MANAGED_CREDENTIAL_DESCRIPTION,
@@ -43,7 +50,6 @@ GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
-
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
 
@@ -351,6 +357,22 @@ class GarmCharm(paas_charm.go.Charm):
         )
         self.framework.observe(
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
+            self._reconcile,
+        )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
+            self._reconcile,
+        )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_changed,
+            self._reconcile,
+        )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_departed,
+            self._reconcile,
+        )
+        self.framework.observe(
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
             self._reconcile,
         )
         self.framework.observe(self.on.update_status, self._reconcile)
@@ -738,7 +760,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _build_desired_scalesets(self) -> list[ScalesetSpec]:
+    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
@@ -801,6 +823,7 @@ class GarmCharm(paas_charm.go.Charm):
                         pre_install_scripts=_parse_pre_install_scripts(
                             data.get("pre_install_scripts", "")
                         ),
+                        template_id=template_id,
                     )
                 )
         return specs
@@ -863,7 +886,15 @@ class GarmCharm(paas_charm.go.Charm):
         return list(credentials.values())
 
     def _reconcile_runners(self) -> None:
-        """Reconcile GARM controller URLs, GitHub credentials, entities, and scalesets."""
+        """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
+
+        The steps are ordered, not independent: GARM rejects every operational call with
+        409 ``urls_required`` until the controller URLs are set; org/repo entities reference a
+        credential by name; and scalesets are created under a registered entity. So a single
+        authenticated client configures the URLs and reconciles credentials, then entities,
+        then scalesets. The ``github_linux_charmed`` template is ensured before scalesets so each
+        scaleset can reference it.
+        """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
             logger.warning("Admin credentials not yet available; deferring reconcile")
@@ -884,8 +915,13 @@ class GarmCharm(paas_charm.go.Charm):
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client).reconcile(CharmState.from_charm(self).desired_entities)
-            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
+            connections = CharmState.from_charm(self).ssh_debug_connections
+            template_id = _apply_garm_template(auth_client, connections)
+            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
             self.unit.status = ops.ActiveStatus()
+        except CharmedTemplateError as exc:
+            logger.warning("GARM charmed template error during reconcile: %s", exc)
+            self.unit.status = ops.WaitingStatus(str(exc))
         except GarmApiError as exc:
             logger.warning("GARM API error during reconcile: %s", exc)
             self.unit.status = ops.WaitingStatus("GARM sync failed")
