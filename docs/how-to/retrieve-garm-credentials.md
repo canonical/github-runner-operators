@@ -25,7 +25,9 @@ The action returns four fields:
 
 Example output:
 
-```
+```{terminal}
+:output-only:
+
 Running operation 1 with 1 task
   - task 2 on unit-garm-0
 
