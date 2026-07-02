@@ -364,8 +364,14 @@ def test_charm_registers_org_via_reconciler(
             f"(id={credential['id']}), got credentials_id={org.get('credentials_id')!r}"
         )
     finally:
+        # Best-effort cleanup: if test_scaleset_created_and_updated_via_relation ran first, GARM
+        # refuses to delete an org that still has a scaleset. That's expected, not a failure of
+        # this test, so tolerate it rather than coupling the outcome to execution order.
         if org is not None and org.get("id"):
-            _delete_org(base_url, token, org["id"])
+            try:
+                _delete_org(base_url, token, org["id"])
+            except requests.HTTPError as exc:
+                logger.warning("Best-effort org cleanup skipped: %s", exc)
 
 
 def test_scaleset_created_and_updated_via_relation(
