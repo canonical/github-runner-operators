@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-02
+
+- Fix TLS verification in the GARM workload: the GARM rock is built on a bare base and previously shipped without a CA trust store, so GARM's statically-linked binary rejected every HTTPS certificate (including GitHub's) with `x509: certificate signed by unknown authority`. The rock now bundles the system CA certificates.
+
 ## 2026-06-30
 
 - Register GARM organization and repository entities from the garm-configurator relation over the GARM REST API, binding each to its managed GitHub App credential. Entities are now created before scalesets are reconciled, so scalesets no longer wait indefinitely for an org/repo that nothing registered. Registration is best-effort: if GARM cannot register an entity yet (for example GitHub is briefly unreachable), the charm defers and retries rather than failing the whole sync. Entities that fall out of the relation are deleted once their scalesets have drained.
