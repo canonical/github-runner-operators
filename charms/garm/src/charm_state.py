@@ -1,7 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Charm state parsing for the GARM charm."""
+"""Charm state parsing for the GARM charm.
+
+Builds the desired GARM org/repo entities from the garm-configurator relation and the SSH
+debug connections from the debug-ssh relation into a ``CharmState`` value (via
+``CharmState.from_charm``), keeping that relation-parsing out of ``charm.py``. Credential and
+scaleset specs are still built in ``charm.py`` today; they can move here under the same pattern
+as the state grows.
+"""
 
 import dataclasses
 import logging
@@ -9,9 +16,12 @@ import typing
 
 import ops
 
+from entity_reconciler import EntitySpec
+
 logger = logging.getLogger(__name__)
 
 DEBUG_SSH_INTEGRATION_NAME: typing.Final[str] = "debug-ssh"
+GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -29,6 +39,15 @@ class SSHDebugInfo:
     port: int
     rsa_fingerprint: str
     ed25519_fingerprint: str
+
+
+def credential_name(app_id: int, installation_id: int) -> str:
+    """Return the GARM credential name for a GitHub App installation.
+
+    The org/repo entity reconciler binds entities to credentials by this name, so both the
+    credential and entity builders must derive it identically.
+    """
+    return f"app-{app_id}-{installation_id}"
 
 
 def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
@@ -94,15 +113,93 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     return sorted(connections, key=lambda c: (c.host, c.port))
 
 
+def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
+    """Build the desired GARM org/repo entities from configurator relation data.
+
+    Each entity is bound to the GitHub App credential the github reconciler creates for the same
+    configurator unit (``app-<app_id>-<installation_id>``). A unit naming an org or repo but
+    lacking the App ids is skipped — its credential name cannot be derived.
+
+    Args:
+        charm: The charm instance.
+
+    Returns:
+        The full desired set of entity specs.
+    """
+    entities: dict[tuple[str, str], EntitySpec] = {}
+    # Iterate relations and units in a stable order so the "keep the first" tie-break below is
+    # deterministic: relation.units is an unordered set, so without sorting two units naming the
+    # same entity with different credentials would flip-flop across reconciles.
+    relations = sorted(
+        charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []), key=lambda r: r.id
+    )
+    for relation in relations:
+        for unit in sorted(relation.units, key=lambda unit: unit.name):
+            data = relation.data[unit]
+            org = data.get("org", "")
+            repo = data.get("repo", "")
+            if org:
+                entity_type, entity_name = "organization", org
+            elif repo:
+                entity_type, entity_name = "repository", repo
+            else:
+                continue
+
+            app_id_raw = data.get("github_app_id", "")
+            installation_id_raw = data.get("github_installation_id", "")
+            # Skip quietly while the App ids are merely absent (the configurator publishes the
+            # entity name before them during bring-up); warn only on malformed values.
+            if not (app_id_raw and installation_id_raw):
+                continue
+            try:
+                app_id = int(app_id_raw)
+                installation_id = int(installation_id_raw)
+            except ValueError:
+                logger.warning(
+                    "Skipping entity %s from %s: non-numeric app/installation id "
+                    "(app_id=%r, installation_id=%r)",
+                    entity_name,
+                    unit.name,
+                    app_id_raw,
+                    installation_id_raw,
+                )
+                continue
+
+            # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
+            # the first spec seen (iteration is ordered above) and warn if a later one derives a
+            # different credential.
+            key = (entity_type, entity_name)
+            credentials_name = credential_name(app_id, installation_id)
+            existing = entities.get(key)
+            if existing is not None:
+                if existing.credentials_name != credentials_name:
+                    logger.warning(
+                        "Conflicting credential for %s '%s' (%s vs %s); keeping the first",
+                        entity_type,
+                        entity_name,
+                        existing.credentials_name,
+                        credentials_name,
+                    )
+                continue
+            entities[key] = EntitySpec(
+                entity_type=entity_type,
+                entity_name=entity_name,
+                credentials_name=credentials_name,
+            )
+    return list(entities.values())
+
+
 @dataclasses.dataclass(frozen=True)
 class CharmState:
     """Consolidated charm state for the GARM charm.
 
     Attributes:
         ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
+        desired_entities: GARM org/repo entities derived from the garm-configurator relation.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
+    desired_entities: list[EntitySpec]
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -114,4 +211,7 @@ class CharmState:
         Returns:
             Current CharmState.
         """
-        return cls(ssh_debug_connections=_get_ssh_debug_connections(charm))
+        return cls(
+            ssh_debug_connections=_get_ssh_debug_connections(charm),
+            desired_entities=_get_desired_entities(charm),
+        )

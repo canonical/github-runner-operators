@@ -24,15 +24,20 @@ from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
 from garm_client.models.create_github_credentials_params import CreateGithubCredentialsParams
+from garm_client.models.create_org_params import CreateOrgParams
+from garm_client.models.create_repo_params import CreateRepoParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.create_template_params import CreateTemplateParams
 from garm_client.models.forge_credentials import ForgeCredentials
 from garm_client.models.new_user_params import NewUserParams
+from garm_client.models.organization import Organization
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.provider import Provider
+from garm_client.models.repository import Repository
 from garm_client.models.scale_set import ScaleSet
 from garm_client.models.template import Template
 from garm_client.models.update_controller_params import UpdateControllerParams
+from garm_client.models.update_entity_params import UpdateEntityParams
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 from garm_client.models.update_template_params import UpdateTemplateParams
@@ -567,6 +572,202 @@ class GarmAuthenticatedClient(GarmApiClient):
             if f"{repo.owner}/{repo.name}" == repo_name:
                 return repo.id
         return None
+
+    def list_orgs(self) -> list[Organization]:
+        """List all GARM organizations.
+
+        Returns:
+            List of Organization model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    OrganizationsApi(api_client=client).list_orgs(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list organizations ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_repos(self) -> list[Repository]:
+        """List all GARM repositories.
+
+        Returns:
+            List of Repository model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    RepositoriesApi(api_client=client).list_repos(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list repositories ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_org(self, params: CreateOrgParams) -> Organization:
+        """Register an organization in GARM.
+
+        Args:
+            params: CreateOrgParams instance (name + credentials_name).
+
+        Returns:
+            Created Organization model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return OrganizationsApi(api_client=client).create_org(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create organization ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_org(self, org_id: str, params: UpdateEntityParams) -> Organization:
+        """Update an existing GARM organization.
+
+        Args:
+            org_id: GARM organization UUID.
+            params: UpdateEntityParams instance.
+
+        Returns:
+            Updated Organization model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return OrganizationsApi(api_client=client).update_org(
+                    org_id=org_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update organization {org_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_org(self, org_id: str) -> None:
+        """Delete a GARM organization.
+
+        Args:
+            org_id: GARM organization UUID.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                OrganizationsApi(api_client=client).delete_org(
+                    org_id=org_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete organization {org_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_repo(self, params: CreateRepoParams) -> Repository:
+        """Register a repository in GARM.
+
+        Args:
+            params: CreateRepoParams instance (owner + name + credentials_name).
+
+        Returns:
+            Created Repository model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return RepositoriesApi(api_client=client).create_repo(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create repository ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_repo(self, repo_id: str, params: UpdateEntityParams) -> Repository:
+        """Update an existing GARM repository.
+
+        Args:
+            repo_id: GARM repository UUID.
+            params: UpdateEntityParams instance.
+
+        Returns:
+            Updated Repository model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return RepositoriesApi(api_client=client).update_repo(
+                    repo_id=repo_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update repository {repo_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_repo(self, repo_id: str) -> None:
+        """Delete a GARM repository.
+
+        Args:
+            repo_id: GARM repository UUID.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                RepositoriesApi(api_client=client).delete_repo(
+                    repo_id=repo_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete repository {repo_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
     def create_org_scaleset(self, org_id: str, params: CreateScaleSetParams) -> ScaleSet:
         """Create a scaleset under a GARM organization.

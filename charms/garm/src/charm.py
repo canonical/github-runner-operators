@@ -20,7 +20,13 @@ import yaml
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
-from charm_state import DEBUG_SSH_INTEGRATION_NAME, CharmState
+from charm_state import (
+    DEBUG_SSH_INTEGRATION_NAME,
+    GARM_CONFIGURATOR_RELATION_NAME,
+    CharmState,
+    credential_name,
+)
+from entity_reconciler import EntityReconciler
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
@@ -38,7 +44,6 @@ GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
-GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -870,7 +875,7 @@ class GarmCharm(paas_charm.go.Charm):
                     continue
 
                 credentials[dedupe_key] = CredentialSpec(
-                    name=f"app-{app_id}-{installation_id}",
+                    name=credential_name(app_id, installation_id),
                     endpoint=DEFAULT_GITHUB_ENDPOINT,
                     app_id=app_id,
                     installation_id=installation_id,
@@ -881,14 +886,14 @@ class GarmCharm(paas_charm.go.Charm):
         return list(credentials.values())
 
     def _reconcile_runners(self) -> None:
-        """Sync GARM controller URLs, GitHub credentials, then scalesets from relation data.
+        """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
 
         The steps are ordered, not independent: GARM rejects every operational call with
-        409 ``urls_required`` until the controller URLs are set, and scalesets reference the
-        GitHub credentials. So a single authenticated client configures the URLs and reconciles
-        credentials before scalesets are reconciled against the same client. The
-        ``github_linux_charmed`` template is ensured before scalesets so each scaleset can
-        reference it.
+        409 ``urls_required`` until the controller URLs are set; org/repo entities reference a
+        credential by name; and scalesets are created under a registered entity. So a single
+        authenticated client configures the URLs and reconciles credentials, then entities,
+        then scalesets. The ``github_linux_charmed`` template is ensured before scalesets so each
+        scaleset can reference it.
         """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
@@ -902,8 +907,14 @@ class GarmCharm(paas_charm.go.Charm):
             auth_client = GarmAuthenticatedClient.from_login(
                 base_url, admin_creds["username"], admin_creds["password"]
             )
+            # The steps are ordered, not independent: GARM rejects every operational call with 409
+            # ``urls_required`` until the controller URLs are set; org/repo entities reference a
+            # credential by name; and scalesets are created under a registered entity. So a single
+            # authenticated client configures the URLs and reconciles credentials, then entities,
+            # then scalesets — each dependency before its dependants.
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
+            EntityReconciler(auth_client).reconcile(CharmState.from_charm(self).desired_entities)
             connections = CharmState.from_charm(self).ssh_debug_connections
             template_id = _apply_garm_template(auth_client, connections)
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
