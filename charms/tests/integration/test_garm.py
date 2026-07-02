@@ -316,6 +316,58 @@ def test_garm_metrics_endpoint_no_auth(
     )
 
 
+def test_charm_registers_org_via_reconciler(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+):
+    """
+    arrange: GARM and garm-configurator are integrated; the configurator's ``org`` config
+        ("test-org", set in the ``configurator_with_image`` fixture) drives a desired
+        organization entity, but nothing has pre-registered it in GARM — unlike
+        test_scaleset_created_and_updated_via_relation, which bypasses entity registration
+        entirely by calling ``_create_test_org`` directly. This test exists to prove the charm's
+        own EntityReconciler can register the entity end-to-end (regression test for the bug
+        where GARM 500s org/repo creation without a non-empty webhook_secret).
+    act: Set controller URLs (idempotent) and trigger a config change so GARM's holistic
+        reconcile runs now that operational endpoints are unblocked.
+    assert: GET /organizations lists "test-org" bound to the charm-managed credential
+        (app-12345-67890) synced from the configurator relation.
+
+    Cleanup: deletes the org via the GARM API afterwards. The later
+        test_scaleset_created_and_updated_via_relation needs "test-org" bound to a *mock*-backed
+        credential so scaleset creation can reach a controllable GitHub API double; leaving this
+        test's charm-managed binding in place would make that test's ``_create_test_org`` call a
+        no-op 409 and break it.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)  # idempotent; ensures controller URLs are set
+
+    # A config change (distinct from the "10" used later) is the only way to make GARM re-run
+    # _reconcile_runners now that the controller URLs are in place — nothing else re-triggers the
+    # charm's holistic reconcile once first-run has set them via a direct API call.
+    juju.config(configurator_with_image, values={"max-runner": "6"})
+    juju.wait(
+        lambda status: jubilant.all_active(status, configurator_with_image)
+        and jubilant.all_agents_idle(status, configurator_garm),
+        timeout=3 * 60,
+        delay=10,
+    )
+
+    org = None
+    try:
+        org = _wait_for_org(base_url, token, "test-org")
+        credential = _wait_for_github_credential(base_url, token, _SYNCED_CREDENTIAL_NAME)
+        assert org["credentials_id"] == credential["id"], (
+            f"Expected 'test-org' bound to charm-managed credential {_SYNCED_CREDENTIAL_NAME!r} "
+            f"(id={credential['id']}), got credentials_id={org.get('credentials_id')!r}"
+        )
+    finally:
+        if org is not None and org.get("id"):
+            _delete_org(base_url, token, org["id"])
+
+
 def test_scaleset_created_and_updated_via_relation(
     juju: jubilant.Juju,
     configurator_garm: str,
@@ -758,6 +810,36 @@ def _wait_for_scaleset(
             f"got {observed_image!r}"
         )
     return scaleset
+
+
+def _list_orgs(base_url: str, token: str) -> list[dict]:
+    """List GARM organizations via the REST API (GARM returns null when empty)."""
+    resp = requests.get(
+        f"{base_url}/organizations", headers=_garm_auth_headers(token), timeout=30
+    )
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+@retry(
+    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
+    reraise=True,
+)
+def _wait_for_org(base_url: str, token: str, name: str) -> dict:
+    """Wait until a named organization is registered in GARM."""
+    org = next((org for org in _list_orgs(base_url, token) if org.get("name") == name), None)
+    assert org is not None, f"Expected organization {name!r} to exist"
+    return org
+
+
+def _delete_org(base_url: str, token: str, org_id: str) -> None:
+    """Delete a GARM organization via the REST API."""
+    resp = requests.delete(
+        f"{base_url}/organizations/{org_id}", headers=_garm_auth_headers(token), timeout=30
+    )
+    resp.raise_for_status()
 
 
 def _list_github_credentials(base_url: str, token: str) -> list[dict]:

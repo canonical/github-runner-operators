@@ -10,6 +10,8 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-02
 
+- Fix GARM organization and repository registration: the charm now sets a webhook secret when registering entities. GARM requires a non-empty webhook secret to register an org/repo, so registration previously failed with an opaque server error and scalesets were never created. The secret is generated and managed by the charm, so no operator configuration is required.
+
 - Fix TLS verification in the GARM workload: the GARM rock is built on a bare base and previously shipped without a CA trust store, so GARM's statically-linked binary rejected every HTTPS certificate (including GitHub's) with `x509: certificate signed by unknown authority`. The rock now bundles the system CA certificates.
 
 ## 2026-06-30

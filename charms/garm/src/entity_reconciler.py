@@ -34,13 +34,18 @@ class EntitySpec:
 class EntityReconciler:
     """Reconciles GARM org/repo entities against a desired spec list."""
 
-    def __init__(self, client: GarmAuthenticatedClient) -> None:
+    def __init__(self, client: GarmAuthenticatedClient, webhook_secret: str) -> None:
         """Initialise the reconciler.
 
         Args:
             client: Authenticated GarmAuthenticatedClient instance.
+            webhook_secret: Charm-managed secret set on newly created entities. GARM requires a
+                non-empty webhook secret to register an entity, even though this charm never
+                installs a GitHub webhook (scalesets dispatch via GitHub's message queue instead),
+                so the value only needs to exist and be stable.
         """
         self._client = client
+        self._webhook_secret = webhook_secret
 
     def reconcile(self, desired: list[EntitySpec]) -> None:
         """Register, update, or delete GARM entities to match *desired*.
@@ -72,7 +77,11 @@ class EntityReconciler:
                 if existing is None:
                     logger.info("Registering organization '%s' in GARM", name)
                     self._client.create_org(
-                        CreateOrgParams(name=name, credentials_name=spec.credentials_name)
+                        CreateOrgParams(
+                            name=name,
+                            credentials_name=spec.credentials_name,
+                            webhook_secret=self._webhook_secret,
+                        )
                     )
                 elif (
                     self._needs_credential_update(existing, spec, creds_by_id, name)
@@ -113,7 +122,10 @@ class EntityReconciler:
                     logger.info("Registering repository '%s' in GARM", full_name)
                     self._client.create_repo(
                         CreateRepoParams(
-                            owner=owner, name=name, credentials_name=spec.credentials_name
+                            owner=owner,
+                            name=name,
+                            credentials_name=spec.credentials_name,
+                            webhook_secret=self._webhook_secret,
                         )
                     )
                 elif (
