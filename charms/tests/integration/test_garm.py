@@ -332,6 +332,11 @@ def test_charm_reconciles_org_and_scaleset(
     base_url = _garm_api_base_url(address)
     token = _garm_first_run(juju, address)  # idempotent; ensures controller URLs are set
 
+    # GARM refuses to change an endpoint's URLs while a credential references it, and the charm has
+    # already synced its credential onto github.com during integration. Detach the charm-managed
+    # org (if any) and credential so github.com can be repointed; the reconcile triggered below
+    # recreates both against the mock.
+    _detach_synced_credential(base_url, token)
     # Route the charm's synced credential (bound to github.com) at the mock so the whole
     # reconcile — credential sync, org registration, scaleset creation — hits a controllable
     # GitHub double. GARM permits updating (not deleting) its built-in endpoint.
@@ -619,6 +624,29 @@ def _point_github_endpoint_at_mock(base_url: str, token: str, mock_base_url: str
         timeout=30,
     )
     resp.raise_for_status()
+
+
+def _detach_synced_credential(base_url: str, token: str) -> None:
+    """Delete the charm-synced org and credential so github.com can be repointed.
+
+    GARM locks an endpoint's URLs while a credential references it. The charm syncs its credential
+    onto the built-in github.com endpoint, so it must be removed (along with any org bound to it)
+    before the endpoint can be pointed at the mock. Deletion tolerates a not-yet-created entity
+    (404); a real failure surfaces later as the repoint's 400.
+    """
+    for org in _list_orgs(base_url, token):
+        if org.get("name") == "test-org" and org.get("id"):
+            _delete_if_present(f"{base_url}/organizations/{org['id']}", token)
+    for cred in _list_github_credentials(base_url, token):
+        if cred.get("name") == _SYNCED_CREDENTIAL_NAME and cred.get("id") is not None:
+            _delete_if_present(f"{base_url}/github/credentials/{cred['id']}", token)
+
+
+def _delete_if_present(url: str, token: str) -> None:
+    """DELETE a GARM resource, treating 404 as already-gone."""
+    resp = requests.delete(url, headers=_garm_auth_headers(token), timeout=30)
+    if resp.status_code != requests.codes.not_found:
+        resp.raise_for_status()
 
 
 def _restore_system_templates(garm_url: str, token: str) -> None:
