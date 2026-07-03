@@ -20,7 +20,6 @@ from charm import (
     GARM_ADMIN_CREDENTIALS_LABEL,
     GARM_PORT,
     GARM_SECRETS_LABEL,
-    GARM_WEBHOOK_SECRET_LABEL,
     GarmCharm,
     _build_provider_list,
     _generate_admin_password,
@@ -368,53 +367,6 @@ def test_get_admin_credentials_returns_none_when_secret_not_found():
     assert result is None
 
 
-def test_get_webhook_secret_returns_content_when_secret_exists():
-    """
-    arrange: garm-webhook-secret secret exists in Juju.
-    act: Call _get_webhook_secret().
-    assert: Returns the secret's webhook-secret value.
-    """
-    charm = MagicMock()
-    mock_secret = MagicMock()
-    mock_secret.get_content.return_value = {"webhook-secret": "s3cr3t"}
-    charm.model.get_secret.return_value = mock_secret
-
-    result = GarmCharm._get_webhook_secret(charm)
-
-    assert result == "s3cr3t"
-
-
-def test_get_webhook_secret_returns_none_when_secret_not_found():
-    """
-    arrange: garm-webhook-secret secret does not exist in Juju.
-    act: Call _get_webhook_secret().
-    assert: Returns None.
-    """
-    charm = MagicMock()
-    charm.model.get_secret.side_effect = ops.SecretNotFoundError("not found")
-
-    result = GarmCharm._get_webhook_secret(charm)
-
-    assert result is None
-
-
-@pytest.mark.parametrize("content", [{}, {"webhook-secret": ""}], ids=["missing-key", "blank"])
-def test_get_webhook_secret_returns_none_when_content_missing_or_blank(content):
-    """
-    arrange: garm-webhook-secret secret exists but its content lacks a usable webhook-secret.
-    act: Call _get_webhook_secret().
-    assert: Returns None rather than raising, so _reconcile_runners defers instead of crashing.
-    """
-    charm = MagicMock()
-    mock_secret = MagicMock()
-    mock_secret.get_content.return_value = content
-    charm.model.get_secret.return_value = mock_secret
-
-    result = GarmCharm._get_webhook_secret(charm)
-
-    assert result is None
-
-
 def test_ensure_secrets_skips_when_not_leader():
     """
     arrange: Unit is not the Juju leader.
@@ -431,10 +383,9 @@ def test_ensure_secrets_skips_when_not_leader():
 
 def test_ensure_secrets_creates_all_secrets_on_first_run():
     """
-    arrange: Leader unit; none of garm-secrets, garm-admin-credentials, garm-webhook-secret exist.
+    arrange: Leader unit; neither garm-secrets nor garm-admin-credentials exist.
     act: Call _ensure_secrets().
-    assert: All three secrets are created, labelled correctly, and the webhook secret has a
-        non-empty ``webhook-secret`` key.
+    assert: Both secrets are created and labelled correctly.
     """
     charm = MagicMock()
     charm.unit.is_leader.return_value = True
@@ -442,18 +393,10 @@ def test_ensure_secrets_creates_all_secrets_on_first_run():
 
     GarmCharm._ensure_secrets(charm)
 
-    assert charm.app.add_secret.call_count == 3
+    assert charm.app.add_secret.call_count == 2
     labels = {c.kwargs["label"] for c in charm.app.add_secret.call_args_list}
     assert GARM_SECRETS_LABEL in labels
     assert GARM_ADMIN_CREDENTIALS_LABEL in labels
-    assert GARM_WEBHOOK_SECRET_LABEL in labels
-
-    webhook_call = next(
-        c
-        for c in charm.app.add_secret.call_args_list
-        if c.kwargs["label"] == GARM_WEBHOOK_SECRET_LABEL
-    )
-    assert webhook_call.args[0]["webhook-secret"]
 
 
 def test_ensure_secrets_skips_creation_when_secrets_exist():
@@ -888,25 +831,6 @@ def test_reconcile_runners_skips_when_no_admin_credentials():
     mock_auth_cls.from_login.assert_not_called()
 
 
-def test_reconcile_runners_skips_when_no_webhook_secret():
-    """
-    arrange: Admin credentials are available but the webhook secret is not (e.g. non-leader before
-        the secret is granted).
-    act: Call _reconcile_runners().
-    assert: No GARM API connection is attempted.
-    """
-    charm = object.__new__(GarmCharm)
-    charm._get_admin_credentials = MagicMock(
-        return_value={"username": "admin", "password": "TestPass-123!"}
-    )
-    charm._get_webhook_secret = MagicMock(return_value=None)
-
-    with patch("charm.GarmAuthenticatedClient") as mock_auth_cls:
-        charm._reconcile_runners()
-
-    mock_auth_cls.from_login.assert_not_called()
-
-
 def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
     """
     arrange: Admin credentials are available and the desired credential/entity/scaleset specs are
@@ -920,7 +844,6 @@ def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
     charm._get_admin_credentials = MagicMock(
         return_value={"username": "admin", "password": "TestPass-123!"}
     )
-    charm._get_webhook_secret = MagicMock(return_value="test-webhook-secret")
     credentials = [object()]
     entities = [object()]
     scalesets = [object()]
@@ -952,7 +875,7 @@ def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
     charm._ensure_controller_urls.assert_called_once_with(auth_client)
     # Each reconciler must be built against the same authenticated client.
     mock_github_cls.assert_called_once_with(auth_client)
-    mock_entity_cls.assert_called_once_with(auth_client, "test-webhook-secret")
+    mock_entity_cls.assert_called_once_with(auth_client)
     mock_scaleset_cls.assert_called_once_with(auth_client)
     mock_github_cls.return_value.reconcile.assert_called_once_with(credentials)
     mock_entity_cls.return_value.reconcile.assert_called_once_with(entities)

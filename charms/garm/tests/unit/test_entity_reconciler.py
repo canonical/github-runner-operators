@@ -31,11 +31,8 @@ def _client(credentials=None, orgs=None, repos=None):
     return client
 
 
-WEBHOOK_SECRET = "test-webhook-secret"
-
-
 def _reconcile(client, desired):
-    EntityReconciler(client, WEBHOOK_SECRET).reconcile(desired)
+    EntityReconciler(client).reconcile(desired)
 
 
 def test_create_org_when_missing():
@@ -52,7 +49,8 @@ def test_create_org_when_missing():
     params = client.create_org.call_args[0][0]
     assert params.name == "canonical"
     assert params.credentials_name == "app-1-2"
-    assert params.webhook_secret == WEBHOOK_SECRET
+    assert params.webhook_secret
+    assert params.agent_mode is True
     client.update_org.assert_not_called()
     client.delete_org.assert_not_called()
 
@@ -72,15 +70,16 @@ def test_create_repo_splits_owner_and_name():
     assert params.owner == "canonical"
     assert params.name == "runner"
     assert params.credentials_name == "app-1-2"
-    assert params.webhook_secret == WEBHOOK_SECRET
+    assert params.webhook_secret
 
 
-def test_create_org_and_repo_set_webhook_secret():
+def test_create_org_and_repo_set_nonempty_webhook_secret():
     """
     arrange: A client with no registered orgs or repos.
     act: Reconcile a desired org and a desired repo in one pass.
-    assert: Both create_org and create_repo are called with the reconciler's webhook secret — GARM
-        rejects entity creation without a non-empty webhook_secret.
+    assert: Both create_org and create_repo are called with a non-empty webhook secret — GARM
+        rejects entity creation without one — and in agent mode, since the charm never installs a
+        GitHub webhook, so the secret is a throwaway placeholder.
     """
     client = _client(orgs=[], repos=[])
     _reconcile(
@@ -91,8 +90,10 @@ def test_create_org_and_repo_set_webhook_secret():
         ],
     )
 
-    assert client.create_org.call_args[0][0].webhook_secret == WEBHOOK_SECRET
-    assert client.create_repo.call_args[0][0].webhook_secret == WEBHOOK_SECRET
+    org_params = client.create_org.call_args[0][0]
+    repo_params = client.create_repo.call_args[0][0]
+    assert org_params.webhook_secret and org_params.agent_mode is True
+    assert repo_params.webhook_secret and repo_params.agent_mode is True
 
 
 def test_no_op_when_org_present_and_credential_matches():

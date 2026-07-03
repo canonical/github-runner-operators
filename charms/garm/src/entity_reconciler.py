@@ -11,6 +11,7 @@ bound to a charm-managed credential; only owned entities are updated or deleted.
 """
 
 import logging
+import secrets
 from dataclasses import dataclass
 
 from garm_api import GarmApiError, GarmAuthenticatedClient
@@ -34,18 +35,13 @@ class EntitySpec:
 class EntityReconciler:
     """Reconciles GARM org/repo entities against a desired spec list."""
 
-    def __init__(self, client: GarmAuthenticatedClient, webhook_secret: str) -> None:
+    def __init__(self, client: GarmAuthenticatedClient) -> None:
         """Initialise the reconciler.
 
         Args:
             client: Authenticated GarmAuthenticatedClient instance.
-            webhook_secret: Charm-managed secret set on newly created entities. GARM requires a
-                non-empty webhook secret to register an entity, even though this charm never
-                installs a GitHub webhook (scalesets dispatch via GitHub's message queue instead),
-                so the value only needs to exist and be stable.
         """
         self._client = client
-        self._webhook_secret = webhook_secret
 
     def reconcile(self, desired: list[EntitySpec]) -> None:
         """Register, update, or delete GARM entities to match *desired*.
@@ -80,7 +76,8 @@ class EntityReconciler:
                         CreateOrgParams(
                             name=name,
                             credentials_name=spec.credentials_name,
-                            webhook_secret=self._webhook_secret,
+                            webhook_secret=_random_webhook_secret(),
+                            agent_mode=True,
                         )
                     )
                 elif (
@@ -125,7 +122,8 @@ class EntityReconciler:
                             owner=owner,
                             name=name,
                             credentials_name=spec.credentials_name,
-                            webhook_secret=self._webhook_secret,
+                            webhook_secret=_random_webhook_secret(),
+                            agent_mode=True,
                         )
                     )
                 elif (
@@ -198,3 +196,14 @@ class EntityReconciler:
                 name,
                 exc,
             )
+
+
+def _random_webhook_secret() -> str:
+    """Return a throwaway webhook secret for entity registration.
+
+    GARM rejects registering an entity without a non-empty webhook secret, but this charm runs
+    entities in agent mode (scalesets dispatch via GitHub's message queue) and never installs a
+    GitHub webhook, so the value is never used. It is generated fresh per registration and not
+    persisted — mirroring GARM's ``--random-secret`` CLI flag — rather than stored in Juju.
+    """
+    return secrets.token_hex(32)

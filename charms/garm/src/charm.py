@@ -37,7 +37,6 @@ GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
-GARM_WEBHOOK_SECRET_LABEL: typing.Final[str] = "garm-webhook-secret"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -539,7 +538,7 @@ class GarmCharm(paas_charm.go.Charm):
         return self._hash_toml(hash_input)
 
     def _ensure_secrets(self) -> None:
-        """Create garm-secrets, garm-admin-credentials, and garm-webhook-secret (leader only)."""
+        """Create garm-secrets and garm-admin-credentials (leader only)."""
         if not self.unit.is_leader():
             return
         try:
@@ -565,13 +564,6 @@ class GarmCharm(paas_charm.go.Charm):
                 " Retrieve with: juju secret-get --label %s",
                 GARM_ADMIN_CREDENTIALS_LABEL,
                 GARM_ADMIN_CREDENTIALS_LABEL,
-            )
-        try:
-            self.model.get_secret(label=GARM_WEBHOOK_SECRET_LABEL)
-        except ops.SecretNotFoundError:
-            logger.info("GARM webhook secret not yet available; creating it")
-            self.app.add_secret(
-                {"webhook-secret": secrets.token_hex(32)}, label=GARM_WEBHOOK_SECRET_LABEL
             )
 
     def _get_secrets(self) -> dict[str, str] | None:
@@ -705,18 +697,6 @@ class GarmCharm(paas_charm.go.Charm):
         try:
             secret = self.model.get_secret(label=GARM_ADMIN_CREDENTIALS_LABEL)
             return secret.get_content()
-        except ops.SecretNotFoundError:
-            return None
-
-    def _get_webhook_secret(self) -> str | None:
-        """Retrieve the charm-managed GARM entity webhook secret.
-
-        Returns:
-            The webhook secret value, or None if not yet available.
-        """
-        try:
-            secret = self.model.get_secret(label=GARM_WEBHOOK_SECRET_LABEL)
-            return secret.get_content().get("webhook-secret") or None
         except ops.SecretNotFoundError:
             return None
 
@@ -888,10 +868,6 @@ class GarmCharm(paas_charm.go.Charm):
         if not admin_creds:
             logger.warning("Admin credentials not yet available; deferring reconcile")
             return
-        webhook_secret = self._get_webhook_secret()
-        if not webhook_secret:
-            logger.warning("Webhook secret not yet available; deferring reconcile")
-            return
 
         # Talk to GARM over its fixed local listener (same target as first-run), rather than
         # _get_garm_url() which depends on charm config that is not set for the local API.
@@ -907,9 +883,7 @@ class GarmCharm(paas_charm.go.Charm):
             # then scalesets — each dependency before its dependants.
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
-            EntityReconciler(auth_client, webhook_secret).reconcile(
-                CharmState.from_charm(self).desired_entities
-            )
+            EntityReconciler(auth_client).reconcile(CharmState.from_charm(self).desired_entities)
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets())
             self.unit.status = ops.ActiveStatus()
         except GarmApiError as exc:
