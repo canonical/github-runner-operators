@@ -72,6 +72,8 @@ class EntityReconciler:
             try:
                 if existing is None:
                     logger.info("Registering organization '%s' in GARM", name)
+                    # GARM rejects registration without a non-empty webhook_secret; the charm
+                    # never installs a webhook, so this throwaway value is unused.
                     self._client.create_org(
                         CreateOrgParams(
                             name=name,
@@ -116,6 +118,8 @@ class EntityReconciler:
                         )
                         continue
                     logger.info("Registering repository '%s' in GARM", full_name)
+                    # GARM rejects registration without a non-empty webhook_secret; the charm
+                    # never installs a webhook, so this throwaway value is unused.
                     self._client.create_repo(
                         CreateRepoParams(
                             owner=owner,
@@ -197,11 +201,5 @@ class EntityReconciler:
 
 
 def _random_webhook_secret() -> str:
-    """Return a throwaway webhook secret for entity registration.
-
-    GARM rejects registering an entity without a non-empty webhook secret, but this charm never
-    installs a GitHub webhook (scalesets dispatch via GitHub's message queue), so the value is
-    never used. It is generated fresh per registration and not persisted — mirroring GARM's
-    ``--random-secret`` CLI flag — rather than stored in Juju.
-    """
+    """Return a fresh random webhook secret."""
     return secrets.token_hex(32)
