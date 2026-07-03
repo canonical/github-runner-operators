@@ -3,6 +3,7 @@
 
 """Integration tests for the GARM charm."""
 
+import base64
 import json
 import logging
 import secrets
@@ -11,14 +12,19 @@ import urllib.request
 import jubilant
 import pytest
 import requests
-from requests.adapters import HTTPAdapter
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
-from urllib3.util.retry import Retry
+
+from tests.integration.conftest import (
+    GARM_ADMIN_CREDENTIALS_LABEL,
+    GARM_API_PORT,
+    _garm_first_run,
+    _get_garm_address,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +32,8 @@ GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
-GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
-GARM_API_PORT = 8080
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
+GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 
 # Generated once per session so all test functions that call _garm_first_run use
 # the same credentials. Format guarantees GARM's strong-password requirements:
@@ -367,6 +372,121 @@ def test_charm_reconciles_org_and_scaleset(
     assert scaleset["name"] == _SCALESET_TEST_NAME
     assert scaleset["max_runners"] == 10
 
+    templates = _list_templates(address, token)
+    charmed = next((t for t in templates if t.get("name") == GARM_CHARMED_TEMPLATE_NAME), None)
+    assert charmed is not None, "charmed template should always be maintained by reconcile"
+    assert scaleset.get("template_id") == charmed["id"], (
+        f"scaleset should reference charmed template id {charmed['id']}; "
+        f"got {scaleset.get('template_id')}"
+    )
+
+
+def _list_templates(address: str, token: str) -> list[dict]:
+    """List all runner install templates from the GARM API.
+
+    Args:
+        address: GARM unit IP address.
+        token: JWT token for authentication.
+
+    Returns:
+        List of template dicts from the GARM API.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/templates", headers=headers, timeout=30)
+    resp.raise_for_status()
+    templates = resp.json()
+    return templates if isinstance(templates, list) else []
+
+
+def _get_template_body(address: str, token: str, template_id: int) -> str:
+    """Fetch a template by ID and return its decoded script body.
+
+    The GARM list API omits the ``data`` field for performance; this helper
+    fetches the individual template and base64-decodes the script bytes.
+
+    Args:
+        address: GARM unit IP address.
+        token: JWT token for authentication.
+        template_id: Numeric template ID to fetch.
+
+    Returns:
+        Decoded UTF-8 script string, or empty string if ``data`` is absent.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{base_url}/templates/{template_id}", headers=headers, timeout=30)
+    resp.raise_for_status()
+    raw_b64 = resp.json().get("data") or ""
+    return base64.b64decode(raw_b64).decode("utf-8") if raw_b64 else ""
+
+
+def test_garm_charmed_template_created_on_debug_ssh(
+    juju: jubilant.Juju,
+    garm_with_debug_ssh: str,
+):
+    """
+    arrange: The debug-ssh relation is integrated with a fake tmate server; the
+        github_linux base template was pre-created in GARM.
+    act: Query GET /api/v1/templates with an admin JWT.
+    assert: The github_linux_charmed template exists and its body contains
+        the tmate env-var snippet for the fake server's host and port.
+    """
+    address = _get_garm_address(juju, garm_with_debug_ssh)
+    token = _garm_first_run(juju, address)
+
+    templates = _list_templates(address, token)
+    logger.info(
+        "Templates after debug-ssh integration: %s",
+        [t.get("name") for t in templates],
+    )
+
+    charmed = next((t for t in templates if t.get("name") == GARM_CHARMED_TEMPLATE_NAME), None)
+    assert charmed is not None, (
+        f"Expected '{GARM_CHARMED_TEMPLATE_NAME}' template to exist after debug-ssh "
+        f"integration; found templates: {[t.get('name') for t in templates]}"
+    )
+
+    body = _get_template_body(address, token, charmed["id"])
+    logger.info("Charmed template body (first 500 chars):\n%s", body[:500])
+
+    assert "TMATE_SERVER_HOST=tmate.example.com" in body, (
+        f"Expected TMATE_SERVER_HOST in charmed template body; got:\n{body[:500]}"
+    )
+    assert "TMATE_SERVER_PORT=2200" in body, (
+        f"Expected TMATE_SERVER_PORT in charmed template body; got:\n{body[:500]}"
+    )
+
+
+def test_garm_charmed_template_persists_without_tmate_on_debug_ssh_removal(
+    juju: jubilant.Juju,
+    garm_without_debug_ssh: str,
+):
+    """
+    arrange: The debug-ssh relation has been removed from GARM.
+    act: Query GET /api/v1/templates with an admin JWT.
+    assert: The github_linux_charmed template still exists (scalesets always
+        reference it) but its body no longer contains the tmate env-var snippet.
+    """
+    address = _get_garm_address(juju, garm_without_debug_ssh)
+    token = _garm_first_run(juju, address)
+
+    templates = _list_templates(address, token)
+    template_names = [t.get("name") for t in templates]
+    logger.info("Templates after debug-ssh removal: %s", template_names)
+
+    charmed = next((t for t in templates if t.get("name") == GARM_CHARMED_TEMPLATE_NAME), None)
+    assert charmed is not None, (
+        f"Expected '{GARM_CHARMED_TEMPLATE_NAME}' to persist after debug-ssh "
+        f"relation removal; found templates: {template_names}"
+    )
+
+    body = _get_template_body(address, token, charmed["id"])
+    assert "TMATE_SERVER_HOST" not in body, (
+        f"Expected tmate snippet removed from charmed template after debug-ssh "
+        f"removal; got:\n{body[:500]}"
+    )
+
 
 def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
     """Run a command inside the workload container via pebble exec.
@@ -380,126 +500,6 @@ def _pebble_exec(juju: jubilant.Juju, unit: str, command: str) -> jubilant.Task:
         ExecResult with stdout/stderr.
     """
     return juju.exec(f"{PEBBLE_PREFIX} exec -- {command}", unit=unit)
-
-
-def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
-    """Get the IP address of the GARM unit.
-
-    Args:
-        juju: Jubilant Juju handle.
-        app_name: GARM application name.
-
-    Returns:
-        IP address string.
-    """
-    status = juju.status()
-    unit_name = f"{app_name}/0"
-    return status.apps[app_name].units[unit_name].address
-
-
-def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
-    """Retrieve GARM admin credentials from the garm-admin-credentials Juju secret.
-
-    Args:
-        juju: Jubilant Juju handle.
-
-    Returns:
-        Dict with at least ``username`` and ``password`` keys as stored by the charm.
-    """
-    secrets_json = juju.cli("secrets", "--format=json")
-    all_secrets = json.loads(secrets_json)
-    admin_creds_uri = None
-    for uri, info in all_secrets.items():
-        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
-            admin_creds_uri = uri
-            break
-    assert (
-        admin_creds_uri is not None
-    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
-    secret_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
-    secret = json.loads(secret_json)
-    content = secret[admin_creds_uri]["content"]["Data"]
-    for key in ("username", "password"):
-        assert (
-            key in content
-        ), f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
-    return content
-
-
-def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
-    """Log in to GARM with charm-managed credentials and return an admin JWT.
-
-    The charm creates the admin user automatically via _maybe_first_run().
-    This function reads credentials from the garm-admin-credentials Juju secret,
-    logs in to obtain a JWT, and configures required controller URLs so GARM will
-    serve operational API endpoints.
-
-    Retries with backoff to allow GARM time to finish starting and the charm's
-    first-run initialization to complete.
-
-    Args:
-        juju: Jubilant Juju handle (used to read admin credentials from Juju secret).
-        address: GARM unit IP address.
-
-    Returns:
-        JWT token string for authenticated API calls.
-    """
-    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    creds = _get_admin_credentials(juju)
-
-    session = requests.Session()
-    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
-    session.mount("http://", HTTPAdapter(max_retries=retries))
-
-    class _LoginRetryable(Exception):
-        pass
-
-    @retry(
-        retry=retry_if_exception_type(
-            (requests.exceptions.ConnectionError, _LoginRetryable)
-        ),
-        wait=wait_exponential(multiplier=1, min=1, max=30),
-        stop=stop_after_attempt(10),
-        reraise=True,
-    )
-    def _do_login() -> str:
-        resp = session.post(
-            f"{base_url}/auth/login",
-            json={"username": creds["username"], "password": creds["password"]},
-            timeout=30,
-        )
-        logger.info(
-            "login response: status=%d body=%s", resp.status_code, resp.text[:500]
-        )
-        if resp.status_code != 200:
-            raise _LoginRetryable(
-                f"Unexpected login status {resp.status_code}: {resp.text[:200]}"
-            )
-        token = resp.json().get("token", "")
-        assert token, "Expected non-empty JWT token from login"
-        return token
-
-    token = _do_login()
-
-    # Configure controller URLs — GARM requires metadata_url and callback_url
-    # before it will serve operational endpoints (returns 409 otherwise)
-    headers = {"Authorization": f"Bearer {token}"}
-    controller_payload = {
-        "metadata_url": f"http://{address}:{GARM_API_PORT}/api/v1/metadata",
-        "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
-        "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
-    }
-    resp = session.put(
-        f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
-    )
-    logger.info(
-        "controller setup response: status=%d body=%s",
-        resp.status_code,
-        resp.text[:300],
-    )
-    resp.raise_for_status()
-
-    return token
 
 
 def garm_login_from_secret(juju: jubilant.Juju, garm_app_name: str, garm_url: str) -> str:
@@ -775,4 +775,3 @@ def test_github_credentials_synced_from_relation(
     assert "github.com" in endpoint_names, (
         f"Built-in github.com endpoint must be preserved; got {sorted(endpoint_names)}"
     )
-

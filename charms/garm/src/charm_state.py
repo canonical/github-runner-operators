@@ -3,10 +3,11 @@
 
 """Charm state parsing for the GARM charm.
 
-Builds the desired GARM org/repo entities from the garm-configurator relation into a
-``CharmState`` value (via ``CharmState.from_charm``), keeping that relation-parsing out of
-``charm.py``. Credential and scaleset specs are still built in ``charm.py`` today; they can move
-here under the same pattern as the state grows.
+Builds the desired GARM org/repo entities from the garm-configurator relation and the SSH
+debug connections from the debug-ssh relation into a ``CharmState`` value (via
+``CharmState.from_charm``), keeping that relation-parsing out of ``charm.py``. Credential and
+scaleset specs are still built in ``charm.py`` today; they can move here under the same pattern
+as the state grows.
 """
 
 import dataclasses
@@ -19,7 +20,25 @@ from entity_reconciler import EntitySpec
 
 logger = logging.getLogger(__name__)
 
+DEBUG_SSH_INTEGRATION_NAME: typing.Final[str] = "debug-ssh"
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
+
+
+@dataclasses.dataclass(frozen=True)
+class SSHDebugInfo:
+    """SSH debug connection information from the debug-ssh relation.
+
+    Attributes:
+        host: The tmate server hostname or IP.
+        port: The tmate server port.
+        rsa_fingerprint: RSA fingerprint of the tmate server.
+        ed25519_fingerprint: Ed25519 fingerprint of the tmate server.
+    """
+
+    host: str
+    port: int
+    rsa_fingerprint: str
+    ed25519_fingerprint: str
 
 
 def credential_name(app_id: int, installation_id: int) -> str:
@@ -29,6 +48,69 @@ def credential_name(app_id: int, installation_id: int) -> str:
     credential and entity builders must derive it identically.
     """
     return f"app-{app_id}-{installation_id}"
+
+
+def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
+    """Read SSH debug connection info from the debug-ssh relation.
+
+    Args:
+        charm: The charm instance.
+
+    Returns:
+        List of SSHDebugInfo for units that have sent complete relation data,
+        sorted by (host, port) for stable ordering across events.
+    """
+    relation = charm.model.get_relation(DEBUG_SSH_INTEGRATION_NAME)
+    if relation is None:
+        return []
+
+    connections: list[SSHDebugInfo] = []
+    for unit in relation.units:
+        data = relation.data[unit]
+        host = data.get("host")
+        port_str = data.get("port")
+        rsa_fingerprint = data.get("rsa_fingerprint")
+        ed25519_fingerprint = data.get("ed25519_fingerprint")
+
+        if not (host and port_str and rsa_fingerprint and ed25519_fingerprint):
+            logger.warning(
+                "%s relation data for %s not yet ready.",
+                DEBUG_SSH_INTEGRATION_NAME,
+                unit.name,
+            )
+            continue
+
+        if any("\n" in v for v in (host, rsa_fingerprint, ed25519_fingerprint)):
+            logger.warning(
+                "Rejecting %s relation data for %s: value contains newline (possible injection).",
+                DEBUG_SSH_INTEGRATION_NAME,
+                unit.name,
+            )
+            continue
+
+        try:
+            port = int(port_str)
+        except ValueError:
+            logger.warning(
+                "Invalid port '%s' in %s relation data for %s.",
+                port_str,
+                DEBUG_SSH_INTEGRATION_NAME,
+                unit.name,
+            )
+            continue
+
+        connections.append(
+            SSHDebugInfo(
+                host=host,
+                port=port,
+                rsa_fingerprint=rsa_fingerprint,
+                ed25519_fingerprint=ed25519_fingerprint,
+            )
+        )
+
+    # relation.units is unordered; sort so that ≥2 debug-ssh units always
+    # produce the same connections[0] selection rather than flip-flopping.
+    return sorted(connections, key=lambda c: (c.host, c.port))
 
 
 def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
@@ -109,12 +191,14 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
 
 @dataclasses.dataclass(frozen=True)
 class CharmState:
-    """Desired GARM state derived from charm relations.
+    """Consolidated charm state for the GARM charm.
 
     Attributes:
+        ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
     """
 
+    ssh_debug_connections: list[SSHDebugInfo]
     desired_entities: list[EntitySpec]
 
     @classmethod
@@ -127,4 +211,7 @@ class CharmState:
         Returns:
             Current CharmState.
         """
-        return cls(desired_entities=_get_desired_entities(charm))
+        return cls(
+            ssh_debug_connections=_get_ssh_debug_connections(charm),
+            desired_entities=_get_desired_entities(charm),
+        )

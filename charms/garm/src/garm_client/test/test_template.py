@@ -36,9 +36,7 @@ class TestTemplate(unittest.TestCase):
         if include_optional:
             return Template(
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                data = [
-                    56
-                    ],
+                data = '',
                 description = '',
                 forge_type = '',
                 id = 56,
