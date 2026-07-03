@@ -3,6 +3,7 @@
 
 """Unit tests for garm_api.py."""
 
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -92,26 +93,29 @@ def test_first_run_succeeds():
     """
     arrange: GarmApiClient with FirstRunApi returning a mock response.
     act: Call first_run with valid credentials.
-    assert: Completes without error.
+    assert: Completes without error, and the request body carries the given username and email.
     """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.FirstRunApi") as MockApi:
             MockApi.return_value.first_run.return_value = MagicMock()
             client.first_run("admin", "pass", "email@example.com", "Admin")
+    body = MockApi.return_value.first_run.call_args.kwargs["body"]
+    assert body.username == "admin"
+    assert body.email == "email@example.com"
 
 
 def test_first_run_raises_on_api_error():
     """
     arrange: GarmApiClient with FirstRunApi raising ApiException(400).
     act: Call first_run with credentials.
-    assert: GarmApiError is raised.
+    assert: GarmApiError is raised mentioning "400".
     """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
         with patch("garm_api.FirstRunApi") as MockApi:
             MockApi.return_value.first_run.side_effect = ApiException(status=400)
-            with pytest.raises(GarmApiError):
+            with pytest.raises(GarmApiError, match="400"):
                 client.first_run("admin", "pass", "email@example.com", "Admin")
 
 
@@ -159,7 +163,7 @@ def test_login_raises_on_api_error():
     """
     arrange: GarmApiClient with LoginApi raising ApiException(401).
     act: Call login("admin", "wrong").
-    assert: GarmApiError is raised.
+    assert: GarmApiError is raised mentioning "401".
     """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
@@ -167,7 +171,7 @@ def test_login_raises_on_api_error():
             MockApi.return_value.login.side_effect = ApiException(
                 status=401, reason="Unauthorized"
             )
-            with pytest.raises(GarmApiError):
+            with pytest.raises(GarmApiError, match="401"):
                 client.login("admin", "wrong")
 
 
@@ -501,6 +505,42 @@ def test_update_controller_raises_on_api_error():
                     callback_url="http://garm/api/v1/callbacks",
                     webhook_url="http://garm/webhooks",
                 )
+
+
+def test_create_template_base64_encodes_data():
+    """
+    arrange: GarmAuthenticatedClient with TemplatesApi stubbed.
+    act: Call create_template() with raw script bytes.
+    assert: The request body carries the data base64-encoded, matching GARM's wire format.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    data = b"#!/bin/bash\necho hi\n"
+    with _stub_api_client(client):
+        with patch("garm_api.TemplatesApi") as MockApi:
+            client.create_template(
+                name="github_linux_charmed",
+                description="charmed template",
+                forge_type="github",
+                os_type="linux",
+                data=data,
+            )
+    body = MockApi.return_value.create_template.call_args.kwargs["body"]
+    assert body.data == base64.b64encode(data).decode("utf-8")
+
+
+def test_update_template_base64_encodes_data():
+    """
+    arrange: GarmAuthenticatedClient with TemplatesApi stubbed.
+    act: Call update_template() with raw script bytes.
+    assert: The request body carries the data base64-encoded, matching GARM's wire format.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    data = b"#!/bin/bash\necho updated\n"
+    with _stub_api_client(client):
+        with patch("garm_api.TemplatesApi") as MockApi:
+            client.update_template(template_id=3, data=data)
+    body = MockApi.return_value.update_template.call_args.kwargs["body"]
+    assert body.data == base64.b64encode(data).decode("utf-8")
 
 
 @pytest.mark.parametrize(

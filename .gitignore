@@ -44,3 +44,4 @@ build/
 # Editor/IDE
 .idea/
 .vscode/
+.claude

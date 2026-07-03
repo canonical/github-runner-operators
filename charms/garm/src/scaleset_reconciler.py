@@ -32,6 +32,7 @@ class ScalesetSpec:
     labels: list[str] = field(default_factory=list)
     runner_group: str = "Default"
     pre_install_scripts: dict[str, str] = field(default_factory=dict)
+    template_id: int | None = None
 
 
 class ScalesetReconciler:
@@ -160,6 +161,7 @@ class ScalesetReconciler:
                 "labels": sorted(spec.labels),
                 "github_runner_group": spec.runner_group or None,
                 "extra_specs": extra_specs or None,
+                "template_id": spec.template_id,
             }
         )
 
@@ -200,6 +202,7 @@ class ScalesetReconciler:
             max_runners=spec.max_runners,
             runner_group=spec.runner_group or None,
             extra_specs=extra_specs or None,
+            template_id=spec.template_id,
         )
         logger.info("Updating scaleset %s (id=%s)", spec.name, observed.id)
         if observed.id is None:
@@ -217,4 +220,5 @@ class ScalesetReconciler:
             or observed.min_idle_runners != spec.min_idle_runners
             or observed.github_runner_group != (spec.runner_group or None)
             or observed_scripts != spec.pre_install_scripts
+            or (spec.template_id is not None and observed.template_id != spec.template_id)
         )

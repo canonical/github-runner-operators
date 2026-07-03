@@ -5,7 +5,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | **List[int]** |  | [optional] 
+**data** | **str** |  | [optional] 
 **description** | **str** |  | [optional] 
 **forge_type** | **str** |  | [optional] 
 **name** | **str** |  | [optional] 

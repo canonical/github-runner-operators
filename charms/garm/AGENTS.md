@@ -10,10 +10,17 @@ charm conventions; this file lists only what's specific to `garm`.
   - **DO** read them with plain `get_content()` (`_get_secrets`, `_get_admin_credentials`).
   - **DON'T** pass `refresh=True` — that's an observer concept (see root `AGENTS.md`).
 - **Domain logic is factored out of `charm.py`**: `src/garm_api.py` and `src/garm_client/`
+- **Domain logic is factored out of `charm.py`**: `src/garm_api.py` and `src/garm_client/`
   (the GARM HTTP client), the per-resource reconcilers (`src/github_reconciler.py`,
   `src/entity_reconciler.py`, `src/scaleset_reconciler.py`), and relation-derived desired state
   (`src/charm_state.py` — `CharmState.from_charm`). Extend these rather than growing the charm
   class. TOML rendering: `render_garm_toml()` in `src/charm.py`.
+- **`src/garm_client/` is generated** by `scripts/generate_client.sh` (openapi-generator) —
+  **DON'T** hand-edit it. The script **patches the GARM swagger spec** before generating so
+  the template `data` field (Go `[]byte`, base64 string on the wire) becomes `StrictStr`
+  instead of `List[int]` (GARM issue #796); accordingly `garm_api.py` base64-encodes `data`
+  on create/update. To fix a generated-type issue, change the patch step and re-run, never
+  the output.
 - GARM serves its API and `/metrics` on one fixed port (`GARM_PORT`); the `app-port` /
   `metrics-port` / `metrics-path` config options have no effect (the charm logs a warning
   rather than blocking). The port is pinned in the `_workload_config` property.
