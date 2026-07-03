@@ -77,7 +77,6 @@ class EntityReconciler:
                             name=name,
                             credentials_name=spec.credentials_name,
                             webhook_secret=_random_webhook_secret(),
-                            agent_mode=True,
                         )
                     )
                 elif (
@@ -123,7 +122,6 @@ class EntityReconciler:
                             name=name,
                             credentials_name=spec.credentials_name,
                             webhook_secret=_random_webhook_secret(),
-                            agent_mode=True,
                         )
                     )
                 elif (
@@ -201,9 +199,9 @@ class EntityReconciler:
 def _random_webhook_secret() -> str:
     """Return a throwaway webhook secret for entity registration.
 
-    GARM rejects registering an entity without a non-empty webhook secret, but this charm runs
-    entities in agent mode (scalesets dispatch via GitHub's message queue) and never installs a
-    GitHub webhook, so the value is never used. It is generated fresh per registration and not
-    persisted — mirroring GARM's ``--random-secret`` CLI flag — rather than stored in Juju.
+    GARM rejects registering an entity without a non-empty webhook secret, but this charm never
+    installs a GitHub webhook (scalesets dispatch via GitHub's message queue), so the value is
+    never used. It is generated fresh per registration and not persisted — mirroring GARM's
+    ``--random-secret`` CLI flag — rather than stored in Juju.
     """
     return secrets.token_hex(32)
