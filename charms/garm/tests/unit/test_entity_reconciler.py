@@ -39,7 +39,8 @@ def test_create_org_when_missing():
     """
     arrange: A client with the managed credential and no registered orgs.
     act: Reconcile a desired organization entity.
-    assert: create_org is called once with the org name and managed credential; no update/delete.
+    assert: create_org is called once with the org name, managed credential, and a non-empty
+        webhook secret; no update/delete.
     """
     client = _client(orgs=[])
     _reconcile(client, [EntitySpec("organization", "canonical", "app-1-2")])
@@ -48,6 +49,7 @@ def test_create_org_when_missing():
     params = client.create_org.call_args[0][0]
     assert params.name == "canonical"
     assert params.credentials_name == "app-1-2"
+    assert params.webhook_secret
     client.update_org.assert_not_called()
     client.delete_org.assert_not_called()
 
@@ -56,7 +58,8 @@ def test_create_repo_splits_owner_and_name():
     """
     arrange: A client with the managed credential and no registered repos.
     act: Reconcile a desired repository entity named "owner/repo".
-    assert: create_repo is called once with owner and name split apart.
+    assert: create_repo is called once with owner and name split apart, and a non-empty webhook
+        secret.
     """
     client = _client(repos=[])
     _reconcile(client, [EntitySpec("repository", "canonical/runner", "app-1-2")])
@@ -66,6 +69,28 @@ def test_create_repo_splits_owner_and_name():
     assert params.owner == "canonical"
     assert params.name == "runner"
     assert params.credentials_name == "app-1-2"
+    assert params.webhook_secret
+
+
+def test_create_org_and_repo_set_nonempty_webhook_secret():
+    """
+    arrange: A client with no registered orgs or repos.
+    act: Reconcile a desired org and a desired repo in one pass.
+    assert: Both create_org and create_repo are called with a non-empty webhook secret — GARM
+        rejects entity creation without one, even though the charm never installs a GitHub webhook,
+        so the secret is a throwaway placeholder.
+    """
+    client = _client(orgs=[], repos=[])
+    _reconcile(
+        client,
+        [
+            EntitySpec("organization", "canonical", "app-1-2"),
+            EntitySpec("repository", "canonical/runner", "app-1-2"),
+        ],
+    )
+
+    assert client.create_org.call_args[0][0].webhook_secret
+    assert client.create_repo.call_args[0][0].webhook_secret
 
 
 def test_no_op_when_org_present_and_credential_matches():

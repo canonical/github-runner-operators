@@ -383,11 +383,11 @@ def test_ensure_secrets_skips_when_not_leader():
     charm.app.add_secret.assert_not_called()
 
 
-def test_ensure_secrets_creates_both_secrets_on_first_run():
+def test_ensure_secrets_creates_secrets_on_first_run():
     """
     arrange: Leader unit; neither garm-secrets nor garm-admin-credentials exist.
     act: Call _ensure_secrets().
-    assert: Both secrets are created, labelled correctly.
+    assert: Both secrets are created and labelled correctly.
     """
     charm = MagicMock()
     charm.unit.is_leader.return_value = True

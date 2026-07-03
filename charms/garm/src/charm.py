@@ -560,7 +560,7 @@ class GarmCharm(paas_charm.go.Charm):
         return self._hash_toml(hash_input)
 
     def _ensure_secrets(self) -> None:
-        """Create garm-secrets and garm-admin-credentials juju secrets (leader only)."""
+        """Create garm-secrets and garm-admin-credentials (leader only)."""
         if not self.unit.is_leader():
             return
         try:

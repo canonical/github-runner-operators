@@ -11,6 +11,7 @@ bound to a charm-managed credential; only owned entities are updated or deleted.
 """
 
 import logging
+import secrets
 from dataclasses import dataclass
 
 from garm_api import GarmApiError, GarmAuthenticatedClient
@@ -72,7 +73,13 @@ class EntityReconciler:
                 if existing is None:
                     logger.info("Registering organization '%s' in GARM", name)
                     self._client.create_org(
-                        CreateOrgParams(name=name, credentials_name=spec.credentials_name)
+                        CreateOrgParams(
+                            name=name,
+                            credentials_name=spec.credentials_name,
+                            # GARM rejects registration without a non-empty webhook_secret;
+                            # the charm never installs a webhook, so this value is unused.
+                            webhook_secret=_random_webhook_secret(),
+                        )
                     )
                 elif (
                     self._needs_credential_update(existing, spec, creds_by_id, name)
@@ -113,7 +120,12 @@ class EntityReconciler:
                     logger.info("Registering repository '%s' in GARM", full_name)
                     self._client.create_repo(
                         CreateRepoParams(
-                            owner=owner, name=name, credentials_name=spec.credentials_name
+                            owner=owner,
+                            name=name,
+                            credentials_name=spec.credentials_name,
+                            # GARM rejects registration without a non-empty webhook_secret;
+                            # the charm never installs a webhook, so this value is unused.
+                            webhook_secret=_random_webhook_secret(),
                         )
                     )
                 elif (
@@ -186,3 +198,8 @@ class EntityReconciler:
                 name,
                 exc,
             )
+
+
+def _random_webhook_secret() -> str:
+    """Return a fresh random webhook secret."""
+    return secrets.token_hex(32)

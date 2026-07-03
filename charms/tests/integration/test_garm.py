@@ -7,7 +7,6 @@ import base64
 import json
 import logging
 import secrets
-import urllib.error
 import urllib.request
 
 import jubilant
@@ -23,11 +22,9 @@ from tenacity import (
 from tests.integration.conftest import (
     GARM_ADMIN_CREDENTIALS_LABEL,
     GARM_API_PORT,
-    _get_admin_credentials,
-    _get_garm_address,
     _garm_first_run,
+    _get_garm_address,
 )
-from tests.integration.helpers import TEST_RSA_PRIVATE_KEY as _TEST_RSA_PRIVATE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +40,12 @@ GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 # uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
 _GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 _SCALESET_TEST_NAME = "test-scaleset"
-_SCALESET_TEST_CREDENTIAL_NAME = "github-app-12345"
 # Credential name the GARM charm derives from the configurator's github-app-id +
 # installation id (12345 / 67890).
 _SYNCED_CREDENTIAL_NAME = "app-12345-67890"
+# GARM's built-in GitHub endpoint that the charm attaches all synced credentials to
+# (mirrors DEFAULT_GITHUB_ENDPOINT in the charm's github_reconciler).
+_GITHUB_COM_ENDPOINT = "github.com"
 
 
 def test_garm_blocks_without_postgresql(
@@ -320,46 +319,53 @@ def test_garm_metrics_endpoint_no_auth(
     )
 
 
-def test_scaleset_created_and_updated_via_relation(
+def test_charm_reconciles_org_and_scaleset(
     juju: jubilant.Juju,
     configurator_garm: str,
     configurator_with_image: str,
     fake_github_api_url: str,
 ):
     """
-    arrange: GARM and garm-configurator are integrated and both active.
-    act: Verify the scaleset is created and reflects updated config.
-    assert: After a config change the scaleset exists with the new max_runners value.
+    arrange: GARM and garm-configurator are integrated, driving a desired org ("test-org") and
+        scaleset ("test-scaleset"); controller URLs are set and github.com is repointed at the
+        mock so the charm's reconcile reaches a controllable GitHub double.
+    act: Trigger a config change so the charm's holistic reconcile runs.
+    assert: The charm registers "test-org" bound to the synced credential (app-12345-67890) and
+        creates "test-scaleset" with the updated max_runners.
     """
     address = _get_garm_address(juju, configurator_garm)
     base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)  # idempotent; ensures controller URLs are set
 
-    # _garm_first_run sets the controller callback/metadata URLs that GARM requires
-    # before it will serve operational endpoints (returns 409 otherwise).  The
-    # configurator_garm fixture integrates the charms before these URLs exist, so
-    # the first reconcile defers.  Calling _garm_first_run here is idempotent (PUT).
-    token = _garm_first_run(juju, address)
-
+    # GARM refuses to change an endpoint's URLs while a credential references it, and the charm has
+    # already synced its credential onto github.com during integration. Detach the charm-managed
+    # org (if any) and credential so github.com can be repointed; the reconcile triggered below
+    # recreates both against the mock.
+    _detach_synced_credential(base_url, token)
+    # Route the charm's synced credential (bound to github.com) at the mock so the whole
+    # reconcile — credential sync, org registration, scaleset creation — hits a controllable
+    # GitHub double. GARM permits updating (not deleting) its built-in endpoint.
+    _point_github_endpoint_at_mock(base_url, token, fake_github_api_url)
     # Restore system templates so GARM can find a linux/github template when
     # CreateEntityScaleSet calls findTemplate internally.
     _restore_system_templates(base_url, token)
 
-    # Create credential and org pointed at the mock GitHub API server so that
-    # GARM's GitHub App calls (installation token, runner-groups, etc.) hit our
-    # mock instead of real GitHub.
-    _create_test_credential(base_url, token, fake_github_api_url)
-    _create_test_org(base_url, token, "test-org")
-
-    # A config change triggers config_changed on the configurator → relation_changed
-    # on GARM → _reconcile_runners() runs now that URLs are configured.
-    # Using max-runner=10 doubles as the update assertion below.
+    # A config change triggers config_changed on the configurator → relation_changed on GARM →
+    # _reconcile_runners() runs now that the controller URLs are set. max-runner=10 doubles as the
+    # scaleset assertion below.
     juju.config(configurator_with_image, values={"max-runner": "10"})
-    # Wait for GARM to settle. GARM is already active so this exits after one poll
-    # (delay=10s), then _wait_for_scaleset polls while relation_changed fires.
     juju.wait(
-        lambda status: jubilant.all_active(status, configurator_garm),
+        lambda status: jubilant.all_active(status, configurator_with_image)
+        and jubilant.all_agents_idle(status, configurator_garm),
         timeout=3 * 60,
         delay=10,
+    )
+
+    org = _wait_for_org(base_url, token, "test-org")
+    credential = _wait_for_github_credential(base_url, token, _SYNCED_CREDENTIAL_NAME)
+    assert org["credentials_id"] == credential["id"], (
+        f"Expected 'test-org' bound to charm-managed credential {_SYNCED_CREDENTIAL_NAME!r} "
+        f"(id={credential['id']}), got credentials_id={org.get('credentials_id')!r}"
     )
 
     scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
@@ -597,92 +603,50 @@ def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
     return next((scaleset for scaleset in scalesets if scaleset.get("name") == name), None)
 
 
-_SCALESET_TEST_ENDPOINT_NAME = "mock-github-endpoint"
+def _point_github_endpoint_at_mock(base_url: str, token: str, mock_base_url: str) -> None:
+    """Repoint GARM's built-in github.com endpoint at the mock GitHub API.
 
-
-def _create_test_credential(garm_url: str, token: str, mock_base_url: str) -> str:
-    """Create a GitHub App credential in GARM pointing at the mock server.
-
-    Uses a dedicated endpoint name ``mock-github-endpoint`` (not the built-in
-    ``github.com`` one) so that GARM routes all GitHub API calls to our mock
-    instead of the real api.github.com.
+    The charm attaches every synced credential to GARM's built-in ``github.com`` endpoint
+    (its DEFAULT_GITHUB_ENDPOINT, not configurable). Overwriting that endpoint's base URLs is
+    the only lever that makes the charm's own GitHub App calls — installation token, runner
+    groups, scaleset creation — resolve to a controllable double instead of api.github.com,
+    letting a single test exercise the full charm reconcile. GARM allows updating (but not
+    deleting) the built-in endpoint.
     """
+    resp = requests.put(
+        f"{base_url}/github/endpoints/{_GITHUB_COM_ENDPOINT}",
+        json={
+            "base_url": mock_base_url,
+            "api_base_url": mock_base_url,
+            "upload_base_url": mock_base_url,
+        },
+        headers=_garm_auth_headers(token),
+        timeout=30,
+    )
+    resp.raise_for_status()
 
-    def _request(
-        path: str, payload: dict, *, method: str = "POST", allow_conflict: bool = True
-    ) -> dict | None:
-        data = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            f"{garm_url}{path}",
-            data=data,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            method=method,
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = resp.read()
-                return json.loads(body) if body else None
-        except urllib.error.HTTPError as exc:
-            if allow_conflict and exc.code == 409:
-                return None
-            raise
 
-    try:
-        # Create a dedicated endpoint pointing at the mock server.
-        # GARM ships with a default "github.com" endpoint wired to
-        # api.github.com; we use a different name so our credential is
-        # guaranteed to use the mock URL for every GitHub API call.
-        _request(
-            "/github/endpoints",
-            {
-                "name": _SCALESET_TEST_ENDPOINT_NAME,
-                "description": "Mock GitHub API endpoint for integration tests",
-                "base_url": mock_base_url,
-                "api_base_url": mock_base_url,
-                "upload_base_url": mock_base_url,
-            },
-        )
-        _request(
-            "/github/credentials",
-            {
-                "name": _SCALESET_TEST_CREDENTIAL_NAME,
-                "description": "Test credential for scaleset integration tests",
-                "endpoint": _SCALESET_TEST_ENDPOINT_NAME,
-                "auth_type": "app",
-                "app": {
-                    "app_id": 12345,
-                    "installation_id": 67890,
-                    "private_key_bytes": base64.b64encode(
-                        _TEST_RSA_PRIVATE_KEY.encode()
-                    ).decode(),
-                },
-            },
-        )
-    except urllib.error.HTTPError:
-        _request(
-            "/credentials",
-            {
-                "name": _SCALESET_TEST_CREDENTIAL_NAME,
-                "description": "Test credential for scaleset integration tests",
-                "base_url": mock_base_url,
-                "api_base_url": mock_base_url,
-                "upload_base_url": mock_base_url,
-                "ca_cert_bundle": "",
-                "credentials": {
-                    "name": "test-creds",
-                    "description": "test",
-                    "type": "github_app",
-                    "payload": {
-                        "app_id": 12345,
-                        "installation_id": 67890,
-                        "private_key": _TEST_RSA_PRIVATE_KEY,
-                    },
-                },
-            },
-            allow_conflict=True,
-        )
-    return _SCALESET_TEST_CREDENTIAL_NAME
+def _detach_synced_credential(base_url: str, token: str) -> None:
+    """Delete the charm-synced org and credential so github.com can be repointed.
 
+    GARM locks an endpoint's URLs while a credential references it. The charm syncs its credential
+    onto the built-in github.com endpoint, so it must be removed (along with any org bound to it)
+    before the endpoint can be pointed at the mock. Deletion tolerates a not-yet-created entity
+    (404); a real failure surfaces later as the repoint's 400.
+    """
+    for org in _list_orgs(base_url, token):
+        if org.get("name") == "test-org" and org.get("id"):
+            _delete_if_present(f"{base_url}/organizations/{org['id']}", token)
+    for cred in _list_github_credentials(base_url, token):
+        if cred.get("name") == _SYNCED_CREDENTIAL_NAME and cred.get("id") is not None:
+            _delete_if_present(f"{base_url}/github/credentials/{cred['id']}", token)
+
+
+def _delete_if_present(url: str, token: str) -> None:
+    """DELETE a GARM resource, treating 404 as already-gone."""
+    resp = requests.delete(url, headers=_garm_auth_headers(token), timeout=30)
+    if resp.status_code != requests.codes.not_found:
+        resp.raise_for_status()
 
 
 def _restore_system_templates(garm_url: str, token: str) -> None:
@@ -701,37 +665,6 @@ def _restore_system_templates(garm_url: str, token: str) -> None:
     )
     with urllib.request.urlopen(req, timeout=30):
         pass
-
-
-def _create_test_org(garm_url: str, token: str, org_name: str) -> None:
-    """Register a GitHub organization in GARM with the test credential.
-
-    GARM requires an organization to be registered before a scaleset can be
-    created for it.  Silently skips if the org already exists (409 Conflict).
-    agent_mode=True prevents GARM from attempting to install a webhook using
-    the fake credential, which would fail against the mock server.
-    """
-    data = json.dumps(
-        {
-            "name": org_name,
-            "credentials_name": _SCALESET_TEST_CREDENTIAL_NAME,
-            "webhook_secret": "test-webhook-secret",
-            "agent_mode": True,
-        }
-    ).encode()
-    req = urllib.request.Request(
-        f"{garm_url}/organizations",
-        data=data,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30):
-            pass
-    except urllib.error.HTTPError as exc:
-        if exc.code != 409:
-            raise
-
 
 
 @retry(
@@ -757,6 +690,28 @@ def _wait_for_scaleset(
             f"got {observed_image!r}"
         )
     return scaleset
+
+
+def _list_orgs(base_url: str, token: str) -> list[dict]:
+    """List GARM organizations via the REST API (GARM returns null when empty)."""
+    resp = requests.get(
+        f"{base_url}/organizations", headers=_garm_auth_headers(token), timeout=30
+    )
+    resp.raise_for_status()
+    return resp.json() or []
+
+
+@retry(
+    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
+    reraise=True,
+)
+def _wait_for_org(base_url: str, token: str, name: str) -> dict:
+    """Wait until a named organization is registered in GARM."""
+    org = next((org for org in _list_orgs(base_url, token) if org.get("name") == name), None)
+    assert org is not None, f"Expected organization {name!r} to exist"
+    return org
 
 
 def _list_github_credentials(base_url: str, token: str) -> list[dict]:
