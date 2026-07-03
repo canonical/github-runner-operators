@@ -49,6 +49,15 @@ parts:
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
 
+  # Bare rocks ship no CA trust store, so GARM's static Go binary trusts no
+  # root CAs. This chisel slice provides the pre-generated
+  # /etc/ssl/certs/ca-certificates.crt bundle so TLS verification works,
+  # mirroring the go-framework extension's runtime part.
+  runtime:
+    plugin: nil
+    stage-packages:
+      - ca-certificates_data
+
   pebble-layer:
     plugin: nil
     override-build: |
