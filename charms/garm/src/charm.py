@@ -904,6 +904,7 @@ class GarmCharm(paas_charm.go.Charm):
         # _get_garm_url() which depends on charm config that is not set for the local API.
         base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
         try:
+            charm_state = CharmState.from_charm(self)
             auth_client = GarmAuthenticatedClient.from_login(
                 base_url, admin_creds["username"], admin_creds["password"]
             )
@@ -914,9 +915,8 @@ class GarmCharm(paas_charm.go.Charm):
             # then scalesets — each dependency before its dependants.
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
-            EntityReconciler(auth_client).reconcile(CharmState.from_charm(self).desired_entities)
-            connections = CharmState.from_charm(self).ssh_debug_connections
-            template_id = _apply_garm_template(auth_client, connections)
+            EntityReconciler(auth_client).reconcile(charm_state.desired_entities)
+            template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
             self.unit.status = ops.ActiveStatus()
         except CharmedTemplateError as exc:
