@@ -72,12 +72,12 @@ class EntityReconciler:
             try:
                 if existing is None:
                     logger.info("Registering organization '%s' in GARM", name)
-                    # GARM rejects registration without a non-empty webhook_secret; the charm
-                    # never installs a webhook, so this throwaway value is unused.
                     self._client.create_org(
                         CreateOrgParams(
                             name=name,
                             credentials_name=spec.credentials_name,
+                            # GARM rejects registration without a non-empty webhook_secret;
+                            # the charm never installs a webhook, so this value is unused.
                             webhook_secret=_random_webhook_secret(),
                         )
                     )
@@ -118,13 +118,13 @@ class EntityReconciler:
                         )
                         continue
                     logger.info("Registering repository '%s' in GARM", full_name)
-                    # GARM rejects registration without a non-empty webhook_secret; the charm
-                    # never installs a webhook, so this throwaway value is unused.
                     self._client.create_repo(
                         CreateRepoParams(
                             owner=owner,
                             name=name,
                             credentials_name=spec.credentials_name,
+                            # GARM rejects registration without a non-empty webhook_secret;
+                            # the charm never installs a webhook, so this value is unused.
                             webhook_secret=_random_webhook_secret(),
                         )
                     )
