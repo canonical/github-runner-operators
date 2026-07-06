@@ -86,7 +86,7 @@ config:
       type: int
       default: 1
       description: |
-        Maximum number of runners in the scaleset.
+        Maximum number of runners in the scaleset. Must be greater than 0.
     labels:
       type: string
       description: |
