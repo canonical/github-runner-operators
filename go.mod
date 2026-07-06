@@ -3,7 +3,7 @@ module github.com/canonical/github-runner-operators
 go 1.25.0
 
 require (
-	github.com/bradleyfalzon/ghinstallation/v2 v2.18.0
+	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/go-github/v82 v82.0.0
 	github.com/google/go-github/v88 v88.0.0
