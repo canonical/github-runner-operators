@@ -25,9 +25,12 @@ def _full_config() -> RunnerConfig:
     )
 
 
-# A fully-populated config injects every option into the template while keeping
-# the base bootstrap intact and placed after the shebang but before `set -e`.
 def test_build_template_data_injects_all_options():
+    """
+    arrange: A bootstrap script and a runner config with every optional field set.
+    act: Build the runner template data.
+    assert: The rendered template preserves the bootstrap and injects every block.
+    """
     result = build_template_data(SAMPLE_BASE, _full_config()).decode()
     lines = result.splitlines()
 
@@ -52,6 +55,8 @@ def test_build_template_data_injects_all_options():
     assert "listen=:54969" in result
     assert "default-ipv4" in result
     assert "/etc/nftables.conf" in result
+    assert "table ip aproxy\nflush table ip aproxy" not in result
+    assert "nft delete table ip aproxy 2>/dev/null || true" in result
     assert "prerouting" in result
     assert "127.0.0.0/8" in result
     assert "counter dnat to \\$default-ipv4:54969" in result
@@ -71,9 +76,12 @@ def test_build_template_data_injects_all_options():
     assert "rm /tmp/custom_pre_job_script" in result
 
 
-# An empty config still wires the job-start hook and static host prep, but emits
-# none of the optional proxy/mirror/telemetry blocks.
 def test_build_template_data_empty_config_omits_optional_blocks():
+    """
+    arrange: A bootstrap script and an empty runner config.
+    act: Build the runner template data.
+    assert: The static setup remains and all optional blocks are omitted.
+    """
     result = build_template_data(SAMPLE_BASE, RunnerConfig()).decode()
 
     assert "echo original-bootstrap" in result
@@ -116,14 +124,22 @@ def test_build_template_data_empty_config_omits_optional_blocks():
     ],
 )
 def test_build_template_data_per_option(config, present, absent):
+    """
+    arrange: A bootstrap script and a runner config with exactly one optional field set.
+    act: Build the runner template data.
+    assert: The selected block is present and an unrelated optional block is absent.
+    """
     result = build_template_data(SAMPLE_BASE, config).decode()
     assert present in result
     assert absent not in result
 
 
-# The consumer side defensively drops malformed/IPv6 tokens (the databag is a
-# trust boundary; the values are rendered into a root-executed nft ruleset).
 def test_aproxy_render_drops_malformed_tokens():
+    """
+    arrange: A runner config with a proxy plus malformed ports and exclude addresses.
+    act: Build the runner template data.
+    assert: Only valid IPv4-oriented aproxy rules are rendered.
+    """
     config = RunnerConfig(
         runner_http_proxy="http://p.test:3128",
         aproxy_redirect_ports="80,not-a-port,8000-9000,99 rm,99999,443-80",
@@ -140,8 +156,12 @@ def test_aproxy_render_drops_malformed_tokens():
     assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
 
 
-# A pre-job-script containing the heredoc delimiter must not terminate it early.
 def test_heredoc_delimiter_avoids_collision_with_pre_job_script():
+    """
+    arrange: A pre-job script containing the default heredoc delimiter token.
+    act: Build the runner template data.
+    assert: The renderer chooses a non-colliding heredoc delimiter.
+    """
     config = RunnerConfig(pre_job_script="echo hi\nGARM_CHARM_PREJOB\necho bye")
     result = build_template_data(SAMPLE_BASE, config).decode()
 
@@ -149,8 +169,12 @@ def test_heredoc_delimiter_avoids_collision_with_pre_job_script():
     assert "echo bye" in result
 
 
-# A CR/LF in the otel endpoint must not inject extra lines into the env file.
 def test_otel_endpoint_newline_stripped():
+    """
+    arrange: An OTEL endpoint containing a newline and extra assignment text.
+    act: Build the runner template data.
+    assert: The endpoint is flattened into one env-file line without line injection.
+    """
     config = RunnerConfig(otel_collector_endpoint="http://o.test:4318\nMALICIOUS=1")
     result = build_template_data(SAMPLE_BASE, config).decode()
 
@@ -158,9 +182,26 @@ def test_otel_endpoint_newline_stripped():
     assert "\nMALICIOUS=1" not in result
 
 
-# from_databag maps each contract key into the config and ignores absent keys;
-# has_config reflects whether any option is set.
+def test_dockerhub_mirror_newline_stripped():
+    """
+    arrange: A Docker mirror URL containing a newline and extra assignment text.
+    act: Build the runner template data.
+    assert: The mirror value is flattened so it cannot inject extra env-file lines.
+    """
+    config = RunnerConfig(dockerhub_mirror="https://m.test\nMALICIOUS=1")
+    result = build_template_data(SAMPLE_BASE, config).decode()
+
+    assert "DOCKERHUB_MIRROR=https://m.testMALICIOUS=1" in result
+    assert "CONTAINER_REGISTRY_URL=https://m.testMALICIOUS=1" in result
+    assert "\nMALICIOUS=1" not in result
+
+
 def test_runner_config_from_databag_and_has_config():
+    """
+    arrange: Empty and populated runner-config databags.
+    act: Build RunnerConfig instances from the databags and inspect has_config.
+    assert: Known keys are mapped, unknown keys are ignored, and has_config reflects content.
+    """
     empty = RunnerConfig.from_databag({})
     assert empty == RunnerConfig()
     assert not empty.has_config()

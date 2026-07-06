@@ -3,8 +3,11 @@
 
 """Unit tests for the scaleset reconciler."""
 
+import base64
+
 import pytest
 
+from garm_client.models.template import Template
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 
@@ -317,6 +320,21 @@ def test_delete_orphaned_scaleset():
     assert client.deleted == [42]
 
 
+def test_unnamed_observed_scaleset_is_skipped():
+    """
+    arrange: FakeGarmClient with one observed scaleset lacking a name.
+    act: Reconcile an unrelated desired spec.
+    assert: The unnamed observed scaleset is ignored rather than deleted under an empty-name key.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name=None, id=42)],
+    )
+    _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted == []
+
+
 @pytest.mark.parametrize(
     "providers, scalesets, desired, expected_deleted",
     [
@@ -350,12 +368,6 @@ def test_pre_install_scripts_passed_in_create():
     assert len(client.created) == 1
     _, _, params = client.created[0]
     assert params.extra_specs == {"pre_install_scripts": scripts}
-
-
-# ---------------------------------------------------------------------------
-# Runner template lifecycle tests
-# ---------------------------------------------------------------------------
-
 
 class _FakeTemplate:
     """Minimal fake for the GARM Template model used in template lifecycle tests."""
@@ -407,6 +419,15 @@ class _TemplateTrackingClient(FakeGarmClient):
         self.deleted_templates.append(template_id)
 
 
+class _DeleteFailingTemplateClient(_TemplateTrackingClient):
+    """TemplateTrackingClient variant whose delete_template raises a GARM API error."""
+
+    def delete_template(self, template_id):
+        from garm_api import GarmApiError
+
+        raise GarmApiError(f"delete failed for template {template_id}")
+
+
 _SYSTEM_TEMPLATE = _FakeTemplate("github_linux", tid=1, data=b"#!/bin/bash\nset -e\necho base\n")
 
 
@@ -445,14 +466,20 @@ def test_template_created_when_runner_config_set():
 
 def test_template_created_when_garm_returns_template_data_as_string():
     """
-    arrange: The system template data is returned as a string by the GARM API.
+    arrange: The system template data is returned as a base64 string by the GARM API.
     act: Reconcile a spec with runner options.
-    assert: A custom template is created from the string data without hook errors.
+    assert: A custom template is created from the decoded script data without hook errors.
     """
     client = _TemplateTrackingClient(
         providers=["openstack-demo"],
         scalesets=[],
-        templates=[_FakeTemplate("github_linux", tid=1, data="#!/bin/bash\nset -e\necho base\n")],
+        templates=[
+            _FakeTemplate(
+                "github_linux",
+                tid=1,
+                data=base64.b64encode(b"#!/bin/bash\nset -e\necho base\n").decode(),
+            )
+        ],
     )
     _reconcile(
         client,
@@ -463,6 +490,43 @@ def test_template_created_when_garm_returns_template_data_as_string():
     _, data, _ = client.created_templates[0]
     assert isinstance(data, bytes)
     assert b"registry-mirrors" in data
+    assert b"#!/bin/bash" in data
+
+
+def test_template_created_from_charmed_template_when_scaleset_references_it():
+    """
+    arrange: A scaleset references the charm-managed template and runner options are set.
+    act: Reconcile the desired spec.
+    assert: The custom template is derived from the charmed template rather than the bare system one.
+    """
+    from charm_state import RunnerConfig
+
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate(
+                "github_linux_charmed",
+                tid=7,
+                data=base64.b64encode(b"#!/bin/bash\nset -e\necho charmed-base\n").decode(),
+            ),
+        ],
+    )
+    _reconcile(
+        client,
+        [
+            _spec(
+                template_id=7,
+                runner_config=RunnerConfig(dockerhub_mirror="https://mirror.example.com"),
+            )
+        ],
+    )
+
+    assert len(client.created_templates) == 1
+    _, data, _ = client.created_templates[0]
+    assert b"echo charmed-base" in data
+    assert b"echo base" not in data
 
 
 def test_template_updated_when_runner_config_changes():
@@ -542,3 +606,61 @@ def test_template_kept_when_system_template_missing():
     assert client.created_templates == []
     assert client.updated_templates == []
     assert client.deleted_templates == []
+
+
+def test_template_with_missing_id_is_not_updated():
+    """
+    arrange: A custom template exists without an id and its rendered content differs.
+    act: Reconcile a spec with runner options.
+    assert: The reconciler skips the update and falls back to the default template id.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate("github_linux-my-scaleset", tid=None, data=b"stale"),
+        ],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://mirror.example.com")],
+    )
+
+    assert client.updated_templates == []
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.template_id == 0
+
+
+def test_template_bytes_does_not_cache_invalid_placeholder_on_generated_model():
+    """
+    arrange: A generated Template model whose list response omits data and whose fetched body is still missing.
+    act: Read template bytes through the reconciler helper.
+    assert: Empty bytes are returned and the Template model is not assigned a non-string placeholder.
+    """
+    client = _TemplateTrackingClient()
+    reconciler = ScalesetReconciler(client)
+    listed = Template(id=5, name="github_linux")
+    client._templates = [listed]
+
+    assert reconciler._template_bytes(listed) == b""
+    assert listed.data is None
+
+
+def test_delete_custom_template_skips_missing_id_and_api_errors():
+    """
+    arrange: One custom template has no id and another raises on delete.
+    act: Reconcile removal of the associated scalesets.
+    assert: Missing-id templates are skipped and delete errors do not abort reconcile.
+    """
+    missing_id_client = _TemplateTrackingClient(
+        templates=[_FakeTemplate("github_linux-stale", tid=None, data=b"x")],
+    )
+    _reconcile(missing_id_client, [])
+    assert missing_id_client.deleted_templates == []
+
+    failing_client = _DeleteFailingTemplateClient(
+        templates=[_FakeTemplate("github_linux-stale", tid=7, data=b"x")],
+    )
+    _reconcile(failing_client, [])

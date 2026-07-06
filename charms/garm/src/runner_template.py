@@ -3,7 +3,7 @@
 
 """Render runner-behaviour options into a GARM runner-install template.
 
-GARM 0.2 stores the runner-install script as a server-side template that a
+GARM stores the runner-install script as a server-side template that a
 scaleset references by ``template_id``. The six operator-facing runner options
 (docker mirror, proxy/aproxy, telemetry, pre-job hook) are delivered by copying
 GARM's system ``github_linux`` template and injecting two blocks right after the
@@ -44,7 +44,7 @@ RUNNER_ENV_PATH = f"{RUNNER_HOME}/env"
 # Only the exporter endpoint is substituted at render time.
 _OTEL_COLLECTOR_SETUP = """\
 /usr/bin/logger -s "OpenTelemetry collector is enabled."
-/usr/bin/logger -s "Additional OpenTelemetery collector configuration can be added."
+/usr/bin/logger -s "Additional OpenTelemetry collector configuration can be added."
 /usr/bin/logger -s "The exporter endpoint is at the environment variable \
 ACTION_OTEL_EXPORTER_OTLP_ENDPOINT."
 /usr/bin/sudo /usr/bin/mkdir -p /etc/otelcol/config.d
@@ -257,19 +257,15 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
     Returns:
         A bash snippet, terminated by a newline.
     """
-    otel_endpoint = ""
-    if config.otel_collector_endpoint:
-        # Strip CR/LF so a databag value can't inject extra env entries or extra
-        # lines into the otelcol config (the databag is a trust boundary,
-        # regardless of configurator validation).
-        otel_endpoint = config.otel_collector_endpoint.replace("\r", "").replace("\n", "")
+    otel_endpoint = _flatten_env_value(config.otel_collector_endpoint)
+    dockerhub_mirror = _flatten_env_value(config.dockerhub_mirror)
 
     hook_body = _render_pre_job_hook_body(config, otel_endpoint)
 
     env_entries = []
-    if config.dockerhub_mirror:
-        env_entries.append(f"DOCKERHUB_MIRROR={config.dockerhub_mirror}")
-        env_entries.append(f"CONTAINER_REGISTRY_URL={config.dockerhub_mirror}")
+    if dockerhub_mirror:
+        env_entries.append(f"DOCKERHUB_MIRROR={dockerhub_mirror}")
+        env_entries.append(f"CONTAINER_REGISTRY_URL={dockerhub_mirror}")
     env_entries.append(f"ACTIONS_RUNNER_HOOK_JOB_STARTED={PRE_JOB_HOOK_PATH}")
     if otel_endpoint:
         env_entries.append(f"ACTION_OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
@@ -319,6 +315,13 @@ def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
         lines.append("")
         lines.append(_render_custom_pre_job_script(config.pre_job_script))
     return "\n".join(lines)
+
+
+def _flatten_env_value(value: str | None) -> str:
+    """Return a value safe for a single-line env file entry."""
+    if value is None:
+        return ""
+    return value.replace("\r", "").replace("\n", "")
 
 
 def _heredoc_delimiter(content: str, base: str) -> str:
@@ -400,11 +403,10 @@ def _render_aproxy(config: RunnerConfig) -> str:
             # compute the default gateway. `\$default-ipv4` stays escaped so the
             # literal two characters `$default-ipv4` land in the file, which nft
             # itself resolves against the `define` above when it loads the file.
+            "nft delete table ip aproxy 2>/dev/null || true",
             "cat << EOF > /etc/nftables.conf",
             "define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 "
             "| grep -oP 'via \\K\\S+') | grep -oP 'src \\K\\S+')",
-            "table ip aproxy",
-            "flush table ip aproxy",
             "table ip aproxy {",
             "      set exclude {",
             "          type ipv4_addr;",

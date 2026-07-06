@@ -3,11 +3,17 @@
 
 """State of the GARM configurator charm."""
 
-import ipaddress
-import urllib.parse
-
 import ops
-from pydantic import BaseModel, ValidationError, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    HttpUrl,
+    IPvAnyNetwork,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 OPENSTACK_AUTH_URL_CONFIG_NAME = "openstack-auth-url"
 OPENSTACK_USERNAME_CONFIG_NAME = "openstack-username"
@@ -39,6 +45,9 @@ APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME = "aproxy-exclude-addresses"
 APROXY_REDIRECT_PORTS_CONFIG_NAME = "aproxy-redirect-ports"
 OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
+
+_HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
+_IP_NETWORK_ADAPTER = TypeAdapter(IPvAnyNetwork)
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
@@ -348,14 +357,11 @@ class RunnerConfig(BaseModel):
         # where a newline could inject extra lines.
         if any(char.isspace() for char in value):
             raise ValueError(msg)
-        parsed = urllib.parse.urlparse(value)
         try:
-            # .port raises ValueError on a non-numeric / out-of-range port that
-            # urlparse otherwise accepts silently.
-            port = parsed.port
-        except ValueError as exc:
+            parsed = _HTTP_URL_ADAPTER.validate_python(value)
+        except ValidationError as exc:
             raise ValueError(msg) from exc
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or port == 0:
+        if parsed.port == 0:
             raise ValueError(msg)
         return value
 
@@ -370,8 +376,8 @@ class RunnerConfig(BaseModel):
             # The values are rendered into an nft IPv4 (table ip) ruleset, so a
             # hostname or IPv6 address would validate here but fail at runtime.
             try:
-                network = ipaddress.ip_network(token, strict=False)
-            except ValueError as exc:
+                network = _IP_NETWORK_ADAPTER.validate_python(token)
+            except ValidationError as exc:
                 raise ValueError(
                     f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
                     f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"

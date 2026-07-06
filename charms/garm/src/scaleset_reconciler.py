@@ -4,6 +4,7 @@
 
 """Scaleset reconciler: diffs desired vs observed GARM scalesets and applies changes."""
 
+import base64
 import logging
 from dataclasses import dataclass, field
 
@@ -67,20 +68,23 @@ class ScalesetReconciler:
             desired: The full desired set of scalesets.
         """
         providers = {provider.name for provider in self._client.list_providers()}
-        observed = {(scaleset.name or ""): scaleset for scaleset in self._client.list_scalesets()}
+        observed: dict[str, ScaleSet] = {}
+        for scaleset in self._client.list_scalesets():
+            if not scaleset.name:
+                logger.warning("Skipping observed scaleset with missing name (id=%s)", scaleset.id)
+                continue
+            observed[scaleset.name] = scaleset
 
         # Templates are only needed when a spec carries runner options or an
         # existing scaleset already references a custom template (to update or
-        # detach it); skip the API call entirely otherwise. When fetched, filter
-        # by partial name so we only pull the system github_linux template and our
-        # per-scaleset github_linux-<name> copies.
+        # detach it); skip the API call entirely otherwise.
         templates: dict[str, Template] = {}
         if any(spec.runner_config.has_config() for spec in desired) or any(
             scaleset.template_id for scaleset in observed.values()
         ):
             templates = {
                 (template.name or ""): template
-                for template in self._client.list_templates(partial_name=SYSTEM_TEMPLATE_NAME)
+                for template in self._client.list_templates()
                 if template.name
             }
 
@@ -213,10 +217,17 @@ class ScalesetReconciler:
 
         new_data = build_template_data(self._template_bytes(base), spec.runner_config)
         if existing is not None:
+            if existing.id is None:
+                logger.warning(
+                    "Runner template %s has no id; scaleset %s will use the default template",
+                    custom_name,
+                    spec.name,
+                )
+                return 0
             if self._template_bytes(existing) != new_data:
                 logger.info("Updating runner template %s", custom_name)
-                self._client.update_template(existing.id or 0, data=new_data)
-            return existing.id or 0
+                self._client.update_template(existing.id, data=new_data)
+            return existing.id
 
         logger.info("Creating runner template %s", custom_name)
         created = self._client.create_template(
@@ -243,13 +254,17 @@ class ScalesetReconciler:
             if template.id is None:
                 return b""
             fetched = self._client.get_template(template.id)
-            data = getattr(fetched, "data", None) or []
-            # Cache it back so repeated lookups don't re-fetch.
-            setattr(template, "data", data)
+            data = getattr(fetched, "data", None)
+            # Cache it back so repeated lookups don't re-fetch, but only when
+            # the generated model can accept the assigned value.
+            if isinstance(data, str):
+                setattr(template, "data", data)
+            if not data:
+                return b""
         if isinstance(data, bytes):
             return data
         if isinstance(data, str):
-            return data.encode("utf-8")
+            return base64.b64decode(data)
         return bytes(data)
 
     def _template_by_id(
@@ -273,8 +288,18 @@ class ScalesetReconciler:
         custom_name = f"{SYSTEM_TEMPLATE_NAME}-{scaleset_name}"
         custom = templates.get(custom_name)
         if custom is not None:
+            if custom.id is None:
+                logger.warning("Skipping delete for runner template %s: missing id", custom_name)
+                return
             logger.info("Deleting orphaned runner template %s", custom.name or custom_name)
-            self._client.delete_template(custom.id or 0)
+            try:
+                self._client.delete_template(custom.id)
+            except GarmApiError as exc:
+                logger.warning(
+                    "Could not delete runner template %s (will retry on next reconcile): %s",
+                    custom.name or custom_name,
+                    exc,
+                )
 
     @staticmethod
     def _to_create_params(spec: ScalesetSpec) -> CreateScaleSetParams:

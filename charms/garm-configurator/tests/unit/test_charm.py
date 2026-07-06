@@ -632,12 +632,6 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     )
     assert "repo" not in garm_out.local_unit_data
 
-
-# ---------------------------------------------------------------------------
-# Runner config — invalid value tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "config_key, bad_value, expected_fragment",
     [
@@ -777,9 +771,7 @@ def test_runner_config_fields_absent_when_unset():
     """
     arrange: Valid config with no runner config options set.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The six runner config keys are absent from the databag (empty strings are stripped by
-        the scenario harness, mirroring how Juju omits unset string keys from real databags).
-        Consumers should use .get(key, "") to treat absent keys as empty.
+    assert: The six runner config keys are absent from the databag.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
