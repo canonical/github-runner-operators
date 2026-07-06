@@ -934,12 +934,9 @@ def test_reconcile_runners_charmed_template_error_sets_waiting_status():
 
 def test_reconcile_runners_success_refreshes_stale_app_status():
     """
-    arrange: Admin credentials are available and the reconcile succeeds; the app status is
-        stale from an earlier reconcile ("Waiting for pebble ready") -- this is the steady
-        state restart() reaches via its config-unchanged fast path, which calls
-        _reconcile_runners() and returns before super().restart() ever runs.
+    arrange: A stale app status and a reconcile that will succeed.
     act: Call _reconcile_runners().
-    assert: Both unit and app status are refreshed to ActiveStatus, not left stale.
+    assert: Both unit and app status refresh to ActiveStatus.
     """
     charm = object.__new__(GarmCharm)
     charm._get_admin_credentials = MagicMock(
@@ -978,12 +975,9 @@ def test_reconcile_runners_success_refreshes_stale_app_status():
 
 def test_restart_missing_configurator_relation_refreshes_stale_app_status():
     """
-    arrange: PostgreSQL and GARM secrets are available but the garm-configurator relation has
-        not sent provider data yet; the app status is stale from an earlier reconcile
-        ("Waiting for pebble ready").
+    arrange: A stale app status and a missing garm-configurator relation.
     act: Call restart().
-    assert: Both unit and app degrade to the same "Waiting for garm-configurator relation"
-        status -- the app status is not left stale.
+    assert: Both unit and app status become "Waiting for garm-configurator relation".
     """
     charm = object.__new__(GarmCharm)
     charm._ensure_secrets = MagicMock()
