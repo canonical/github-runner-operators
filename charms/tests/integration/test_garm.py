@@ -849,6 +849,7 @@ def test_runner_options_render_into_scaleset_template(
         values={
             "dockerhub-mirror": "https://mirror.example.com",
             "runner-http-proxy": "http://proxy.example.com:3128",
+            "aproxy-exclude-addresses": "192.168.0.0/16",
             "aproxy-redirect-ports": "80,443",
             "otel-collector-endpoint": "http://otel.example.com:4318",
             "pre-job-script": "echo integration-marker",
@@ -861,10 +862,16 @@ def test_runner_options_render_into_scaleset_template(
         delay=10,
     )
 
+    # One marker per config option, proving each reaches GARM via live reconcile:
+    # dockerhub-mirror (daemon.json + env var), runner-http-proxy + aproxy-*
+    # (aproxy listener and nftables ruleset), otel-collector-endpoint (env var),
+    # and pre-job-script (job-start hook).
     expected_markers = (
         "registry-mirrors",
-        "https://mirror.example.com",
-        "http://proxy.example.com:3128",
+        "DOCKERHUB_MIRROR=https://mirror.example.com",
+        "proxy=http://proxy.example.com:3128 listen=:54969",
+        "192.168.0.0/16",
+        "tcp dport { 80, 443 }",
         "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
         "echo integration-marker",
     )
