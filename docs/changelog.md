@@ -10,6 +10,8 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-06
 
+- `garm`: fix the application status freezing on a stale value. The charm wrote the unit status directly on its own reconcile paths, so the leader's application status was never refreshed and could stay stuck (for example showing `Waiting for pebble ready` while the unit was `active`). Status writes now go through the shared unit/application status helper so both stay in sync.
+
 - `garm-configurator`: reject `max-runner=0` during config validation. GARM rejects scale set creation with `max_runners cannot be 0`, so the charm now surfaces the invalid configuration before publishing unusable scale set data to GARM.
 
 ## 2026-07-02

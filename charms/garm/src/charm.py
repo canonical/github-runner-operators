@@ -438,18 +438,20 @@ class GarmCharm(paas_charm.go.Charm):
         postgresql_config = self._get_postgresql_config()
         if not postgresql_config:
             logger.info("PostgreSQL relation data not yet available; blocking")
-            self.unit.status = ops.WaitingStatus("Waiting for postgresql relation")
+            self.update_app_and_unit_status(ops.WaitingStatus("Waiting for postgresql relation"))
             return
 
         secrets_data = self._get_secrets()
         if secrets_data is None:
             logger.info("GARM secrets not yet available; blocking until leader initialises")
-            self.unit.status = ops.WaitingStatus("Waiting for GARM secrets")
+            self.update_app_and_unit_status(ops.WaitingStatus("Waiting for GARM secrets"))
             return
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
-            self.unit.status = ops.WaitingStatus("Waiting for garm-configurator relation")
+            self.update_app_and_unit_status(
+                ops.WaitingStatus("Waiting for garm-configurator relation")
+            )
             return
 
         proxy_env = _proxy_environment()
@@ -918,13 +920,13 @@ class GarmCharm(paas_charm.go.Charm):
             EntityReconciler(auth_client).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
             ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
-            self.unit.status = ops.ActiveStatus()
+            self.update_app_and_unit_status(ops.ActiveStatus())
         except CharmedTemplateError as exc:
             logger.warning("GARM charmed template error during reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus(str(exc))
+            self.update_app_and_unit_status(ops.WaitingStatus(str(exc)))
         except GarmApiError as exc:
             logger.warning("GARM API error during reconcile: %s", exc)
-            self.unit.status = ops.WaitingStatus("GARM sync failed")
+            self.update_app_and_unit_status(ops.WaitingStatus("GARM sync failed"))
 
     def _ensure_controller_urls(self, auth_client: GarmAuthenticatedClient) -> None:
         """Configure the GARM controller URLs that gate its operational API.
