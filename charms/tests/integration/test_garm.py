@@ -868,13 +868,11 @@ def test_runner_options_render_into_scaleset_template(
         "OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
         "echo integration-marker",
     )
-    rendered = _wait_for_scaleset_template_data(
+    # Asserts each expected marker is present in the referenced template, retrying
+    # until GARM reflects the reconciled config.
+    _wait_for_scaleset_template_data(
         base_url,
         token,
         _SCALESET_TEST_NAME,
         expected_markers,
     )
-    for expected in expected_markers:
-        assert expected in rendered, (
-            f"Expected {expected!r} in rendered template, got:\n{rendered}"
-        )

@@ -452,7 +452,7 @@ class RunnerConfig(BaseModel):
             )
 
         raw_script = charm.config.get(PRE_JOB_SCRIPT_CONFIG_NAME)
-        pre_job_script = str(raw_script).strip() if raw_script else None
+        pre_job_script = (str(raw_script).strip() or None) if raw_script else None
 
         return cls(
             dockerhub_mirror=url_values[DOCKERHUB_MIRROR_CONFIG_NAME],
@@ -460,7 +460,7 @@ class RunnerConfig(BaseModel):
             aproxy_exclude_addresses=aproxy_exclude_addresses,
             aproxy_redirect_ports=aproxy_redirect_ports,
             otel_collector_endpoint=url_values[OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME],
-            pre_job_script=pre_job_script or None,
+            pre_job_script=pre_job_script,
         )
 
 
