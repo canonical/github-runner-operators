@@ -865,7 +865,7 @@ def test_runner_options_render_into_scaleset_template(
         "registry-mirrors",
         "https://mirror.example.com",
         "http://proxy.example.com:3128",
-        "OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
+        "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
         "echo integration-marker",
     )
     # Asserts each expected marker is present in the referenced template, retrying

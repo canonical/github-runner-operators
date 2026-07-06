@@ -42,10 +42,33 @@ def test_build_template_data_injects_all_options():
     assert "snap install aproxy" in result
     assert "10.0.0.0/8" in result and "192.168.1.5" in result
     assert "8000-9000" in result
-    assert "OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318" in result
+    assert "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318" in result
     assert "echo hello-from-operator" in result
     assert "ACTIONS_RUNNER_HOOK_JOB_STARTED=" in result
     assert RUNNER_ENV_PATH in result
+
+    # aproxy: correct listen port, nftables file (not a piped `nft -f -`), and
+    # both the prerouting and output DNAT chains.
+    assert "listen=:54969" in result
+    assert "default-ipv4" in result
+    assert "/etc/nftables.conf" in result
+    assert "prerouting" in result
+    assert "127.0.0.0/8" in result
+    assert "counter dnat to \\$default-ipv4:54969" in result
+
+    # docker mirror: both env vars and a full daemon-reload + restart.
+    assert "DOCKERHUB_MIRROR=https://mirror.example.com" in result
+    assert "CONTAINER_REGISTRY_URL=https://mirror.example.com" in result
+    assert "systemctl daemon-reload" in result
+
+    # otel collector config is written to disk and enabled.
+    assert "/etc/otelcol/config.d/github.yaml" in result
+    assert "snap enable opentelemetry-collector" in result
+
+    # custom pre-job script: temp-file / run / cleanup pattern.
+    assert "cat > /tmp/custom_pre_job_script <<" in result
+    assert "chmod +x /tmp/custom_pre_job_script" in result
+    assert "rm /tmp/custom_pre_job_script" in result
 
 
 # An empty config still wires the job-start hook and static host prep, but emits
@@ -55,11 +78,12 @@ def test_build_template_data_empty_config_omits_optional_blocks():
 
     assert "echo original-bootstrap" in result
     assert "ACTIONS_RUNNER_HOOK_JOB_STARTED=" in result
-    assert "usermod -aG lxd,adm ubuntu" in result
+    assert "adduser runner lxd || true" in result
+    assert "adduser runner adm || true" in result
 
     assert "snap install aproxy" not in result
     assert "registry-mirrors" not in result
-    assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in result
+    assert "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT" not in result
 
 
 @pytest.mark.parametrize(
@@ -79,7 +103,7 @@ def test_build_template_data_empty_config_omits_optional_blocks():
         ),
         pytest.param(
             RunnerConfig(otel_collector_endpoint="http://o.test:4318"),
-            "OTEL_EXPORTER_OTLP_ENDPOINT=http://o.test:4318",
+            "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://o.test:4318",
             "snap install aproxy",
             id="otel-only",
         ),
@@ -107,7 +131,7 @@ def test_aproxy_render_drops_malformed_tokens():
     )
     result = build_template_data(SAMPLE_BASE, config).decode()
 
-    assert "{ 80, 8000-9000 }" in result
+    assert "tcp dport { 80, 8000-9000 }" in result
     assert "not-a-port" not in result
     assert "99999" not in result  # out of range
     assert "443-80" not in result  # inverted range
@@ -130,7 +154,7 @@ def test_otel_endpoint_newline_stripped():
     config = RunnerConfig(otel_collector_endpoint="http://o.test:4318\nMALICIOUS=1")
     result = build_template_data(SAMPLE_BASE, config).decode()
 
-    assert "OTEL_EXPORTER_OTLP_ENDPOINT=http://o.test:4318MALICIOUS=1" in result
+    assert "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://o.test:4318MALICIOUS=1" in result
     assert "\nMALICIOUS=1" not in result
 
 

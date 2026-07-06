@@ -16,6 +16,11 @@ abort the whole bootstrap:
     runner ``env`` file under ``/home/runner/actions-runner`` (GARM hardcodes the
     ``runner`` user and that path).
 
+Both blocks are ported line-for-line from the production
+``canonical/github-runner-operator`` templates (``openstack-userdata.sh.j2``,
+``env.j2``, ``pre-job.j2``) so the runner behaves identically to the previous
+machine-charm implementation.
+
 The reconciler creates/updates the per-scaleset template with the bytes returned
 by :func:`build_template_data` and only does so when :meth:`RunnerConfig.has_config`
 is true.
@@ -138,9 +143,10 @@ def render_pre_install(config: RunnerConfig) -> str:
 def render_pre_job_hooks(config: RunnerConfig) -> str:
     """Render the runner ``env`` file and GitHub job-start hook.
 
-    The hook always carries a hardcoded proxy-IP-resolution step (pins the proxy
-    address for the job's lifetime) and appends the operator's ``pre-job-script``.
-    The OTEL endpoint, when set, is exported via the runner ``env`` file.
+    The hook file (``pre-job.j2`` in production) sets up the OpenTelemetry
+    collector, when configured, and appends the operator's ``pre-job-script``.
+    The docker mirror and OTEL endpoint are exported via the runner ``env`` file
+    (``env.j2`` in production), read once per job by the runner service.
 
     Args:
         config: The runner options to render.
@@ -148,16 +154,22 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
     Returns:
         A bash snippet, terminated by a newline.
     """
-    hook_body = _PROXY_RESOLVE_SNIPPET
-    if config.pre_job_script:
-        hook_body += "\n\n# --- operator-provided pre-job-script ---\n" + config.pre_job_script
-
-    env_entries = [f"ACTIONS_RUNNER_HOOK_JOB_STARTED={PRE_JOB_HOOK_PATH}"]
+    otel_endpoint = ""
     if config.otel_collector_endpoint:
-        # Strip CR/LF so a databag value can't inject extra env entries (the
-        # databag is a trust boundary, regardless of configurator validation).
+        # Strip CR/LF so a databag value can't inject extra env entries or extra
+        # lines into the otelcol config (the databag is a trust boundary,
+        # regardless of configurator validation).
         otel_endpoint = config.otel_collector_endpoint.replace("\r", "").replace("\n", "")
-        env_entries.append(f"OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
+
+    hook_body = _render_pre_job_hook_body(config, otel_endpoint)
+
+    env_entries = []
+    if config.dockerhub_mirror:
+        env_entries.append(f"DOCKERHUB_MIRROR={config.dockerhub_mirror}")
+        env_entries.append(f"CONTAINER_REGISTRY_URL={config.dockerhub_mirror}")
+    env_entries.append(f"ACTIONS_RUNNER_HOOK_JOB_STARTED={PRE_JOB_HOOK_PATH}")
+    if otel_endpoint:
+        env_entries.append(f"ACTION_OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
 
     # Pick delimiters that don't collide with the (operator-controlled) content,
     # so a pre-job-script containing the literal delimiter can't terminate the
@@ -170,6 +182,9 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
             "",
             "# ===== charm-injected runner job hooks =====",
             f"mkdir -p {RUNNER_HOME}",
+            # Quoted delimiter: the hook file's own heredocs and $VARS must stay
+            # literal here and expand only when the runner executes the hook,
+            # once per job.
             f"cat > {PRE_JOB_HOOK_PATH} <<'{prejob_delim}'",
             hook_body,
             prejob_delim,
@@ -181,6 +196,26 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
             "# ===== end charm-injected runner job hooks =====\n",
         ]
     )
+
+
+def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
+    """Render the contents of the pre-job hook file, ported from ``pre-job.j2``.
+
+    Args:
+        config: The runner options to render.
+        otel_endpoint: The sanitised OTEL endpoint, or "" if unset.
+
+    Returns:
+        The full contents of the hook script (no trailing newline).
+    """
+    lines = ["#!/usr/bin/env bash", "set +e"]
+    if otel_endpoint:
+        lines.append("")
+        lines.append(_OTEL_COLLECTOR_SETUP.format(endpoint=otel_endpoint))
+    if config.pre_job_script:
+        lines.append("")
+        lines.append(_render_custom_pre_job_script(config.pre_job_script))
+    return "\n".join(lines)
 
 
 def _heredoc_delimiter(content: str, base: str) -> str:
@@ -200,26 +235,208 @@ def _heredoc_delimiter(content: str, base: str) -> str:
     return delimiter
 
 
-# The production github-runner charm pins the proxy IP once per job so it cannot
-# drift mid-run. The exact resolution logic is environment-specific; this is a
-# faithful-but-minimal port.
-# TODO(ISD-278): port the exact proxy-resolution script from
-# canonical/github-runner-operator once the production source is available.
-_PROXY_RESOLVE_SNIPPET = """\
-#!/bin/bash
-# Pin the proxy address for the duration of this job.
-set -uo pipefail
-if [ -n "${HTTP_PROXY:-}" ]; then
-    proxy_host=$(echo "${HTTP_PROXY}" | sed -E 's#^https?://##; s#[:/].*$##')
-    proxy_ip=$(getent hosts "${proxy_host}" | awk '{print $1; exit}' || true)
-    if [ -n "${proxy_ip}" ]; then
-        echo "${proxy_ip} ${proxy_host}" | sudo tee -a /etc/hosts >/dev/null
-    fi
-fi"""
+# Ported verbatim from pre-job.j2 (the `{% if otel_collector_endpoint %}` block,
+# lines 136-290): sets up the OpenTelemetry collector's hostmetrics/otlp/loki
+# pipelines. `$GITHUB_*`, `$RUNNER_NAME` and `$(uname -m)` are left as literal
+# shell syntax — they sit inside the *inner*, unquoted `tee <<EOF` heredoc, so
+# they only expand when the runner executes this hook, once per job. Only the
+# exporter endpoint is substituted at render time.
+_OTEL_COLLECTOR_SETUP = """\
+/usr/bin/logger -s "OpenTelemetry collector is enabled."
+/usr/bin/logger -s "Additional OpenTelemetery collector configuration can be added."
+/usr/bin/logger -s "The exporter endpoint is at the environment variable \
+ACTION_OTEL_EXPORTER_OTLP_ENDPOINT."
+/usr/bin/sudo /usr/bin/mkdir -p /etc/otelcol/config.d
+/usr/bin/sudo /usr/bin/touch /etc/otelcol/config.d/github.yaml
+/usr/bin/sudo /usr/bin/tee /etc/otelcol/config.d/github.yaml <<EOF
+receivers:
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.logical.count:
+            enabled: true
+          system.cpu.physical.count:
+            enabled: true
+      memory:
+      disk:
+      filesystem:
+      network:
+      load:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:44317
+      http:
+        endpoint: 0.0.0.0:44318
+  loki:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:43100
+    use_incoming_timestamp: true
+  filelog/aproxy:
+    include:
+      - /var/log/syslog
+    operators:
+      - type: filter
+        expr: 'body not matches "aproxy.aproxy"'
+processors:
+  attributes/self_hosted_runner_github_labels:
+    actions:
+      - key: service.name
+        action: upsert
+        value: "self-hosted-runner"
+      - key: github.repository
+        action: upsert
+        value: "$GITHUB_REPOSITORY"
+      - key: github.runner
+        action: upsert
+        value: "$RUNNER_NAME"
+      - key: github.workflow
+        action: upsert
+        value: "$GITHUB_WORKFLOW"
+      - key: github.job
+        action: upsert
+        value: "$GITHUB_JOB"
+      - key: github.run.id
+        action: upsert
+        value: "$GITHUB_RUN_ID"
+      - key: github.run.attempt
+        action: upsert
+        value: "$GITHUB_RUN_ATTEMPT"
+      - key: host.arch
+        action: upsert
+        value: "$(uname -m)"
+  resource/self_hosted_runner_github_labels:
+    attributes:
+      - key: service.name
+        action: upsert
+        value: "self-hosted-runner"
+      - key: github.repository
+        action: upsert
+        value: "$GITHUB_REPOSITORY"
+      - key: github.runner
+        action: upsert
+        value: "$RUNNER_NAME"
+      - key: github.workflow
+        action: upsert
+        value: "$GITHUB_WORKFLOW"
+      - key: github.job
+        action: upsert
+        value: "$GITHUB_JOB"
+      - key: github.run.id
+        action: upsert
+        value: "$GITHUB_RUN_ID"
+      - key: github.run.attempt
+        action: upsert
+        value: "$GITHUB_RUN_ATTEMPT"
+      - key: host.arch
+        action: upsert
+        value: "$(uname -m)"
+  resource/self_hosted_runner_github_aproxy_labels:
+    attributes:
+      - key: service.name
+        action: upsert
+        value: "aproxy"
+  transform/self_hosted_runner_loki_labels:
+    log_statements:
+      - context: resource
+        statements:
+          - >
+            set(resource.attributes["loki.resource.labels"],
+            Concat([resource.attributes["loki.resource.labels"],
+            ", service.name, github.repository, github.runner, github.workflow, github.job, \
+github.run.id, github.run.attempt, host.arch"], ""))
+            where resource.attributes["loki.resource.labels"] != nil
+          - >
+            set(resource.attributes["loki.resource.labels"],
+            "service.name, github.repository, github.runner, github.workflow, github.job, \
+github.run.id, github.run.attempt, host.arch")
+            where resource.attributes["loki.resource.labels"] == nil
+  batch:
+exporters:
+  otlp/self_hosted_runner:
+    endpoint: {endpoint}
+    tls:
+      insecure: true
+service:
+  pipelines:
+    metrics:
+      receivers: [hostmetrics]
+      processors: [attributes/self_hosted_runner_github_labels, batch]
+      exporters: [otlp/self_hosted_runner]
+    metrics/otlp:
+      receivers: [otlp]
+      processors: [attributes/self_hosted_runner_github_labels, batch]
+      exporters: [otlp/self_hosted_runner]
+    logs/otlp:
+      receivers: [otlp]
+      processors:
+        - resource/self_hosted_runner_github_labels
+        - transform/self_hosted_runner_loki_labels
+        - batch
+      exporters: [otlp/self_hosted_runner]
+    logs/loki:
+      receivers: [loki]
+      processors:
+        - resource/self_hosted_runner_github_labels
+        - transform/self_hosted_runner_loki_labels
+        - batch
+      exporters: [otlp/self_hosted_runner]
+    logs/aproxy:
+      receivers: [filelog/aproxy]
+      processors:
+        - resource/self_hosted_runner_github_labels
+        - resource/self_hosted_runner_github_aproxy_labels
+        - transform/self_hosted_runner_loki_labels
+        - batch
+      exporters: [otlp/self_hosted_runner]
+    traces:
+      receivers: [otlp]
+      processors: [resource/self_hosted_runner_github_labels, batch]
+      exporters: [otlp/self_hosted_runner]
+EOF
+
+/usr/bin/sudo /usr/bin/snap enable opentelemetry-collector
+/usr/bin/sudo /usr/bin/snap start opentelemetry-collector"""
+
+
+def _render_custom_pre_job_script(script: str) -> str:
+    """Render the custom pre-job script block, ported from ``pre-job.j2``.
+
+    Writes the operator script to a temp file, runs it, and removes it — a
+    failure is logged but never aborts the job (``pre-job.j2`` lines 300-308).
+
+    Args:
+        script: The operator-provided pre-job-script content, inserted verbatim
+            (mirrors the template's ``| safe`` filter).
+
+    Returns:
+        A bash snippet.
+    """
+    delim = _heredoc_delimiter(script, "GARM_CHARM_CUSTOM_PREJOB")
+    return "\n".join(
+        [
+            f"cat > /tmp/custom_pre_job_script <<'{delim}'",
+            script,
+            delim,
+            "chmod +x /tmp/custom_pre_job_script",
+            'logger -s "Running custom pre-job script"',
+            '/tmp/custom_pre_job_script || logger -s "Custom pre-job script failed, '
+            'continuing with the job"',
+            'rm /tmp/custom_pre_job_script || logger -s "Failed to remove custom pre-job script"',
+        ]
+    )
 
 
 def _render_aproxy(config: RunnerConfig) -> str:
     """Render aproxy install + nftables redirect rules.
+
+    Ported from ``openstack-userdata.sh.j2`` lines 13-38: aproxy listens on
+    ``:54969`` and an nftables DNAT ruleset (written to ``/etc/nftables.conf``)
+    redirects egress traffic to it, both for locally-initiated connections
+    (``output`` chain) and forwarded ones (``prerouting`` chain).
 
     Args:
         config: The runner options (uses proxy, exclude addresses, redirect ports).
@@ -232,32 +449,52 @@ def _render_aproxy(config: RunnerConfig) -> str:
     # rely on the configurator's validation alone — drop anything malformed.
     ports = _valid_port_tokens(config.aproxy_redirect_ports) or ["80", "443"]
     nft_ports = ", ".join(ports)
-    exclude_guard = ""
     excludes = _valid_ipv4_tokens(config.aproxy_exclude_addresses)
-    if excludes:
-        exclude_guard = f"ip daddr != {{ {', '.join(excludes)} }} "
+    exclude_elements = ", ".join(["127.0.0.0/8", *excludes])
+    dnat_rule = (
+        f"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \\$default-ipv4:54969"
+    )
 
-    # TODO(ISD-278): confirm the exact aproxy listen port / nft ruleset against
-    # the production github-runner charm cloud-init.
     return "\n".join(
         [
             "# Transparently forward runner egress through the configured HTTP proxy.",
-            "snap install aproxy --edge >/dev/null 2>&1 || true",
-            f"snap set aproxy proxy={shlex.quote(config.runner_http_proxy)} listen=:8443 || true",
-            "nft -f - <<'GARM_CHARM_NFT' || true",
+            "snap install aproxy --edge",
+            f"snap set aproxy proxy={shlex.quote(config.runner_http_proxy)} listen=:54969",
+            # Unquoted heredoc: `$(ip route ...)` must expand now, at boot, to
+            # compute the default gateway. `\$default-ipv4` stays escaped so the
+            # literal two characters `$default-ipv4` land in the file, which nft
+            # itself resolves against the `define` above when it loads the file.
+            "cat << EOF > /etc/nftables.conf",
+            "define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 "
+            "| grep -oP 'via \\K\\S+') | grep -oP 'src \\K\\S+')",
+            "table ip aproxy",
+            "flush table ip aproxy",
             "table ip aproxy {",
-            "  chain output {",
-            "    type nat hook output priority -100; policy accept;",
-            f"    {exclude_guard}tcp dport {{ {nft_ports} }} counter redirect to :8443",
-            "  }",
+            "      set exclude {",
+            "          type ipv4_addr;",
+            "          flags interval; auto-merge;",
+            f"          elements = {{ {exclude_elements} }}",
+            "      }",
+            "      chain prerouting {",
+            "              type nat hook prerouting priority dstnat; policy accept;",
+            f"              {dnat_rule}",
+            "      }",
+            "      chain output {",
+            "              type nat hook output priority -100; policy accept;",
+            f"              {dnat_rule}",
+            "      }",
             "}",
-            "GARM_CHARM_NFT",
+            "EOF",
+            "systemctl enable nftables.service",
+            "nft -f /etc/nftables.conf",
         ]
     )
 
 
 def _render_dockerhub_mirror(mirror: str) -> str:
     """Render Docker daemon config pointing at the registry mirror.
+
+    Ported from ``openstack-userdata.sh.j2`` lines 77-81.
 
     Args:
         mirror: The registry mirror URL.
@@ -273,7 +510,8 @@ def _render_dockerhub_mirror(mirror: str) -> str:
             "cat > /etc/docker/daemon.json <<'GARM_CHARM_DOCKER'",
             daemon_json,
             "GARM_CHARM_DOCKER",
-            "systemctl restart docker >/dev/null 2>&1 || true",
+            "systemctl daemon-reload",
+            "systemctl restart docker",
         ]
     )
 
@@ -281,21 +519,18 @@ def _render_dockerhub_mirror(mirror: str) -> str:
 def _render_static_host_prep() -> str:
     """Render the always-on host-preparation steps ported from the old charm.
 
+    Ported from ``openstack-userdata.sh.j2`` lines 74-75 (``adduser ubuntu
+    lxd``/``adduser ubuntu adm``), targeting GARM's runner account instead.
+
     Returns:
-        A bash snippet. Group membership is applied here; the remaining
-        production steps are stubbed pending a faithful port.
+        A bash snippet. Each command is guarded by ``|| true`` so it is a no-op
+        if the runner account doesn't exist yet.
     """
-    # TODO(ISD-278): port the remaining production cloud-init steps from
-    # canonical/github-runner-operator: apt mirror sync self-test, tmate proxy
-    # setup, and the post-job metrics collector. Also confirm the target account
-    # for these group memberships: ISD278 specifies "ubuntu", but GARM runs the
-    # runner as RUNNER_USER ("runner") — reconcile against the old charm's
-    # cloud-init. The command is guarded by "|| true", so it is a no-op if the
-    # user is absent.
     return "\n".join(
         [
             "# Static runner host preparation (ported from the github-runner charm).",
-            "usermod -aG lxd,adm ubuntu >/dev/null 2>&1 || true",
+            f"adduser {RUNNER_USER} lxd || true",
+            f"adduser {RUNNER_USER} adm || true",
         ]
     )
 
