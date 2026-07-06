@@ -129,7 +129,7 @@ _MISSING_CONFIG_SENTINEL = object()
         ),
         pytest.param(
             {"max-runner": -5},
-            "max-runner must be non-negative",
+            "max-runner must be greater than 0",
             id="negative-max-runner",
         ),
         pytest.param(
