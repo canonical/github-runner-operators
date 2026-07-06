@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-06
+
+- `garm-configurator`: reject `max-runner=0` during config validation. GARM rejects scale set creation with `max_runners cannot be 0`, so the charm now surfaces the invalid configuration before publishing unusable scale set data to GARM.
+
 ## 2026-07-02
 
 - Fix GARM organization and repository registration: the charm now sets a webhook secret when registering entities. GARM requires a non-empty webhook secret to register an org/repo, so registration previously failed with an opaque server error and scalesets were never created. The charm generates a throwaway secret automatically, so no operator configuration is required.
