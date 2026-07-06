@@ -16,11 +16,6 @@ abort the whole bootstrap:
     runner ``env`` file under ``/home/runner/actions-runner`` (GARM hardcodes the
     ``runner`` user and that path).
 
-Both blocks are ported line-for-line from the production
-``canonical/github-runner-operator`` templates (``openstack-userdata.sh.j2``,
-``env.j2``, ``pre-job.j2``) so the runner behaves identically to the previous
-machine-charm implementation.
-
 The reconciler creates/updates the per-scaleset template with the bytes returned
 by :func:`build_template_data` and only does so when :meth:`RunnerConfig.has_config`
 is true.
@@ -143,10 +138,9 @@ def render_pre_install(config: RunnerConfig) -> str:
 def render_pre_job_hooks(config: RunnerConfig) -> str:
     """Render the runner ``env`` file and GitHub job-start hook.
 
-    The hook file (``pre-job.j2`` in production) sets up the OpenTelemetry
-    collector, when configured, and appends the operator's ``pre-job-script``.
-    The docker mirror and OTEL endpoint are exported via the runner ``env`` file
-    (``env.j2`` in production), read once per job by the runner service.
+    The hook file sets up the OpenTelemetry collector, when configured, and runs
+    the operator's ``pre-job-script``. The docker mirror and OTEL endpoint are
+    exported via the runner ``env`` file, read once per job by the runner service.
 
     Args:
         config: The runner options to render.
@@ -199,7 +193,7 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
 
 
 def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
-    """Render the contents of the pre-job hook file, ported from ``pre-job.j2``.
+    """Render the contents of the pre-job hook file (the GitHub job-start hook).
 
     Args:
         config: The runner options to render.
@@ -235,12 +229,11 @@ def _heredoc_delimiter(content: str, base: str) -> str:
     return delimiter
 
 
-# Ported verbatim from pre-job.j2 (the `{% if otel_collector_endpoint %}` block,
-# lines 136-290): sets up the OpenTelemetry collector's hostmetrics/otlp/loki
-# pipelines. `$GITHUB_*`, `$RUNNER_NAME` and `$(uname -m)` are left as literal
-# shell syntax — they sit inside the *inner*, unquoted `tee <<EOF` heredoc, so
-# they only expand when the runner executes this hook, once per job. Only the
-# exporter endpoint is substituted at render time.
+# OpenTelemetry collector config: hostmetrics/otlp/loki pipelines exporting to
+# the configured endpoint. `$GITHUB_*`, `$RUNNER_NAME` and `$(uname -m)` are left
+# as literal shell syntax — they sit inside the *inner*, unquoted `tee <<EOF`
+# heredoc, so they only expand when the runner executes this hook, once per job.
+# Only the exporter endpoint is substituted at render time.
 _OTEL_COLLECTOR_SETUP = """\
 /usr/bin/logger -s "OpenTelemetry collector is enabled."
 /usr/bin/logger -s "Additional OpenTelemetery collector configuration can be added."
@@ -403,10 +396,10 @@ EOF
 
 
 def _render_custom_pre_job_script(script: str) -> str:
-    """Render the custom pre-job script block, ported from ``pre-job.j2``.
+    """Render the custom pre-job script block.
 
     Writes the operator script to a temp file, runs it, and removes it — a
-    failure is logged but never aborts the job (``pre-job.j2`` lines 300-308).
+    failure is logged but never aborts the job.
 
     Args:
         script: The operator-provided pre-job-script content, inserted verbatim
@@ -433,10 +426,10 @@ def _render_custom_pre_job_script(script: str) -> str:
 def _render_aproxy(config: RunnerConfig) -> str:
     """Render aproxy install + nftables redirect rules.
 
-    Ported from ``openstack-userdata.sh.j2`` lines 13-38: aproxy listens on
-    ``:54969`` and an nftables DNAT ruleset (written to ``/etc/nftables.conf``)
-    redirects egress traffic to it, both for locally-initiated connections
-    (``output`` chain) and forwarded ones (``prerouting`` chain).
+    aproxy listens on ``:54969`` and an nftables DNAT ruleset (written to
+    ``/etc/nftables.conf``) redirects egress traffic to it, both for
+    locally-initiated connections (``output`` chain) and forwarded ones
+    (``prerouting`` chain).
 
     Args:
         config: The runner options (uses proxy, exclude addresses, redirect ports).
@@ -494,8 +487,6 @@ def _render_aproxy(config: RunnerConfig) -> str:
 def _render_dockerhub_mirror(mirror: str) -> str:
     """Render Docker daemon config pointing at the registry mirror.
 
-    Ported from ``openstack-userdata.sh.j2`` lines 77-81.
-
     Args:
         mirror: The registry mirror URL.
 
@@ -517,10 +508,9 @@ def _render_dockerhub_mirror(mirror: str) -> str:
 
 
 def _render_static_host_prep() -> str:
-    """Render the always-on host-preparation steps ported from the old charm.
+    """Render the always-on host-preparation steps.
 
-    Ported from ``openstack-userdata.sh.j2`` lines 74-75 (``adduser ubuntu
-    lxd``/``adduser ubuntu adm``), targeting GARM's runner account instead.
+    Adds the runner account to the ``lxd`` and ``adm`` groups.
 
     Returns:
         A bash snippet. Each command is guarded by ``|| true`` so it is a no-op
@@ -528,7 +518,7 @@ def _render_static_host_prep() -> str:
     """
     return "\n".join(
         [
-            "# Static runner host preparation (ported from the github-runner charm).",
+            "# Static runner host preparation.",
             f"adduser {RUNNER_USER} lxd || true",
             f"adduser {RUNNER_USER} adm || true",
         ]
