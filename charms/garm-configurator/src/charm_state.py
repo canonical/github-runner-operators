@@ -250,9 +250,9 @@ class ScalesetConfig(BaseModel):
             )
 
         max_runner = int(charm.config.get(SCALESET_MAX_RUNNER_CONFIG_NAME, 0))
-        if max_runner < 0:
+        if max_runner <= 0:
             raise CharmConfigInvalidError(
-                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be non-negative"
+                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be greater than 0"
             )
         if max_runner < min_idle_runner:
             raise CharmConfigInvalidError(

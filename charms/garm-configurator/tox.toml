@@ -37,7 +37,7 @@ commands = [
 
 [env.unit]
 description = "Run unit tests"
-deps = ["pytest", "coverage[toml]", "ops-scenario==8.7.1", "-r requirements.txt"]
+deps = ["pytest", "coverage[toml]", "ops-scenario==8.8.0", "-r requirements.txt"]
 commands = [
   [
     "coverage",
