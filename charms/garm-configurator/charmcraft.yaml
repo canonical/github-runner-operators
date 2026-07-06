@@ -84,7 +84,7 @@ config:
         Minimum number of idle runners in the scaleset.
     max-runner:
       type: int
-      default: 0
+      default: 1
       description: |
         Maximum number of runners in the scaleset.
     labels:
