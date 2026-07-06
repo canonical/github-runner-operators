@@ -128,18 +128,22 @@ def test_garm_charm_reaches_active(
     """
     arrange: The GARM charm is deployed with postgresql & garm-configurator integrated.
     act: Observe the Juju application status.
-    assert: The application is in active status, confirming a successful install.
+    assert: The application is up (``active``, or ``waiting`` on the GARM runner
+        reconcile) rather than ``blocked`` or errored, confirming a successful install.
 
-    Note: the unit workload status may be ``waiting`` at this point because
-    _reconcile_runners() runs on integration and fails until first-run
-    initialises GARM via the API.  The app-level status is what paas_charm
-    sets, confirming the service is up.
+    The charm keeps the application status in sync with the unit status, so while
+    _reconcile_runners() is still pending (GARM not yet fully initialised via the
+    API) the application legitimately reports ``waiting`` instead of a stale
+    ``active``.  Either state confirms the workload came up cleanly.
     """
     status = juju.status()
-    current = status.apps[configurator_garm].app_status.current
-    logger.info("GARM app status: %s", current)
+    app_status = status.apps[configurator_garm].app_status
+    logger.info("GARM app status: %s (%s)", app_status.current, app_status.message)
 
-    assert current == "active", f"Expected {configurator_garm} to be active, got: {current}"
+    assert app_status.current in (
+        "active",
+        "waiting",
+    ), f"Expected {configurator_garm} to be active or waiting, got: {app_status.current}"
 
 
 def test_garm_api_controller_info(
