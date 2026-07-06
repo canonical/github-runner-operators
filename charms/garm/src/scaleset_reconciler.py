@@ -245,6 +245,10 @@ class ScalesetReconciler:
             # Cache it back so repeated lookups don't re-fetch.
             setattr(template, "data", fetched_data)
             data = fetched_data
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, str):
+            return data.encode("utf-8")
         return bytes(data)
 
     def _template_id(self, template: object) -> int:
@@ -305,6 +309,7 @@ class ScalesetReconciler:
                 "os_type": spec.os_type,
                 "min_idle_runners": spec.min_idle_runners,
                 "max_runners": spec.max_runners,
+                "enabled": True,
                 "labels": sorted(spec.labels),
                 "github_runner_group": spec.runner_group or None,
                 "extra_specs": extra_specs or None,
@@ -360,6 +365,7 @@ class ScalesetReconciler:
             flavor=spec.flavor,
             min_idle_runners=spec.min_idle_runners,
             max_runners=spec.max_runners,
+            enabled=True,
             runner_group=spec.runner_group or None,
             extra_specs=extra_specs or None,
             template_id=spec.template_id,
@@ -383,6 +389,7 @@ class ScalesetReconciler:
             or observed.flavor != spec.flavor
             or observed.max_runners != spec.max_runners
             or observed.min_idle_runners != spec.min_idle_runners
+            or observed.enabled is not True
             or observed.github_runner_group != (spec.runner_group or None)
             or observed_scripts != spec.pre_install_scripts
             or (observed.template_id or 0) != template_id

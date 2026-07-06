@@ -31,6 +31,7 @@ class _FakeScaleset:
         extra_specs=None,
         tags=None,
         template_id=None,
+        enabled=True,
     ):
         self.name = name
         self.id = sid
@@ -42,6 +43,7 @@ class _FakeScaleset:
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
         self.template_id = template_id
+        self.enabled = enabled
 
 
 class FakeGarmClient:
@@ -65,6 +67,7 @@ class FakeGarmClient:
                 extra_specs=ss.get("extra_specs", {}),
                 tags=ss.get("tags", []),
                 template_id=ss.get("template_id", None),
+                enabled=ss.get("enabled", True),
             )
             for ss in (scalesets or [])
         ]
@@ -185,6 +188,7 @@ def test_create_scaleset(entity_type, entity_name, create_key, expected_entity_i
     assert params.name == "my-scaleset"
     assert params.image == "ubuntu-22.04"
     assert params.flavor == "m1.small"
+    assert params.enabled is True
     assert client.updated == []
     assert client.deleted == []
 
@@ -222,6 +226,7 @@ def _existing_scaleset(**overrides):
         github_runner_group=None,
         extra_specs={},
         tags=[],
+        enabled=True,
     )
     base.update(overrides)
     return base
@@ -278,6 +283,23 @@ def test_no_update_when_scaleset_unchanged():
     assert client.created == []
     assert client.updated == []
     assert client.deleted == []
+
+
+def test_update_when_scaleset_disabled():
+    """
+    arrange: FakeGarmClient with one existing disabled scaleset that otherwise matches.
+    act: Reconcile the desired spec.
+    assert: The reconciler enables the scaleset so GARM can spawn runners.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(enabled=False)],
+    )
+    _reconcile(client, [_spec()])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.enabled is True
 
 
 def test_delete_orphaned_scaleset():
@@ -341,7 +363,7 @@ class _FakeTemplate:
     def __init__(self, name, tid, data=b"", description=""):
         self.name = name
         self.id = tid
-        self.data = list(data) if data else None
+        self.data = list(data) if isinstance(data, bytes) and data else data or None
         self.description = description
 
 
@@ -419,6 +441,28 @@ def test_template_created_when_runner_config_set():
     _, _, params = client.created[0]
     # The created template's id is 2 (system=1, first custom=2)
     assert params.template_id == 2
+
+
+def test_template_created_when_garm_returns_template_data_as_string():
+    """
+    arrange: The system template data is returned as a string by the GARM API.
+    act: Reconcile a spec with runner options.
+    assert: A custom template is created from the string data without hook errors.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[],
+        templates=[_FakeTemplate("github_linux", tid=1, data="#!/bin/bash\nset -e\necho base\n")],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://mirror.example.com")],
+    )
+
+    assert len(client.created_templates) == 1
+    _, data, _ = client.created_templates[0]
+    assert isinstance(data, bytes)
+    assert b"registry-mirrors" in data
 
 
 def test_template_updated_when_runner_config_changes():

@@ -798,6 +798,31 @@ def _get_template_data(base_url: str, token: str, template_id: int) -> str:
     return base64.b64decode(data).decode() if data else ""
 
 
+@retry(
+    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
+    reraise=True,
+)
+def _wait_for_scaleset_template_data(
+    base_url: str,
+    token: str,
+    scaleset_name: str,
+    expected_markers: tuple[str, ...],
+) -> str:
+    """Wait until a scaleset references a template containing the expected markers."""
+    scaleset = _wait_for_scaleset(base_url, token, scaleset_name)
+    template_id = scaleset.get("template_id")
+    assert template_id, f"Expected scaleset to reference a custom template, got: {scaleset}"
+
+    rendered = _get_template_data(base_url, token, template_id)
+    missing = [marker for marker in expected_markers if marker not in rendered]
+    assert not missing, (
+        f"Expected markers {missing!r} in rendered template {template_id}, got:\n{rendered}"
+    )
+    return rendered
+
+
 def test_runner_options_render_into_scaleset_template(
     juju: jubilant.Juju,
     configurator_garm: str,
@@ -815,9 +840,9 @@ def test_runner_options_render_into_scaleset_template(
     address = _get_garm_address(juju, configurator_garm)
     base_url = _garm_api_base_url(address)
     token = _garm_first_run(juju, address)
+    _detach_synced_credential(base_url, token)
+    _point_github_endpoint_at_mock(base_url, token, fake_github_api_url)
     _restore_system_templates(base_url, token)
-    _create_test_credential(base_url, token, fake_github_api_url)
-    _create_test_org(base_url, token, "test-org")
 
     juju.config(
         configurator_with_image,
@@ -830,23 +855,26 @@ def test_runner_options_render_into_scaleset_template(
         },
     )
     juju.wait(
-        lambda status: jubilant.all_active(status, configurator_garm, configurator_with_image),
+        lambda status: jubilant.all_active(status, configurator_with_image)
+        and jubilant.all_agents_idle(status, configurator_garm),
         timeout=3 * 60,
         delay=10,
     )
 
-    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-    template_id = scaleset.get("template_id")
-    assert template_id, f"Expected scaleset to reference a custom template, got: {scaleset}"
-
-    rendered = _get_template_data(base_url, token, template_id)
-    for expected in (
+    expected_markers = (
         "registry-mirrors",
         "https://mirror.example.com",
         "http://proxy.example.com:3128",
         "OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
         "echo integration-marker",
-    ):
+    )
+    rendered = _wait_for_scaleset_template_data(
+        base_url,
+        token,
+        _SCALESET_TEST_NAME,
+        expected_markers,
+    )
+    for expected in expected_markers:
         assert expected in rendered, (
             f"Expected {expected!r} in rendered template, got:\n{rendered}"
         )
