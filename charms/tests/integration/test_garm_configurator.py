@@ -53,6 +53,7 @@ def deploy_garm_configurator_app_fixture(
             "name": "test-scaleset",
             "flavor": "m1.large",
             "os-arch": "amd64",
+            "max-runner": "1",
             "repo": "myorg/myrepo",
         },
     )
