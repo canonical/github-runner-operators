@@ -7,7 +7,7 @@ import ipaddress
 import urllib.parse
 
 import ops
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, ValidationInfo, field_validator, model_validator
 
 OPENSTACK_AUTH_URL_CONFIG_NAME = "openstack-auth-url"
 OPENSTACK_USERNAME_CONFIG_NAME = "openstack-username"
@@ -306,62 +306,6 @@ class ScalesetConfig(BaseModel):
         )
 
 
-def _validate_http_url(config_name: str, value: str) -> None:
-    """Raise CharmConfigInvalidError if value is not a valid http(s) URL.
-
-    Args:
-        config_name: Config option name used in the error message.
-        value: URL string to validate.
-
-    Raises:
-        CharmConfigInvalidError: When the URL has whitespace, a non-http(s) scheme,
-            or an empty netloc.
-    """
-    # Reject embedded whitespace/control characters: the value is later rendered
-    # into scripts and env files, where a newline could inject extra lines.
-    if any(char.isspace() for char in value):
-        raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
-    parsed = urllib.parse.urlparse(value)
-    try:
-        # Accessing .port raises ValueError on a non-numeric / out-of-range port,
-        # which urlparse otherwise accepts silently.
-        port = parsed.port
-    except ValueError as exc:
-        raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL") from exc
-    if parsed.scheme not in ("http", "https") or not parsed.hostname or port == 0:
-        raise CharmConfigInvalidError(f"{config_name} must be a valid http(s) URL")
-
-
-def _validate_port_token(token: str) -> None:
-    """Raise CharmConfigInvalidError if token is not a valid port or N-M range.
-
-    Args:
-        token: A single comma-split token from the aproxy-redirect-ports config.
-
-    Raises:
-        CharmConfigInvalidError: When the token is not a valid port or N<=M range in 1..65535.
-    """
-    error_msg = (
-        f"{APROXY_REDIRECT_PORTS_CONFIG_NAME} must be a comma-separated list of "
-        "ports or N-M ranges in 1..65535"
-    )
-    if "-" in token:
-        parts = token.split("-", 1)
-        try:
-            low, high = int(parts[0]), int(parts[1])
-        except (ValueError, IndexError):
-            raise CharmConfigInvalidError(error_msg)
-        if not (1 <= low <= 65535 and 1 <= high <= 65535 and low <= high):
-            raise CharmConfigInvalidError(error_msg)
-    else:
-        try:
-            port = int(token)
-        except ValueError:
-            raise CharmConfigInvalidError(error_msg)
-        if not 1 <= port <= 65535:
-            raise CharmConfigInvalidError(error_msg)
-
-
 class RunnerConfig(BaseModel):
     """Optional runner-level configuration forwarded to the GARM scaleset.
 
@@ -381,11 +325,108 @@ class RunnerConfig(BaseModel):
     otel_collector_endpoint: str | None = None
     pre_job_script: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_to_none(cls, data: object) -> object:
+        """Strip whitespace and treat empty/whitespace-only values as unset."""
+        if not isinstance(data, dict):
+            return data
+        return {
+            key: (str(value).strip() or None) if value is not None else None
+            for key, value in data.items()
+        }
+
+    @field_validator("dockerhub_mirror", "runner_http_proxy", "otel_collector_endpoint")
+    @classmethod
+    def _validate_http_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Require a set option to be a well-formed http(s) URL."""
+        if value is None:
+            return None
+        # Field names are the snake_case form of the kebab-case config option.
+        msg = f"{(info.field_name or '').replace('_', '-')} must be a valid http(s) URL"
+        # Reject whitespace: the value is rendered into scripts and env files,
+        # where a newline could inject extra lines.
+        if any(char.isspace() for char in value):
+            raise ValueError(msg)
+        parsed = urllib.parse.urlparse(value)
+        try:
+            # .port raises ValueError on a non-numeric / out-of-range port that
+            # urlparse otherwise accepts silently.
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(msg) from exc
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or port == 0:
+            raise ValueError(msg)
+        return value
+
+    @field_validator("aproxy_exclude_addresses")
+    @classmethod
+    def _validate_ipv4_list(cls, value: str | None) -> str | None:
+        """Require a comma-separated list of IPv4 addresses/CIDRs; normalise spacing."""
+        if value is None:
+            return None
+        tokens = [token.strip() for token in value.split(",")]
+        for token in tokens:
+            # The values are rendered into an nft IPv4 (table ip) ruleset, so a
+            # hostname or IPv6 address would validate here but fail at runtime.
+            try:
+                network = ipaddress.ip_network(token, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
+                    f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
+                ) from exc
+            if network.version != 4:
+                raise ValueError(
+                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
+                    f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
+                )
+        return ",".join(tokens)
+
+    @field_validator("aproxy_redirect_ports")
+    @classmethod
+    def _validate_port_list(cls, value: str | None) -> str | None:
+        """Require a comma-separated list of ports or N-M ranges in 1..65535."""
+        if value is None:
+            return None
+        msg = (
+            f"{APROXY_REDIRECT_PORTS_CONFIG_NAME} must be a comma-separated list of "
+            "ports or N-M ranges in 1..65535"
+        )
+        tokens = [token.strip() for token in value.split(",")]
+        for token in tokens:
+            bounds = token.split("-")
+            if len(bounds) > 2:
+                raise ValueError(msg)
+            try:
+                ports = [int(part) for part in bounds]
+            except ValueError as exc:
+                raise ValueError(msg) from exc
+            if not all(1 <= port <= 65535 for port in ports) or ports != sorted(ports):
+                raise ValueError(msg)
+        return ",".join(tokens)
+
+    @model_validator(mode="after")
+    def _aproxy_requires_proxy(self) -> "RunnerConfig":
+        """The aproxy options only take effect alongside a proxy.
+
+        The runner template renders the aproxy block solely when runner-http-proxy
+        is set, so reject these options on their own rather than letting them no-op.
+        """
+        if (self.aproxy_exclude_addresses or self.aproxy_redirect_ports) and (
+            not self.runner_http_proxy
+        ):
+            raise ValueError(
+                f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} and {APROXY_REDIRECT_PORTS_CONFIG_NAME} "
+                f"require {RUNNER_HTTP_PROXY_CONFIG_NAME} to be set"
+            )
+        return self
+
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "RunnerConfig":
-        """Initialize the runner config from charm, applying best-effort validation.
+        """Build and validate the runner config from charm configuration.
 
-        All options are optional; unset or empty values result in None fields.
+        All options are optional; unset, empty, or whitespace-only values become None.
 
         Args:
             charm: The charm instance.
@@ -396,72 +437,23 @@ class RunnerConfig(BaseModel):
         Returns:
             The parsed runner configuration.
         """
-        url_options = (
-            DOCKERHUB_MIRROR_CONFIG_NAME,
-            RUNNER_HTTP_PROXY_CONFIG_NAME,
-            OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME,
-        )
-        url_values: dict[str, str | None] = {}
-        for config_name in url_options:
-            raw = charm.config.get(config_name)
-            value = str(raw).strip() if raw else None
-            if value:
-                _validate_http_url(config_name, value)
-            url_values[config_name] = value or None
 
-        raw_exclude = charm.config.get(APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME)
-        aproxy_exclude_addresses: str | None = None
-        if raw_exclude:
-            tokens = [t.strip() for t in str(raw_exclude).split(",")]
-            # Reject empty tokens (e.g. trailing comma) as they signal a misconfiguration.
-            for token in tokens:
-                # Each token must be a valid IPv4 address or CIDR: the values are
-                # rendered into an nft IPv4 (table ip) ruleset, so a hostname or
-                # IPv6 address would pass validation but fail at runtime.
-                try:
-                    network = ipaddress.ip_network(token, strict=False)
-                except ValueError as exc:
-                    raise CharmConfigInvalidError(
-                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
-                        f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
-                    ) from exc
-                if network.version != 4:
-                    raise CharmConfigInvalidError(
-                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
-                        f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
-                    )
-            aproxy_exclude_addresses = ",".join(tokens)
+        def config_str(name: str) -> str | None:
+            """Return a string config value, or None when unset."""
+            value = charm.config.get(name)
+            return None if value is None else str(value)
 
-        raw_ports = charm.config.get(APROXY_REDIRECT_PORTS_CONFIG_NAME)
-        aproxy_redirect_ports: str | None = None
-        if raw_ports:
-            tokens_ports = [t.strip() for t in str(raw_ports).split(",")]
-            for token in tokens_ports:
-                _validate_port_token(token)
-            aproxy_redirect_ports = ",".join(tokens_ports)
-
-        # The aproxy options only take effect alongside a proxy: the runner
-        # template renders the aproxy block solely when runner-http-proxy is set,
-        # so reject these options on their own rather than letting them no-op.
-        if (aproxy_exclude_addresses or aproxy_redirect_ports) and not url_values[
-            RUNNER_HTTP_PROXY_CONFIG_NAME
-        ]:
-            raise CharmConfigInvalidError(
-                f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} and {APROXY_REDIRECT_PORTS_CONFIG_NAME} "
-                f"require {RUNNER_HTTP_PROXY_CONFIG_NAME} to be set"
+        try:
+            return cls(
+                dockerhub_mirror=config_str(DOCKERHUB_MIRROR_CONFIG_NAME),
+                runner_http_proxy=config_str(RUNNER_HTTP_PROXY_CONFIG_NAME),
+                aproxy_exclude_addresses=config_str(APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME),
+                aproxy_redirect_ports=config_str(APROXY_REDIRECT_PORTS_CONFIG_NAME),
+                otel_collector_endpoint=config_str(OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME),
+                pre_job_script=config_str(PRE_JOB_SCRIPT_CONFIG_NAME),
             )
-
-        raw_script = charm.config.get(PRE_JOB_SCRIPT_CONFIG_NAME)
-        pre_job_script = (str(raw_script).strip() or None) if raw_script else None
-
-        return cls(
-            dockerhub_mirror=url_values[DOCKERHUB_MIRROR_CONFIG_NAME],
-            runner_http_proxy=url_values[RUNNER_HTTP_PROXY_CONFIG_NAME],
-            aproxy_exclude_addresses=aproxy_exclude_addresses,
-            aproxy_redirect_ports=aproxy_redirect_ports,
-            otel_collector_endpoint=url_values[OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME],
-            pre_job_script=pre_job_script,
-        )
+        except ValidationError as exc:
+            raise CharmConfigInvalidError(str(exc)) from exc
 
 
 class CharmState:
