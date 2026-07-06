@@ -24,6 +24,7 @@ from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
     CharmState,
+    RunnerConfig,
     credential_name,
 )
 from entity_reconciler import EntityReconciler
@@ -36,7 +37,6 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
-from runner_template import RunnerConfig
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)

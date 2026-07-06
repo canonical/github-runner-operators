@@ -25,8 +25,8 @@ import ipaddress
 import json
 import re
 import shlex
-from collections.abc import Mapping
-from dataclasses import dataclass
+
+from charm_state import RunnerConfig
 
 _PORT_TOKEN_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
 
@@ -36,198 +36,6 @@ RUNNER_USER = "runner"
 RUNNER_HOME = "/home/runner/actions-runner"
 PRE_JOB_HOOK_PATH = f"{RUNNER_HOME}/pre-job.sh"
 RUNNER_ENV_PATH = f"{RUNNER_HOME}/env"
-
-# Databag keys written by the garm-configurator charm. Kept here as the single
-# source of truth for the configurator→garm relation contract for runner options.
-DATABAG_KEYS = (
-    "dockerhub_mirror",
-    "runner_http_proxy",
-    "aproxy_exclude_addresses",
-    "aproxy_redirect_ports",
-    "otel_collector_endpoint",
-    "pre_job_script",
-)
-
-
-@dataclass(frozen=True)
-class RunnerConfig:
-    """Runner-behaviour options sourced from the garm-configurator relation.
-
-    Every field is a plain string; an empty string means "unset". Values are
-    validated upstream by the configurator charm, so rendering here is purely
-    mechanical.
-
-    Attributes:
-        dockerhub_mirror: Docker registry mirror URL, or "".
-        runner_http_proxy: Upstream HTTP proxy that aproxy forwards to, or "".
-        aproxy_exclude_addresses: Comma-separated addresses/CIDRs to bypass, or "".
-        aproxy_redirect_ports: Comma-separated ports / N-M ranges to redirect, or "".
-        otel_collector_endpoint: OTEL exporter endpoint, or "".
-        pre_job_script: Operator bash appended to the pre-job hook, or "".
-    """
-
-    dockerhub_mirror: str = ""
-    runner_http_proxy: str = ""
-    aproxy_exclude_addresses: str = ""
-    aproxy_redirect_ports: str = ""
-    otel_collector_endpoint: str = ""
-    pre_job_script: str = ""
-
-    @classmethod
-    def from_databag(cls, data: Mapping[str, str]) -> "RunnerConfig":
-        """Build a config from a relation databag, ignoring missing keys.
-
-        Args:
-            data: The relation unit databag (or any mapping).
-
-        Returns:
-            A RunnerConfig with each field taken from its databag key, "" if absent.
-        """
-        return cls(**{key: (data.get(key) or "").strip() for key in DATABAG_KEYS})
-
-    def has_config(self) -> bool:
-        """Whether any runner option is set (i.e. a custom template is needed).
-
-        Returns:
-            True if at least one field is non-empty.
-        """
-        return any(getattr(self, key) for key in DATABAG_KEYS)
-
-
-def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
-    """Inject the runner-option blocks into a base runner-install template.
-
-    The blocks are inserted immediately after the shebang line (before the base
-    template's ``set -e``), mirroring GARM's documented "prepend after the
-    shebang" approach.
-
-    Args:
-        base: The system ``github_linux`` template bytes to copy from.
-        config: The runner options to render.
-
-    Returns:
-        The new template bytes, with the pre-install and job-hook blocks injected.
-    """
-    text = base.decode("utf-8")
-    injection = render_pre_install(config) + render_pre_job_hooks(config)
-    if "\n" in text:
-        shebang, rest = text.split("\n", 1)
-        return f"{shebang}\n{injection}{rest}".encode("utf-8")
-    return f"{text}\n{injection}".encode("utf-8")
-
-
-def render_pre_install(config: RunnerConfig) -> str:
-    """Render the root pre-install block (runs before the runner is installed).
-
-    Args:
-        config: The runner options to render.
-
-    Returns:
-        A bash snippet, terminated by a newline.
-    """
-    sections = ["", "# ===== charm-injected pre-install setup (runs as root) ====="]
-    if config.runner_http_proxy:
-        sections.append(_render_aproxy(config))
-    if config.dockerhub_mirror:
-        sections.append(_render_dockerhub_mirror(config.dockerhub_mirror))
-    sections.append(_render_static_host_prep())
-    sections.append("# ===== end charm-injected pre-install setup =====\n")
-    return "\n".join(sections)
-
-
-def render_pre_job_hooks(config: RunnerConfig) -> str:
-    """Render the runner ``env`` file and GitHub job-start hook.
-
-    The hook file sets up the OpenTelemetry collector, when configured, and runs
-    the operator's ``pre-job-script``. The docker mirror and OTEL endpoint are
-    exported via the runner ``env`` file, read once per job by the runner service.
-
-    Args:
-        config: The runner options to render.
-
-    Returns:
-        A bash snippet, terminated by a newline.
-    """
-    otel_endpoint = ""
-    if config.otel_collector_endpoint:
-        # Strip CR/LF so a databag value can't inject extra env entries or extra
-        # lines into the otelcol config (the databag is a trust boundary,
-        # regardless of configurator validation).
-        otel_endpoint = config.otel_collector_endpoint.replace("\r", "").replace("\n", "")
-
-    hook_body = _render_pre_job_hook_body(config, otel_endpoint)
-
-    env_entries = []
-    if config.dockerhub_mirror:
-        env_entries.append(f"DOCKERHUB_MIRROR={config.dockerhub_mirror}")
-        env_entries.append(f"CONTAINER_REGISTRY_URL={config.dockerhub_mirror}")
-    env_entries.append(f"ACTIONS_RUNNER_HOOK_JOB_STARTED={PRE_JOB_HOOK_PATH}")
-    if otel_endpoint:
-        env_entries.append(f"ACTION_OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
-
-    # Pick delimiters that don't collide with the (operator-controlled) content,
-    # so a pre-job-script containing the literal delimiter can't terminate the
-    # heredoc early. Deterministic for a given content, keeping the rendered
-    # template stable across reconciles.
-    prejob_delim = _heredoc_delimiter(hook_body, "GARM_CHARM_PREJOB")
-    env_delim = _heredoc_delimiter("\n".join(env_entries), "GARM_CHARM_ENV")
-    return "\n".join(
-        [
-            "",
-            "# ===== charm-injected runner job hooks =====",
-            f"mkdir -p {RUNNER_HOME}",
-            # Quoted delimiter: the hook file's own heredocs and $VARS must stay
-            # literal here and expand only when the runner executes the hook,
-            # once per job.
-            f"cat > {PRE_JOB_HOOK_PATH} <<'{prejob_delim}'",
-            hook_body,
-            prejob_delim,
-            f"chmod 0755 {PRE_JOB_HOOK_PATH}",
-            f"cat >> {RUNNER_ENV_PATH} <<'{env_delim}'",
-            *env_entries,
-            env_delim,
-            f"chown -R {RUNNER_USER}:{RUNNER_USER} {RUNNER_HOME} 2>/dev/null || true",
-            "# ===== end charm-injected runner job hooks =====\n",
-        ]
-    )
-
-
-def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
-    """Render the contents of the pre-job hook file (the GitHub job-start hook).
-
-    Args:
-        config: The runner options to render.
-        otel_endpoint: The sanitised OTEL endpoint, or "" if unset.
-
-    Returns:
-        The full contents of the hook script (no trailing newline).
-    """
-    lines = ["#!/usr/bin/env bash", "set +e"]
-    if otel_endpoint:
-        lines.append("")
-        lines.append(_OTEL_COLLECTOR_SETUP.format(endpoint=otel_endpoint))
-    if config.pre_job_script:
-        lines.append("")
-        lines.append(_render_custom_pre_job_script(config.pre_job_script))
-    return "\n".join(lines)
-
-
-def _heredoc_delimiter(content: str, base: str) -> str:
-    """Return a heredoc delimiter that does not appear as a line in *content*.
-
-    Args:
-        content: The heredoc body the delimiter must not collide with.
-        base: The preferred delimiter; extended only if it collides.
-
-    Returns:
-        ``base``, suffixed with underscores until no line of *content* matches it.
-    """
-    lines = content.splitlines()
-    delimiter = base
-    while delimiter in lines:
-        delimiter += "_"
-    return delimiter
-
 
 # OpenTelemetry collector config: hostmetrics/otlp/loki pipelines exporting to
 # the configured endpoint. `$GITHUB_*`, `$RUNNER_NAME` and `$(uname -m)` are left
@@ -393,6 +201,141 @@ EOF
 
 /usr/bin/sudo /usr/bin/snap enable opentelemetry-collector
 /usr/bin/sudo /usr/bin/snap start opentelemetry-collector"""
+
+
+def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
+    """Inject the runner-option blocks into a base runner-install template.
+
+    The blocks are inserted immediately after the shebang line (before the base
+    template's ``set -e``), mirroring GARM's documented "prepend after the
+    shebang" approach.
+
+    Args:
+        base: The system ``github_linux`` template bytes to copy from.
+        config: The runner options to render.
+
+    Returns:
+        The new template bytes, with the pre-install and job-hook blocks injected.
+    """
+    text = base.decode("utf-8")
+    injection = render_pre_install(config) + render_pre_job_hooks(config)
+    if "\n" in text:
+        shebang, rest = text.split("\n", 1)
+        return f"{shebang}\n{injection}{rest}".encode("utf-8")
+    return f"{text}\n{injection}".encode("utf-8")
+
+
+def render_pre_install(config: RunnerConfig) -> str:
+    """Render the root pre-install block (runs before the runner is installed).
+
+    Args:
+        config: The runner options to render.
+
+    Returns:
+        A bash snippet, terminated by a newline.
+    """
+    sections = ["", "# ===== charm-injected pre-install setup (runs as root) ====="]
+    if config.runner_http_proxy:
+        sections.append(_render_aproxy(config))
+    if config.dockerhub_mirror:
+        sections.append(_render_dockerhub_mirror(config.dockerhub_mirror))
+    sections.append(_render_static_host_prep())
+    sections.append("# ===== end charm-injected pre-install setup =====\n")
+    return "\n".join(sections)
+
+
+def render_pre_job_hooks(config: RunnerConfig) -> str:
+    """Render the runner ``env`` file and GitHub job-start hook.
+
+    The hook file sets up the OpenTelemetry collector, when configured, and runs
+    the operator's ``pre-job-script``. The docker mirror and OTEL endpoint are
+    exported via the runner ``env`` file, read once per job by the runner service.
+
+    Args:
+        config: The runner options to render.
+
+    Returns:
+        A bash snippet, terminated by a newline.
+    """
+    otel_endpoint = ""
+    if config.otel_collector_endpoint:
+        # Strip CR/LF so a databag value can't inject extra env entries or extra
+        # lines into the otelcol config (the databag is a trust boundary,
+        # regardless of configurator validation).
+        otel_endpoint = config.otel_collector_endpoint.replace("\r", "").replace("\n", "")
+
+    hook_body = _render_pre_job_hook_body(config, otel_endpoint)
+
+    env_entries = []
+    if config.dockerhub_mirror:
+        env_entries.append(f"DOCKERHUB_MIRROR={config.dockerhub_mirror}")
+        env_entries.append(f"CONTAINER_REGISTRY_URL={config.dockerhub_mirror}")
+    env_entries.append(f"ACTIONS_RUNNER_HOOK_JOB_STARTED={PRE_JOB_HOOK_PATH}")
+    if otel_endpoint:
+        env_entries.append(f"ACTION_OTEL_EXPORTER_OTLP_ENDPOINT={otel_endpoint}")
+
+    # Pick delimiters that don't collide with the (operator-controlled) content,
+    # so a pre-job-script containing the literal delimiter can't terminate the
+    # heredoc early. Deterministic for a given content, keeping the rendered
+    # template stable across reconciles.
+    prejob_delim = _heredoc_delimiter(hook_body, "GARM_CHARM_PREJOB")
+    env_delim = _heredoc_delimiter("\n".join(env_entries), "GARM_CHARM_ENV")
+    return "\n".join(
+        [
+            "",
+            "# ===== charm-injected runner job hooks =====",
+            f"mkdir -p {RUNNER_HOME}",
+            # Quoted delimiter: the hook file's own heredocs and $VARS must stay
+            # literal here and expand only when the runner executes the hook,
+            # once per job.
+            f"cat > {PRE_JOB_HOOK_PATH} <<'{prejob_delim}'",
+            hook_body,
+            prejob_delim,
+            f"chmod 0755 {PRE_JOB_HOOK_PATH}",
+            f"cat >> {RUNNER_ENV_PATH} <<'{env_delim}'",
+            *env_entries,
+            env_delim,
+            f"chown -R {RUNNER_USER}:{RUNNER_USER} {RUNNER_HOME} 2>/dev/null || true",
+            "# ===== end charm-injected runner job hooks =====\n",
+        ]
+    )
+
+
+def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
+    """Render the contents of the pre-job hook file (the GitHub job-start hook).
+
+    Args:
+        config: The runner options to render.
+        otel_endpoint: The sanitised OTEL endpoint, or "" if unset.
+
+    Returns:
+        The full contents of the hook script (no trailing newline).
+    """
+    lines = ["#!/usr/bin/env bash", "set +e"]
+    if otel_endpoint:
+        lines.append("")
+        lines.append(_OTEL_COLLECTOR_SETUP.format(endpoint=otel_endpoint))
+    if config.pre_job_script:
+        lines.append("")
+        lines.append(_render_custom_pre_job_script(config.pre_job_script))
+    return "\n".join(lines)
+
+
+def _heredoc_delimiter(content: str, base: str) -> str:
+    """Return a heredoc delimiter that does not appear as a line in *content*.
+
+    Args:
+        content: The heredoc body the delimiter must not collide with.
+        base: The preferred delimiter; extended only if it collides.
+
+    Returns:
+        ``base``, suffixed with underscores until no line of *content* matches it.
+    """
+    lines = content.splitlines()
+    delimiter = base
+    while delimiter in lines:
+        delimiter += "_"
+    return delimiter
 
 
 def _render_custom_pre_job_script(script: str) -> str:

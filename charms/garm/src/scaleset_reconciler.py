@@ -7,12 +7,13 @@
 import logging
 from dataclasses import dataclass, field
 
+from charm_state import RunnerConfig
 from garm_api import GarmApiError, GarmAuthenticatedClient
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.scale_set import ScaleSet
 from garm_client.models.template import Template
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
-from runner_template import RunnerConfig, build_template_data
+from runner_template import build_template_data
 
 logger = logging.getLogger(__name__)
 

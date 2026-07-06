@@ -13,6 +13,7 @@ as the state grows.
 import dataclasses
 import logging
 import typing
+from collections.abc import Mapping
 
 import ops
 
@@ -39,6 +40,63 @@ class SSHDebugInfo:
     port: int
     rsa_fingerprint: str
     ed25519_fingerprint: str
+
+
+# Databag keys written by the garm-configurator charm — the single source of
+# truth for the configurator→garm relation contract for runner options.
+RUNNER_OPTION_DATABAG_KEYS: typing.Final = (
+    "dockerhub_mirror",
+    "runner_http_proxy",
+    "aproxy_exclude_addresses",
+    "aproxy_redirect_ports",
+    "otel_collector_endpoint",
+    "pre_job_script",
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class RunnerConfig:
+    """Runner-behaviour options sourced from the garm-configurator relation.
+
+    Every field is a plain string; an empty string means "unset". Values are
+    validated upstream by the configurator charm, so consuming them here (and in
+    the template renderer) is purely mechanical.
+
+    Attributes:
+        dockerhub_mirror: Docker registry mirror URL, or "".
+        runner_http_proxy: Upstream HTTP proxy that aproxy forwards to, or "".
+        aproxy_exclude_addresses: Comma-separated addresses/CIDRs to bypass, or "".
+        aproxy_redirect_ports: Comma-separated ports / N-M ranges to redirect, or "".
+        otel_collector_endpoint: OTEL exporter endpoint, or "".
+        pre_job_script: Operator bash appended to the pre-job hook, or "".
+    """
+
+    dockerhub_mirror: str = ""
+    runner_http_proxy: str = ""
+    aproxy_exclude_addresses: str = ""
+    aproxy_redirect_ports: str = ""
+    otel_collector_endpoint: str = ""
+    pre_job_script: str = ""
+
+    @classmethod
+    def from_databag(cls, data: Mapping[str, str]) -> "RunnerConfig":
+        """Build a config from a relation databag, ignoring missing keys.
+
+        Args:
+            data: The relation unit databag (or any mapping).
+
+        Returns:
+            A RunnerConfig with each field taken from its databag key, "" if absent.
+        """
+        return cls(**{key: (data.get(key) or "").strip() for key in RUNNER_OPTION_DATABAG_KEYS})
+
+    def has_config(self) -> bool:
+        """Whether any runner option is set (i.e. a custom template is needed).
+
+        Returns:
+            True if at least one field is non-empty.
+        """
+        return any(getattr(self, key) for key in RUNNER_OPTION_DATABAG_KEYS)
 
 
 def credential_name(app_id: int, installation_id: int) -> str:

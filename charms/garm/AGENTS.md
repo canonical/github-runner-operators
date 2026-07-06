@@ -10,11 +10,17 @@ charm conventions; this file lists only what's specific to `garm`.
   - **DO** read them with plain `get_content()` (`_get_secrets`, `_get_admin_credentials`).
   - **DON'T** pass `refresh=True` — that's an observer concept (see root `AGENTS.md`).
 - **Domain logic is factored out of `charm.py`**: `src/garm_api.py` and `src/garm_client/`
-- **Domain logic is factored out of `charm.py`**: `src/garm_api.py` and `src/garm_client/`
   (the GARM HTTP client), the per-resource reconcilers (`src/github_reconciler.py`,
   `src/entity_reconciler.py`, `src/scaleset_reconciler.py`), and relation-derived desired state
   (`src/charm_state.py` — `CharmState.from_charm`). Extend these rather than growing the charm
   class. TOML rendering: `render_garm_toml()` in `src/charm.py`.
+  - **Relation-/config-derived value objects belong in `src/charm_state.py`** (per
+    [ISD014](https://discourse.charmhub.io/t/specification-isd014-managing-charm-complexity/11619)):
+    keep desired-state types parsed from relation or config data (`CharmState`, `SSHDebugInfo`,
+    `RunnerConfig`) there. **DON'T** define them in rendering/helper modules — e.g.
+    `runner_template.py` only *renders* a `RunnerConfig`, it doesn't own it. Rendering and
+    reconciler modules import these types; **DO** keep `charm_state.py` free of
+    rendering/reconciler imports so it can't form an import cycle.
 - **`src/garm_client/` is generated** by `scripts/generate_client.sh` (openapi-generator) —
   **DON'T** hand-edit it. The script **patches the GARM swagger spec** before generating so
   the template `data` field (Go `[]byte`, base64 string on the wire) becomes `StrictStr`

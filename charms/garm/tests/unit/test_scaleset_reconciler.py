@@ -135,7 +135,7 @@ def _spec(
     template_id=None,
     runner_config=None,
 ):
-    from runner_template import RunnerConfig
+    from charm_state import RunnerConfig
 
     return ScalesetSpec(
         name=name,
@@ -412,7 +412,7 @@ _SYSTEM_TEMPLATE = _FakeTemplate("github_linux", tid=1, data=b"#!/bin/bash\nset 
 
 def _spec_with_runner_config(**rc_kwargs):
     """Build a spec with runner_config populated from the given kwargs."""
-    from runner_template import RunnerConfig
+    from charm_state import RunnerConfig
 
     return _spec(runner_config=RunnerConfig(**rc_kwargs))
 
@@ -472,7 +472,7 @@ def test_template_updated_when_runner_config_changes():
     assert: The custom template is updated (not recreated); the scaleset template_id is unchanged.
     """
     from runner_template import build_template_data
-    from runner_template import RunnerConfig
+    from charm_state import RunnerConfig
 
     old_config = RunnerConfig(dockerhub_mirror="https://old.example.com")
     custom_template = _FakeTemplate(

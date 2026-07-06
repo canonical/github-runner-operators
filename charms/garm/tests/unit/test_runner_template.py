@@ -5,9 +5,9 @@
 
 import pytest
 
+from charm_state import RunnerConfig
 from runner_template import (
     RUNNER_ENV_PATH,
-    RunnerConfig,
     build_template_data,
 )
 
