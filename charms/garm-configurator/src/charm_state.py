@@ -47,7 +47,7 @@ OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
-_IP_NETWORK_ADAPTER = TypeAdapter(IPvAnyNetwork)
+_IP_NETWORK_ADAPTER: TypeAdapter[IPvAnyNetwork] = TypeAdapter(IPvAnyNetwork)
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
