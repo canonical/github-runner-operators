@@ -631,13 +631,16 @@ def _point_github_endpoint_at_mock(base_url: str, token: str, mock_base_url: str
 
 
 def _detach_synced_credential(base_url: str, token: str) -> None:
-    """Delete the charm-synced org and credential so github.com can be repointed.
+    """Delete the charm-synced scalesets, org and credential so github.com can be repointed.
 
-    GARM locks an endpoint's URLs while a credential references it. The charm syncs its credential
-    onto the built-in github.com endpoint, so it must be removed (along with any org bound to it)
-    before the endpoint can be pointed at the mock. Deletion tolerates a not-yet-created entity
-    (404); a real failure surfaces later as the repoint's 400.
+    GARM locks an endpoint's URLs while a credential references it, and refuses to delete an org
+    (or credential) while a scaleset still references it. The charm syncs its credential onto the
+    built-in github.com endpoint, so the whole chain — scalesets first, then the org bound to the
+    credential, then the credential — must be removed before the endpoint can be pointed at the
+    mock. Deletion tolerates a not-yet-created entity (404); a real failure surfaces later as the
+    repoint's 400.
     """
+    _delete_scalesets(base_url, token)
     for org in _list_orgs(base_url, token):
         if org.get("name") == "test-org" and org.get("id"):
             _delete_if_present(f"{base_url}/organizations/{org['id']}", token)
@@ -651,6 +654,19 @@ def _delete_if_present(url: str, token: str) -> None:
     resp = requests.delete(url, headers=_garm_auth_headers(token), timeout=30)
     if resp.status_code != requests.codes.not_found:
         resp.raise_for_status()
+
+
+def _delete_scalesets(base_url: str, token: str) -> None:
+    """Delete every scaleset so the org that owns it can be removed.
+
+    GARM refuses to delete an org while a scaleset references it. The test scalesets run with
+    ``min-idle-runners`` at zero, so they hold no runners and delete without a drain cycle; a
+    scaleset already gone is tolerated (404).
+    """
+    for scaleset in _list_scalesets(base_url, token):
+        scaleset_id = scaleset.get("id")
+        if scaleset_id is not None:
+            _delete_if_present(f"{base_url}/scalesets/{scaleset_id}", token)
 
 
 def _restore_system_templates(garm_url: str, token: str) -> None:
