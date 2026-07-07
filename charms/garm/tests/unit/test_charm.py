@@ -862,10 +862,12 @@ def test_reconcile_runners_reconciles_credentials_entities_then_scalesets():
         patch("charm._apply_garm_template", return_value=99) as mock_apply,
         patch("charm.CharmState") as mock_charm_state_cls,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch.object(GarmCharm, "app", new_callable=PropertyMock) as mock_app,
     ):
         mock_charm_state_cls.from_charm.return_value.ssh_debug_connections = []
         mock_charm_state_cls.from_charm.return_value.desired_entities = entities
         mock_unit.return_value = MagicMock()
+        mock_app.return_value = MagicMock()
         order = MagicMock()
         order.attach_mock(mock_github_cls.return_value.reconcile, "github")
         order.attach_mock(mock_entity_cls.return_value.reconcile, "entity")
@@ -916,9 +918,11 @@ def test_reconcile_runners_charmed_template_error_sets_waiting_status():
         ),
         patch("charm.CharmState") as mock_state,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch.object(GarmCharm, "app", new_callable=PropertyMock) as mock_app,
     ):
         mock_state.from_charm.return_value.ssh_debug_connections = []
         mock_unit.return_value = MagicMock()
+        mock_app.return_value = MagicMock()
         charm._reconcile_runners()  # must not raise
 
         status = mock_unit.return_value.status
@@ -926,6 +930,83 @@ def test_reconcile_runners_charmed_template_error_sets_waiting_status():
 
     assert isinstance(status, ops.WaitingStatus)
     assert status.message == "base template missing"
+
+
+def test_reconcile_runners_success_refreshes_stale_app_status():
+    """
+    arrange: A stale app status and a reconcile that will succeed.
+    act: Call _reconcile_runners().
+    assert: Both unit and app status refresh to ActiveStatus.
+    """
+    charm = object.__new__(GarmCharm)
+    charm._get_admin_credentials = MagicMock(
+        return_value={"username": "admin", "password": "TestPass-123!"}
+    )
+    charm._build_desired_credentials = MagicMock(return_value=[])
+    charm._build_desired_scalesets = MagicMock(return_value=[])
+    charm._ensure_controller_urls = MagicMock()
+
+    with (
+        patch("charm.GarmAuthenticatedClient"),
+        patch("charm.GithubReconciler"),
+        patch("charm.EntityReconciler"),
+        patch("charm.ScalesetReconciler"),
+        patch("charm._apply_garm_template", return_value=99),
+        patch("charm.CharmState") as mock_charm_state_cls,
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch.object(GarmCharm, "app", new_callable=PropertyMock) as mock_app,
+    ):
+        mock_charm_state_cls.from_charm.return_value.ssh_debug_connections = []
+        mock_charm_state_cls.from_charm.return_value.desired_entities = []
+        mock_unit.return_value = MagicMock()
+        mock_unit.return_value.is_leader.return_value = True
+        mock_unit.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
+        mock_app.return_value = MagicMock()
+        mock_app.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
+
+        charm._reconcile_runners()
+
+        unit_status = mock_unit.return_value.status
+        app_status = mock_app.return_value.status
+
+    assert unit_status == ops.ActiveStatus()
+    assert app_status == ops.ActiveStatus()
+
+
+def test_restart_missing_configurator_relation_refreshes_stale_app_status():
+    """
+    arrange: A stale app status and a missing garm-configurator relation.
+    act: Call restart().
+    assert: Both unit and app status become "Waiting for garm-configurator relation".
+    """
+    charm = object.__new__(GarmCharm)
+    charm._ensure_secrets = MagicMock()
+    charm.is_ready = MagicMock(return_value=True)
+    charm._get_postgresql_config = MagicMock(return_value=_DEFAULT_PG_CONFIG)
+    charm._get_secrets = MagicMock(
+        return_value={"jwt-secret": "test-jwt-secret", "db-passphrase": "a" * 32}
+    )
+    charm._get_configurator_provider_configs = MagicMock(return_value=[])
+
+    with (
+        patch.object(GarmCharm, "config", new_callable=PropertyMock) as mock_config,
+        patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
+        patch.object(GarmCharm, "app", new_callable=PropertyMock) as mock_app,
+    ):
+        mock_config.return_value = {}
+        mock_unit.return_value = MagicMock()
+        mock_unit.return_value.is_leader.return_value = True
+        mock_unit.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
+        mock_app.return_value = MagicMock()
+        mock_app.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
+
+        charm.restart()
+
+        unit_status = mock_unit.return_value.status
+        app_status = mock_app.return_value.status
+
+    assert unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+    assert app_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
 def test_restart_ensures_secrets_before_readiness_gate():
