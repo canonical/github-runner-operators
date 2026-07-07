@@ -75,6 +75,29 @@ class ScalesetReconciler:
                 continue
             observed[scaleset.name] = scaleset
 
+        templates = self._load_templates(desired, observed)
+        all_desired_names: set[str] = {spec.name for spec in desired}
+
+        for spec in desired:
+            self._reconcile_one(spec, providers, observed, templates)
+
+        for name, scaleset in observed.items():
+            if name not in all_desired_names:
+                self._delete_orphaned(scaleset)
+                self._delete_custom_template(name, templates)
+
+    def _load_templates(
+        self, desired: list[ScalesetSpec], observed: dict[str, ScaleSet]
+    ) -> dict[str, Template]:
+        """Fetch observed templates keyed by name, only when a reconcile pass needs them.
+
+        Args:
+            desired: The full desired set of scalesets.
+            observed: Observed scalesets keyed by name.
+
+        Returns:
+            Observed templates keyed by name, or an empty dict when none are needed.
+        """
         # Templates are only needed when a spec carries runner options or an
         # existing scaleset already references a custom template (to update or
         # detach it); skip the API call entirely otherwise.
@@ -87,51 +110,59 @@ class ScalesetReconciler:
                 for template in self._client.list_templates()
                 if template.name
             }
+        return templates
 
-        all_desired_names: set[str] = {spec.name for spec in desired}
+    def _reconcile_one(
+        self,
+        spec: ScalesetSpec,
+        providers: set[str | None],
+        observed: dict[str, ScaleSet],
+        templates: dict[str, Template],
+    ) -> None:
+        """Reconcile a single desired scaleset: validate, create or update, and sync its template.
 
-        for spec in desired:
-            try:
-                create_params = self._to_create_params(spec)
-            except Exception as exc:
-                logger.warning("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
-                continue
+        Args:
+            spec: The desired scaleset.
+            providers: Names of providers currently registered in GARM.
+            observed: Observed scalesets keyed by name.
+            templates: Observed templates keyed by name.
+        """
+        try:
+            create_params = self._to_create_params(spec)
+        except Exception as exc:
+            logger.warning("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
+            return
 
-            if spec.provider_name not in providers:
-                logger.warning(
-                    "Skipping scaleset %s: provider %s not registered yet",
-                    spec.name,
-                    spec.provider_name,
-                )
-                continue
+        if spec.provider_name not in providers:
+            logger.warning(
+                "Skipping scaleset %s: provider %s not registered yet",
+                spec.name,
+                spec.provider_name,
+            )
+            return
 
-            entity_id = self._resolve_entity_id(spec)
-            if entity_id is None:
-                logger.warning(
-                    "Skipping scaleset %s: %s '%s' not registered in GARM yet",
-                    spec.name,
-                    spec.entity_type,
-                    spec.entity_name,
-                )
-                continue
+        entity_id = self._resolve_entity_id(spec)
+        if entity_id is None:
+            logger.warning(
+                "Skipping scaleset %s: %s '%s' not registered in GARM yet",
+                spec.name,
+                spec.entity_type,
+                spec.entity_name,
+            )
+            return
 
-            template_id = self._ensure_template(spec, templates)
+        template_id = self._ensure_template(spec, templates)
 
-            if spec.name in observed:
-                self._maybe_update(observed[spec.name], spec, template_id)
-            else:
-                self._create(spec, entity_id, create_params, template_id)
+        if spec.name in observed:
+            self._maybe_update(observed[spec.name], spec, template_id)
+        else:
+            self._create(spec, entity_id, create_params, template_id)
 
-            if not spec.runner_config.has_config():
-                # Runner options were cleared (or the system template is
-                # unavailable): the scaleset has been reverted to the default
-                # template above, so drop any now-unreferenced custom template.
-                self._delete_custom_template(spec.name, templates)
-
-        for name, scaleset in observed.items():
-            if name not in all_desired_names:
-                self._delete_orphaned(scaleset)
-                self._delete_custom_template(name, templates)
+        if not spec.runner_config.has_config():
+            # Runner options were cleared (or the system template is
+            # unavailable): the scaleset has been reverted to the default
+            # template above, so drop any now-unreferenced custom template.
+            self._delete_custom_template(spec.name, templates)
 
     def _delete_orphaned(self, scaleset: ScaleSet) -> None:
         """Disable then delete a scaleset that is no longer in the desired set."""

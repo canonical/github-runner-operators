@@ -369,6 +369,7 @@ def test_pre_install_scripts_passed_in_create():
     _, _, params = client.created[0]
     assert params.extra_specs == {"pre_install_scripts": scripts}
 
+
 class _FakeTemplate:
     """Minimal fake for the GARM Template model used in template lifecycle tests."""
 
@@ -535,8 +536,8 @@ def test_template_updated_when_runner_config_changes():
     act: Reconcile with a changed runner config.
     assert: The custom template is updated (not recreated); the scaleset template_id is unchanged.
     """
-    from runner_template import build_template_data
     from charm_state import RunnerConfig
+    from runner_template import build_template_data
 
     old_config = RunnerConfig(dockerhub_mirror="https://old.example.com")
     custom_template = _FakeTemplate(
@@ -574,7 +575,9 @@ def test_template_detached_when_runner_config_cleared():
         scalesets=[_existing_scaleset(template_id=2)],
         templates=[
             _SYSTEM_TEMPLATE,
-            _FakeTemplate("github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"),
+            _FakeTemplate(
+                "github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"
+            ),
         ],
     )
     _reconcile(client, [_spec()])
@@ -595,7 +598,9 @@ def test_template_kept_when_system_template_missing():
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset(template_id=2)],
         templates=[
-            _FakeTemplate("github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"),
+            _FakeTemplate(
+                "github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"
+            ),
         ],
     )
     _reconcile(
