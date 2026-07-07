@@ -641,11 +641,11 @@ def integrate_configurator_with_garm_fixture(
     Returns the garm app name.
     """
     juju.integrate(configurator_with_image, garm_app)
-    # GARM may end up in a split state: app_status=active (set by paas_charm)
-    # while unit workload_status=waiting (set by _reconcile_runners when
-    # credentials/providers are not yet configured). all_active and all_waiting
-    # both require BOTH app and unit to match, so neither would pass. Using
-    # all_agents_idle checks only that hooks have finished running, which is
+    # The charm keeps app and unit status in sync, so after integration GARM
+    # settles into a consistent state that is usually waiting (both app and unit)
+    # because _reconcile_runners() is still pending until credentials/providers
+    # are configured -- not active. Waiting for all_active would therefore time
+    # out; all_agents_idle checks only that hooks have finished running, which is
     # sufficient to confirm the integration event was processed.
     juju.wait(
         lambda status: jubilant.all_agents_idle(status, garm_app)
