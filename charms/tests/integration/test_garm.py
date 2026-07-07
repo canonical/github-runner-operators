@@ -652,21 +652,44 @@ def _detach_synced_credential(base_url: str, token: str) -> None:
 def _delete_if_present(url: str, token: str) -> None:
     """DELETE a GARM resource, treating 404 as already-gone."""
     resp = requests.delete(url, headers=_garm_auth_headers(token), timeout=30)
-    if resp.status_code != requests.codes.not_found:
-        resp.raise_for_status()
+    if resp.status_code == requests.codes.not_found:
+        return
+    if not resp.ok:
+        logger.warning("DELETE %s -> %s: %s", url, resp.status_code, resp.text)
+    resp.raise_for_status()
 
 
 def _delete_scalesets(base_url: str, token: str) -> None:
-    """Delete every scaleset so the org that owns it can be removed.
+    """Disable and delete every scaleset so the org that owns it can be removed.
 
-    GARM refuses to delete an org while a scaleset references it. The test scalesets run with
-    ``min-idle-runners`` at zero, so they hold no runners and delete without a drain cycle; a
-    scaleset already gone is tolerated (404).
+    GARM refuses to delete an org while a scaleset references it, and 400s a scaleset delete
+    while the scaleset is still enabled or draining runners. Disable each scaleset (idle count
+    to zero) to trigger the drain, then delete once GARM has drained it; a scaleset already gone
+    is tolerated (404).
     """
     for scaleset in _list_scalesets(base_url, token):
         scaleset_id = scaleset.get("id")
-        if scaleset_id is not None:
-            _delete_if_present(f"{base_url}/scalesets/{scaleset_id}", token)
+        if scaleset_id is None:
+            continue
+        resp = requests.put(
+            f"{base_url}/scalesets/{scaleset_id}",
+            json={"enabled": False, "min_idle_runners": 0},
+            headers=_garm_auth_headers(token),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        _delete_scaleset_drained(base_url, token, scaleset_id)
+
+
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    stop=stop_after_attempt(20),
+    reraise=True,
+)
+def _delete_scaleset_drained(base_url: str, token: str, scaleset_id: int) -> None:
+    """DELETE a scaleset, retrying while GARM drains it (400); 404 means already gone."""
+    _delete_if_present(f"{base_url}/scalesets/{scaleset_id}", token)
 
 
 def _restore_system_templates(garm_url: str, token: str) -> None:
