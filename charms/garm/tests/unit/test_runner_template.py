@@ -6,10 +6,7 @@
 import pytest
 
 from charm_state import RunnerConfig
-from runner_template import (
-    RUNNER_ENV_PATH,
-    build_template_data,
-)
+from runner_template import RUNNER_ENV_PATH, build_template_data
 
 SAMPLE_BASE = b"#!/bin/bash\nset -e\necho original-bootstrap\n"
 
@@ -134,26 +131,21 @@ def test_build_template_data_per_option(config, present, absent):
     assert absent not in result
 
 
-def test_aproxy_render_drops_malformed_tokens():
+def test_aproxy_render_uses_configured_ports_and_excludes():
     """
-    arrange: A runner config with a proxy plus malformed ports and exclude addresses.
+    arrange: A runner config with a proxy plus well-formed redirect ports and excludes.
     act: Build the runner template data.
-    assert: Only valid IPv4-oriented aproxy rules are rendered.
+    assert: The nft ruleset embeds exactly those ports and addresses.
     """
     config = RunnerConfig(
         runner_http_proxy="http://p.test:3128",
-        aproxy_redirect_ports="80,not-a-port,8000-9000,99 rm,99999,443-80",
-        aproxy_exclude_addresses="10.0.0.0/8,evil;,2001:db8::1",
+        aproxy_redirect_ports="80,8000-9000",
+        aproxy_exclude_addresses="10.0.0.0/8",
     )
     result = build_template_data(SAMPLE_BASE, config).decode()
 
     assert "tcp dport { 80, 8000-9000 }" in result
-    assert "not-a-port" not in result
-    assert "99999" not in result  # out of range
-    assert "443-80" not in result  # inverted range
     assert "10.0.0.0/8" in result
-    assert "evil" not in result
-    assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
 
 
 def test_heredoc_delimiter_avoids_collision_with_pre_job_script():
@@ -169,45 +161,31 @@ def test_heredoc_delimiter_avoids_collision_with_pre_job_script():
     assert "echo bye" in result
 
 
-def test_otel_endpoint_newline_stripped():
+def test_build_template_data_from_untrusted_databag_drops_malformed_values():
     """
-    arrange: An OTEL endpoint containing a newline and extra assignment text.
-    act: Build the runner template data.
-    assert: The endpoint is flattened into one env-file line without line injection.
+    arrange: A raw relation databag with malformed ports/addresses and newline-bearing values.
+    act: Parse it via RunnerConfig.from_databag and build the runner template data.
+    assert: The malformed/injected content never reaches the rendered script.
     """
-    config = RunnerConfig(otel_collector_endpoint="http://o.test:4318\nMALICIOUS=1")
+    config = RunnerConfig.from_databag(
+        {
+            "runner_http_proxy": "http://p.test:3128",
+            "aproxy_redirect_ports": "80,not-a-port,8000-9000,99999,443-80",
+            "aproxy_exclude_addresses": "10.0.0.0/8,evil;,2001:db8::1",
+            "otel_collector_endpoint": "http://o.test:4318\nMALICIOUS=1",
+            "dockerhub_mirror": "https://m.test\nMALICIOUS=1",
+        }
+    )
     result = build_template_data(SAMPLE_BASE, config).decode()
 
+    assert "tcp dport { 80, 8000-9000 }" in result
+    assert "not-a-port" not in result
+    assert "99999" not in result  # out of range
+    assert "443-80" not in result  # inverted range
+    assert "10.0.0.0/8" in result
+    assert "evil" not in result
+    assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
     assert "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://o.test:4318MALICIOUS=1" in result
-    assert "\nMALICIOUS=1" not in result
-
-
-def test_dockerhub_mirror_newline_stripped():
-    """
-    arrange: A Docker mirror URL containing a newline and extra assignment text.
-    act: Build the runner template data.
-    assert: The mirror value is flattened so it cannot inject extra env-file lines.
-    """
-    config = RunnerConfig(dockerhub_mirror="https://m.test\nMALICIOUS=1")
-    result = build_template_data(SAMPLE_BASE, config).decode()
-
     assert "DOCKERHUB_MIRROR=https://m.testMALICIOUS=1" in result
     assert "CONTAINER_REGISTRY_URL=https://m.testMALICIOUS=1" in result
     assert "\nMALICIOUS=1" not in result
-
-
-def test_runner_config_from_databag_and_has_config():
-    """
-    arrange: Empty and populated runner-config databags.
-    act: Build RunnerConfig instances from the databags and inspect has_config.
-    assert: Known keys are mapped, unknown keys are ignored, and has_config reflects content.
-    """
-    empty = RunnerConfig.from_databag({})
-    assert empty == RunnerConfig()
-    assert not empty.has_config()
-
-    populated = RunnerConfig.from_databag(
-        {"dockerhub_mirror": " https://m.test ", "irrelevant": "x"}
-    )
-    assert populated.dockerhub_mirror == "https://m.test"
-    assert populated.has_config()

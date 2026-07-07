@@ -1,0 +1,7 @@
+# Point Docker at the configured registry mirror.
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'GARM_CHARM_DOCKER'
+{{ daemon_json }}
+GARM_CHARM_DOCKER
+systemctl daemon-reload
+systemctl restart docker
