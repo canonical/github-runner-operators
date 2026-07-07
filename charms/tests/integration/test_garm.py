@@ -631,15 +631,12 @@ def _point_github_endpoint_at_mock(base_url: str, token: str, mock_base_url: str
 
 
 def _detach_synced_credential(base_url: str, token: str) -> None:
-    """Delete the charm-synced scalesets, org and credential so github.com can be repointed.
-
-    GARM locks an endpoint's URLs while a credential references it, and refuses to delete an org
-    (or credential) while a scaleset still references it. The charm syncs its credential onto the
-    built-in github.com endpoint, so the whole chain — scalesets first, then the org bound to the
-    credential, then the credential — must be removed before the endpoint can be pointed at the
-    mock. Deletion tolerates a not-yet-created entity (404); a real failure surfaces later as the
-    repoint's 400.
-    """
+    """Delete the charm-synced scalesets, org and credential so github.com can be repointed."""
+    # GARM locks an endpoint's URLs while a credential references it, refuses to delete a
+    # credential while an org is bound to it, and refuses to delete an org while a scaleset
+    # references it. The charm syncs its credential onto the built-in github.com endpoint, so the
+    # chain must be unwound in dependency order — scalesets, then org, then credential — before
+    # the endpoint can be repointed at the mock.
     _delete_scalesets(base_url, token)
     for org in _list_orgs(base_url, token):
         if org.get("name") == "test-org" and org.get("id"):
@@ -660,17 +657,13 @@ def _delete_if_present(url: str, token: str) -> None:
 
 
 def _delete_scalesets(base_url: str, token: str) -> None:
-    """Disable and delete every scaleset so the org that owns it can be removed.
-
-    GARM refuses to delete an org while a scaleset references it, and 400s a scaleset delete
-    while the scaleset is still enabled or draining runners. Disable each scaleset (idle count
-    to zero) to trigger the drain, then delete once GARM has drained it; a scaleset already gone
-    is tolerated (404).
-    """
+    """Disable and delete every scaleset."""
     for scaleset in _list_scalesets(base_url, token):
         scaleset_id = scaleset.get("id")
         if scaleset_id is None:
             continue
+        # GARM 400s a scaleset delete while the scaleset is still enabled or draining runners, so
+        # disable it (idle count to zero) to trigger the drain before deleting.
         resp = requests.put(
             f"{base_url}/scalesets/{scaleset_id}",
             json={"enabled": False, "min_idle_runners": 0},
