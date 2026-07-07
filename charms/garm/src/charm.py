@@ -24,6 +24,7 @@ from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
     CharmState,
+    RunnerConfig,
     credential_name,
 )
 from entity_reconciler import EntityReconciler
@@ -826,6 +827,7 @@ class GarmCharm(paas_charm.go.Charm):
                             data.get("pre_install_scripts", "")
                         ),
                         template_id=template_id,
+                        runner_config=RunnerConfig.from_databag(data),
                     )
                 )
         return specs

@@ -1,0 +1,14 @@
+
+# ===== charm-injected runner job hooks =====
+mkdir -p {{ runner_home }}
+cat > {{ hook_path }} <<'{{ prejob_delim }}'
+{{ hook_body }}
+{{ prejob_delim }}
+chmod 0755 {{ hook_path }}
+cat >> {{ env_path }} <<'{{ env_delim }}'
+{% for entry in env_entries %}
+{{ entry }}
+{% endfor %}
+{{ env_delim }}
+chown -R {{ runner_user }}:{{ runner_user }} {{ runner_home }} 2>/dev/null || true
+# ===== end charm-injected runner job hooks =====

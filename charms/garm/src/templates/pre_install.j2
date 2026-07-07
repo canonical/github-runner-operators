@@ -1,0 +1,10 @@
+
+# ===== charm-injected pre-install setup (runs as root) =====
+{% if aproxy %}
+{{ aproxy }}
+{% endif %}
+{% if dockerhub %}
+{{ dockerhub }}
+{% endif %}
+{{ static_prep }}
+# ===== end charm-injected pre-install setup =====

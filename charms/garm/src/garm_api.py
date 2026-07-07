@@ -246,8 +246,16 @@ class GarmAuthenticatedClient(GarmApiClient):
             header_value=f"Bearer {self._token}",
         )
 
-    def list_templates(self) -> list[Template]:
-        """List all runner install templates known to GARM.
+    def list_templates(
+        self,
+        partial_name: str | None = None,
+        os_type: str | None = None,
+    ) -> list[Template]:
+        """List runner install templates known to GARM, optionally filtered.
+
+        Args:
+            partial_name: Optional partial or full template name to filter by.
+            os_type: Optional OS type filter (e.g. ``"linux"``).
 
         Returns:
             List of Template objects.
@@ -258,7 +266,14 @@ class GarmAuthenticatedClient(GarmApiClient):
         with self._api_client() as client:
             api = TemplatesApi(api_client=client)
             try:
-                return api.list_templates(_request_timeout=_REQUEST_TIMEOUT) or []
+                return (
+                    api.list_templates(
+                        partial_name=partial_name,
+                        os_type=os_type,
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
             except ApiException as exc:
                 raise GarmApiError(
                     f"GARM list_templates failed ({exc.status}): {exc.body}"
@@ -292,19 +307,19 @@ class GarmAuthenticatedClient(GarmApiClient):
     def create_template(
         self,
         name: str,
-        description: str,
-        forge_type: str,
-        os_type: str,
         data: bytes,
+        description: str = "",
+        forge_type: str = "github",
+        os_type: str = "linux",
     ) -> Template:
         """Create a new runner install template.
 
         Args:
             name: Template name.
+            data: Raw shell script bytes for the template body.
             description: Human-readable description.
             forge_type: Source forge type, e.g. ``"github"``.
             os_type: OS type, e.g. ``"linux"``.
-            data: Raw shell script bytes for the template body.
 
         Returns:
             The created Template.

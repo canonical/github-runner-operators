@@ -1,0 +1,24 @@
+# Transparently forward runner egress through the configured HTTP proxy.
+snap install aproxy --edge
+snap set aproxy proxy={{ proxy }} listen=:54969
+nft delete table ip aproxy 2>/dev/null || true
+cat << EOF > /etc/nftables.conf
+define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \K\S+') | grep -oP 'src \K\S+')
+table ip aproxy {
+      set exclude {
+          type ipv4_addr;
+          flags interval; auto-merge;
+          elements = { {{ exclude_elements }} }
+      }
+      chain prerouting {
+              type nat hook prerouting priority dstnat; policy accept;
+              {{ dnat_rule }}
+      }
+      chain output {
+              type nat hook output priority -100; policy accept;
+              {{ dnat_rule }}
+      }
+}
+EOF
+systemctl enable nftables.service
+nft -f /etc/nftables.conf

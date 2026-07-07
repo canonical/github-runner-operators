@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from charm_state import CharmState, SSHDebugInfo, _get_ssh_debug_connections
+from charm_state import CharmState, RunnerConfig, SSHDebugInfo, _get_ssh_debug_connections
 
 _COMPLETE = {
     "host": "10.0.0.1",
@@ -257,3 +257,72 @@ def test_desired_entities_skip_incomplete_unit(unit_data):
     assert: No entity is built.
     """
     assert _entities([unit_data]) == []
+
+
+def test_runner_config_from_databag_and_has_config():
+    """
+    arrange: Empty and populated runner-config databags.
+    act: Build RunnerConfig instances from the databags and inspect has_config.
+    assert: Known keys are mapped, unknown keys are ignored, and has_config reflects content.
+    """
+    empty = RunnerConfig.from_databag({})
+    assert empty == RunnerConfig()
+    assert not empty.has_config()
+
+    populated = RunnerConfig.from_databag(
+        {"dockerhub_mirror": " https://m.test ", "irrelevant": "x"}
+    )
+    assert populated.dockerhub_mirror == "https://m.test"
+    assert populated.has_config()
+
+
+def test_runner_config_from_databag_drops_malformed_port_and_address_tokens():
+    """
+    arrange: A databag with well-formed, malformed, out-of-range and IPv6 tokens.
+    act: Build a RunnerConfig from the databag.
+    assert: Only the well-formed, in-range IPv4 tokens survive.
+    """
+    config = RunnerConfig.from_databag(
+        {
+            "aproxy_redirect_ports": "80,not-a-port,8000-9000,99 rm,99999,443-80",
+            "aproxy_exclude_addresses": "10.0.0.0/8,evil;,2001:db8::1",
+        }
+    )
+
+    assert config.aproxy_redirect_ports == "80,8000-9000"
+    assert config.aproxy_exclude_addresses == "10.0.0.0/8"
+
+
+def test_runner_config_from_databag_strips_newlines_from_otel_endpoint():
+    """
+    arrange: A databag whose OTEL endpoint contains a newline and extra assignment text.
+    act: Build a RunnerConfig from the databag.
+    assert: The endpoint is flattened into a single line, preventing env-file line injection.
+    """
+    config = RunnerConfig.from_databag(
+        {"otel_collector_endpoint": "http://o.test:4318\nMALICIOUS=1"}
+    )
+
+    assert config.otel_collector_endpoint == "http://o.test:4318MALICIOUS=1"
+
+
+def test_runner_config_from_databag_strips_newlines_from_dockerhub_mirror():
+    """
+    arrange: A databag whose Docker mirror URL contains a newline and extra assignment text.
+    act: Build a RunnerConfig from the databag.
+    assert: The mirror value is flattened, preventing env-file line injection.
+    """
+    config = RunnerConfig.from_databag({"dockerhub_mirror": "https://m.test\nMALICIOUS=1"})
+
+    assert config.dockerhub_mirror == "https://m.testMALICIOUS=1"
+
+
+def test_runner_config_from_databag_preserves_multiline_pre_job_script():
+    """
+    arrange: A databag whose pre_job_script is legitimately multi-line.
+    act: Build a RunnerConfig from the databag.
+    assert: Newlines in pre_job_script are preserved (unlike the single-line env fields).
+    """
+    config = RunnerConfig.from_databag({"pre_job_script": "echo one\necho two"})
+
+    assert config.pre_job_script == "echo one\necho two"

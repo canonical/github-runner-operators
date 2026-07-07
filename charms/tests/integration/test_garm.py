@@ -631,13 +631,13 @@ def _point_github_endpoint_at_mock(base_url: str, token: str, mock_base_url: str
 
 
 def _detach_synced_credential(base_url: str, token: str) -> None:
-    """Delete the charm-synced org and credential so github.com can be repointed.
-
-    GARM locks an endpoint's URLs while a credential references it. The charm syncs its credential
-    onto the built-in github.com endpoint, so it must be removed (along with any org bound to it)
-    before the endpoint can be pointed at the mock. Deletion tolerates a not-yet-created entity
-    (404); a real failure surfaces later as the repoint's 400.
-    """
+    """Delete the charm-synced scalesets, org and credential so github.com can be repointed."""
+    # GARM locks an endpoint's URLs while a credential references it, refuses to delete a
+    # credential while an org is bound to it, and refuses to delete an org while a scaleset
+    # references it. The charm syncs its credential onto the built-in github.com endpoint, so the
+    # chain must be unwound in dependency order — scalesets, then org, then credential — before
+    # the endpoint can be repointed at the mock.
+    _delete_scalesets(base_url, token)
     for org in _list_orgs(base_url, token):
         if org.get("name") == "test-org" and org.get("id"):
             _delete_if_present(f"{base_url}/organizations/{org['id']}", token)
@@ -649,8 +649,40 @@ def _detach_synced_credential(base_url: str, token: str) -> None:
 def _delete_if_present(url: str, token: str) -> None:
     """DELETE a GARM resource, treating 404 as already-gone."""
     resp = requests.delete(url, headers=_garm_auth_headers(token), timeout=30)
-    if resp.status_code != requests.codes.not_found:
+    if resp.status_code == requests.codes.not_found:
+        return
+    if not resp.ok:
+        logger.warning("DELETE %s -> %s: %s", url, resp.status_code, resp.text)
+    resp.raise_for_status()
+
+
+def _delete_scalesets(base_url: str, token: str) -> None:
+    """Disable and delete every scaleset."""
+    for scaleset in _list_scalesets(base_url, token):
+        scaleset_id = scaleset.get("id")
+        if scaleset_id is None:
+            continue
+        # GARM 400s a scaleset delete while the scaleset is still enabled or draining runners, so
+        # disable it (idle count to zero) to trigger the drain before deleting.
+        resp = requests.put(
+            f"{base_url}/scalesets/{scaleset_id}",
+            json={"enabled": False, "min_idle_runners": 0},
+            headers=_garm_auth_headers(token),
+            timeout=30,
+        )
         resp.raise_for_status()
+        _delete_scaleset_drained(base_url, token, scaleset_id)
+
+
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    stop=stop_after_attempt(20),
+    reraise=True,
+)
+def _delete_scaleset_drained(base_url: str, token: str, scaleset_id: int) -> None:
+    """DELETE a scaleset, retrying while GARM drains it (400); 404 means already gone."""
+    _delete_if_present(f"{base_url}/scalesets/{scaleset_id}", token)
 
 
 def _restore_system_templates(garm_url: str, token: str) -> None:
@@ -778,4 +810,112 @@ def test_github_credentials_synced_from_relation(
     endpoint_names = {endpoint.get("name") for endpoint in _list_github_endpoints(base_url, token)}
     assert "github.com" in endpoint_names, (
         f"Built-in github.com endpoint must be preserved; got {sorted(endpoint_names)}"
+    )
+
+
+def _get_template_data(base_url: str, token: str, template_id: int) -> str:
+    """Fetch a GARM template and return its decoded (base64) script content.
+
+    Args:
+        base_url: GARM API base URL.
+        token: JWT token for authentication.
+        template_id: Integer template ID.
+
+    Returns:
+        The decoded template script as a string.
+    """
+    resp = requests.get(
+        f"{base_url}/templates/{template_id}",
+        headers=_garm_auth_headers(token),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json().get("data", "")
+    return base64.b64decode(data).decode() if data else ""
+
+
+@retry(
+    retry=retry_if_exception_type((AssertionError, requests.exceptions.RequestException)),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
+    reraise=True,
+)
+def _wait_for_scaleset_template_data(
+    base_url: str,
+    token: str,
+    scaleset_name: str,
+    expected_markers: tuple[str, ...],
+) -> str:
+    """Wait until a scaleset references a template containing the expected markers."""
+    scaleset = _wait_for_scaleset(base_url, token, scaleset_name)
+    template_id = scaleset.get("template_id")
+    assert template_id, f"Expected scaleset to reference a custom template, got: {scaleset}"
+
+    rendered = _get_template_data(base_url, token, template_id)
+    missing = [marker for marker in expected_markers if marker not in rendered]
+    assert not missing, (
+        f"Expected markers {missing!r} in rendered template {template_id}, got:\n{rendered}"
+    )
+    return rendered
+
+
+def test_runner_options_render_into_scaleset_template(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+    fake_github_api_url: str,
+):
+    """
+    arrange: GARM and garm-configurator are integrated, with a credential and org
+        registered so a scaleset can be created.
+    act: Set the runner-behaviour config options on the configurator charm.
+    assert: The scaleset references a custom template whose rendered content
+        reflects each runner option — proving the options reach GARM via live
+        reconcile (no upgrade).
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+    _detach_synced_credential(base_url, token)
+    _point_github_endpoint_at_mock(base_url, token, fake_github_api_url)
+    _restore_system_templates(base_url, token)
+
+    juju.config(
+        configurator_with_image,
+        values={
+            "dockerhub-mirror": "https://mirror.example.com",
+            "runner-http-proxy": "http://proxy.example.com:3128",
+            "aproxy-exclude-addresses": "192.168.0.0/16",
+            "aproxy-redirect-ports": "80,443",
+            "otel-collector-endpoint": "http://otel.example.com:4318",
+            "pre-job-script": "echo integration-marker",
+        },
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, configurator_with_image)
+        and jubilant.all_agents_idle(status, configurator_garm),
+        timeout=3 * 60,
+        delay=10,
+    )
+
+    # One marker per config option, proving each reaches GARM via live reconcile:
+    # dockerhub-mirror (daemon.json + env var), runner-http-proxy + aproxy-*
+    # (aproxy listener and nftables ruleset), otel-collector-endpoint (env var),
+    # and pre-job-script (job-start hook).
+    expected_markers = (
+        "registry-mirrors",
+        "DOCKERHUB_MIRROR=https://mirror.example.com",
+        "proxy=http://proxy.example.com:3128 listen=:54969",
+        "192.168.0.0/16",
+        "tcp dport { 80, 443 }",
+        "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
+        "echo integration-marker",
+    )
+    # Asserts each expected marker is present in the referenced template, retrying
+    # until GARM reflects the reconciled config.
+    _wait_for_scaleset_template_data(
+        base_url,
+        token,
+        _SCALESET_TEST_NAME,
+        expected_markers,
     )

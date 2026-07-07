@@ -1,5 +1,6 @@
 ops==3.8.0
 paas-charm==1.11.3
+Jinja2==3.1.6
 tomli-w==1.2.0
 PyYAML==6.0.3
 urllib3==2.7.0

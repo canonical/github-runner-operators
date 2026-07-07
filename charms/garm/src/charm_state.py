@@ -11,14 +11,19 @@ as the state grows.
 """
 
 import dataclasses
+import ipaddress
 import logging
+import re
 import typing
+from collections.abc import Mapping
 
 import ops
 
 from entity_reconciler import EntitySpec
 
 logger = logging.getLogger(__name__)
+
+_PORT_TOKEN_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
 
 DEBUG_SSH_INTEGRATION_NAME: typing.Final[str] = "debug-ssh"
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
@@ -39,6 +44,123 @@ class SSHDebugInfo:
     port: int
     rsa_fingerprint: str
     ed25519_fingerprint: str
+
+
+# Databag keys written by the garm-configurator charm — the single source of
+# truth for the configurator→garm relation contract for runner options.
+RUNNER_OPTION_DATABAG_KEYS: typing.Final = (
+    "dockerhub_mirror",
+    "runner_http_proxy",
+    "aproxy_exclude_addresses",
+    "aproxy_redirect_ports",
+    "otel_collector_endpoint",
+    "pre_job_script",
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class RunnerConfig:
+    """Runner-behaviour options sourced from the garm-configurator relation.
+
+    Every field is a plain string; an empty string means "unset".
+    :meth:`from_databag` sanitises the security-sensitive fields (ports,
+    addresses, env-file values) at parse time.
+
+    Attributes:
+        dockerhub_mirror: Docker registry mirror URL, or "".
+        runner_http_proxy: Upstream HTTP proxy that aproxy forwards to, or "".
+        aproxy_exclude_addresses: Comma-separated addresses/CIDRs to bypass, or "".
+        aproxy_redirect_ports: Comma-separated ports / N-M ranges to redirect, or "".
+        otel_collector_endpoint: OTEL exporter endpoint, or "".
+        pre_job_script: Operator bash appended to the pre-job hook, or "".
+    """
+
+    dockerhub_mirror: str = ""
+    runner_http_proxy: str = ""
+    aproxy_exclude_addresses: str = ""
+    aproxy_redirect_ports: str = ""
+    otel_collector_endpoint: str = ""
+    pre_job_script: str = ""
+
+    @classmethod
+    def from_databag(cls, data: Mapping[str, str]) -> "RunnerConfig":
+        """Build a config from a relation databag, ignoring missing keys.
+
+        Args:
+            data: The relation unit databag (or any mapping).
+
+        Returns:
+            A RunnerConfig with each field taken from its databag key, "" if absent, and the
+            security-sensitive fields sanitised (see class docstring).
+        """
+        values = {key: (data.get(key) or "").strip() for key in RUNNER_OPTION_DATABAG_KEYS}
+        values["aproxy_redirect_ports"] = ",".join(
+            _valid_port_tokens(values["aproxy_redirect_ports"])
+        )
+        values["aproxy_exclude_addresses"] = ",".join(
+            _valid_ipv4_tokens(values["aproxy_exclude_addresses"])
+        )
+        values["otel_collector_endpoint"] = _strip_newlines(values["otel_collector_endpoint"])
+        values["dockerhub_mirror"] = _strip_newlines(values["dockerhub_mirror"])
+        return cls(**values)
+
+    def has_config(self) -> bool:
+        """Whether any runner option is set (i.e. a custom template is needed).
+
+        Returns:
+            True if at least one field is non-empty.
+        """
+        return any(getattr(self, key) for key in RUNNER_OPTION_DATABAG_KEYS)
+
+
+def _strip_newlines(value: str) -> str:
+    """Flatten a value so it is safe as a single-line env-file entry."""
+    return value.replace("\r", "").replace("\n", "")
+
+
+def _valid_port_tokens(spec: str) -> list[str]:
+    """Return only the in-range port / N-M range tokens from a comma list.
+
+    A token is kept only if it is ``N`` or ``N-M`` with every port in 1..65535
+    and ``N <= M`` — out-of-range or inverted tokens are dropped so they can't
+    break the rendered nft ruleset.
+
+    Args:
+        spec: A comma-separated ports string (possibly empty or untrusted).
+
+    Returns:
+        The subset of well-formed, in-range tokens.
+    """
+    valid: list[str] = []
+    for raw in spec.split(","):
+        token = raw.strip()
+        if not _PORT_TOKEN_RE.match(token):
+            continue
+        ports = [int(part) for part in token.split("-")]
+        if all(1 <= port <= 65535 for port in ports) and ports == sorted(ports):
+            valid.append(token)
+    return valid
+
+
+def _valid_ipv4_tokens(spec: str) -> list[str]:
+    """Return only the valid IPv4 address/CIDR tokens from a comma list.
+
+    Args:
+        spec: A comma-separated address string (possibly empty or untrusted).
+
+    Returns:
+        The subset of tokens that parse as IPv4 networks.
+    """
+    valid: list[str] = []
+    for token in spec.split(","):
+        token = token.strip()
+        try:
+            network = ipaddress.ip_network(token, strict=False)
+        except ValueError:
+            continue
+        if network.version == 4:
+            valid.append(token)
+    return valid
 
 
 def credential_name(app_id: int, installation_id: int) -> str:
