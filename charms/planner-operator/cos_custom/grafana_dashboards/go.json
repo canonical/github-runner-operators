@@ -506,7 +506,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "Median time jobs waited between creation and starting on a runner. Treat with caution: this measures `started_at \u2212 created_at`, but the job's effective queued time (when it became eligible for a runner) may be later than `created_at`, so the value can overstate runner pickup time.",
+      "description": "Median time jobs waited between creation and starting on a runner. Treat with caution: this measures `started_at − created_at`, but the job's effective queued time (when it became eligible for a runner) may be later than `created_at`, so the value can overstate runner pickup time.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -605,7 +605,7 @@
         "type": "prometheus",
         "uid": "${prometheusds}"
       },
-      "description": "95th percentile time jobs waited between creation and starting on a runner (tail latency). Treat with caution: this measures `started_at \u2212 created_at`, but the job's effective queued time (when it became eligible for a runner) may be later than `created_at`, so the value can overstate runner pickup time.",
+      "description": "95th percentile time jobs waited between creation and starting on a runner (tail latency). Treat with caution: this measures `started_at − created_at`, but the job's effective queued time (when it became eligible for a runner) may be later than `created_at`, so the value can overstate runner pickup time.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1080,7 +1080,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1
+        "y": 41
       },
       "id": 12,
       "panels": [],
@@ -1152,7 +1152,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 2
+        "y": 42
       },
       "id": 14,
       "options": {
@@ -1274,7 +1274,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 2
+        "y": 42
       },
       "id": 15,
       "options": {
@@ -1379,7 +1379,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 2
+        "y": 42
       },
       "id": 16,
       "options": {
