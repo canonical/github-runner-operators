@@ -174,6 +174,27 @@ def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: 
     assert out.unit_status == ops.BlockedStatus(expected_message)
 
 
+def test_charm_logs_invalid_config_detail(caplog: pytest.LogCaptureFixture):
+    """
+    arrange: A required config value is missing.
+    act: Run config-changed.
+    assert: The full validation detail is logged at WARNING level, so it is
+        discoverable in juju debug-log even when Juju truncates the status.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["openstack-auth-url"]
+    state = State(config=config, secrets=[secret, pk_secret])
+    ctx.run(ctx.on.config_changed(), state)
+    assert any(
+        record.levelname == "WARNING"
+        and "Missing required configuration: openstack-auth-url" in record.message
+        for record in caplog.records
+    )
+
+
 def test_charm_blocked_password_secret_missing_value_key():
     """
     arrange: openstack-password secret exists but lacks 'value' key.
