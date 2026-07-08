@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-08
+
+- Add webhook gateway dashboard panels: three new panels show webhook ingestion, webhook delivery, and webhook redelivery for the webhook gateway. The panels are co-located in the planner dashboard for a better viewing experience, making webhook-related errors such as delivery failures easier to monitor.
+
 ## 2026-07-06
 
 - `garm`: fix the application status freezing on a stale value. The charm wrote the unit status directly on its own reconcile paths, so the leader's application status was never refreshed and could stay stuck (for example showing `Waiting for pebble ready` while the unit was `active`). Status writes now go through the shared unit/application status helper so both stay in sync.
