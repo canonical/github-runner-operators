@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-08
+
+-  Fix runner provisioning in the GARM workload: the OpenStack provider binary in the bare-base rock was built dynamically linked, so GARM could not execute it (`fork/exec /usr/local/bin/garm-provider-openstack: no such file or directory`) and no runners were spawned, even though the charm reported `active`. The provider is now built as a fully static, pure-Go binary, matching the GARM binary.
+- `garm-configurator`: log the full config-validation detail when configuration is invalid. Juju truncates the blocked unit status to its first line, so a multi-line validation error (for example from an invalid runner option) was not fully visible. The charm now also logs the complete detail at warning level, so it is discoverable in `juju debug-log`.
+
 ## 2026-07-06
 
 - `garm`: fix the application status freezing on a stale value. The charm wrote the unit status directly on its own reconcile paths, so the leader's application status was never refreshed and could stay stuck (for example showing `Waiting for pebble ready` while the unit was `active`). Status writes now go through the shared unit/application status helper so both stay in sync.

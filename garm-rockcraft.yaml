@@ -43,9 +43,15 @@ parts:
       - go/1.26/stable
     build-environment:
       - GOTOOLCHAIN: local
+      # Force a fully static, pure-Go binary. The bare base ships no dynamic
+      # loader or libc, so a cgo/dynamically-linked binary fails at fork/exec
+      # with "no such file or directory" (missing ELF interpreter). CGO_ENABLED=0
+      # selects the pure-Go net/os resolvers, mirroring the garm part's
+      # osusergo,netgo,-static build.
+      - CGO_ENABLED: "0"
     override-build: |
       cd "$CRAFT_PART_SRC"
-      go build -ldflags "-extldflags -static" -o bin/garm-provider-openstack .
+      go build -o bin/garm-provider-openstack .
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
 
