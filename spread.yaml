@@ -13,7 +13,7 @@ backends:
           disk: 20
 environment:
   CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
-  OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'
+  OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-v0.0.1-alpha.7}")'
   TEST_GITHUB_APP_ID: '$(HOST: echo "${TEST_GITHUB_APP_ID:-}")'
   TEST_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${TEST_GITHUB_APP_INSTALLATION_ID:-}")'
   TEST_GITHUB_APP_PRIVATE_KEY: '$(HOST: echo "${TEST_GITHUB_APP_PRIVATE_KEY:-}")'
