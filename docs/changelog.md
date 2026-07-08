@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-08
 
-- `garm-configurator`: log the full config-validation error and show a short blocked status. Invalid configuration previously put the entire (often multi-line) validation error into the unit status, where Juju truncates it to an unhelpful first line and nothing reached `juju debug-log`. The charm now logs the full detail at warning level and sets a stable `Invalid charm config` status, so the specific problem is discoverable in the logs.
+- `garm-configurator`: log the full config-validation detail when configuration is invalid. Juju truncates the blocked unit status to its first line, so a multi-line validation error (for example from an invalid runner option) was not fully visible. The charm now also logs the complete detail at warning level, so it is discoverable in `juju debug-log`.
 
 ## 2026-07-06
 
