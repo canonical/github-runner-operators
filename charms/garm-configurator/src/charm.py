@@ -5,6 +5,7 @@
 """Charm entrypoint for the GARM configurator charm."""
 
 import json
+import logging
 import typing
 
 import ops
@@ -15,6 +16,8 @@ from charm_state import (
     CharmConfigInvalidError,
     CharmState,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GarmConfiguratorCharm(ops.CharmBase):
@@ -52,7 +55,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
         try:
             state = CharmState.from_charm(self)
         except CharmConfigInvalidError as e:
-            self.unit.status = ops.BlockedStatus(e.msg)
+            logger.warning("Invalid charm config:\n%s", e.msg)
+            self.unit.status = ops.BlockedStatus("Invalid charm config")
             return
 
         self._update_image_relation(state)

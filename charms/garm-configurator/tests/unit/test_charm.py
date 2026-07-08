@@ -154,11 +154,14 @@ _MISSING_CONFIG_SENTINEL = object()
         ),
     ],
 )
-def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: str):
+def test_charm_blocked_invalid_config(
+    config_mutations: dict, expected_message: str, caplog: pytest.LogCaptureFixture
+):
     """
     arrange: Config is invalid (missing, empty, or has an invalid value).
     act: Run config-changed.
-    assert: Unit status is Blocked with the expected message.
+    assert: Unit status is Blocked with a short, stable message, and the
+        specific validation detail is logged as a warning.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -171,14 +174,19 @@ def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: 
             config[key] = value
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(expected_message)
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING" and expected_message in record.message
+        for record in caplog.records
+    )
 
 
-def test_charm_blocked_password_secret_missing_value_key():
+def test_charm_blocked_password_secret_missing_value_key(caplog: pytest.LogCaptureFixture):
     """
     arrange: openstack-password secret exists but lacks 'value' key.
     act: Run config-changed.
-    assert: Unit status is Blocked.
+    assert: Unit status is Blocked with a short message, and the specific
+        detail is logged as a warning.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = Secret(tracked_content={"wrong-key": "data"})
@@ -186,16 +194,20 @@ def test_charm_blocked_password_secret_missing_value_key():
     config = _valid_config(secret, pk_secret)
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "openstack-password secret is invalid or missing 'value' key"
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING"
+        and "openstack-password secret is invalid or missing 'value' key" in record.message
+        for record in caplog.records
     )
 
 
-def test_charm_blocked_password_secret_not_found():
+def test_charm_blocked_password_secret_not_found(caplog: pytest.LogCaptureFixture):
     """
     arrange: openstack-password references a secret that doesn't exist in state.
     act: Run config-changed.
-    assert: Unit status is Blocked.
+    assert: Unit status is Blocked with a short message, and the specific
+        detail is logged as a warning.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -203,8 +215,11 @@ def test_charm_blocked_password_secret_not_found():
     config = _valid_config(secret, pk_secret)
     state = State(config=config, secrets=[pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "openstack-password secret is invalid or missing 'value' key"
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING"
+        and "openstack-password secret is invalid or missing 'value' key" in record.message
+        for record in caplog.records
     )
 
 
@@ -224,11 +239,14 @@ def test_charm_not_blocked_with_http_auth_url():
     assert not isinstance(out.unit_status, ops.BlockedStatus)
 
 
-def test_charm_blocked_github_app_private_key_secret_missing_value_key():
+def test_charm_blocked_github_app_private_key_secret_missing_value_key(
+    caplog: pytest.LogCaptureFixture,
+):
     """
     arrange: github-app-private-key secret exists but lacks 'value' key.
     act: Run config-changed.
-    assert: Unit status is Blocked.
+    assert: Unit status is Blocked with a short message, and the specific
+        detail is logged as a warning.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -236,16 +254,20 @@ def test_charm_blocked_github_app_private_key_secret_missing_value_key():
     config = _valid_config(secret, bad_pk_secret)
     state = State(config=config, secrets=[secret, bad_pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "github-app-private-key secret is invalid or missing 'value' key"
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING"
+        and "github-app-private-key secret is invalid or missing 'value' key" in record.message
+        for record in caplog.records
     )
 
 
-def test_charm_blocked_github_app_private_key_secret_not_found():
+def test_charm_blocked_github_app_private_key_secret_not_found(caplog: pytest.LogCaptureFixture):
     """
     arrange: github-app-private-key references a secret not in state.
     act: Run config-changed.
-    assert: Unit status is Blocked.
+    assert: Unit status is Blocked with a short message, and the specific
+        detail is logged as a warning.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -253,8 +275,11 @@ def test_charm_blocked_github_app_private_key_secret_not_found():
     config = _valid_config(secret, pk_secret)
     state = State(config=config, secrets=[secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "github-app-private-key secret is invalid or missing 'value' key"
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING"
+        and "github-app-private-key secret is invalid or missing 'value' key" in record.message
+        for record in caplog.records
     )
 
 
@@ -637,6 +662,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     )
     assert "repo" not in garm_out.local_unit_data
 
+
 @pytest.mark.parametrize(
     "config_key, bad_value, expected_fragment",
     [
@@ -703,12 +729,15 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     ],
 )
 def test_charm_blocked_invalid_runner_config(
-    config_key: str, bad_value: str, expected_fragment: str
+    config_key: str, bad_value: str, expected_fragment: str, caplog: pytest.LogCaptureFixture
 ):
     """
     arrange: A single runner config option is set to an invalid value.
     act: Run config-changed.
-    assert: Unit status is Blocked with a message matching the expected fragment.
+    assert: Unit status is Blocked with a short, stable message, and the
+        pydantic validation detail matching the expected fragment is logged
+        as a warning (Juju truncates status messages to their first line, so
+        the detail must go to the log instead).
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -717,15 +746,19 @@ def test_charm_blocked_invalid_runner_config(
     config[config_key] = bad_value
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert isinstance(out.unit_status, ops.BlockedStatus)
-    assert expected_fragment in out.unit_status.message
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING" and expected_fragment in record.message
+        for record in caplog.records
+    )
 
 
-def test_runner_config_aproxy_options_require_proxy():
+def test_runner_config_aproxy_options_require_proxy(caplog: pytest.LogCaptureFixture):
     """
     arrange: aproxy options set without runner-http-proxy.
     act: Run config-changed.
-    assert: Unit is Blocked — the aproxy options would otherwise silently no-op.
+    assert: Unit is Blocked — the aproxy options would otherwise silently no-op — and the
+        detail is logged as a warning.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -734,8 +767,11 @@ def test_runner_config_aproxy_options_require_proxy():
     config["aproxy-redirect-ports"] = "80,443"
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert isinstance(out.unit_status, ops.BlockedStatus)
-    assert "require runner-http-proxy to be set" in out.unit_status.message
+    assert out.unit_status == ops.BlockedStatus("Invalid charm config")
+    assert any(
+        record.levelname == "WARNING" and "require runner-http-proxy to be set" in record.message
+        for record in caplog.records
+    )
 
 
 def test_runner_config_fields_written_to_garm_configurator_relation():

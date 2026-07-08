@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-08
+
+- `garm-configurator`: log the full config-validation error and show a short blocked status. Invalid configuration previously put the entire (often multi-line) validation error into the unit status, where Juju truncates it to an unhelpful first line and nothing reached `juju debug-log`. The charm now logs the full detail at warning level and sets a stable `Invalid charm config` status, so the specific problem is discoverable in the logs.
+
 ## 2026-07-06
 
 - `garm`: fix the application status freezing on a stale value. The charm wrote the unit status directly on its own reconcile paths, so the leader's application status was never refreshed and could stay stuck (for example showing `Waiting for pebble ready` while the unit was `active`). Status writes now go through the shared unit/application status helper so both stay in sync.
