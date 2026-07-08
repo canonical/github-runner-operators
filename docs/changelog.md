@@ -10,6 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-08
 
+- `garm`: fix runner provisioning on proxy-only networks. GARM prepends a compiled-in wrapper as the cloud-init install script that must reach the GARM API before any runner-template content runs, so the aproxy bootstrap embedded in the template could never bring up egress in time and runners never registered. The aproxy setup is now delivered as a pre-install script (which GARM runs before the wrapper), apt updates are disabled on boot when a proxy is configured, and `snap set aproxy proxy=` now receives a bare `host:port` as aproxy requires.
 -  Fix runner provisioning in the GARM workload: the OpenStack provider binary in the bare-base rock was built dynamically linked, so GARM could not execute it (`fork/exec /usr/local/bin/garm-provider-openstack: no such file or directory`) and no runners were spawned, even though the charm reported `active`. The provider is now built as a fully static, pure-Go binary, matching the GARM binary.
 - `garm-configurator`: log the full config-validation detail when configuration is invalid. Juju truncates the blocked unit status to its first line, so a multi-line validation error (for example from an invalid runner option) was not fully visible. The charm now also logs the complete detail at warning level, so it is discoverable in `juju debug-log`.
 

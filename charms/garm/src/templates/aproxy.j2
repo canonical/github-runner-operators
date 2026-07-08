@@ -1,6 +1,14 @@
-# Transparently forward runner egress through the configured HTTP proxy.
+#!/bin/bash
+# Best-effort proxy bootstrap, deliberately without strict-mode shell options:
+# a failure here must never abort the rest of GARM's pre-install/install-runner
+# sequence.
+
+# snapd itself needs the proxy to reach the snap store before aproxy exists.
+snap set system proxy.http={{ proxy }}
+snap set system proxy.https={{ proxy }}
+
 snap install aproxy --edge
-snap set aproxy proxy={{ proxy }} listen=:54969
+snap set aproxy proxy={{ proxy_host_port }} listen=:54969
 nft delete table ip aproxy 2>/dev/null || true
 cat << EOF > /etc/nftables.conf
 define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \K\S+') | grep -oP 'src \K\S+')
