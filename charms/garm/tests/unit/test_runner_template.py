@@ -49,6 +49,13 @@ def test_build_template_data_injects_all_options():
 
     # aproxy: correct listen port, nftables file (not a piped `nft -f -`), and
     # both the prerouting and output DNAT chains.
+    # aproxy bootstrap: proxy hostname resolved into /etc/hosts before snap
+    # installs aproxy, and snapd is told to use the proxy so the snap store is
+    # reachable even when there is no direct internet path.
+    assert "getent hosts" in result
+    assert "snap set system proxy.http" in result
+    assert "snap set system proxy.https" in result
+
     assert "listen=:54969" in result
     assert "default-ipv4" in result
     assert "/etc/nftables.conf" in result
