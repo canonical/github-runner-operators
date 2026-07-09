@@ -1,47 +1,4 @@
 {
-  "__inputs": [
-    {
-      "name": "prometheusds",
-      "label": "juju_prod-cos-platform-engineering_cafadeb1-c97e-41d6-8c49-7dd8092cf06c_prometheus_0",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__elements": {},
-  "__requires": [
-    {
-      "type": "panel",
-      "id": "bargauge",
-      "name": "Bar gauge",
-      "version": ""
-    },
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "12.0.2"
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "stat",
-      "name": "Stat",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-    }
-  ],
   "annotations": {
     "list": [
       {
@@ -64,6 +21,19 @@
   "id": null,
   "links": [],
   "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 13,
+      "panels": [],
+      "title": "Planner",
+      "type": "row"
+    },
     {
       "datasource": {
         "type": "prometheus",
@@ -129,7 +99,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -154,7 +124,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(\n  rate(github_runner_planner_webhook_consumed_total[5m])\n)\n+\nsum(\n  rate(github_runner_planner_webhook_discarded_total[5m])\n)",
+          "expr": "sum(rate(github_runner_planner_webhook_consumed_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) + sum(rate(github_runner_planner_webhook_discarded_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -198,7 +168,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 1
       },
       "id": 7,
       "options": {
@@ -226,7 +196,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "max by (flavor) (github_runner_planner_flavor_pressure)",
+          "expr": "max by(flavor) (github_runner_planner_flavor_pressure{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -300,7 +270,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "id": 2,
       "options": {
@@ -324,7 +294,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(github_runner_planner_webhook_consumed_total[5m]))\n/\n(\n  sum(rate(github_runner_planner_webhook_consumed_total[5m]))\n+ sum(rate(github_runner_planner_webhook_discarded_total[5m]))\n)",
+          "expr": "sum(rate(github_runner_planner_webhook_consumed_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) / (sum(rate(github_runner_planner_webhook_consumed_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) + sum(rate(github_runner_planner_webhook_discarded_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -398,7 +368,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 8
+        "y": 9
       },
       "id": 3,
       "options": {
@@ -422,7 +392,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(github_runner_planner_webhook_errors_total[5m]))\n/\n(\n  sum(rate(github_runner_planner_webhook_consumed_total[5m]))\n+ sum(rate(github_runner_planner_webhook_errors_total[5m]))\n)",
+          "expr": "sum(rate(github_runner_planner_webhook_errors_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) / (sum(rate(github_runner_planner_webhook_consumed_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) + sum(rate(github_runner_planner_webhook_errors_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -497,7 +467,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 16
+        "y": 17
       },
       "id": 6,
       "options": {
@@ -521,7 +491,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(github_runner_planner_webhook_job_running_seconds_sum[5m]))\n/\nsum(rate(github_runner_planner_webhook_job_running_seconds_count[5m]))",
+          "expr": "sum(rate(github_runner_planner_webhook_job_running_seconds_sum{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) / sum(rate(github_runner_planner_webhook_job_running_seconds_count{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -596,7 +566,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 16
+        "y": 17
       },
       "id": 5,
       "options": {
@@ -620,7 +590,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
+          "expr": "histogram_quantile(0.5, sum by(le) (rate(github_runner_planner_webhook_job_waiting_seconds_bucket{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])))",
           "instant": false,
           "legendFormat": "Median (p50)",
           "range": true,
@@ -695,7 +665,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 16
+        "y": 17
       },
       "id": 11,
       "options": {
@@ -719,7 +689,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, \nsum by (le) (\n  rate(github_runner_planner_webhook_job_waiting_seconds_bucket[5m])\n  )\n)",
+          "expr": "histogram_quantile(0.95, sum by(le) (rate(github_runner_planner_webhook_job_waiting_seconds_bucket{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])))",
           "instant": false,
           "legendFormat": "95th percentile (p95)",
           "range": true,
@@ -761,7 +731,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 25
       },
       "id": 4,
       "options": {
@@ -797,7 +767,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "topk(20, \nsum by (repo) (\n  increase(github_runner_planner_webhook_job_running_seconds_count[$__range])\n  )\n)",
+          "expr": "topk(20, sum by(repo) (increase(github_runner_planner_webhook_job_running_seconds_count{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__range])))",
           "instant": true,
           "legendFormat": "__auto",
           "range": false,
@@ -872,7 +842,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 25
       },
       "id": 8,
       "options": {
@@ -896,7 +866,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum by (http_route) (\n  rate(http_server_request_duration_seconds_count{\n    juju_charm=\"github-runner-planner\",\n    http_route!=\"\"\n  }[5m])\n)\nor\nsum by (http_route) (\n  label_replace(\n    rate(http_server_request_duration_seconds_count{\n      juju_charm=\"github-runner-planner\",\n      http_route=\"\"\n    }[5m]),\n    \"http_route\",\n    \"unknown\",\n    \"\",\n    \"\"\n  )\n)\n",
+          "expr": "sum by(http_route) (rate(http_server_request_duration_seconds_count{http_route!=\"\",juju_application=~\"$juju_application\",juju_charm=\"github-runner-planner\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) or sum by(http_route) (label_replace(rate(http_server_request_duration_seconds_count{http_route=\"\",juju_application=~\"$juju_application\",juju_charm=\"github-runner-planner\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m]), \"http_route\", \"unknown\", \"\", \"\"))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -971,7 +941,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 33
       },
       "id": 10,
       "options": {
@@ -995,7 +965,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(\n  0.95,\n  sum by (le, http_route) (\n    rate(http_server_request_duration_seconds_bucket{\n      juju_charm=\"github-runner-planner\",\n      http_route!=\"\",\n      http_route!=\"/api/v1/flavors/{name}/pressure\"\n    }[5m])\n  )\n)\nor\nhistogram_quantile(\n  0.95,\n  sum by (le, http_route) (\n    label_replace(\n      rate(http_server_request_duration_seconds_bucket{\n        juju_charm=\"github-runner-planner\",\n        http_route=\"\"\n      }[5m]),\n      \"http_route\",\n      \"unknown\",\n      \"\",\n      \"\"\n    )\n  )\n)\n",
+          "expr": "histogram_quantile(0.95, sum by(le, http_route) (rate(http_server_request_duration_seconds_bucket{http_route!=\"\",http_route!=\"/api/v1/flavors/{name}/pressure\",juju_application=~\"$juju_application\",juju_charm=\"github-runner-planner\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m]))) or histogram_quantile(0.95, sum by(le, http_route) (label_replace(rate(http_server_request_duration_seconds_bucket{http_route=\"\",juju_application=~\"$juju_application\",juju_charm=\"github-runner-planner\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m]), \"http_route\", \"unknown\", \"\", \"\")))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1070,7 +1040,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 33
       },
       "id": 9,
       "options": {
@@ -1094,7 +1064,7 @@
             "uid": "${prometheusds}"
           },
           "editorMode": "code",
-          "expr": "sum by (http_route) (\n  rate(http_server_request_duration_seconds_count{\n    juju_charm=\"github-runner-planner\",\n    http_response_status_code!~\"2..\",\n    http_route!=\"\"\n  }[5m])\n)\nor\nsum by (http_route) (\n  label_replace(\n    rate(http_server_request_duration_seconds_count{\n      juju_charm=\"github-runner-planner\",\n      http_response_status_code!~\"2..\",\n      http_route=\"\"\n    }[5m]),\n    \"http_route\",\n    \"unknown\",\n    \"\",\n    \"\"\n  )\n)\n",
+          "expr": "sum by(http_route) (rate(http_server_request_duration_seconds_count{http_response_status_code!~\"2..\",http_route!=\"\",juju_application=~\"$juju_application\",juju_charm=\"github-runner-planner\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])) or sum by(http_route) (label_replace(rate(http_server_request_duration_seconds_count{http_response_status_code!~\"2..\",http_route=\"\",juju_application=~\"$juju_application\",juju_charm=\"github-runner-planner\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m]), \"http_route\", \"unknown\", \"\", \"\"))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1103,8 +1073,354 @@
       ],
       "title": "Non-2XX request rate (by endpoint)",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 12,
+      "panels": [],
+      "title": "Webhook",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "Webhook gateway inbound/outbound webhooks",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 42
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(github_runner_webhook_gateway_inbound_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "inbound - {{juju_unit}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(github_runner_webhook_gateway_outbound_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]) * -1",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "outbound - {{juju_unit}}",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Webhook Gateway In/Out",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "Webhook redelivery counts by webhook gateway.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cpm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 42
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(github_runner_webhook_redelivery_count_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]) * 60",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "{{juju_unit}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Webhook Redelivery",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "Webhook redelivery errors by webhook gateway.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cpm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 42
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(github_runner_webhook_redelivery_errors_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]) * 60",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "{{juju_unit}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Webhook Redelivery Errors",
+      "type": "timeseries"
     }
   ],
+  "preload": false,
   "schemaVersion": 41,
   "tags": [],
   "templating": {
@@ -1117,6 +1433,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "GitHub Runner Planner",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
