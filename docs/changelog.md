@@ -11,6 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-07-09
 
 - `garm`: fix runner provisioning on proxy-only networks. GARM injects a compiled-in wrapper as the cloud-init install script that must reach the GARM API before any runner-template content runs, so the aproxy bootstrap embedded in the template could never bring up egress in time and runners never registered. The aproxy setup is now delivered as a pre-install script (which GARM runs before the wrapper), apt updates are disabled on boot when a proxy is configured, and `snap set aproxy proxy=` now receives a bare `host:port` as aproxy requires.
+- `garm`: fix a charm crash when a runner fails to provision. GARM reports the IaaS provider error as a base64 string in the instance's `provider_fault`, but the generated GARM API client expected an integer array and raised a validation error, aborting every reconcile until GARM removed the faulted instance. The client is now pinned to a GARM revision that declares its byte fields as base64 strings (upstream GARM #802), so faulted instances deserialize correctly.
 
 ## 2026-07-08
 
