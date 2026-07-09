@@ -1178,7 +1178,7 @@
             "uid": "${prometheusds}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "expr": "rate(github_runner_webhook_gateway_inbound_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -1194,7 +1194,7 @@
             "uid": "${prometheusds}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "expr": "rate(github_runner_webhook_gateway_outbound_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]) * -1",
           "fullMetaSearch": false,
           "hide": false,
@@ -1300,7 +1300,7 @@
             "uid": "${prometheusds}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "expr": "rate(github_runner_webhook_redelivery_count_total{juju_application=~\"$juju_application\",juju_charm=\"github-runner-webhook-gateway\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]) * 60",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
