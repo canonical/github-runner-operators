@@ -37,9 +37,7 @@ class TestGithubApp(unittest.TestCase):
             return GithubApp(
                 app_id = 56,
                 installation_id = 56,
-                private_key_bytes = [
-                    56
-                    ]
+                private_key_bytes = 'YQ=='
             )
         else:
             return GithubApp(

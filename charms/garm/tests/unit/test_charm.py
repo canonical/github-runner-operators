@@ -3,6 +3,7 @@
 
 """Unit tests for GarmCharm."""
 
+import base64
 import os
 import string
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -1083,7 +1084,7 @@ def test_build_desired_credentials_builds_credential_from_relation():
     assert cred.endpoint == DEFAULT_GITHUB_ENDPOINT
     assert cred.app_id == 12345
     assert cred.installation_id == 67890
-    assert cred.private_key_bytes == list(b"PEMDATA")
+    assert cred.private_key_bytes == base64.b64encode(b"PEMDATA").decode("utf-8")
     charm._resolve_secret_value.assert_called_once_with("secret:abc")
 
 

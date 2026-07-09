@@ -22,11 +22,13 @@ charm conventions; this file lists only what's specific to `garm`.
     reconciler modules import these types; **DO** keep `charm_state.py` free of
     rendering/reconciler imports so it can't form an import cycle.
 - **`src/garm_client/` is generated** by `scripts/generate_client.sh` (openapi-generator) —
-  **DON'T** hand-edit it. The script **patches the GARM swagger spec** before generating so
-  the template `data` field (Go `[]byte`, base64 string on the wire) becomes `StrictStr`
-  instead of `List[int]` (GARM issue #796); accordingly `garm_api.py` base64-encodes `data`
-  on create/update. To fix a generated-type issue, change the patch step and re-run, never
-  the output.
+  **DON'T** hand-edit it. The pin (`GARM_COMMIT`) is at a GARM revision that includes upstream's
+  `swagger:strfmt byte` fix (GARM PR #802), so Go `[]byte` fields — the template `data` body and
+  `GithubApp.private_key_bytes` — are declared `type: string, format: byte` in the spec and
+  generate as base64 strings directly; no local swagger patch is needed. Accordingly
+  `garm_api.py` base64-encodes `data` on create/update, and `charm.py` base64-encodes
+  `private_key_bytes` when building a `CredentialSpec`. To fix a generated-type issue, bump
+  `GARM_COMMIT` and re-run the script, never hand-edit the output.
 - GARM serves its API and `/metrics` on one fixed port (`GARM_PORT`); the `app-port` /
   `metrics-port` / `metrics-path` config options have no effect (the charm logs a warning
   rather than blocking). The port is pinned in the `_workload_config` property.

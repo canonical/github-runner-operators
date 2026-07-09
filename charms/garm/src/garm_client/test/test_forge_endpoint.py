@@ -37,9 +37,7 @@ class TestForgeEndpoint(unittest.TestCase):
             return ForgeEndpoint(
                 api_base_url = '',
                 base_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 description = '',
                 endpoint_type = '',

@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **api_base_url** | **str** |  | [optional] 
 **base_url** | **str** |  | [optional] 
-**ca_cert_bundle** | **List[int]** |  | [optional] 
+**ca_cert_bundle** | **bytes** |  | [optional] 
 **created_at** | **datetime** |  | [optional] 
 **description** | **str** |  | [optional] 
 **endpoint_type** | **str** |  | [optional] 

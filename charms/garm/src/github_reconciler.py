@@ -5,7 +5,7 @@
 """GitHub reconciler: diffs desired vs observed GARM GitHub credentials."""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from garm_api import GarmApiError, GarmAuthenticatedClient
 from garm_client.models.create_github_credentials_params import CreateGithubCredentialsParams
@@ -29,7 +29,7 @@ class CredentialSpec:
     endpoint: str
     app_id: int
     installation_id: int
-    private_key_bytes: list[int] = field(default_factory=list)
+    private_key_bytes: str = ""
     description: str = ""
 
 

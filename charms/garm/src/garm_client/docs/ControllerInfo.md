@@ -6,7 +6,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **agent_url** | **str** | AgentURL is the URL where the GARM agent will connect. If set behind a reverse proxy, this URL must be configured to allow websocket connections. | [optional] 
-**ca_cert_bundle** | **List[int]** | CACertBundle holds a certificate bundle meant to validate the certificate used by GARM itself. This can be just the root certificate that can validate the GARM TLS certificate, a chain or multiple root CAs. | [optional] 
+**ca_cert_bundle** | **bytes** | CACertBundle holds a certificate bundle meant to validate the certificate used by GARM itself. This can be just the root certificate that can validate the GARM TLS certificate, a chain or multiple root CAs. | [optional] 
 **cached_garm_agent_release_fetched_at** | **datetime** | CachedGARMAgentReleaseFetchedAt is the timestamp when the release data was last fetched from GARMAgentReleasesURL | [optional] 
 **callback_url** | **str** | CallbackURL is the URL where instances can send updates back to the controller. This URL is used by instances to send status updates back to the controller. The URL itself may be made available to instances via a reverse proxy or a load balancer. That means that the user is responsible for telling GARM what the public URL is, by setting this field. | [optional] 
 **controller_id** | **UUID** | ControllerID is the unique ID of this controller. This ID gets generated automatically on controller init. | [optional] 

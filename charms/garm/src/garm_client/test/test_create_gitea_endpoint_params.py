@@ -37,9 +37,7 @@ class TestCreateGiteaEndpointParams(unittest.TestCase):
             return CreateGiteaEndpointParams(
                 api_base_url = '',
                 base_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 description = '',
                 name = '',
                 tools_metadata_url = '',

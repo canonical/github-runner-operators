@@ -38,7 +38,7 @@ def _cred_spec(
         endpoint=endpoint,
         app_id=app_id,
         installation_id=installation_id,
-        private_key_bytes=private_key_bytes or [1, 2, 3],
+        private_key_bytes=private_key_bytes or "AQID",
         description=description,
     )
 
@@ -72,7 +72,7 @@ def test_create_credential_when_missing():
     assert params.endpoint == "github.com"
     assert params.app.app_id == 123
     assert params.app.installation_id == 456
-    assert params.app.private_key_bytes == [1, 2, 3]
+    assert params.app.private_key_bytes == "AQID"
 
 
 def test_update_adoptable_credential_when_description_changed():

@@ -10,6 +10,7 @@ import pytest
 
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
 from garm_client.exceptions import ApiException
+from garm_client.models.instance import Instance
 
 BASE_URL = "http://127.0.0.1:9997/api/v1"
 
@@ -541,6 +542,19 @@ def test_update_template_base64_encodes_data():
             client.update_template(template_id=3, data=data)
     body = MockApi.return_value.update_template.call_args.kwargs["body"]
     assert body.data == base64.b64encode(data).decode("utf-8")
+
+
+def test_instance_deserializes_populated_provider_fault():
+    """
+    arrange: A raw API response dict for an Instance with a populated base64 provider_fault,
+        matching GARM's wire format for a runner that failed to bootstrap on its provider.
+    act: Deserialize the dict via Instance.from_dict().
+    assert: Deserialization succeeds and provider_fault round-trips as the base64 string.
+    """
+    fault = base64.b64encode(b"boom: quota exceeded").decode("utf-8")
+    instance = Instance.from_dict({"name": "runner-1", "provider_fault": fault})
+    assert instance is not None
+    assert instance.provider_fault == fault
 
 
 @pytest.mark.parametrize(

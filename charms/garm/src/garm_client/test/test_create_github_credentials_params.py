@@ -38,9 +38,7 @@ class TestCreateGithubCredentialsParams(unittest.TestCase):
                 app = garm_client.models.github_app.GithubApp(
                     app_id = 56, 
                     installation_id = 56, 
-                    private_key_bytes = [
-                        56
-                        ], ),
+                    private_key_bytes = 'YQ==', ),
                 auth_type = '',
                 description = '',
                 endpoint = '',

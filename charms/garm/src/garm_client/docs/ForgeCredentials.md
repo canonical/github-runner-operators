@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 **api_base_url** | **str** |  | [optional] 
 **auth_type** | **str** |  | [optional] 
 **base_url** | **str** |  | [optional] 
-**ca_bundle** | **List[int]** |  | [optional] 
+**ca_bundle** | **bytes** |  | [optional] 
 **created_at** | **datetime** |  | [optional] 
 **description** | **str** |  | [optional] 
 **endpoint** | [**ForgeEndpoint**](ForgeEndpoint.md) |  | [optional] 
