@@ -161,12 +161,17 @@ def test_render_aproxy_pre_install_script_happy_path():
     assert "10.0.0.0/8" in result
     assert "127.0.0.0/8" in result
     assert "counter dnat to \\$default-ipv4:54969" in result
-    assert "/etc/nftables.conf" in result
+
+    # The ruleset is piped straight into the kernel (single-use VM, no reboot),
+    # not persisted to a file or nftables.service.
+    assert "nft -f -" in result
+    assert "/etc/nftables.conf" not in result
+    assert "systemctl enable nftables" not in result
 
     # The nftables redirect must be gated on aproxy actually listening — a DNAT
     # to a dead :54969 would black-hole all egress rather than fall back.
     assert "snap services aproxy" in result
-    assert result.index("snap services aproxy") < result.index("nft -f /etc/nftables.conf")
+    assert result.index("snap services aproxy") < result.index("nft -f -")
 
     # Failures are logged so a broken bootstrap is visible in the console logs.
     assert "[aproxy-bootstrap]" in result

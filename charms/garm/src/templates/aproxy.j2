@@ -28,8 +28,13 @@ if ! snap set aproxy proxy={{ proxy_host_port }} listen=:54969; then
     exit 0
 fi
 
-nft delete table ip aproxy 2>/dev/null || true
-cat << EOF > /etc/nftables.conf
+# Only redirect once aproxy is actually listening; otherwise the DNAT would
+# black-hole all :80/:443 egress by sending it to a dead port. Runner VMs are
+# single-use and never reboot, so the ruleset is piped straight into the kernel
+# rather than persisted to a file and reloaded by nftables.service on boot.
+if snap services aproxy 2>/dev/null | grep -q active; then
+    log "aproxy is listening; applying nftables redirect"
+    nft -f - << EOF
 define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \K\S+') | grep -oP 'src \K\S+')
 table ip aproxy {
       set exclude {
@@ -47,13 +52,6 @@ table ip aproxy {
       }
 }
 EOF
-systemctl enable nftables.service
-
-# Only redirect once aproxy is actually listening; otherwise the DNAT would
-# black-hole all :80/:443 egress by sending it to a dead port.
-if snap services aproxy 2>/dev/null | grep -q active; then
-    log "aproxy is listening; applying nftables redirect"
-    nft -f /etc/nftables.conf
 else
     log "ERROR: aproxy service is not active; leaving egress unchanged (no redirect)"
 fi
