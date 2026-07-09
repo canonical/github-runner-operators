@@ -1,14 +1,33 @@
 #!/bin/bash
-# Best-effort proxy bootstrap, deliberately without strict-mode shell options:
-# a failure here must never abort the rest of GARM's pre-install/install-runner
-# sequence.
+# aproxy proxy bootstrap, delivered as a GARM pre-install script so it runs
+# before the runner-install wrapper. cloud-init runs each pre-install script as
+# its own runcmd entry and continues past a non-zero exit, so strict mode here
+# would not protect GARM's sequence anyway -- a failure already surfaces
+# downstream as the wrapper's curl to the GARM API failing. Instead we log each
+# step (to /var/log/cloud-init-output.log and the serial console) so a broken
+# proxy bootstrap is diagnosable, and we install the nftables redirect only once
+# aproxy is actually listening: a DNAT to a dead :54969 would black-hole all
+# :80/:443 egress instead of leaving the box on whatever path it had.
+
+log() { echo "[aproxy-bootstrap] $*"; }
 
 # snapd itself needs the proxy to reach the snap store before aproxy exists.
 snap set system proxy.http={{ proxy }}
 snap set system proxy.https={{ proxy }}
 
-snap install aproxy --edge
-snap set aproxy proxy={{ proxy_host_port }} listen=:54969
+log "installing aproxy snap"
+# A non-zero exit is expected when aproxy is already baked into the image; only
+# bail if the snap is genuinely absent afterwards.
+if ! snap install aproxy --edge && ! snap list aproxy >/dev/null 2>&1; then
+    log "ERROR: aproxy install failed and the snap is not present; skipping redirect"
+    exit 0
+fi
+
+if ! snap set aproxy proxy={{ proxy_host_port }} listen=:54969; then
+    log "ERROR: failed to point aproxy at the upstream proxy; skipping redirect"
+    exit 0
+fi
+
 nft delete table ip aproxy 2>/dev/null || true
 cat << EOF > /etc/nftables.conf
 define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \K\S+') | grep -oP 'src \K\S+')
@@ -29,4 +48,12 @@ table ip aproxy {
 }
 EOF
 systemctl enable nftables.service
-nft -f /etc/nftables.conf
+
+# Only redirect once aproxy is actually listening; otherwise the DNAT would
+# black-hole all :80/:443 egress by sending it to a dead port.
+if snap services aproxy 2>/dev/null | grep -q active; then
+    log "aproxy is listening; applying nftables redirect"
+    nft -f /etc/nftables.conf
+else
+    log "ERROR: aproxy service is not active; leaving egress unchanged (no redirect)"
+fi

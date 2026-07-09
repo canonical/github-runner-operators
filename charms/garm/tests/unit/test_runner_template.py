@@ -163,6 +163,15 @@ def test_render_aproxy_pre_install_script_happy_path():
     assert "counter dnat to \\$default-ipv4:54969" in result
     assert "/etc/nftables.conf" in result
 
+    # The nftables redirect must be gated on aproxy actually listening — a DNAT
+    # to a dead :54969 would black-hole all egress rather than fall back.
+    assert "snap services aproxy" in result
+    assert result.index("snap services aproxy") < result.index("nft -f /etc/nftables.conf")
+
+    # Failures are logged so a broken bootstrap is visible in the console logs.
+    assert "[aproxy-bootstrap]" in result
+    assert "ERROR" in result
+
 
 @pytest.mark.parametrize(
     "proxy, expected",
