@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-09
+
+- `garm`: fix runner provisioning on proxy-only networks. GARM injects a compiled-in wrapper as the cloud-init install script that must reach the GARM API before any runner-template content runs, so the aproxy bootstrap embedded in the template could never bring up egress in time and runners never registered. The aproxy setup is now delivered as a pre-install script (which GARM runs before the wrapper), apt updates are disabled on boot when a proxy is configured, and `snap set aproxy proxy=` now receives a bare `host:port` as aproxy requires.
+
 ## 2026-07-08
 
 -  Add webhook gateway dashboard panels: three new panels show webhook ingestion, webhook delivery, and webhook redelivery for the webhook gateway. The panels are co-located in the planner dashboard for a better viewing experience, making webhook-related errors such as delivery failures easier to monitor.

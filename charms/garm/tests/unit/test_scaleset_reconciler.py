@@ -7,8 +7,10 @@ import base64
 
 import pytest
 
+from charm_state import RunnerConfig
 from garm_client.models.template import Template
-from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
+from runner_template import build_template_data
+from scaleset_reconciler import ScalesetReconciler, ScalesetSpec, _effective_extra_specs
 
 
 class _FakeProvider:
@@ -138,8 +140,6 @@ def _spec(
     template_id=None,
     runner_config=None,
 ):
-    from charm_state import RunnerConfig
-
     return ScalesetSpec(
         name=name,
         provider_name=provider_name,
@@ -359,7 +359,8 @@ def test_pre_install_scripts_passed_in_create():
     """
     arrange: FakeGarmClient with provider registered and no existing scalesets.
     act: Reconcile a spec containing pre_install_scripts.
-    assert: Created scaleset params include extra_specs with the script mapping.
+    assert: Created scaleset params include extra_specs with the base64-encoded script
+        mapping (GARM's extra_specs field is map[string][]byte on the wire).
     """
     scripts = {"setup.sh": "#!/bin/bash\napt-get update"}
     client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
@@ -367,7 +368,135 @@ def test_pre_install_scripts_passed_in_create():
 
     assert len(client.created) == 1
     _, _, params = client.created[0]
-    assert params.extra_specs == {"pre_install_scripts": scripts}
+    assert params.extra_specs == {
+        "pre_install_scripts": {
+            name: base64.b64encode(content.encode()).decode() for name, content in scripts.items()
+        }
+    }
+
+
+def test_aproxy_pre_install_script_injected_when_proxy_configured():
+    """
+    arrange: A spec with runner_config.runner_http_proxy set and one operator script.
+    act: Reconcile a create.
+    assert: The created params disable cloud-init package upgrades and carry both the
+        operator script and a "00-aproxy" entry (sorts first) whose decoded content
+        configures aproxy for the given proxy.
+    """
+
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(
+        client,
+        [
+            _spec(
+                pre_install_scripts={"pre_install.sh": "echo operator-script"},
+                runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"),
+            )
+        ],
+    )
+
+    assert len(client.created) == 1
+    _, _, params = client.created[0]
+    assert params.extra_specs["disable_updates"] is True
+    scripts = params.extra_specs["pre_install_scripts"]
+    assert set(scripts.keys()) == {"00-aproxy", "pre_install.sh"}
+    aproxy_script = base64.b64decode(scripts["00-aproxy"]).decode()
+    assert "snap set aproxy proxy=squid.internal:3128" in aproxy_script
+
+
+def test_no_update_when_extra_specs_already_match_encoded_desired_state():
+    """
+    arrange: An observed scaleset whose extra_specs already carry the base64-encoded
+        aproxy + operator scripts and disable_updates, matching the desired spec.
+    act: Reconcile that spec.
+    assert: No update is issued.
+    """
+
+    proxy = "http://squid.internal:3128"
+    spec = _spec(
+        pre_install_scripts={"pre_install.sh": "echo operator-script"},
+        runner_config=RunnerConfig(runner_http_proxy=proxy),
+    )
+
+    extra_specs = _effective_extra_specs(spec)
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=extra_specs)],
+    )
+    _reconcile(client, [spec])
+
+    assert client.updated == []
+
+
+def test_update_when_observed_scripts_are_legacy_raw_text():
+    """
+    arrange: An observed scaleset whose extra_specs carry raw-text (unencoded) script
+        values from before base64-encoding was introduced.
+    act: Reconcile a spec whose desired scripts are the same content.
+    assert: An update is issued (the raw-text value never matches the encoded desired one).
+    """
+
+    spec = _spec(
+        pre_install_scripts={"pre_install.sh": "echo operator-script"},
+        runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"),
+    )
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[
+            _existing_scaleset(
+                extra_specs={
+                    "disable_updates": True,
+                    "pre_install_scripts": {"pre_install.sh": "echo operator-script"},
+                }
+            )
+        ],
+    )
+    _reconcile(client, [spec])
+
+    assert len(client.updated) == 1
+
+
+def test_update_when_disable_updates_missing_but_proxy_configured():
+    """
+    arrange: An observed scaleset whose extra_specs carry the correctly-encoded scripts
+        but lack disable_updates, while the spec configures a proxy.
+    act: Reconcile that spec.
+    assert: An update is issued to set disable_updates.
+    """
+
+    spec = _spec(runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"))
+    extra_specs = _effective_extra_specs(spec)
+    del extra_specs["disable_updates"]
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=extra_specs)],
+    )
+    _reconcile(client, [spec])
+
+    assert len(client.updated) == 1
+
+
+def test_update_clears_extra_specs_with_empty_dict_when_proxy_removed():
+    """
+    arrange: An observed scaleset carrying aproxy extra_specs, and a desired spec with no
+        proxy (and no operator scripts) so the effective extra_specs are empty.
+    act: Reconcile that spec.
+    assert: The update sends an explicit empty dict — not None, which exclude_none would
+        drop, leaving the stale extra_specs (and looping forever).
+    """
+
+    stale = _effective_extra_specs(
+        _spec(runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"))
+    )
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=stale)],
+    )
+    _reconcile(client, [_spec(runner_config=RunnerConfig())])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.extra_specs == {}
 
 
 class _FakeTemplate:
@@ -434,7 +563,6 @@ _SYSTEM_TEMPLATE = _FakeTemplate("github_linux", tid=1, data=b"#!/bin/bash\nset 
 
 def _spec_with_runner_config(**rc_kwargs):
     """Build a spec with runner_config populated from the given kwargs."""
-    from charm_state import RunnerConfig
 
     return _spec(runner_config=RunnerConfig(**rc_kwargs))
 
@@ -500,7 +628,6 @@ def test_template_created_from_charmed_template_when_scaleset_references_it():
     act: Reconcile the desired spec.
     assert: The custom template is derived from the charmed template rather than the bare system one.
     """
-    from charm_state import RunnerConfig
 
     client = _TemplateTrackingClient(
         providers=["openstack-demo"],
@@ -536,8 +663,6 @@ def test_template_updated_when_runner_config_changes():
     act: Reconcile with a changed runner config.
     assert: The custom template is updated (not recreated); the scaleset template_id is unchanged.
     """
-    from charm_state import RunnerConfig
-    from runner_template import build_template_data
 
     old_config = RunnerConfig(dockerhub_mirror="https://old.example.com")
     custom_template = _FakeTemplate(

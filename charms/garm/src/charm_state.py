@@ -102,6 +102,7 @@ class RunnerConfig:
         )
         values["otel_collector_endpoint"] = _strip_newlines(values["otel_collector_endpoint"])
         values["dockerhub_mirror"] = _strip_newlines(values["dockerhub_mirror"])
+        values["runner_http_proxy"] = _strip_newlines(values["runner_http_proxy"])
         return cls(**values)
 
     def has_config(self) -> bool:

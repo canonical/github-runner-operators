@@ -4,17 +4,25 @@
 """Render runner-behaviour options into a GARM runner-install template.
 
 GARM stores the runner-install script as a server-side template that a
-scaleset references by ``template_id``. The six operator-facing runner options
-(docker mirror, proxy/aproxy, telemetry, pre-job hook) are delivered by copying
-GARM's system ``github_linux`` template and injecting two blocks right after the
+scaleset references by ``template_id``. Three of the six operator-facing runner
+options (docker mirror, telemetry, pre-job hook) are delivered by copying GARM's
+system ``github_linux`` template and injecting two blocks right after the
 shebang — before the base template's ``set -e`` — so a best-effort step can never
 abort the whole bootstrap:
 
   * a *pre-install* block that runs as root before the runner is installed
-    (aproxy, docker registry mirror, static host prep), and
+    (docker registry mirror, static host prep), and
   * a *runner job hooks* block that writes the GitHub job-start hook and the
     runner ``env`` file under ``/home/runner/actions-runner`` (GARM hardcodes the
     ``runner`` user and that path).
+
+The proxy/aproxy option is *not* injected into this template: GARM prepends a
+compiled-in wrapper script that curls this template from the GARM metadata API
+before any of its content runs, so proxy bootstrap embedded in the template
+could never help that curl succeed on a proxy-only network. It is instead
+rendered by :func:`render_aproxy_pre_install_script` and delivered as a
+``pre_install_scripts`` extra-spec entry (see ``scaleset_reconciler``), which
+GARM runs, as root, before the wrapper.
 
 The reconciler creates/updates the per-scaleset template with the bytes returned
 by :func:`build_template_data` and only does so when :meth:`RunnerConfig.has_config`
@@ -29,6 +37,7 @@ off throughout: the output is shell/YAML, not HTML.
 import json
 import pathlib
 import shlex
+import urllib.parse
 
 import jinja2
 
@@ -102,12 +111,11 @@ def render_pre_install(config: RunnerConfig) -> str:
     Returns:
         A bash snippet, terminated by a newline.
     """
-    aproxy = _render_aproxy(config) if config.runner_http_proxy else ""
     dockerhub = (
         _render_dockerhub_mirror(config.dockerhub_mirror) if config.dockerhub_mirror else ""
     )
     return _PRE_INSTALL_TEMPLATE.render(
-        aproxy=aproxy, dockerhub=dockerhub, static_prep=_render_static_host_prep()
+        dockerhub=dockerhub, static_prep=_render_static_host_prep()
     )
 
 
@@ -154,6 +162,60 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
         prejob_delim=prejob_delim,
         env_delim=env_delim,
     )
+
+
+def render_aproxy_pre_install_script(config: RunnerConfig) -> str:
+    """Render the standalone aproxy bootstrap script.
+
+    The script installs aproxy, points it and the snap store at the configured
+    proxy, and writes an nftables DNAT ruleset that transparently redirects
+    egress traffic to aproxy's listener, both for locally-initiated connections
+    (``output`` chain) and forwarded ones (``prerouting`` chain).
+
+    Args:
+        config: The runner options (uses proxy, exclude addresses, redirect ports).
+
+    Returns:
+        A complete best-effort bash script (shebang first line, deliberately no
+        ``set -e``) configuring aproxy as a transparent forward proxy.
+    """
+    # Values are already validated at parse time (RunnerConfig.from_databag); only
+    # shell-safe embedding (quoting, the empty-string split guard below) happens here.
+    ports = [t for t in config.aproxy_redirect_ports.split(",") if t] or ["80", "443"]
+    nft_ports = ", ".join(ports)
+    excludes = [t for t in config.aproxy_exclude_addresses.split(",") if t]
+    exclude_elements = ", ".join(["127.0.0.0/8", *excludes])
+    # `\$default-ipv4` stays escaped so the literal two characters `$default-ipv4`
+    # land in the file, which nft itself resolves against the `define` above when
+    # it loads the file.
+    dnat_rule = (
+        f"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \\$default-ipv4:54969"
+    )
+    return _APROXY_TEMPLATE.render(
+        proxy=shlex.quote(config.runner_http_proxy),
+        proxy_host_port=shlex.quote(_proxy_host_port(config.runner_http_proxy)),
+        exclude_elements=exclude_elements,
+        dnat_rule=dnat_rule,
+    )
+
+
+def _proxy_host_port(proxy: str) -> str:
+    """Return the bare authority (``host:port``, optionally ``user:pass@``) of a proxy.
+
+    aproxy rejects a full URL for its ``proxy=`` setting, unlike ``snap set
+    system proxy.http/https=``, so it needs the scheme stripped. The URL
+    ``netloc`` is returned verbatim, preserving userinfo and IPv6 brackets that
+    ``urlsplit().hostname`` would drop. Accepts a URL (``http://host:port``) or
+    an already-bare ``host:port``.
+
+    Args:
+        proxy: The configured proxy value, with or without a URL scheme.
+
+    Returns:
+        The proxy authority with any scheme and path removed.
+    """
+    candidate = proxy if "//" in proxy else f"//{proxy}"
+    return urllib.parse.urlsplit(candidate).netloc
 
 
 def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
@@ -205,40 +267,6 @@ def _render_custom_pre_job_script(script: str) -> str:
     """
     delim = _heredoc_delimiter(script, "GARM_CHARM_CUSTOM_PREJOB")
     return _CUSTOM_PRE_JOB_SCRIPT_TEMPLATE.render(delim=delim, script=script)
-
-
-def _render_aproxy(config: RunnerConfig) -> str:
-    """Render aproxy install + nftables redirect rules.
-
-    aproxy listens on ``:54969`` and an nftables DNAT ruleset (written to
-    ``/etc/nftables.conf``) redirects egress traffic to it, both for
-    locally-initiated connections (``output`` chain) and forwarded ones
-    (``prerouting`` chain).
-
-    Args:
-        config: The runner options (uses proxy, exclude addresses, redirect ports).
-
-    Returns:
-        A bash snippet configuring aproxy as a transparent forward proxy.
-    """
-    # Values are already validated at parse time (RunnerConfig.from_databag); only
-    # shell-safe embedding (quoting, the empty-string split guard below) happens here.
-    ports = [t for t in config.aproxy_redirect_ports.split(",") if t] or ["80", "443"]
-    nft_ports = ", ".join(ports)
-    excludes = [t for t in config.aproxy_exclude_addresses.split(",") if t]
-    exclude_elements = ", ".join(["127.0.0.0/8", *excludes])
-    # `\$default-ipv4` stays escaped so the literal two characters `$default-ipv4`
-    # land in the file, which nft itself resolves against the `define` above when
-    # it loads the file.
-    dnat_rule = (
-        f"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \\$default-ipv4:54969"
-    )
-
-    return _APROXY_TEMPLATE.render(
-        proxy=shlex.quote(config.runner_http_proxy),
-        exclude_elements=exclude_elements,
-        dnat_rule=dnat_rule,
-    )
 
 
 def _render_dockerhub_mirror(mirror: str) -> str:

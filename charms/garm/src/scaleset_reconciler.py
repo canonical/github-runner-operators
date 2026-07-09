@@ -14,13 +14,18 @@ from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.scale_set import ScaleSet
 from garm_client.models.template import Template
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
-from runner_template import build_template_data
+from runner_template import build_template_data, render_aproxy_pre_install_script
 
 logger = logging.getLogger(__name__)
 
 # GARM seeds a non-editable system template per forge/OS; we copy this one to
 # build per-scaleset runner templates carrying the operator's runner options.
 SYSTEM_TEMPLATE_NAME = "github_linux"
+
+# GARM runs pre-install scripts in lexicographic key order; "00-aproxy" sorts
+# before the configurator's "pre_install.sh", so the proxy is up before any
+# operator-supplied script runs.
+APROXY_SCRIPT_NAME = "00-aproxy"
 
 
 @dataclass
@@ -345,9 +350,6 @@ class ScalesetReconciler:
         Raises:
             ValidationError: If the spec data fails Pydantic model validation.
         """
-        extra_specs: dict[str, object] = {}
-        if spec.pre_install_scripts:
-            extra_specs["pre_install_scripts"] = spec.pre_install_scripts
         return CreateScaleSetParams.model_validate(
             {
                 "name": spec.name,
@@ -361,7 +363,7 @@ class ScalesetReconciler:
                 "enabled": True,
                 "labels": sorted(spec.labels),
                 "github_runner_group": spec.runner_group or None,
-                "extra_specs": extra_specs or None,
+                "extra_specs": _effective_extra_specs(spec) or None,
                 "template_id": spec.template_id,
             }
         )
@@ -404,10 +406,13 @@ class ScalesetReconciler:
             logger.debug("Scaleset %s is up to date", spec.name)
             return
 
-        extra_specs: dict[str, object] = {}
-        if spec.pre_install_scripts:
-            extra_specs["pre_install_scripts"] = spec.pre_install_scripts
-
+        # UpdateScaleSetParams omits None fields (exclude_none), so None can only
+        # leave extra_specs untouched, never clear them. Send an explicit empty
+        # dict when the desired specs are empty but the scaleset still carries
+        # some (e.g. a proxy was unset) — otherwise a stale aproxy script would
+        # persist and _needs_update would loop forever trying to converge.
+        desired_extra = _effective_extra_specs(spec)
+        extra_specs = desired_extra or ({} if observed.extra_specs else None)
         params = UpdateScaleSetParams(
             image=spec.image,
             flavor=spec.flavor,
@@ -415,7 +420,7 @@ class ScalesetReconciler:
             max_runners=spec.max_runners,
             enabled=True,
             runner_group=spec.runner_group or None,
-            extra_specs=extra_specs or None,
+            extra_specs=extra_specs,
             template_id=spec.template_id,
         )
         # Send template_id when the scaleset has, or had, a custom template — a 0
@@ -431,7 +436,10 @@ class ScalesetReconciler:
 
     @staticmethod
     def _needs_update(observed: ScaleSet, spec: ScalesetSpec, template_id: int) -> bool:
-        observed_scripts = (observed.extra_specs or {}).get("pre_install_scripts", {})
+        # GARM round-trips extra_specs exactly as sent, so the observed script
+        # values are base64 like the desired ones — compare them encoded.
+        observed_extra = observed.extra_specs or {}
+        desired_extra = _effective_extra_specs(spec)
         return (
             observed.image != spec.image
             or observed.flavor != spec.flavor
@@ -439,6 +447,42 @@ class ScalesetReconciler:
             or observed.min_idle_runners != spec.min_idle_runners
             or observed.enabled is not True
             or observed.github_runner_group != (spec.runner_group or None)
-            or observed_scripts != spec.pre_install_scripts
+            or observed_extra.get("pre_install_scripts", {})
+            != desired_extra.get("pre_install_scripts", {})
+            or bool(observed_extra.get("disable_updates"))
+            != bool(desired_extra.get("disable_updates"))
             or (observed.template_id or 0) != template_id
         )
+
+
+def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
+    """Build the scaleset extra_specs a spec should produce.
+
+    Single source of truth for create, update, and drift detection: combines the
+    operator-supplied pre-install scripts with the charm's aproxy bootstrap and
+    the ``disable_updates`` flag when a runner proxy is configured.
+
+    Args:
+        spec: The desired scaleset.
+
+    Returns:
+        The extra_specs dict, with all script values base64-encoded (GARM decodes
+        ``pre_install_scripts`` as ``map[string][]byte``); empty when the spec
+        yields no extra specs.
+    """
+    scripts = dict(spec.pre_install_scripts)
+    extra_specs: dict[str, object] = {}
+    if spec.runner_config.runner_http_proxy:
+        # The aproxy bootstrap must run before GARM's compiled-in install wrapper
+        # (which needs egress to fetch the runner template), hence a pre-install
+        # script rather than template content.
+        scripts[APROXY_SCRIPT_NAME] = render_aproxy_pre_install_script(spec.runner_config)
+        # cloud-init's apt upgrade runs before any pre-install script, so it can
+        # never use the proxy — skip it instead of timing out on every mirror.
+        extra_specs["disable_updates"] = True
+    if scripts:
+        extra_specs["pre_install_scripts"] = {
+            name: base64.b64encode(content.encode("utf-8")).decode("utf-8")
+            for name, content in scripts.items()
+        }
+    return extra_specs

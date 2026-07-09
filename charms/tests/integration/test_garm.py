@@ -870,7 +870,8 @@ def test_runner_options_render_into_scaleset_template(
         registered so a scaleset can be created.
     act: Set the runner-behaviour config options on the configurator charm.
     assert: The scaleset references a custom template whose rendered content
-        reflects each runner option — proving the options reach GARM via live
+        reflects each template-delivered runner option, and its extra_specs carry
+        the aproxy pre-install script — proving the options reach GARM via live
         reconcile (no upgrade).
     """
     address = _get_garm_address(juju, configurator_garm)
@@ -898,16 +899,12 @@ def test_runner_options_render_into_scaleset_template(
         delay=10,
     )
 
-    # One marker per config option, proving each reaches GARM via live reconcile:
-    # dockerhub-mirror (daemon.json + env var), runner-http-proxy + aproxy-*
-    # (aproxy listener and nftables ruleset), otel-collector-endpoint (env var),
-    # and pre-job-script (job-start hook).
+    # One marker per template-delivered config option, proving each reaches GARM
+    # via live reconcile: dockerhub-mirror (daemon.json + env var),
+    # otel-collector-endpoint (env var), and pre-job-script (job-start hook).
     expected_markers = (
         "registry-mirrors",
         "DOCKERHUB_MIRROR=https://mirror.example.com",
-        "proxy=http://proxy.example.com:3128 listen=:54969",
-        "192.168.0.0/16",
-        "tcp dport { 80, 443 }",
         "ACTION_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.example.com:4318",
         "echo integration-marker",
     )
@@ -919,3 +916,18 @@ def test_runner_options_render_into_scaleset_template(
         _SCALESET_TEST_NAME,
         expected_markers,
     )
+
+    # runner-http-proxy + aproxy-* are delivered as a pre-install script via the
+    # scaleset's extra_specs (they must run before GARM's install wrapper), not
+    # via the template.
+    scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+    extra_specs = scaleset.get("extra_specs") or {}
+    assert extra_specs.get("disable_updates") is True, (
+        f"Expected disable_updates in extra_specs, got: {extra_specs}"
+    )
+    aproxy_encoded = (extra_specs.get("pre_install_scripts") or {}).get("00-aproxy")
+    assert aproxy_encoded, f"Expected a 00-aproxy pre-install script, got: {extra_specs}"
+    aproxy_script = base64.b64decode(aproxy_encoded).decode()
+    assert "proxy=proxy.example.com:3128 listen=:54969" in aproxy_script
+    assert "192.168.0.0/16" in aproxy_script
+    assert "tcp dport { 80, 443 }" in aproxy_script
