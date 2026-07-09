@@ -10,6 +10,8 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-09
 
+- `garm`: apply the Docker registry mirror and runner host preparation on the runner. GARM runs the injected runner-install steps as the unprivileged `runner` user, but the Docker-mirror and host-prep steps ran without `sudo`, so writing `/etc/docker/daemon.json`, restarting Docker, and adding the runner to the `lxd`/`adm` groups all failed silently — the mirror and group membership were never applied. These steps now escalate with `sudo`, matching the rest of the install script.
+
 - `garm`: fix runner provisioning on proxy-only networks. GARM injects a compiled-in wrapper as the cloud-init install script that must reach the GARM API before any runner-template content runs, so the aproxy bootstrap embedded in the template could never bring up egress in time and runners never registered. The aproxy setup is now delivered as a pre-install script (which GARM runs before the wrapper), apt updates are disabled on boot when a proxy is configured, and `snap set aproxy proxy=` now receives a bare `host:port` as aproxy requires.
 
 ## 2026-07-08

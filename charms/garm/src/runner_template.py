@@ -10,7 +10,8 @@ system ``github_linux`` template and injecting two blocks right after the
 shebang — before the base template's ``set -e`` — so a best-effort step can never
 abort the whole bootstrap:
 
-  * a *pre-install* block that runs as root before the runner is installed
+  * a *pre-install* block that runs before the runner is installed, as the
+    unprivileged ``runner`` user, escalating each privileged step with ``sudo``
     (docker registry mirror, static host prep), and
   * a *runner job hooks* block that writes the GitHub job-start hook and the
     runner ``env`` file under ``/home/runner/actions-runner`` (GARM hardcodes the
@@ -103,7 +104,7 @@ def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
 
 
 def render_pre_install(config: RunnerConfig) -> str:
-    """Render the root pre-install block (runs before the runner is installed).
+    """Render the pre-install block (runs before the runner is installed).
 
     Args:
         config: The runner options to render.
