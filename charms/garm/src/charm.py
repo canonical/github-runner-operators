@@ -4,7 +4,6 @@
 
 """GARM charm entrypoint."""
 
-import base64
 import dataclasses
 import hashlib
 import json
@@ -884,7 +883,7 @@ class GarmCharm(paas_charm.go.Charm):
                     endpoint=DEFAULT_GITHUB_ENDPOINT,
                     app_id=app_id,
                     installation_id=installation_id,
-                    private_key_bytes=base64.b64encode(private_key.encode()).decode("utf-8"),
+                    private_key=private_key,
                     description=MANAGED_CREDENTIAL_DESCRIPTION,
                 )
 

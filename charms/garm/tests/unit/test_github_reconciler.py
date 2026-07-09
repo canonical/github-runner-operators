@@ -3,6 +3,7 @@
 
 """Unit tests for the GitHub reconciler."""
 
+import base64
 from unittest.mock import MagicMock
 
 from garm_api import GarmApiError
@@ -30,7 +31,7 @@ def _cred_spec(
     endpoint="github.com",
     app_id=123,
     installation_id=456,
-    private_key_bytes=None,
+    private_key=None,
     description="",
 ):
     return CredentialSpec(
@@ -38,7 +39,7 @@ def _cred_spec(
         endpoint=endpoint,
         app_id=app_id,
         installation_id=installation_id,
-        private_key_bytes=private_key_bytes or "AQID",
+        private_key=private_key or "-----PEM-----",
         description=description,
     )
 
@@ -72,7 +73,7 @@ def test_create_credential_when_missing():
     assert params.endpoint == "github.com"
     assert params.app.app_id == 123
     assert params.app.installation_id == 456
-    assert params.app.private_key_bytes == "AQID"
+    assert params.app.private_key_bytes == base64.b64encode(b"-----PEM-----").decode("utf-8")
 
 
 def test_update_adoptable_credential_when_description_changed():

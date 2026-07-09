@@ -4,6 +4,7 @@
 
 """GitHub reconciler: diffs desired vs observed GARM GitHub credentials."""
 
+import base64
 import logging
 from dataclasses import dataclass
 
@@ -29,7 +30,7 @@ class CredentialSpec:
     endpoint: str
     app_id: int
     installation_id: int
-    private_key_bytes: str = ""
+    private_key: str = ""
     description: str = ""
 
 
@@ -102,7 +103,7 @@ class GithubReconciler:
             app=GithubApp(
                 app_id=spec.app_id,
                 installation_id=spec.installation_id,
-                private_key_bytes=spec.private_key_bytes,
+                private_key_bytes=base64.b64encode(spec.private_key.encode()).decode("utf-8"),
             ),
         )
         logger.info("Creating GitHub credential '%s'", spec.name)
@@ -125,7 +126,7 @@ class GithubReconciler:
             app=GithubApp(
                 app_id=spec.app_id,
                 installation_id=spec.installation_id,
-                private_key_bytes=spec.private_key_bytes,
+                private_key_bytes=base64.b64encode(spec.private_key.encode()).decode("utf-8"),
             ),
         )
         logger.info("Updating GitHub credential '%s' (id=%s)", spec.name, observed.id)
