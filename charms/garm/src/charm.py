@@ -883,7 +883,7 @@ class GarmCharm(paas_charm.go.Charm):
                     endpoint=DEFAULT_GITHUB_ENDPOINT,
                     app_id=app_id,
                     installation_id=installation_id,
-                    private_key_bytes=list(private_key.encode()),
+                    private_key=private_key,
                     description=MANAGED_CREDENTIAL_DESCRIPTION,
                 )
 

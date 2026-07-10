@@ -20,7 +20,7 @@ Name | Type | Description | Notes
 **os_type** | **str** |  | [optional] 
 **os_version** | **str** | OSVersion is the version of the operating system. | [optional] 
 **pool_id** | **str** | PoolID is the ID of the garm pool to which a runner belongs. | [optional] 
-**provider_fault** | **List[int]** | ProviderFault holds any error messages captured from the IaaS provider that is responsible for managing the lifecycle of the runner. | [optional] 
+**provider_fault** | **bytes** | ProviderFault holds any error messages captured from the IaaS provider that is responsible for managing the lifecycle of the runner. | [optional] 
 **provider_id** | **str** | PeoviderID is the unique ID the provider associated with the compute instance. We use this to identify the instance in the provider. | [optional] 
 **provider_name** | **str** | ProviderName is the name of the IaaS where the instance was created. | [optional] 
 **runner_status** | **str** |  | [optional] 

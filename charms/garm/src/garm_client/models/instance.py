@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing_extensions import Annotated
 from garm_client.models.address import Address
 from garm_client.models.agent_capabilities import AgentCapabilities
 from garm_client.models.job import Job
@@ -47,7 +48,7 @@ class Instance(BaseModel):
     os_type: Optional[StrictStr] = None
     os_version: Optional[StrictStr] = Field(default=None, description="OSVersion is the version of the operating system.")
     pool_id: Optional[StrictStr] = Field(default=None, description="PoolID is the ID of the garm pool to which a runner belongs.")
-    provider_fault: Optional[List[StrictInt]] = Field(default=None, description="ProviderFault holds any error messages captured from the IaaS provider that is responsible for managing the lifecycle of the runner.")
+    provider_fault: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = Field(default=None, description="ProviderFault holds any error messages captured from the IaaS provider that is responsible for managing the lifecycle of the runner.")
     provider_id: Optional[StrictStr] = Field(default=None, description="PeoviderID is the unique ID the provider associated with the compute instance. We use this to identify the instance in the provider.")
     provider_name: Optional[StrictStr] = Field(default=None, description="ProviderName is the name of the IaaS where the instance was created.")
     runner_status: Optional[StrictStr] = None
@@ -56,6 +57,19 @@ class Instance(BaseModel):
     status_messages: Optional[List[StatusMessage]] = Field(default=None, description="StatusMessages is a list of status messages sent back by the runner as it sets itself up.")
     updated_at: Optional[datetime] = Field(default=None, description="UpdatedAt is the timestamp of the last update to this runner.")
     __properties: ClassVar[List[str]] = ["addresses", "agent_id", "capabilities", "created_at", "generation", "github-runner-group", "heartbeat", "id", "job", "name", "os_arch", "os_name", "os_type", "os_version", "pool_id", "provider_fault", "provider_id", "provider_name", "runner_status", "scale_set_id", "status", "status_messages", "updated_at"]
+
+    @field_validator('provider_fault')
+    def provider_fault_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        if not re.match(r"^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$", value):
+            raise ValueError(r"must validate the regular expression /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/")
+        return value
 
     model_config = ConfigDict(
         validate_by_name=True,

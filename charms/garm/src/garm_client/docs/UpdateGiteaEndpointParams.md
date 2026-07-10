@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **api_base_url** | **str** |  | [optional] 
 **base_url** | **str** |  | [optional] 
-**ca_cert_bundle** | **List[int]** |  | [optional] 
+**ca_cert_bundle** | **bytes** |  | [optional] 
 **description** | **str** |  | [optional] 
 **tools_metadata_url** | **str** |  | [optional] 
 **use_internal_tools_metadata** | **bool** |  | [optional] 

@@ -5,7 +5,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | **str** |  | [optional] 
+**data** | **bytes** |  | [optional] 
 **description** | **str** |  | [optional] 
 **name** | **str** |  | [optional] 
 

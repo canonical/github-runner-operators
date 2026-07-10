@@ -35,7 +35,7 @@ class TestUpdateTemplateParams(unittest.TestCase):
         model = UpdateTemplateParams()
         if include_optional:
             return UpdateTemplateParams(
-                data = '',
+                data = 'YQ==',
                 description = '',
                 name = ''
             )

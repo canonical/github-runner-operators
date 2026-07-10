@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 from pydantic_core import to_jsonable_python
@@ -27,12 +28,25 @@ class CreateTemplateParams(BaseModel):
     """
     CreateTemplateParams
     """ # noqa: E501
-    data: Optional[StrictStr] = None
+    data: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = None
     description: Optional[StrictStr] = None
     forge_type: Optional[StrictStr] = None
     name: Optional[StrictStr] = None
     os_type: Optional[StrictStr] = None
     __properties: ClassVar[List[str]] = ["data", "description", "forge_type", "name", "os_type"]
+
+    @field_validator('data')
+    def data_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        if not re.match(r"^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$", value):
+            raise ValueError(r"must validate the regular expression /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/")
+        return value
 
     model_config = ConfigDict(
         validate_by_name=True,
