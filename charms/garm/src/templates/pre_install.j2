@@ -1,7 +1,7 @@
 
 # ===== charm-injected pre-install setup (runs as the runner user; privileged steps use sudo) =====
 {% if dockerhub %}
-{{ dockerhub -}}
+{{ dockerhub }}
 {% endif %}
-{{ static_prep -}}
+{{ static_prep }}
 # ===== end charm-injected pre-install setup =====
