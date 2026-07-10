@@ -10,7 +10,8 @@ system ``github_linux`` template and injecting two blocks right after the
 shebang — before the base template's ``set -e`` — so a best-effort step can never
 abort the whole bootstrap:
 
-  * a *pre-install* block that runs as root before the runner is installed
+  * a *pre-install* block that runs before the runner is installed, as the
+    unprivileged ``runner`` user, escalating each privileged step with ``sudo``
     (docker registry mirror, static host prep), and
   * a *runner job hooks* block that writes the GitHub job-start hook and the
     runner ``env`` file under ``/home/runner/actions-runner`` (GARM hardcodes the
@@ -103,7 +104,7 @@ def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
 
 
 def render_pre_install(config: RunnerConfig) -> str:
-    """Render the root pre-install block (runs before the runner is installed).
+    """Render the pre-install block (runs before the runner is installed).
 
     Args:
         config: The runner options to render.
@@ -228,11 +229,34 @@ def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:
     Returns:
         The full contents of the hook script (no trailing newline).
     """
-    otel = _OTEL_COLLECTOR_SETUP_TEMPLATE.render(endpoint=otel_endpoint) if otel_endpoint else ""
+    otel = (
+        _render_fragment(_OTEL_COLLECTOR_SETUP_TEMPLATE, endpoint=otel_endpoint)
+        if otel_endpoint
+        else ""
+    )
     custom_script = (
         _render_custom_pre_job_script(config.pre_job_script) if config.pre_job_script else ""
     )
-    return _HOOK_BODY_TEMPLATE.render(otel=otel, custom_script=custom_script)
+    return _render_fragment(_HOOK_BODY_TEMPLATE, otel=otel, custom_script=custom_script)
+
+
+def _render_fragment(template: jinja2.Template, **kwargs: object) -> str:
+    """Render a sub-fragment for splicing into a larger script.
+
+    Fragment template files end with a newline (POSIX text-file convention), but
+    a fragment is spliced into a composing template (``pre_install.j2`` /
+    ``hook_body.j2`` / ``pre_job_hooks.j2``) that owns the spacing between blocks.
+    Its own trailing newline would leak an extra blank line into the composition,
+    so drop it here; the composer supplies the separator.
+
+    Args:
+        template: The fragment template to render.
+        kwargs: The template variables.
+
+    Returns:
+        The rendered fragment without its trailing newline.
+    """
+    return template.render(**kwargs).removesuffix("\n")
 
 
 def _heredoc_delimiter(content: str, base: str) -> str:
@@ -266,7 +290,7 @@ def _render_custom_pre_job_script(script: str) -> str:
         A bash snippet.
     """
     delim = _heredoc_delimiter(script, "GARM_CHARM_CUSTOM_PREJOB")
-    return _CUSTOM_PRE_JOB_SCRIPT_TEMPLATE.render(delim=delim, script=script)
+    return _render_fragment(_CUSTOM_PRE_JOB_SCRIPT_TEMPLATE, delim=delim, script=script)
 
 
 def _render_dockerhub_mirror(mirror: str) -> str:
@@ -279,7 +303,7 @@ def _render_dockerhub_mirror(mirror: str) -> str:
         A bash snippet writing /etc/docker/daemon.json and restarting docker.
     """
     daemon_json = json.dumps({"registry-mirrors": [mirror]})
-    return _DOCKERHUB_MIRROR_TEMPLATE.render(daemon_json=daemon_json)
+    return _render_fragment(_DOCKERHUB_MIRROR_TEMPLATE, daemon_json=daemon_json)
 
 
 def _render_static_host_prep() -> str:
@@ -291,4 +315,4 @@ def _render_static_host_prep() -> str:
         A bash snippet. Each command is guarded by ``|| true`` so it is a no-op
         if the runner account doesn't exist yet.
     """
-    return _STATIC_HOST_PREP_TEMPLATE.render(runner_user=RUNNER_USER)
+    return _render_fragment(_STATIC_HOST_PREP_TEMPLATE, runner_user=RUNNER_USER)

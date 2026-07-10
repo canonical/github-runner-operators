@@ -1,5 +1,5 @@
 
-# ===== charm-injected pre-install setup (runs as root) =====
+# ===== charm-injected pre-install setup (runs as the runner user; privileged steps use sudo) =====
 {% if dockerhub %}
 {{ dockerhub }}
 {% endif %}

@@ -52,7 +52,9 @@ def test_build_template_data_injects_all_options():
     # docker mirror: both env vars and a full daemon-reload + restart.
     assert "DOCKERHUB_MIRROR=https://mirror.example.com" in result
     assert "CONTAINER_REGISTRY_URL=https://mirror.example.com" in result
-    assert "systemctl daemon-reload" in result
+    assert "sudo systemctl daemon-reload" in result
+    assert "sudo tee /etc/docker/daemon.json" in result
+    assert "sudo systemctl restart docker" in result
 
     # otel collector config is written to disk and enabled.
     assert "/etc/otelcol/config.d/github.yaml" in result
@@ -74,8 +76,8 @@ def test_build_template_data_empty_config_omits_optional_blocks():
 
     assert "echo original-bootstrap" in result
     assert "ACTIONS_RUNNER_HOOK_JOB_STARTED=" in result
-    assert "adduser runner lxd || true" in result
-    assert "adduser runner adm || true" in result
+    assert "sudo adduser runner lxd || true" in result
+    assert "sudo adduser runner adm || true" in result
 
     assert "snap install aproxy" not in result
     assert "registry-mirrors" not in result
