@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing_extensions import Annotated
 from uuid import UUID
 from typing import Optional, Set
 from typing_extensions import Self
@@ -30,7 +31,7 @@ class ControllerInfo(BaseModel):
     ControllerInfo
     """ # noqa: E501
     agent_url: Optional[StrictStr] = Field(default=None, description="AgentURL is the URL where the GARM agent will connect. If set behind a reverse proxy, this URL must be configured to allow websocket connections.")
-    ca_cert_bundle: Optional[List[StrictInt]] = Field(default=None, description="CACertBundle holds a certificate bundle meant to validate the certificate used by GARM itself. This can be just the root certificate that can validate the GARM TLS certificate, a chain or multiple root CAs.")
+    ca_cert_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = Field(default=None, description="CACertBundle holds a certificate bundle meant to validate the certificate used by GARM itself. This can be just the root certificate that can validate the GARM TLS certificate, a chain or multiple root CAs.")
     cached_garm_agent_release_fetched_at: Optional[datetime] = Field(default=None, description="CachedGARMAgentReleaseFetchedAt is the timestamp when the release data was last fetched from GARMAgentReleasesURL")
     callback_url: Optional[StrictStr] = Field(default=None, description="CallbackURL is the URL where instances can send updates back to the controller. This URL is used by instances to send status updates back to the controller. The URL itself may be made available to instances via a reverse proxy or a load balancer. That means that the user is responsible for telling GARM what the public URL is, by setting this field.")
     controller_id: Optional[UUID] = Field(default=None, description="ControllerID is the unique ID of this controller. This ID gets generated automatically on controller init.")
@@ -43,6 +44,19 @@ class ControllerInfo(BaseModel):
     version: Optional[StrictStr] = Field(default=None, description="Version is the version of the GARM controller.")
     webhook_url: Optional[StrictStr] = Field(default=None, description="WebhookURL is the base URL where the controller will receive webhooks from github. When webhook management is used, this URL is used as a base to which the controller UUID is appended and which will receive the webhooks. The URL itself may be made available to instances via a reverse proxy or a load balancer. That means that the user is responsible for telling GARM what the public URL is, by setting this field.")
     __properties: ClassVar[List[str]] = ["agent_url", "ca_cert_bundle", "cached_garm_agent_release_fetched_at", "callback_url", "controller_id", "controller_webhook_url", "enable_agent_tools_sync", "garm_agent_releases_url", "hostname", "metadata_url", "minimum_job_age_backoff", "version", "webhook_url"]
+
+    @field_validator('ca_cert_bundle')
+    def ca_cert_bundle_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        if not re.match(r"^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$", value):
+            raise ValueError(r"must validate the regular expression /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/")
+        return value
 
     model_config = ConfigDict(
         validate_by_name=True,

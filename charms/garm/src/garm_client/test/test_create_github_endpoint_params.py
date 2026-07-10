@@ -37,9 +37,7 @@ class TestCreateGithubEndpointParams(unittest.TestCase):
             return CreateGithubEndpointParams(
                 api_base_url = '',
                 base_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 description = '',
                 name = '',
                 upload_base_url = ''

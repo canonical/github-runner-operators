@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 from pydantic_core import to_jsonable_python
@@ -28,7 +29,7 @@ class UpdateControllerParams(BaseModel):
     UpdateControllerParams
     """ # noqa: E501
     agent_url: Optional[StrictStr] = None
-    ca_cert_bundle: Optional[List[StrictInt]] = None
+    ca_cert_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = None
     callback_url: Optional[StrictStr] = None
     clear_ca_cert_bundle: Optional[StrictBool] = None
     enable_agent_tools_sync: Optional[StrictBool] = None
@@ -37,6 +38,19 @@ class UpdateControllerParams(BaseModel):
     minimum_job_age_backoff: Optional[StrictInt] = None
     webhook_url: Optional[StrictStr] = None
     __properties: ClassVar[List[str]] = ["agent_url", "ca_cert_bundle", "callback_url", "clear_ca_cert_bundle", "enable_agent_tools_sync", "garm_agent_releases_url", "metadata_url", "minimum_job_age_backoff", "webhook_url"]
+
+    @field_validator('ca_cert_bundle')
+    def ca_cert_bundle_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        if not re.match(r"^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$", value):
+            raise ValueError(r"must validate the regular expression /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/")
+        return value
 
     model_config = ConfigDict(
         validate_by_name=True,

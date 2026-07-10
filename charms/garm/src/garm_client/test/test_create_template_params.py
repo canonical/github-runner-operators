@@ -35,7 +35,7 @@ class TestCreateTemplateParams(unittest.TestCase):
         model = CreateTemplateParams()
         if include_optional:
             return CreateTemplateParams(
-                data = '',
+                data = 'YQ==',
                 description = '',
                 forge_type = '',
                 name = '',

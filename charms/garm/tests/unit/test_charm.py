@@ -1083,7 +1083,7 @@ def test_build_desired_credentials_builds_credential_from_relation():
     assert cred.endpoint == DEFAULT_GITHUB_ENDPOINT
     assert cred.app_id == 12345
     assert cred.installation_id == 67890
-    assert cred.private_key_bytes == list(b"PEMDATA")
+    assert cred.private_key == "PEMDATA"
     charm._resolve_secret_value.assert_called_once_with("secret:abc")
 
 

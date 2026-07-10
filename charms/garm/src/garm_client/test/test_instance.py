@@ -81,9 +81,7 @@ class TestInstance(unittest.TestCase):
                 os_type = '',
                 os_version = '',
                 pool_id = '',
-                provider_fault = [
-                    56
-                    ],
+                provider_fault = 'YQ==',
                 provider_id = '',
                 provider_name = '',
                 runner_status = '',

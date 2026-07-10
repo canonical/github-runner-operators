@@ -37,9 +37,7 @@ class TestUpdateGiteaEndpointParams(unittest.TestCase):
             return UpdateGiteaEndpointParams(
                 api_base_url = '',
                 base_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 description = '',
                 tools_metadata_url = '',
                 use_internal_tools_metadata = True

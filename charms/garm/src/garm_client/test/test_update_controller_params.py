@@ -36,9 +36,7 @@ class TestUpdateControllerParams(unittest.TestCase):
         if include_optional:
             return UpdateControllerParams(
                 agent_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 callback_url = '',
                 clear_ca_cert_bundle = True,
                 enable_agent_tools_sync = True,

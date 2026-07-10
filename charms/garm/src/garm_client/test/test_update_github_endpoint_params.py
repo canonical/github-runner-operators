@@ -37,9 +37,7 @@ class TestUpdateGithubEndpointParams(unittest.TestCase):
             return UpdateGithubEndpointParams(
                 api_base_url = '',
                 base_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 description = '',
                 upload_base_url = ''
             )

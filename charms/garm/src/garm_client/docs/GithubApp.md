@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **app_id** | **int** |  | [optional] 
 **installation_id** | **int** |  | [optional] 
-**private_key_bytes** | **List[int]** |  | [optional] 
+**private_key_bytes** | **bytes** |  | [optional] 
 
 ## Example
 
