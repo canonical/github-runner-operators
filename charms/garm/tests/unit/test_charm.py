@@ -713,8 +713,8 @@ def _expected_config_hash(proxy_env: dict, providers: list | None = None) -> str
     """Reproduce restart()'s hash-input construction for assertion purposes.
 
     Mirrors the exact serialization restart() feeds into _hash_toml: the
-    rendered TOML, the sorted provider files, then the sorted proxy env
-    key=value pairs.
+    rendered TOML, the sorted provider files, then — only when a proxy is
+    configured — the sorted proxy env key=value pairs.
     """
     providers = _RESTART_PROVIDER_CONFIGS if providers is None else providers
     toml_content, provider_files = render_garm_toml(
@@ -729,7 +729,8 @@ def _expected_config_hash(proxy_env: dict, providers: list | None = None) -> str
         + "\n"
         + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
     )
-    hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
+    if proxy_env:
+        hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
     return GarmCharm._hash_toml(hash_input)
 
 

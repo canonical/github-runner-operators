@@ -477,13 +477,18 @@ class GarmCharm(paas_charm.go.Charm):
             + "\n"
             + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
-        hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
+        # Only extend the input when a proxy is configured, so the no-proxy hash matches
+        # earlier charm revisions and upgrading doesn't force a spurious one-time replan.
+        if proxy_env:
+            hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         new_hash = self._hash_toml(hash_input)
 
         container = self.unit.get_container(CONTAINER_NAME)
         previous_hash = self._current_config_hash(container)
         if previous_hash == new_hash:
-            logger.debug("TOML config unchanged; skipping service restart")
+            logger.debug(
+                "Workload config (TOML, provider files, proxy env) unchanged; skipping replan"
+            )
             self._reconcile_runners()
             return
 
