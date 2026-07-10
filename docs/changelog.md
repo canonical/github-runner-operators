@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-10
+
+- `garm`: reliably apply proxy changes to the GARM workload. The charm gated the workload's Pebble layer rewrite on a hash of the on-disk config file, which excluded the proxy environment *values* — so changing or clearing a proxy value while the variable set stayed the same never rewrote the layer, leaving the old value in the plan. The on-disk file could also drift from the layer and wedge it permanently. The charm now compares the freshly rendered hash (which includes the proxy values) against the `config_hash` stored in the container's current Pebble plan, so proxy value changes and clears reliably replan the workload.
+
 ## 2026-07-09
 
 - `garm`: apply the Docker registry mirror and runner host preparation on the runner. GARM runs the injected runner-install steps as the unprivileged `runner` user, but the Docker-mirror and host-prep steps ran without `sudo`, so writing `/etc/docker/daemon.json`, restarting Docker, and adding the runner to the `lxd`/`adm` groups all failed silently — the mirror and group membership were never applied. These steps now escalate with `sudo`, matching the rest of the install script.
