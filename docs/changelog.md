@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-12
+
+- `garm`: delete GARM scalesets when the `garm-configurator` relation is removed. Removing the relation left its scalesets registered in GARM (still shown by `garm-cli scaleset list`), because the charm's reconcile short-circuited on the now-missing relation before reaching the scaleset reconciler that prunes orphaned scalesets. The charm now still runs the reconcile when no configurator relation is present, so scalesets orphaned by the relation removal are disabled and deleted.
+
 ## 2026-07-09
 
 - `garm`: apply the Docker registry mirror and runner host preparation on the runner. GARM runs the injected runner-install steps as the unprivileged `runner` user, but the Docker-mirror and host-prep steps ran without `sudo`, so writing `/etc/docker/daemon.json`, restarting Docker, and adding the runner to the `lxd`/`adm` groups all failed silently — the mirror and group membership were never applied. These steps now escalate with `sudo`, matching the rest of the install script.

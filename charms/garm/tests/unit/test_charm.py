@@ -799,6 +799,54 @@ def test_restart_no_proxy_hash_matches_on_disk_format():
     assert captured == GarmCharm._hash_toml(expected_input)
 
 
+def test_restart_without_configurator_relation_still_prunes_orphaned_scalesets():
+    """
+    arrange: The charm is ready (postgres + secrets available) but the
+             garm-configurator relation is gone, so there are no provider configs
+             and get_relation returns None.
+    act: Run restart().
+    assert: _reconcile_runners() still runs so ScalesetReconciler can delete the
+            now-orphaned scalesets, the workload is not replanned, and the unit
+            reports that it is waiting for the garm-configurator relation.
+    """
+    charm = _make_restart_charm()
+    charm._get_configurator_provider_configs.return_value = []
+    charm.model.get_relation.return_value = None
+
+    with patch.dict(os.environ, {}, clear=True):
+        GarmCharm.restart(charm)
+
+    charm._reconcile_runners.assert_called_once()
+    charm.unit.get_container.return_value.add_layer.assert_not_called()
+    charm.update_app_and_unit_status.assert_called_once_with(
+        ops.WaitingStatus("Waiting for garm-configurator relation")
+    )
+
+
+def test_restart_configurator_relation_present_but_unpopulated_does_not_prune():
+    """
+    arrange: The charm is ready but the garm-configurator relation, though still
+             present, has not yet published its secret-dependent fields, so there
+             are no provider configs while get_relation returns the relation.
+    act: Run restart().
+    assert: _reconcile_runners() is NOT called — pruning against the empty desired
+            state would delete live scalesets — the workload is not replanned, and
+            the unit waits for the relation to finish publishing.
+    """
+    charm = _make_restart_charm()
+    charm._get_configurator_provider_configs.return_value = []
+    charm.model.get_relation.return_value = MagicMock()
+
+    with patch.dict(os.environ, {}, clear=True):
+        GarmCharm.restart(charm)
+
+    charm._reconcile_runners.assert_not_called()
+    charm.unit.get_container.return_value.add_layer.assert_not_called()
+    charm.update_app_and_unit_status.assert_called_once_with(
+        ops.WaitingStatus("Waiting for garm-configurator relation")
+    )
+
+
 def test_render_garm_toml_default_provider_applies_proxy_var_names():
     """
     arrange: No configurator providers but a non-empty proxy_var_names list.
@@ -987,11 +1035,15 @@ def test_restart_missing_configurator_relation_refreshes_stale_app_status():
         return_value={"jwt-secret": "test-jwt-secret", "db-passphrase": "a" * 32}
     )
     charm._get_configurator_provider_configs = MagicMock(return_value=[])
+    # restart() now still prunes orphaned scalesets when the relation is gone;
+    # stub it out since this test only cares about the status it reports.
+    charm._reconcile_runners = MagicMock()
 
     with (
         patch.object(GarmCharm, "config", new_callable=PropertyMock) as mock_config,
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
         patch.object(GarmCharm, "app", new_callable=PropertyMock) as mock_app,
+        patch.object(GarmCharm, "model", new_callable=PropertyMock) as mock_model,
     ):
         mock_config.return_value = {}
         mock_unit.return_value = MagicMock()
@@ -999,6 +1051,7 @@ def test_restart_missing_configurator_relation_refreshes_stale_app_status():
         mock_unit.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
         mock_app.return_value = MagicMock()
         mock_app.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
+        mock_model.return_value.get_relation.return_value = None
 
         charm.restart()
 

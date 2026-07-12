@@ -450,6 +450,18 @@ class GarmCharm(paas_charm.go.Charm):
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
+            # Empty provider configs are ambiguous: the garm-configurator relation
+            # may be gone, or still present but not yet publishing its
+            # secret-dependent fields (auth_url and image_id appear together once
+            # the image UUID and secrets are available). Only a removed relation
+            # leaves its scalesets orphaned and eligible for pruning; reconciling
+            # while the relation is merely mid-publish would delete live scalesets
+            # against a still-empty desired state. _reconcile_runners() is the only
+            # caller of ScalesetReconciler's orphan-delete, so run it here when —
+            # and only when — the relation is absent. GARM otherwise keeps the
+            # orphaned scalesets registered indefinitely.
+            if self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME) is None:
+                self._reconcile_runners()
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
