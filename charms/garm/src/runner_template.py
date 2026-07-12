@@ -44,10 +44,12 @@ import jinja2
 
 from charm_state import RunnerConfig
 
-# The runner account is uid 1000, home /home/ubuntu, so its actions-runner
-# install lives under /home/ubuntu rather than /home/runner; the GitHub Actions
-# runner service reads a `.env` file (a dotfile) from that directory (matching
-# github-runner-manager's production openstack-userdata.sh.j2).
+# /home/runner symlinks to /home/ubuntu (both are uid 1000's home), so the
+# directory was never the issue -- the actual bug is the filename: the GitHub
+# Actions runner sources a `.env` dotfile, not a plain `env`, which is why the
+# injected options were silently dropped. Target /home/ubuntu directly rather
+# than lean on the symlink (matching github-runner-manager's production
+# openstack-userdata.sh.j2).
 RUNNER_USER = "runner"
 RUNNER_HOME = "/home/ubuntu/actions-runner"
 PRE_JOB_HOOK_PATH = f"{RUNNER_HOME}/pre-job.sh"
