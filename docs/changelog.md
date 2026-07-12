@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-12
 
-- `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads, under the runner's actual install directory `/home/ubuntu/actions-runner`.
+- `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads.
 
 ## 2026-07-09
 

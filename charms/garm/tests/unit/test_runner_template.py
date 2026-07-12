@@ -66,23 +66,21 @@ def test_build_template_data_injects_all_options():
     assert "rm /tmp/custom_pre_job_script" in result
 
 
-def test_build_template_data_writes_env_and_hook_under_home_ubuntu():
+def test_build_template_data_writes_env_to_dotfile():
     """
     arrange: A bootstrap script and a runner config with every optional field set.
     act: Build the runner template data.
-    assert: The env vars are written to a dot-env under /home/ubuntu/actions-runner and
-        the pre-job hook is written alongside it — the directory and file the GitHub
-        Actions runner (running as uid 1000, home /home/ubuntu) actually reads, matching
-        github-runner-manager's openstack-userdata.sh.j2.
+    assert: The env vars are written to a `.env` dotfile — the file the GitHub Actions
+        runner sources — not a plain `env`, with the hook written alongside it under the
+        runner's home (/home/runner, a symlink to /home/ubuntu on the image).
     """
     result = build_template_data(SAMPLE_BASE, _full_config()).decode()
 
-    assert "cat >> /home/ubuntu/actions-runner/.env <<" in result
-    assert "cat > /home/ubuntu/actions-runner/pre-job.sh <<" in result
+    assert "cat >> /home/runner/actions-runner/.env <<" in result
+    assert "cat > /home/runner/actions-runner/pre-job.sh <<" in result
 
-    # The old, dotless env path must never appear as a write target.
-    assert "cat >> /home/ubuntu/actions-runner/env <<" not in result
-    assert "/home/runner/actions-runner" not in result
+    # The dotless env file the runner never sources must not be a write target.
+    assert "cat >> /home/runner/actions-runner/env <<" not in result
 
 
 def test_build_template_data_empty_config_omits_optional_blocks():

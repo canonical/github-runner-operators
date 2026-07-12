@@ -14,8 +14,8 @@ abort the whole bootstrap:
     unprivileged ``runner`` user, escalating each privileged step with ``sudo``
     (docker registry mirror, static host prep), and
   * a *runner job hooks* block that writes the GitHub job-start hook and the
-    runner ``.env`` file under ``/home/ubuntu/actions-runner``, the runner's
-    actual install directory.
+    runner ``.env`` file under ``/home/runner/actions-runner`` (the runner's
+    home; a symlink to ``/home/ubuntu`` on the GARM image).
 
 The proxy/aproxy option is *not* injected into this template: GARM prepends a
 compiled-in wrapper script that curls this template from the GARM metadata API
@@ -44,14 +44,12 @@ import jinja2
 
 from charm_state import RunnerConfig
 
-# /home/runner symlinks to /home/ubuntu (both are uid 1000's home), so the
-# directory was never the issue -- the actual bug is the filename: the GitHub
-# Actions runner sources a `.env` dotfile, not a plain `env`, which is why the
-# injected options were silently dropped. Target /home/ubuntu directly rather
-# than lean on the symlink (matching github-runner-manager's production
-# openstack-userdata.sh.j2).
+# The bug this path fixes is the filename: the GitHub Actions runner sources a
+# `.env` dotfile, not a plain `env`, so the injected options were silently
+# dropped. /home/runner is the runner's home (a symlink to /home/ubuntu on the
+# GARM image), kept consistent with garm_template.py.
 RUNNER_USER = "runner"
-RUNNER_HOME = "/home/ubuntu/actions-runner"
+RUNNER_HOME = "/home/runner/actions-runner"
 PRE_JOB_HOOK_PATH = f"{RUNNER_HOME}/pre-job.sh"
 RUNNER_ENV_PATH = f"{RUNNER_HOME}/.env"
 
