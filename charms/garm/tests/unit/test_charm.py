@@ -524,6 +524,8 @@ def test_get_credentials_action_returns_credentials_when_available():
     """
     arrange: Admin credentials secret exists and contains valid content.
     act: Call _on_get_credentials_action().
+    assert: event.set_results is called once with the credentials dict and
+        event.fail is not called.
     """
     charm = MagicMock()
     event = MagicMock()
