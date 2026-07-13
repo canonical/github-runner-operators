@@ -84,10 +84,12 @@ class GarmApiClient:
     def is_initialized(self) -> bool:
         """Return True if GARM has already been initialised (first-run done).
 
-        GARM returns 409 Conflict on ``GET /controller-info`` until the initial
-        admin user has been created via ``POST /first-run``. Once initialised,
-        the endpoint requires auth, so this deliberately unauthenticated probe
-        gets back either 200 or 401 — both mean initialised.
+        GARM's init gate returns 409 Conflict on ``GET /controller-info`` until
+        the initial admin user has been created via ``POST /first-run``. Past
+        that gate the endpoint is auth-gated, so this deliberately unauthenticated
+        probe sees 401 once GARM is initialised. Both 401 and 200 therefore mean
+        the init gate has been passed (initialised); only 409 means first-run is
+        still pending.
 
         Returns:
             True if GARM is initialised, False if it is waiting for first-run.
