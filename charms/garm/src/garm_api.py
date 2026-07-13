@@ -82,10 +82,9 @@ class GarmApiClient:
         return ApiClient(configuration=Configuration(host=self._base_url))
 
     def is_initialized(self) -> bool:
-        """Return True if GARM has already been initialised (first-run done).
+        """Return whether GARM has completed first-run initialisation.
 
-        GARM returns 409 Conflict on ``GET /controller-info`` until the initial
-        admin user has been created via ``POST /first-run``.
+        Probes ``GET /controller-info``, GARM's only auth-free first-run signal.
 
         Returns:
             True if GARM is initialised, False if it is waiting for first-run.
@@ -99,8 +98,15 @@ class GarmApiClient:
                 api.controller_info(_request_timeout=_REQUEST_TIMEOUT)
                 return True
             except ApiException as exc:
+                # 409 is GARM's init gate rejecting the probe until first-run
+                # creates the admin user; getting past it means initialised.
                 if exc.status == 409:
                     return False
+                if exc.status == 401:
+                    # Auth is only enforced once first-run has created the admin
+                    # user, so a 401 on this deliberately unauthenticated probe
+                    # means the init gate already let the request through.
+                    return True
                 raise GarmApiError(
                     f"Unexpected response from GARM controller-info ({exc.status}): {exc.body}"
                 ) from exc
