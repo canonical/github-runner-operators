@@ -9,6 +9,7 @@ import typing
 
 from charm_state import SSHDebugInfo
 from garm_api import GarmApiError, GarmAuthenticatedClient
+from runner_paths import RUNNER_ENV_PATH, prepend_after_shebang
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,10 @@ def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
     if not connections:
         return ""
     conn = connections[0]
-    runner_env = "/home/runner/.env"
+    # Global env write: injected into the shared github_linux_charmed template, so
+    # these tmate vars apply to every scaleset (a separate .env append from the
+    # per-scaleset one in runner_template.render_pre_job_hooks).
+    runner_env = RUNNER_ENV_PATH
     lines = [
         f"mkdir -p $(dirname {runner_env})",
         f'cat >> {runner_env} << "EOF"',
@@ -85,24 +89,6 @@ def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
         "",
     ]
     return "\n".join(lines)
-
-
-def prepend_after_shebang(script: str, snippet: str) -> str:
-    """Insert *snippet* immediately after the shebang line of *script*.
-
-    If no shebang is present the snippet is prepended at the very start.
-
-    Args:
-        script: The original shell script (may start with ``#!``).
-        snippet: The shell code to inject.
-
-    Returns:
-        The modified script string.
-    """
-    lines = script.split("\n")
-    if lines and lines[0].startswith("#!"):
-        return lines[0] + "\n" + snippet + "\n".join(lines[1:])
-    return snippet + script
 
 
 def _build_charmed_template_data(

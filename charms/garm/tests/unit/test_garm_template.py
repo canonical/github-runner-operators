@@ -34,11 +34,59 @@ def test_ssh_debug_info_env_vars():
     patched = garm_template.prepend_after_shebang(base_script, snippet)
 
     assert patched.startswith("#!/bin/bash\n")
+    assert "cat >> /home/runner/actions-runner/.env <<" in patched
     assert "TMATE_SERVER_HOST=10.10.0.5" in patched
     assert "TMATE_SERVER_PORT=2222" in patched
     assert "TMATE_SERVER_RSA_FINGERPRINT=SHA256:rsa" in patched
     assert "TMATE_SERVER_ED25519_FINGERPRINT=SHA256:ed" in patched
     assert "echo 'hello'" in patched
+
+
+def test_prepend_after_shebang_no_shebang_prepends_at_start():
+    """
+    arrange: A script that does not start with a shebang and a snippet.
+    act: Call prepend_after_shebang().
+    assert: The snippet is prepended at the very start, on its own line, with the
+            original script body preserved intact after it.
+    """
+    patched = garm_template.prepend_after_shebang("echo original\n", "echo injected\n")
+
+    assert patched == "echo injected\necho original\n"
+
+
+def test_prepend_after_shebang_separates_snippet_without_trailing_newline():
+    """
+    arrange: A shebang script and a snippet that is not newline-terminated.
+    act: Call prepend_after_shebang().
+    assert: The snippet does not run into the following body line — a newline is
+            inserted so the injected code and the original body stay separate.
+    """
+    patched = garm_template.prepend_after_shebang("#!/bin/bash\necho body\n", "echo injected")
+
+    assert patched == "#!/bin/bash\necho injected\necho body\n"
+
+
+def test_prepend_after_shebang_no_shebang_unterminated_snippet():
+    """
+    arrange: A script with no shebang and a snippet that is not newline-terminated.
+    act: Call prepend_after_shebang().
+    assert: The snippet is prepended at the start, separated from the body by a
+            newline so the two do not run together.
+    """
+    patched = garm_template.prepend_after_shebang("echo original", "echo injected")
+
+    assert patched == "echo injected\necho original"
+
+
+def test_prepend_after_shebang_empty_snippet_leaves_script_unchanged():
+    """
+    arrange: A script and an empty snippet.
+    act: Call prepend_after_shebang().
+    assert: The script is returned unchanged — no stray blank line is injected.
+    """
+    script = "#!/bin/bash\necho body\n"
+
+    assert garm_template.prepend_after_shebang(script, "") == script
 
 
 def test_apply_charmed_template_maintains_when_no_connections_and_charmed_exists():
