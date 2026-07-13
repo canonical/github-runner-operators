@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-12
+
+- `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads.
+
 ## 2026-07-09
 
 - `garm`: apply the Docker registry mirror and runner host preparation on the runner. GARM runs the injected runner-install steps as the unprivileged `runner` user, but the Docker-mirror and host-prep steps ran without `sudo`, so writing `/etc/docker/daemon.json`, restarting Docker, and adding the runner to the `lxd`/`adm` groups all failed silently — the mirror and group membership were never applied. These steps now escalate with `sudo`, matching the rest of the install script.
