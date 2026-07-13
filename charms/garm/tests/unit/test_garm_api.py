@@ -33,14 +33,16 @@ def _stub_api_client(client):
     [
         (None, True),
         (ApiException(status=409), False),
+        (ApiException(status=401), True),
     ],
-    ids=["200-ok", "409-not-initialised"],
+    ids=["200-ok", "409-not-initialised", "401-initialised-unauthenticated-probe"],
 )
 def test_is_initialized(side_effect, expected):
     """
     arrange: GarmApiClient pointed at BASE_URL with a stubbed api_client.
-    act: Call is_initialized(); ControllerInfoApi raises ApiException(409) or succeeds.
-    assert: Returns True on success, False on 409.
+    act: Call is_initialized(); ControllerInfoApi raises ApiException(409/401) or succeeds.
+    assert: Returns True on success or 401 (auth enforced means already initialised),
+        False on 409.
     """
     client = GarmApiClient(BASE_URL)
     with _stub_api_client(client):
