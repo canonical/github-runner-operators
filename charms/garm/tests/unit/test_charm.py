@@ -560,6 +560,8 @@ def test_get_credentials_action_fails_when_credentials_unavailable():
     fail_message = event.fail.call_args[0][0]
     assert "not yet available" in fail_message
     event.set_results.assert_not_called()
+
+
 def test_reconcile_scalesets_skips_when_no_admin_credentials():
     """
     arrange: Admin credentials secret is unavailable.
