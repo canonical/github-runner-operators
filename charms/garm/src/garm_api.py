@@ -85,7 +85,9 @@ class GarmApiClient:
         """Return True if GARM has already been initialised (first-run done).
 
         GARM returns 409 Conflict on ``GET /controller-info`` until the initial
-        admin user has been created via ``POST /first-run``.
+        admin user has been created via ``POST /first-run``. Once initialised,
+        the endpoint requires auth, so this deliberately unauthenticated probe
+        gets back either 200 or 401 — both mean initialised.
 
         Returns:
             True if GARM is initialised, False if it is waiting for first-run.
@@ -101,6 +103,11 @@ class GarmApiClient:
             except ApiException as exc:
                 if exc.status == 409:
                     return False
+                if exc.status == 401:
+                    # Auth is only enforced once first-run has created the admin
+                    # user, so a 401 on this deliberately unauthenticated probe
+                    # means the init gate already let the request through.
+                    return True
                 raise GarmApiError(
                     f"Unexpected response from GARM controller-info ({exc.status}): {exc.body}"
                 ) from exc
