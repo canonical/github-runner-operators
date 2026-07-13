@@ -319,10 +319,7 @@ class CharmState:
     Attributes:
         ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
-        configurator_related: Whether a garm-configurator relation is present. Empty desired state
-            alone can't distinguish a removed relation from one still mid-publish; only a removed
-            relation orphans the scalesets it configured, so callers prune orphaned scalesets only
-            when this is False.
+        configurator_related: Whether a garm-configurator relation is present.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
