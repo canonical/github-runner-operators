@@ -853,10 +853,12 @@ def test_restart_proxy_value_change_forces_layer_rewrite():
     charm = _make_restart_charm(previous_plan_env={"config_hash": old_hash, **old_proxy})
     charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
 
-    with patch.dict(os.environ, new_env, clear=True):
-        with patch("charm.GarmApiClient"):
-            with pytest.raises(StopIteration):
-                GarmCharm.restart(charm)
+    with (
+        patch.dict(os.environ, new_env, clear=True),
+        patch("charm.GarmApiClient"),
+        pytest.raises(StopIteration),
+    ):
+        GarmCharm.restart(charm)
 
     charm.unit.get_container.return_value.add_layer.assert_called_once()
     service_env = _layer_service_env(charm)
@@ -880,10 +882,12 @@ def test_restart_clearing_proxy_removes_it_from_layer():
     charm = _make_restart_charm(previous_plan_env={"config_hash": old_hash, **old_proxy})
     charm._maybe_first_run.side_effect = StopIteration(_SENTINEL)
 
-    with patch.dict(os.environ, {}, clear=True):
-        with patch("charm.GarmApiClient"):
-            with pytest.raises(StopIteration):
-                GarmCharm.restart(charm)
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("charm.GarmApiClient"),
+        pytest.raises(StopIteration),
+    ):
+        GarmCharm.restart(charm)
 
     charm.unit.get_container.return_value.add_layer.assert_called_once()
     service_env = _layer_service_env(charm)
@@ -906,9 +910,11 @@ def test_restart_unchanged_config_skips_replan():
 
     charm = _make_restart_charm(previous_plan_env={"config_hash": current_hash, **current_proxy})
 
-    with patch.dict(os.environ, proxy_env, clear=True):
-        with patch("charm.GarmApiClient"):
-            GarmCharm.restart(charm)
+    with (
+        patch.dict(os.environ, proxy_env, clear=True),
+        patch("charm.GarmApiClient"),
+    ):
+        GarmCharm.restart(charm)
 
     charm.unit.get_container.return_value.add_layer.assert_not_called()
     charm.unit.get_container.return_value.replan.assert_not_called()
