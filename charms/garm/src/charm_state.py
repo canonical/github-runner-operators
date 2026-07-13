@@ -319,10 +319,12 @@ class CharmState:
     Attributes:
         ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
+        configurator_related: Whether a garm-configurator relation is present.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
     desired_entities: list[EntitySpec]
+    configurator_related: bool
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -337,4 +339,7 @@ class CharmState:
         return cls(
             ssh_debug_connections=_get_ssh_debug_connections(charm),
             desired_entities=_get_desired_entities(charm),
+            configurator_related=(
+                charm.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME) is not None
+            ),
         )

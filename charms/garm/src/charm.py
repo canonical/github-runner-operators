@@ -411,28 +411,7 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
 
-        # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
-        # no separate metrics listener — and declares its scrape target in
-        # paas-config.yaml, so the go-framework's app-port/metrics-port/metrics-path
-        # settings don't apply. _workload_config also pins the workload port to
-        # GARM_PORT, so app-port has no effect on ingress, the opened ports, or the
-        # service URL (they can't drift from GARM's actual port). Warn rather than
-        # block when an operator sets any to a non-default value, tolerating their
-        # absence (the framework may drop them in future).
-        for option, default in (
-            ("app-port", GARM_PORT),
-            ("metrics-port", GARM_PORT),
-            ("metrics-path", "/metrics"),
-        ):
-            value = self.config.get(option)
-            if value is not None and str(value) != str(default):
-                logger.warning(
-                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
-                    "declares its Prometheus scrape config in paas-config.yaml",
-                    option,
-                    value,
-                    GARM_PORT,
-                )
+        self._warn_unsupported_port_options()
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
@@ -450,6 +429,13 @@ class GarmCharm(paas_charm.go.Charm):
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
+            # Empty configs don't distinguish a removed relation from one still
+            # mid-publish, but only a removed relation orphans scalesets. Prune
+            # them (via _reconcile_runners) only when the relation is truly gone;
+            # reconciling mid-publish would delete live scalesets against an empty
+            # desired state.
+            if not CharmState.from_charm(self).configurator_related:
+                self._reconcile_runners()
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
@@ -523,6 +509,32 @@ class GarmCharm(paas_charm.go.Charm):
         self._maybe_first_run()
         self._reconcile_runners()
         super().restart(rerun_migrations=rerun_migrations)
+
+    def _warn_unsupported_port_options(self) -> None:
+        """Warn when app-port/metrics-port/metrics-path are set to non-default values.
+
+        GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has no separate
+        metrics listener — and declares its scrape target in paas-config.yaml, so the
+        go-framework's app-port/metrics-port/metrics-path settings don't apply. _workload_config
+        also pins the workload port to GARM_PORT, so app-port has no effect on ingress, the opened
+        ports, or the service URL (they can't drift from GARM's actual port). Warn rather than
+        block when an operator sets any to a non-default value, tolerating their absence (the
+        framework may drop them in future).
+        """
+        for option, default in (
+            ("app-port", GARM_PORT),
+            ("metrics-port", GARM_PORT),
+            ("metrics-path", "/metrics"),
+        ):
+            value = self.config.get(option)
+            if value is not None and str(value) != str(default):
+                logger.warning(
+                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
+                    "declares its Prometheus scrape config in paas-config.yaml",
+                    option,
+                    value,
+                    GARM_PORT,
+                )
 
     @staticmethod
     def _hash_toml(toml_content: str) -> str:

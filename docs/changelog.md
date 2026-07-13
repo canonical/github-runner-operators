@@ -15,6 +15,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-07-12
 
 - `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads.
+- `garm`: delete GARM scalesets when the `garm-configurator` relation is removed. Removing the relation left its scalesets registered in GARM (still shown by `garm-cli scaleset list`), because the charm's reconcile short-circuited on the now-missing relation before reaching the scaleset reconciler that prunes orphaned scalesets. The charm now still runs the reconcile when no configurator relation is present, so scalesets orphaned by the relation removal are disabled and deleted.
 
 ## 2026-07-09
 
