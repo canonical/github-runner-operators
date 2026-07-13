@@ -25,7 +25,6 @@ from charm_state import (
     GARM_CONFIGURATOR_RELATION_NAME,
     CharmState,
     RunnerConfig,
-    configurator_related,
     credential_name,
 )
 from entity_reconciler import EntityReconciler
@@ -435,7 +434,7 @@ class GarmCharm(paas_charm.go.Charm):
             # them (via _reconcile_runners) only when the relation is truly gone;
             # reconciling mid-publish would delete live scalesets against an empty
             # desired state.
-            if not configurator_related(self):
+            if not CharmState.from_charm(self).configurator_related:
                 self._reconcile_runners()
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")

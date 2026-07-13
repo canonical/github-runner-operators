@@ -925,7 +925,7 @@ def test_restart_without_configurator_relation_still_prunes_orphaned_scalesets()
     """
     arrange: The charm is ready (postgres + secrets available) but the
              garm-configurator relation is gone, so there are no provider configs
-             and get_relation returns None.
+             and CharmState reports the relation absent.
     act: Run restart().
     assert: _reconcile_runners() still runs so ScalesetReconciler can delete the
             now-orphaned scalesets, the workload is not replanned, and the unit
@@ -933,9 +933,9 @@ def test_restart_without_configurator_relation_still_prunes_orphaned_scalesets()
     """
     charm = _make_restart_charm()
     charm._get_configurator_provider_configs.return_value = []
-    charm.model.get_relation.return_value = None
 
-    with patch.dict(os.environ, {}, clear=True):
+    with patch.dict(os.environ, {}, clear=True), patch("charm.CharmState") as mock_state:
+        mock_state.from_charm.return_value.configurator_related = False
         GarmCharm.restart(charm)
 
     charm._reconcile_runners.assert_called_once()
@@ -949,7 +949,7 @@ def test_restart_configurator_relation_present_but_unpopulated_does_not_prune():
     """
     arrange: The charm is ready but the garm-configurator relation, though still
              present, has not yet published its secret-dependent fields, so there
-             are no provider configs while get_relation returns the relation.
+             are no provider configs while CharmState reports the relation present.
     act: Run restart().
     assert: _reconcile_runners() is NOT called — pruning against the empty desired
             state would delete live scalesets — the workload is not replanned, and
@@ -957,9 +957,9 @@ def test_restart_configurator_relation_present_but_unpopulated_does_not_prune():
     """
     charm = _make_restart_charm()
     charm._get_configurator_provider_configs.return_value = []
-    charm.model.get_relation.return_value = MagicMock()
 
-    with patch.dict(os.environ, {}, clear=True):
+    with patch.dict(os.environ, {}, clear=True), patch("charm.CharmState") as mock_state:
+        mock_state.from_charm.return_value.configurator_related = True
         GarmCharm.restart(charm)
 
     charm._reconcile_runners.assert_not_called()
@@ -1166,6 +1166,7 @@ def test_restart_missing_configurator_relation_refreshes_stale_app_status():
         patch.object(GarmCharm, "unit", new_callable=PropertyMock) as mock_unit,
         patch.object(GarmCharm, "app", new_callable=PropertyMock) as mock_app,
         patch.object(GarmCharm, "model", new_callable=PropertyMock) as mock_model,
+        patch("charm.CharmState") as mock_state,
     ):
         mock_config.return_value = {}
         mock_unit.return_value = MagicMock()
@@ -1173,7 +1174,7 @@ def test_restart_missing_configurator_relation_refreshes_stale_app_status():
         mock_unit.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
         mock_app.return_value = MagicMock()
         mock_app.return_value.status = ops.WaitingStatus("Waiting for pebble ready")
-        mock_model.return_value.get_relation.return_value = None
+        mock_state.from_charm.return_value.configurator_related = False
 
         charm.restart()
 
