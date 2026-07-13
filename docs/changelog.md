@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-13
+
+- `garm`: fix the SSH debug (tmate) connection details so the runner actually reads them. The `TMATE_SERVER_*` variables injected into the shared runner template were written to `/home/runner/.env`, but the GitHub Actions runner sources a `.env` file from its install directory (`/home/runner/actions-runner/.env`), so the debug-SSH server host, port, and fingerprints were silently ignored. They are now written to the `.env` file the runner reads, matching the per-scaleset runner options.
+
 ## 2026-07-12
 
 - `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads.
