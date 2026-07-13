@@ -11,10 +11,12 @@ Each revision is versioned by the date of the revision.
 ## 2026-07-13
 
 - `garm`: fix the SSH debug (tmate) connection details so the runner actually reads them. The `TMATE_SERVER_*` variables injected into the shared runner template were written to `/home/runner/.env`, but the GitHub Actions runner sources a `.env` file from its install directory (`/home/runner/actions-runner/.env`), so the debug-SSH server host, port, and fingerprints were silently ignored. They are now written to the `.env` file the runner reads, matching the per-scaleset runner options.
+- `garm`: reliably apply proxy changes to the GARM workload. The charm gated the workload's Pebble layer rewrite on a hash of the on-disk config file, which excluded the proxy environment *values* — so changing or clearing a proxy value while the variable set stayed the same never rewrote the layer, leaving the old value in the plan. The on-disk file could also drift from the layer and wedge it permanently. The charm now compares the freshly rendered hash (which includes the proxy values) against the `config_hash` stored in the container's current Pebble plan, so proxy value changes and clears reliably replan the workload.
 
 ## 2026-07-12
 
 - `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads.
+- `garm`: delete GARM scalesets when the `garm-configurator` relation is removed. Removing the relation left its scalesets registered in GARM (still shown by `garm-cli scaleset list`), because the charm's reconcile short-circuited on the now-missing relation before reaching the scaleset reconciler that prunes orphaned scalesets. The charm now still runs the reconcile when no configurator relation is present, so scalesets orphaned by the relation removal are disabled and deleted.
 
 ## 2026-07-09
 

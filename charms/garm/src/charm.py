@@ -411,28 +411,7 @@ class GarmCharm(paas_charm.go.Charm):
         if not self.is_ready():
             return
 
-        # GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has
-        # no separate metrics listener — and declares its scrape target in
-        # paas-config.yaml, so the go-framework's app-port/metrics-port/metrics-path
-        # settings don't apply. _workload_config also pins the workload port to
-        # GARM_PORT, so app-port has no effect on ingress, the opened ports, or the
-        # service URL (they can't drift from GARM's actual port). Warn rather than
-        # block when an operator sets any to a non-default value, tolerating their
-        # absence (the framework may drop them in future).
-        for option, default in (
-            ("app-port", GARM_PORT),
-            ("metrics-port", GARM_PORT),
-            ("metrics-path", "/metrics"),
-        ):
-            value = self.config.get(option)
-            if value is not None and str(value) != str(default):
-                logger.warning(
-                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
-                    "declares its Prometheus scrape config in paas-config.yaml",
-                    option,
-                    value,
-                    GARM_PORT,
-                )
+        self._warn_unsupported_port_options()
 
         # Short-circuit if postgresql relation data is not yet available.
         # GARM cannot start without a database connection.
@@ -450,20 +429,19 @@ class GarmCharm(paas_charm.go.Charm):
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
+            # Empty configs don't distinguish a removed relation from one still
+            # mid-publish, but only a removed relation orphans scalesets. Prune
+            # them (via _reconcile_runners) only when the relation is truly gone;
+            # reconciling mid-publish would delete live scalesets against an empty
+            # desired state.
+            if not CharmState.from_charm(self).configurator_related:
+                self._reconcile_runners()
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
             return
 
         proxy_env = _proxy_environment()
-        # The proxy variable *names* are rendered into the TOML (each provider's
-        # environment_variables allowlist), so toggling the proxy on or off changes the
-        # config hash below and triggers a restart. The proxy *values* live only in the
-        # Pebble service environment and are not part of that hash, so changing a value while
-        # the same variables stay set is not detected here and applies on the next config
-        # change. Detecting it properly means gating the replan on the Pebble layer
-        # environment (e.g. always replan and let Pebble diff the service env) instead of on
-        # the on-disk TOML hash; deferred to the env-driven GARM startup refactor.
         toml_content, provider_files = render_garm_toml(
             jwt_secret=secrets_data["jwt-secret"],
             db_passphrase=secrets_data["db-passphrase"],
@@ -472,17 +450,31 @@ class GarmCharm(paas_charm.go.Charm):
             proxy_var_names=sorted(proxy_env.keys()),
         )
 
-        # Detect config changes by comparing the new config hash against
-        # the hash of the config currently on disk in the container.
+        # Detect config changes by comparing the freshly rendered config hash against the
+        # config_hash stored in the container's current Pebble plan. The proxy *values* live
+        # only in the service environment, so they are folded into the hash input here; the
+        # stored hash was computed from the same input last time, making the comparison
+        # symmetric. This catches a proxy-value-only change (variable set unchanged) that the
+        # TOML-embedded variable *names* alone would miss, and — by comparing against the
+        # actual plan rather than the on-disk TOML — avoids the desync where a matching
+        # on-disk file wedged the layer permanently.
         hash_input = (
             toml_content
             + "\n"
             + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
         )
+        # Only extend the input when a proxy is configured, so the no-proxy hash matches
+        # earlier charm revisions and upgrading doesn't force a spurious one-time replan.
+        if proxy_env:
+            hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
         new_hash = self._hash_toml(hash_input)
-        previous_hash = self._get_on_disk_toml_hash(provider_files)
+
+        container = self.unit.get_container(CONTAINER_NAME)
+        previous_hash = self._current_config_hash(container)
         if previous_hash == new_hash:
-            logger.debug("TOML config unchanged; skipping service restart")
+            logger.debug(
+                "Workload config (TOML, provider files, proxy env) unchanged; skipping replan"
+            )
             self._reconcile_runners()
             return
 
@@ -492,7 +484,6 @@ class GarmCharm(paas_charm.go.Charm):
         provider_names = [p.get("unit_name") for p in provider_configs]
         logger.info("Updating GARM config for providers: %s", provider_names)
 
-        container = self.unit.get_container(CONTAINER_NAME)
         container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
@@ -519,6 +510,32 @@ class GarmCharm(paas_charm.go.Charm):
         self._reconcile_runners()
         super().restart(rerun_migrations=rerun_migrations)
 
+    def _warn_unsupported_port_options(self) -> None:
+        """Warn when app-port/metrics-port/metrics-path are set to non-default values.
+
+        GARM serves its API and metrics on the same fixed port (GARM_PORT) — it has no separate
+        metrics listener — and declares its scrape target in paas-config.yaml, so the
+        go-framework's app-port/metrics-port/metrics-path settings don't apply. _workload_config
+        also pins the workload port to GARM_PORT, so app-port has no effect on ingress, the opened
+        ports, or the service URL (they can't drift from GARM's actual port). Warn rather than
+        block when an operator sets any to a non-default value, tolerating their absence (the
+        framework may drop them in future).
+        """
+        for option, default in (
+            ("app-port", GARM_PORT),
+            ("metrics-port", GARM_PORT),
+            ("metrics-path", "/metrics"),
+        ):
+            value = self.config.get(option)
+            if value is not None and str(value) != str(default):
+                logger.warning(
+                    "%s=%s is not supported and has no effect; GARM serves on port %d and "
+                    "declares its Prometheus scrape config in paas-config.yaml",
+                    option,
+                    value,
+                    GARM_PORT,
+                )
+
     @staticmethod
     def _hash_toml(toml_content: str) -> str:
         """Return the SHA-256 hex digest of the given TOML content.
@@ -531,36 +548,24 @@ class GarmCharm(paas_charm.go.Charm):
         """
         return hashlib.sha256(toml_content.encode("utf-8")).hexdigest()
 
-    def _get_on_disk_toml_hash(self, provider_files: dict[str, str]) -> str | None:
-        """Compute the hash of the config currently on disk in the container.
+    @staticmethod
+    def _current_config_hash(container: ops.Container) -> str | None:
+        """Return the config_hash stored in the container's current Pebble plan.
 
-        Reads the existing config files from the container, constructs the
-        same hash input used during render, and returns its SHA-256 digest.
-        Returns None if the config file does not yet exist on disk.
+        This is the config hash computed during the previous successful replan;
+        it lives in the app service's environment. Returns None when the service
+        (or the key) is absent, i.e. the container was never configured.
 
         Args:
-            provider_files: The new provider files dict (used only for keys).
+            container: The workload container to read the plan from.
 
         Returns:
-            The SHA-256 hex digest of the on-disk config, or None if
-            the main config file does not exist yet.
+            The stored config_hash, or None if it has not been set yet.
         """
-        container = self.unit.get_container(CONTAINER_NAME)
-        try:
-            existing_toml = container.pull(GARM_CONFIG_PATH).read()
-        except (ops.pebble.PathError, FileNotFoundError):
+        service = container.get_plan().services.get(PEBBLE_SERVICE_NAME)
+        if service is None:
             return None
-
-        existing_provider_parts: list[str] = []
-        for path in sorted(provider_files.keys()):
-            try:
-                existing_provider_parts.append(f"{path}\n{container.pull(path).read()}")
-            except (ops.pebble.PathError, FileNotFoundError):
-                # If a provider file is missing, the config has changed.
-                return None
-
-        hash_input = existing_toml + "\n" + "\n".join(existing_provider_parts)
-        return self._hash_toml(hash_input)
+        return service.environment.get("config_hash")
 
     def _ensure_secrets(self) -> None:
         """Create garm-secrets and garm-admin-credentials (leader only)."""
