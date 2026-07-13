@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-07-13
 
-- `garm`: stop the config-changed hook from erroring on an already-initialised GARM. The charm's first-run check probed GARM's `controller-info` endpoint without a token and treated the resulting `401` (returned once GARM is initialised and requires auth) as a fatal error, failing the hook on any config or charm change that rewrote the workload config — e.g. a charm upgrade. The probe now treats `401` the same as `200`: both mean GARM is past its init gate and already initialised.
+- `garm`: stop the config-changed hook from erroring on an already-initialised GARM. The charm's first-run check probed GARM's `controller-info` endpoint without a token and treated the resulting `401` (returned once GARM is initialised and requires auth) as a fatal error, failing the hook on any config or charm change that rewrote the workload config — for example, a charm upgrade. The probe now treats `401` the same as `200`: both mean GARM is past its init gate and already initialised.
 - `garm`: reliably apply proxy changes to the GARM workload. The charm gated the workload's Pebble layer rewrite on a hash of the on-disk config file, which excluded the proxy environment *values* — so changing or clearing a proxy value while the variable set stayed the same never rewrote the layer, leaving the old value in the plan. The on-disk file could also drift from the layer and wedge it permanently. The charm now compares the freshly rendered hash (which includes the proxy values) against the `config_hash` stored in the container's current Pebble plan, so proxy value changes and clears reliably replan the workload.
 
 ## 2026-07-12
