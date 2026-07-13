@@ -38,17 +38,13 @@ class TestForgeCredentials(unittest.TestCase):
                 api_base_url = '',
                 auth_type = '',
                 base_url = '',
-                ca_bundle = [
-                    56
-                    ],
+                ca_bundle = 'YQ==',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 description = '',
                 endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                     api_base_url = '', 
                     base_url = '', 
-                    ca_cert_bundle = [
-                        56
-                        ], 
+                    ca_cert_bundle = 'YQ==', 
                     created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     description = '', 
                     endpoint_type = '', 
@@ -65,17 +61,13 @@ class TestForgeCredentials(unittest.TestCase):
                             api_base_url = '', 
                             auth_type = '', 
                             base_url = '', 
-                            ca_bundle = [
-                                56
-                                ], 
+                            ca_bundle = 'YQ==', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             description = '', 
                             endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                                 api_base_url = '', 
                                 base_url = '', 
-                                ca_cert_bundle = [
-                                    56
-                                    ], 
+                                ca_cert_bundle = 'YQ==', 
                                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                                 description = '', 
                                 endpoint_type = '', 
@@ -164,9 +156,7 @@ class TestForgeCredentials(unittest.TestCase):
                                                     os_type = '', 
                                                     os_version = '', 
                                                     pool_id = '', 
-                                                    provider_fault = [
-                                                        56
-                                                        ], 
+                                                    provider_fault = 'YQ==', 
                                                     provider_id = '', 
                                                     provider_name = '', 
                                                     runner_status = '', 
@@ -231,6 +221,7 @@ class TestForgeCredentials(unittest.TestCase):
                         endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                             api_base_url = '', 
                             base_url = '', 
+                            ca_cert_bundle = 'YQ==', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             description = '', 
                             name = '', 
@@ -290,17 +281,13 @@ class TestForgeCredentials(unittest.TestCase):
                             api_base_url = '', 
                             auth_type = '', 
                             base_url = '', 
-                            ca_bundle = [
-                                56
-                                ], 
+                            ca_bundle = 'YQ==', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             description = '', 
                             endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                                 api_base_url = '', 
                                 base_url = '', 
-                                ca_cert_bundle = [
-                                    56
-                                    ], 
+                                ca_cert_bundle = 'YQ==', 
                                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                                 description = '', 
                                 endpoint_type = '', 
@@ -386,9 +373,7 @@ class TestForgeCredentials(unittest.TestCase):
                                                     os_type = '', 
                                                     os_version = '', 
                                                     pool_id = '', 
-                                                    provider_fault = [
-                                                        56
-                                                        ], 
+                                                    provider_fault = 'YQ==', 
                                                     provider_id = '', 
                                                     provider_name = '', 
                                                     runner_status = '', 
@@ -457,6 +442,7 @@ class TestForgeCredentials(unittest.TestCase):
                         endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                             api_base_url = '', 
                             base_url = '', 
+                            ca_cert_bundle = 'YQ==', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             description = '', 
                             name = '', 
@@ -518,17 +504,13 @@ class TestForgeCredentials(unittest.TestCase):
                             api_base_url = '', 
                             auth_type = '', 
                             base_url = '', 
-                            ca_bundle = [
-                                56
-                                ], 
+                            ca_bundle = 'YQ==', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             description = '', 
                             endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                                 api_base_url = '', 
                                 base_url = '', 
-                                ca_cert_bundle = [
-                                    56
-                                    ], 
+                                ca_cert_bundle = 'YQ==', 
                                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                                 description = '', 
                                 endpoint_type = '', 
@@ -614,9 +596,7 @@ class TestForgeCredentials(unittest.TestCase):
                                                     os_type = '', 
                                                     os_version = '', 
                                                     pool_id = '', 
-                                                    provider_fault = [
-                                                        56
-                                                        ], 
+                                                    provider_fault = 'YQ==', 
                                                     provider_id = '', 
                                                     provider_name = '', 
                                                     runner_status = '', 
@@ -684,6 +664,7 @@ class TestForgeCredentials(unittest.TestCase):
                         endpoint = garm_client.models.forge_endpoint.ForgeEndpoint(
                             api_base_url = '', 
                             base_url = '', 
+                            ca_cert_bundle = 'YQ==', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             description = '', 
                             name = '', 

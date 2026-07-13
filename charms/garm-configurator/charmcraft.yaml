@@ -52,12 +52,12 @@ config:
       type: string
       description: |
         OpenStack network name or ID to use for instances.
-    github-app-client-id:
-      type: string
+    github-app-id:
+      type: int
       description: |
-        GitHub App client ID.
+        GitHub App ID (numeric).
     github-app-installation-id:
-      type: string
+      type: int
       description: |
         GitHub App installation ID.
     github-app-private-key:
@@ -84,9 +84,9 @@ config:
         Minimum number of idle runners in the scaleset.
     max-runner:
       type: int
-      default: 0
+      default: 1
       description: |
-        Maximum number of runners in the scaleset.
+        Maximum number of runners in the scaleset. Must be greater than 0.
     labels:
       type: string
       description: |
@@ -109,6 +109,30 @@ config:
       description: |
         A Python dict-like string containing key-value pairs of script name
         to bash script to be run prior to runner installation.
+    dockerhub-mirror:
+      type: string
+      description: |
+        Optional Docker registry mirror URL for runners. Must be a valid http(s) address.
+    runner-http-proxy:
+      type: string
+      description: |
+        Optional HTTP proxy that aproxy forwards to. Must be a valid http(s) URL.
+    aproxy-exclude-addresses:
+      type: string
+      description: |
+        Optional comma-separated IPv4 addresses/CIDRs to exclude from aproxy forwarding.
+    aproxy-redirect-ports:
+      type: string
+      description: |
+        Optional comma-separated ports or port ranges (e.g. 80,443,8000-9000) to forward to aproxy.
+    otel-collector-endpoint:
+      type: string
+      description: |
+        Optional OTEL exporter address for the otel-collector to connect to. Must be a valid http(s) URL.
+    pre-job-script:
+      type: string
+      description: |
+        Optional bash script appended to the end of the runner pre-job script.
 
 requires:
   image:

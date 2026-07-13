@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set +e
+{%- if otel %}
+
+
+{{ otel }}
+{%- endif %}
+{%- if custom_script %}
+
+
+{{ custom_script }}
+{%- endif %}

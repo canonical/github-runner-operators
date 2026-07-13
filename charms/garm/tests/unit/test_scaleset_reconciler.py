@@ -3,9 +3,14 @@
 
 """Unit tests for the scaleset reconciler."""
 
+import base64
+
 import pytest
 
-from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
+from charm_state import RunnerConfig
+from garm_client.models.template import Template
+from runner_template import build_template_data
+from scaleset_reconciler import ScalesetReconciler, ScalesetSpec, _effective_extra_specs
 
 
 class _FakeProvider:
@@ -30,6 +35,8 @@ class _FakeScaleset:
         github_runner_group=None,
         extra_specs=None,
         tags=None,
+        template_id=None,
+        enabled=True,
     ):
         self.name = name
         self.id = sid
@@ -40,6 +47,8 @@ class _FakeScaleset:
         self.github_runner_group = github_runner_group
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
+        self.template_id = template_id
+        self.enabled = enabled
 
 
 class FakeGarmClient:
@@ -62,6 +71,8 @@ class FakeGarmClient:
                 github_runner_group=ss.get("github_runner_group", None),
                 extra_specs=ss.get("extra_specs", {}),
                 tags=ss.get("tags", []),
+                template_id=ss.get("template_id", None),
+                enabled=ss.get("enabled", True),
             )
             for ss in (scalesets or [])
         ]
@@ -95,6 +106,23 @@ class FakeGarmClient:
     def delete_scaleset(self, scaleset_id):
         self.deleted.append(scaleset_id)
 
+    # Template stubs: return empty results so the reconciler's template path
+    # is a no-op when no runner config is set.
+    def list_templates(self, partial_name=None, os_type=None):
+        return []
+
+    def get_template(self, template_id):
+        return None
+
+    def create_template(self, name, data, description="", os_type="linux") -> object:
+        return None
+
+    def update_template(self, template_id, data):
+        return None
+
+    def delete_template(self, template_id):
+        pass
+
 
 def _spec(
     name="my-scaleset",
@@ -109,6 +137,8 @@ def _spec(
     labels=None,
     runner_group="",
     pre_install_scripts=None,
+    template_id=None,
+    runner_config=None,
 ):
     return ScalesetSpec(
         name=name,
@@ -123,6 +153,8 @@ def _spec(
         labels=labels or [],
         runner_group=runner_group,
         pre_install_scripts=pre_install_scripts or {},
+        template_id=template_id,
+        runner_config=runner_config or RunnerConfig(),
     )
 
 
@@ -159,6 +191,7 @@ def test_create_scaleset(entity_type, entity_name, create_key, expected_entity_i
     assert params.name == "my-scaleset"
     assert params.image == "ubuntu-22.04"
     assert params.flavor == "m1.small"
+    assert params.enabled is True
     assert client.updated == []
     assert client.deleted == []
 
@@ -196,6 +229,7 @@ def _existing_scaleset(**overrides):
         github_runner_group=None,
         extra_specs={},
         tags=[],
+        enabled=True,
     )
     base.update(overrides)
     return base
@@ -208,8 +242,15 @@ def _existing_scaleset(**overrides):
         ("flavor", "m1.large", {"flavor": "m1.large"}),
         ("max_runners", 10, {"max_runners": 10}),
         ("min_idle_runners", 2, {"min_idle": 2}),
+        ("template_id", 7, {"template_id": 7}),
     ],
-    ids=["image-changed", "flavor-changed", "max-runners-changed", "min-idle-changed"],
+    ids=[
+        "image-changed",
+        "flavor-changed",
+        "max-runners-changed",
+        "min-idle-changed",
+        "template-id-changed",
+    ],
 )
 def test_update_when_field_changed(changed_field, new_value, spec_kwarg):
     """
@@ -247,6 +288,23 @@ def test_no_update_when_scaleset_unchanged():
     assert client.deleted == []
 
 
+def test_update_when_scaleset_disabled():
+    """
+    arrange: FakeGarmClient with one existing disabled scaleset that otherwise matches.
+    act: Reconcile the desired spec.
+    assert: The reconciler enables the scaleset so GARM can spawn runners.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(enabled=False)],
+    )
+    _reconcile(client, [_spec()])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.enabled is True
+
+
 def test_delete_orphaned_scaleset():
     """
     arrange: FakeGarmClient with an observed scaleset not present in the desired set.
@@ -260,6 +318,21 @@ def test_delete_orphaned_scaleset():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted == [42]
+
+
+def test_unnamed_observed_scaleset_is_skipped():
+    """
+    arrange: FakeGarmClient with one observed scaleset lacking a name.
+    act: Reconcile an unrelated desired spec.
+    assert: The unnamed observed scaleset is ignored rather than deleted under an empty-name key.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name=None, id=42)],
+    )
+    _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted == []
 
 
 @pytest.mark.parametrize(
@@ -286,7 +359,8 @@ def test_pre_install_scripts_passed_in_create():
     """
     arrange: FakeGarmClient with provider registered and no existing scalesets.
     act: Reconcile a spec containing pre_install_scripts.
-    assert: Created scaleset params include extra_specs with the script mapping.
+    assert: Created scaleset params include extra_specs with the base64-encoded script
+        mapping (GARM's extra_specs field is map[string][]byte on the wire).
     """
     scripts = {"setup.sh": "#!/bin/bash\napt-get update"}
     client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
@@ -294,4 +368,429 @@ def test_pre_install_scripts_passed_in_create():
 
     assert len(client.created) == 1
     _, _, params = client.created[0]
-    assert params.extra_specs == {"pre_install_scripts": scripts}
+    assert params.extra_specs == {
+        "pre_install_scripts": {
+            name: base64.b64encode(content.encode()).decode() for name, content in scripts.items()
+        }
+    }
+
+
+def test_aproxy_pre_install_script_injected_when_proxy_configured():
+    """
+    arrange: A spec with runner_config.runner_http_proxy set and one operator script.
+    act: Reconcile a create.
+    assert: The created params disable cloud-init package upgrades and carry both the
+        operator script and a "00-aproxy" entry (sorts first) whose decoded content
+        configures aproxy for the given proxy.
+    """
+
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(
+        client,
+        [
+            _spec(
+                pre_install_scripts={"pre_install.sh": "echo operator-script"},
+                runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"),
+            )
+        ],
+    )
+
+    assert len(client.created) == 1
+    _, _, params = client.created[0]
+    assert params.extra_specs["disable_updates"] is True
+    scripts = params.extra_specs["pre_install_scripts"]
+    assert set(scripts.keys()) == {"00-aproxy", "pre_install.sh"}
+    aproxy_script = base64.b64decode(scripts["00-aproxy"]).decode()
+    assert "snap set aproxy proxy=squid.internal:3128" in aproxy_script
+
+
+def test_no_update_when_extra_specs_already_match_encoded_desired_state():
+    """
+    arrange: An observed scaleset whose extra_specs already carry the base64-encoded
+        aproxy + operator scripts and disable_updates, matching the desired spec.
+    act: Reconcile that spec.
+    assert: No update is issued.
+    """
+
+    proxy = "http://squid.internal:3128"
+    spec = _spec(
+        pre_install_scripts={"pre_install.sh": "echo operator-script"},
+        runner_config=RunnerConfig(runner_http_proxy=proxy),
+    )
+
+    extra_specs = _effective_extra_specs(spec)
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=extra_specs)],
+    )
+    _reconcile(client, [spec])
+
+    assert client.updated == []
+
+
+def test_update_when_observed_scripts_are_legacy_raw_text():
+    """
+    arrange: An observed scaleset whose extra_specs carry raw-text (unencoded) script
+        values from before base64-encoding was introduced.
+    act: Reconcile a spec whose desired scripts are the same content.
+    assert: An update is issued (the raw-text value never matches the encoded desired one).
+    """
+
+    spec = _spec(
+        pre_install_scripts={"pre_install.sh": "echo operator-script"},
+        runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"),
+    )
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[
+            _existing_scaleset(
+                extra_specs={
+                    "disable_updates": True,
+                    "pre_install_scripts": {"pre_install.sh": "echo operator-script"},
+                }
+            )
+        ],
+    )
+    _reconcile(client, [spec])
+
+    assert len(client.updated) == 1
+
+
+def test_update_when_disable_updates_missing_but_proxy_configured():
+    """
+    arrange: An observed scaleset whose extra_specs carry the correctly-encoded scripts
+        but lack disable_updates, while the spec configures a proxy.
+    act: Reconcile that spec.
+    assert: An update is issued to set disable_updates.
+    """
+
+    spec = _spec(runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"))
+    extra_specs = _effective_extra_specs(spec)
+    del extra_specs["disable_updates"]
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=extra_specs)],
+    )
+    _reconcile(client, [spec])
+
+    assert len(client.updated) == 1
+
+
+def test_update_clears_extra_specs_with_empty_dict_when_proxy_removed():
+    """
+    arrange: An observed scaleset carrying aproxy extra_specs, and a desired spec with no
+        proxy (and no operator scripts) so the effective extra_specs are empty.
+    act: Reconcile that spec.
+    assert: The update sends an explicit empty dict — not None, which exclude_none would
+        drop, leaving the stale extra_specs (and looping forever).
+    """
+
+    stale = _effective_extra_specs(
+        _spec(runner_config=RunnerConfig(runner_http_proxy="http://squid.internal:3128"))
+    )
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=stale)],
+    )
+    _reconcile(client, [_spec(runner_config=RunnerConfig())])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.extra_specs == {}
+
+
+class _FakeTemplate:
+    """Minimal fake for the GARM Template model used in template lifecycle tests."""
+
+    def __init__(self, name, tid, data=b"", description=""):
+        self.name = name
+        self.id = tid
+        self.data = list(data) if isinstance(data, bytes) and data else data or None
+        self.description = description
+
+
+class _TemplateTrackingClient(FakeGarmClient):
+    """FakeGarmClient variant that tracks template create/update/delete operations."""
+
+    def __init__(self, templates=None, **kwargs):
+        super().__init__(**kwargs)
+        self._templates = list(templates or [])
+        self.created_templates: list[tuple[str, bytes, str]] = []
+        self.updated_templates: list[tuple[int, bytes]] = []
+        self.deleted_templates: list[int] = []
+
+    def list_templates(self, partial_name=None, os_type=None):
+        if partial_name is None:
+            return list(self._templates)
+        return [t for t in self._templates if t.name and partial_name in t.name]
+
+    def get_template(self, template_id):
+        for t in self._templates:
+            if t.id == template_id:
+                return t
+        return None
+
+    def create_template(self, name, data, description="", os_type="linux") -> _FakeTemplate:  # type: ignore[override]
+        tid = max((t.id for t in self._templates), default=0) + 1
+        template = _FakeTemplate(name, tid, data, description)
+        self._templates.append(template)
+        self.created_templates.append((name, data, description))
+        return template
+
+    def update_template(self, template_id, data):
+        for t in self._templates:
+            if t.id == template_id:
+                t.data = list(data)
+                break
+        self.updated_templates.append((template_id, data))
+
+    def delete_template(self, template_id):
+        self._templates = [t for t in self._templates if t.id != template_id]
+        self.deleted_templates.append(template_id)
+
+
+class _DeleteFailingTemplateClient(_TemplateTrackingClient):
+    """TemplateTrackingClient variant whose delete_template raises a GARM API error."""
+
+    def delete_template(self, template_id):
+        from garm_api import GarmApiError
+
+        raise GarmApiError(f"delete failed for template {template_id}")
+
+
+_SYSTEM_TEMPLATE = _FakeTemplate("github_linux", tid=1, data=b"#!/bin/bash\nset -e\necho base\n")
+
+
+def _spec_with_runner_config(**rc_kwargs):
+    """Build a spec with runner_config populated from the given kwargs."""
+
+    return _spec(runner_config=RunnerConfig(**rc_kwargs))
+
+
+def test_template_created_when_runner_config_set():
+    """
+    arrange: No existing scalesets or custom templates; system template exists.
+    act: Reconcile a spec with runner options (dockerhub_mirror).
+    assert: A custom template is created and the scaleset references it via template_id.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[],
+        templates=[_SYSTEM_TEMPLATE],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://mirror.example.com")],
+    )
+
+    assert len(client.created_templates) == 1
+    name, data, _ = client.created_templates[0]
+    assert name == "github_linux-my-scaleset"
+    assert b"registry-mirrors" in data
+    assert len(client.created) == 1
+    _, _, params = client.created[0]
+    # The created template's id is 2 (system=1, first custom=2)
+    assert params.template_id == 2
+
+
+def test_template_created_when_garm_returns_template_data_as_string():
+    """
+    arrange: The system template data is returned as a base64 string by the GARM API.
+    act: Reconcile a spec with runner options.
+    assert: A custom template is created from the decoded script data without hook errors.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[],
+        templates=[
+            _FakeTemplate(
+                "github_linux",
+                tid=1,
+                data=base64.b64encode(b"#!/bin/bash\nset -e\necho base\n").decode(),
+            )
+        ],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://mirror.example.com")],
+    )
+
+    assert len(client.created_templates) == 1
+    _, data, _ = client.created_templates[0]
+    assert isinstance(data, bytes)
+    assert b"registry-mirrors" in data
+    assert b"#!/bin/bash" in data
+
+
+def test_template_created_from_charmed_template_when_scaleset_references_it():
+    """
+    arrange: A scaleset references the charm-managed template and runner options are set.
+    act: Reconcile the desired spec.
+    assert: The custom template is derived from the charmed template rather than the bare system one.
+    """
+
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate(
+                "github_linux_charmed",
+                tid=7,
+                data=base64.b64encode(b"#!/bin/bash\nset -e\necho charmed-base\n").decode(),
+            ),
+        ],
+    )
+    _reconcile(
+        client,
+        [
+            _spec(
+                template_id=7,
+                runner_config=RunnerConfig(dockerhub_mirror="https://mirror.example.com"),
+            )
+        ],
+    )
+
+    assert len(client.created_templates) == 1
+    _, data, _ = client.created_templates[0]
+    assert b"echo charmed-base" in data
+    assert b"echo base" not in data
+
+
+def test_template_updated_when_runner_config_changes():
+    """
+    arrange: A scaleset with an existing custom template.
+    act: Reconcile with a changed runner config.
+    assert: The custom template is updated (not recreated); the scaleset template_id is unchanged.
+    """
+
+    old_config = RunnerConfig(dockerhub_mirror="https://old.example.com")
+    custom_template = _FakeTemplate(
+        "github_linux-my-scaleset",
+        tid=2,
+        data=build_template_data(b"#!/bin/bash\nset -e\necho base\n", old_config),
+    )
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[_SYSTEM_TEMPLATE, custom_template],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://new.example.com")],
+    )
+
+    assert len(client.updated_templates) == 1
+    template_id, data = client.updated_templates[0]
+    assert template_id == 2
+    assert b"new.example.com" in data
+    assert b"old.example.com" not in data
+    # Scaleset should not be updated just because template content changed.
+    assert client.updated == []
+
+
+def test_template_detached_when_runner_config_cleared():
+    """
+    arrange: A scaleset with an existing custom template.
+    act: Reconcile with no runner options.
+    assert: The scaleset is updated with template_id=0 (detach), and the custom template is deleted.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate(
+                "github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"
+            ),
+        ],
+    )
+    _reconcile(client, [_spec()])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.template_id == 0
+    assert 2 in client.deleted_templates
+
+
+def test_template_kept_when_system_template_missing():
+    """
+    arrange: A scaleset with an existing custom template, but the system template is not listed.
+    act: Reconcile with runner options still set.
+    assert: The existing custom template is kept (not destroyed); no create/update/delete on templates.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[
+            _FakeTemplate(
+                "github_linux-my-scaleset", tid=2, data=b"#!/bin/bash\nset -e\necho x\n"
+            ),
+        ],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://m.example.com")],
+    )
+
+    assert client.created_templates == []
+    assert client.updated_templates == []
+    assert client.deleted_templates == []
+
+
+def test_template_with_missing_id_is_not_updated():
+    """
+    arrange: A custom template exists without an id and its rendered content differs.
+    act: Reconcile a spec with runner options.
+    assert: The reconciler skips the update and falls back to the default template id.
+    """
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(template_id=2)],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate("github_linux-my-scaleset", tid=None, data=b"stale"),
+        ],
+    )
+    _reconcile(
+        client,
+        [_spec_with_runner_config(dockerhub_mirror="https://mirror.example.com")],
+    )
+
+    assert client.updated_templates == []
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.template_id == 0
+
+
+def test_template_bytes_does_not_cache_invalid_placeholder_on_generated_model():
+    """
+    arrange: A generated Template model whose list response omits data and whose fetched body is still missing.
+    act: Read template bytes through the reconciler helper.
+    assert: Empty bytes are returned and the Template model is not assigned a non-string placeholder.
+    """
+    client = _TemplateTrackingClient()
+    reconciler = ScalesetReconciler(client)
+    listed = Template(id=5, name="github_linux")
+    client._templates = [listed]
+
+    assert reconciler._template_bytes(listed) == b""
+    assert listed.data is None
+
+
+def test_delete_custom_template_skips_missing_id_and_api_errors():
+    """
+    arrange: One custom template has no id and another raises on delete.
+    act: Reconcile removal of the associated scalesets.
+    assert: Missing-id templates are skipped and delete errors do not abort reconcile.
+    """
+    missing_id_client = _TemplateTrackingClient(
+        templates=[_FakeTemplate("github_linux-stale", tid=None, data=b"x")],
+    )
+    _reconcile(missing_id_client, [])
+    assert missing_id_client.deleted_templates == []
+
+    failing_client = _DeleteFailingTemplateClient(
+        templates=[_FakeTemplate("github_linux-stale", tid=7, data=b"x")],
+    )
+    _reconcile(failing_client, [])

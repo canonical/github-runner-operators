@@ -5,6 +5,7 @@
 """Charm entrypoint for the GARM configurator charm."""
 
 import json
+import logging
 import typing
 
 import ops
@@ -15,6 +16,8 @@ from charm_state import (
     CharmConfigInvalidError,
     CharmState,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GarmConfiguratorCharm(ops.CharmBase):
@@ -52,6 +55,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
         try:
             state = CharmState.from_charm(self)
         except CharmConfigInvalidError as e:
+            # Juju shows only the first line of a status message, so log the full
+            # detail (a pydantic error may span several lines) for debug-log.
+            logger.warning("Invalid charm config:\n%s", e.msg)
             self.unit.status = ops.BlockedStatus(e.msg)
             return
 
@@ -146,6 +152,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             return
 
         pre_install = state.scaleset_config.pre_install_scripts
+        rc = state.runner_config
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
@@ -159,6 +166,12 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
             if pre_install
             else "",
+            "dockerhub_mirror": rc.dockerhub_mirror or "",
+            "runner_http_proxy": rc.runner_http_proxy or "",
+            "aproxy_exclude_addresses": rc.aproxy_exclude_addresses or "",
+            "aproxy_redirect_ports": rc.aproxy_redirect_ports or "",
+            "otel_collector_endpoint": rc.otel_collector_endpoint or "",
+            "pre_job_script": rc.pre_job_script or "",
         }
         if state.scaleset_config.org:
             basic_data["org"] = state.scaleset_config.org
@@ -187,15 +200,15 @@ class GarmConfiguratorCharm(ops.CharmBase):
             {
                 "openstack_auth_url": state.provider_config.auth_url,
                 "openstack_username": state.provider_config.username,
-                "openstack_password_secret_uri": password_secret.id,
+                "openstack_password_secret_uri": str(password_secret.id),
                 "openstack_project_name": state.provider_config.project_name,
                 "openstack_user_domain_name": state.provider_config.user_domain_name,
                 "openstack_project_domain_name": state.provider_config.project_domain_name,
                 "openstack_region_name": state.provider_config.region_name,
                 "openstack_network": state.provider_config.network,
-                "github_client_id": state.github_app_config.client_id,
-                "github_installation_id": state.github_app_config.installation_id,
-                "github_private_key_secret_uri": github_key_secret.id,
+                "github_app_id": str(state.github_app_config.app_id),
+                "github_installation_id": str(state.github_app_config.installation_id),
+                "github_private_key_secret_uri": str(github_key_secret.id),
                 "image_id": state.image_id,
             }
         )

@@ -6,7 +6,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **agent_url** | **str** |  | [optional] 
-**ca_cert_bundle** | **List[int]** |  | [optional] 
+**ca_cert_bundle** | **bytes** |  | [optional] 
 **callback_url** | **str** |  | [optional] 
 **clear_ca_cert_bundle** | **bool** |  | [optional] 
 **enable_agent_tools_sync** | **bool** |  | [optional] 

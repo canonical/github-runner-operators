@@ -36,6 +36,7 @@ charms — there are four charms, not two).
 - **`actions/` Python** — `tox -e actions-lint`, `tox -e actions-static`, `tox -e actions-unit`.
 - **Go** — `go test ./...`.
 - `charmcraft pack` — build a charm (run from the charm dir; not wired into tox).
+- **Docs spellcheck** — CI runs Vale over `docs/` with `Canonical.000-US-spellcheck` at **error** level, so an unknown technical term (e.g. `deserialize`) fails the build. Add project-specific terms — regex forms like `[Dd]eserializ(e|es|ed|ing|ation)` are supported — to `docs/.custom_wordlist.txt` (the docs `Makefile` appends it to the Canonical accept vocabulary); verify with `make -C docs spellcheck` before pushing a `docs/` change.
 - Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function.
 
 ## Charm conventions
@@ -82,8 +83,11 @@ but some of its rules assume a hand-written `ops` charm and do **not** apply to 
 - **No separate reconcile logic** — `restart()` is the reconcile (see above). A thin `_reconcile` dispatcher that just calls `self.restart()` is fine; don't implement reconcile logic outside `restart()`.
 - **No hand-authored `workload.py` / Pebble layer** — the `go-framework` extension owns the
   workload; touch Pebble only inside a `restart()` override when strictly necessary.
-- **`state.py` Pydantic abstraction is optional** — only `garm-configurator` has a real
-  `CharmState`; don't force it onto paas charms.
+- **A `CharmState` abstraction is optional but encouraged where it cuts `charm.py` complexity**
+  (per [ISD014](https://discourse.charmhub.io/t/specification-isd014-managing-charm-complexity/11619)).
+  `garm-configurator` uses a Pydantic `CharmState`; `garm` uses a `dataclasses`-based
+  `charm_state.py` (`CharmState.from_charm`) for relation-derived desired state. Don't force one
+  onto a trivial paas charm, and keep it dependency-free of `charm.py` (no import cycle).
 
 Still applicable: holistic state handling, idempotent `install`, explicit port handling, small
 `try/except` blocks scoped to custom exceptions, no Canonical-internal references in charm

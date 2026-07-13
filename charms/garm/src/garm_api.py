@@ -3,28 +3,44 @@
 
 """Thin wrapper over the generated GARM API client for charm use."""
 
+import base64
 import logging
 import time
 
 import urllib3
 import urllib3.exceptions
 
+from garm_client.api.controller_api import ControllerApi
 from garm_client.api.controller_info_api import ControllerInfoApi
+from garm_client.api.credentials_api import CredentialsApi
 from garm_client.api.first_run_api import FirstRunApi
 from garm_client.api.login_api import LoginApi
 from garm_client.api.organizations_api import OrganizationsApi
 from garm_client.api.providers_api import ProvidersApi
 from garm_client.api.repositories_api import RepositoriesApi
 from garm_client.api.scalesets_api import ScalesetsApi
+from garm_client.api.templates_api import TemplatesApi
 from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
+from garm_client.models.create_github_credentials_params import CreateGithubCredentialsParams
+from garm_client.models.create_org_params import CreateOrgParams
+from garm_client.models.create_repo_params import CreateRepoParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
+from garm_client.models.create_template_params import CreateTemplateParams
+from garm_client.models.forge_credentials import ForgeCredentials
 from garm_client.models.new_user_params import NewUserParams
+from garm_client.models.organization import Organization
 from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.provider import Provider
+from garm_client.models.repository import Repository
 from garm_client.models.scale_set import ScaleSet
+from garm_client.models.template import Template
+from garm_client.models.update_controller_params import UpdateControllerParams
+from garm_client.models.update_entity_params import UpdateEntityParams
+from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
+from garm_client.models.update_template_params import UpdateTemplateParams
 
 logger = logging.getLogger(__name__)
 
@@ -156,22 +172,22 @@ class GarmApiClient:
         logger.info("GARM first-run initialisation complete for user '%s'", username)
 
     def login(self, username: str, password: str) -> str:
-        """Log in to the GARM API and return a JWT token.
+        """Authenticate with GARM and return a JWT token.
 
         Args:
-            username: Admin username.
-            password: Admin password.
-
-        Raises:
-            GarmApiError: If login fails or response has no token.
+            username: GARM admin username.
+            password: GARM admin password.
 
         Returns:
             JWT token string.
+
+        Raises:
+            GarmApiError: If login fails.
         """
         with self._api_client() as client:
             api = LoginApi(api_client=client)
             try:
-                result = api.login(
+                response = api.login(
                     body=PasswordLoginParams(username=username, password=password),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
@@ -179,9 +195,9 @@ class GarmApiClient:
                 raise GarmApiError(f"GARM login failed ({exc.status}): {exc.body}") from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
-        if not result.token:
-            raise GarmApiError("login response did not contain a token")
-        return result.token
+        if not response.token:
+            raise GarmApiError("GARM login returned empty token")
+        return response.token
 
 
 class GarmAuthenticatedClient(GarmApiClient):
@@ -230,6 +246,139 @@ class GarmAuthenticatedClient(GarmApiClient):
             header_value=f"Bearer {self._token}",
         )
 
+    def list_templates(
+        self,
+        partial_name: str | None = None,
+        os_type: str | None = None,
+    ) -> list[Template]:
+        """List runner install templates known to GARM, optionally filtered.
+
+        Args:
+            partial_name: Optional partial or full template name to filter by.
+            os_type: Optional OS type filter (e.g. ``"linux"``).
+
+        Returns:
+            List of Template objects.
+
+        Raises:
+            GarmApiError: If the API call fails.
+        """
+        with self._api_client() as client:
+            api = TemplatesApi(api_client=client)
+            try:
+                return (
+                    api.list_templates(
+                        partial_name=partial_name,
+                        os_type=os_type,
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"GARM list_templates failed ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def get_template(self, template_id: int) -> Template:
+        """Fetch a single runner install template by ID.
+
+        Args:
+            template_id: Numeric template ID.
+
+        Returns:
+            The requested Template.
+
+        Raises:
+            GarmApiError: If the API call fails.
+        """
+        with self._api_client() as client:
+            api = TemplatesApi(api_client=client)
+            try:
+                return api.get_template(template_id=template_id, _request_timeout=_REQUEST_TIMEOUT)
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"GARM get_template({template_id}) failed ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_template(
+        self,
+        name: str,
+        data: bytes,
+        description: str = "",
+        forge_type: str = "github",
+        os_type: str = "linux",
+    ) -> Template:
+        """Create a new runner install template.
+
+        Args:
+            name: Template name.
+            data: Raw shell script bytes for the template body.
+            description: Human-readable description.
+            forge_type: Source forge type, e.g. ``"github"``.
+            os_type: OS type, e.g. ``"linux"``.
+
+        Returns:
+            The created Template.
+
+        Raises:
+            GarmApiError: If the API call fails.
+        """
+        with self._api_client() as client:
+            api = TemplatesApi(api_client=client)
+            try:
+                return api.create_template(
+                    body=CreateTemplateParams(
+                        name=name,
+                        description=description,
+                        forge_type=forge_type,
+                        os_type=os_type,
+                        data=base64.b64encode(data).decode("utf-8"),
+                    ),
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"GARM create_template failed ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_controller(self, metadata_url: str, callback_url: str, webhook_url: str) -> None:
+        """Set the controller metadata, callback and webhook URLs.
+
+        GARM rejects operational endpoints (credentials, endpoints, scalesets) with
+        HTTP 409 ``urls_required`` until these controller URLs are configured. The call
+        is idempotent.
+
+        Args:
+            metadata_url: URL runners use to fetch instance metadata.
+            callback_url: URL runners use for status callbacks.
+            webhook_url: URL GitHub uses to deliver webhooks.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                ControllerApi(api_client=client).update_controller(
+                    body=UpdateControllerParams(
+                        metadata_url=metadata_url,
+                        callback_url=callback_url,
+                        webhook_url=webhook_url,
+                    ),
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update controller ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
     def list_providers(self) -> list[Provider]:
         """List all registered GARM providers.
 
@@ -249,6 +398,106 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
             except ApiException as exc:
                 raise GarmApiError(f"Failed to list providers ({exc.status}): {exc.body}") from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_credentials(self) -> list[ForgeCredentials]:
+        """List all registered GARM credentials.
+
+        Returns:
+            List of ForgeCredentials model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    CredentialsApi(api_client=client).list_credentials(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list credentials ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_credentials(self, params: CreateGithubCredentialsParams) -> ForgeCredentials:
+        """Create new GitHub credentials in GARM.
+
+        Args:
+            params: CreateGithubCredentialsParams instance.
+
+        Returns:
+            Created ForgeCredentials model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return CredentialsApi(api_client=client).create_credentials(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create credential ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_credentials(
+        self, cred_id: int, params: UpdateGithubCredentialsParams
+    ) -> ForgeCredentials:
+        """Update existing GitHub credentials in GARM.
+
+        Args:
+            cred_id: Integer ID of the credentials to update.
+            params: UpdateGithubCredentialsParams instance.
+
+        Returns:
+            Updated ForgeCredentials model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return CredentialsApi(api_client=client).update_credentials(
+                    id=cred_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update credential {cred_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_credentials(self, cred_id: int) -> None:
+        """Delete GitHub credentials from GARM.
+
+        Args:
+            cred_id: Integer ID of the credentials to delete.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                CredentialsApi(api_client=client).delete_credentials(
+                    id=cred_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete credential {cred_id} ({exc.status}): {exc.body}"
+                ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -339,6 +588,202 @@ class GarmAuthenticatedClient(GarmApiClient):
                 return repo.id
         return None
 
+    def list_orgs(self) -> list[Organization]:
+        """List all GARM organizations.
+
+        Returns:
+            List of Organization model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    OrganizationsApi(api_client=client).list_orgs(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list organizations ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_repos(self) -> list[Repository]:
+        """List all GARM repositories.
+
+        Returns:
+            List of Repository model objects.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return (
+                    RepositoriesApi(api_client=client).list_repos(
+                        _request_timeout=_REQUEST_TIMEOUT
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list repositories ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_org(self, params: CreateOrgParams) -> Organization:
+        """Register an organization in GARM.
+
+        Args:
+            params: CreateOrgParams instance (name + credentials_name).
+
+        Returns:
+            Created Organization model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return OrganizationsApi(api_client=client).create_org(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create organization ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_org(self, org_id: str, params: UpdateEntityParams) -> Organization:
+        """Update an existing GARM organization.
+
+        Args:
+            org_id: GARM organization UUID.
+            params: UpdateEntityParams instance.
+
+        Returns:
+            Updated Organization model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return OrganizationsApi(api_client=client).update_org(
+                    org_id=org_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update organization {org_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_org(self, org_id: str) -> None:
+        """Delete a GARM organization.
+
+        Args:
+            org_id: GARM organization UUID.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                OrganizationsApi(api_client=client).delete_org(
+                    org_id=org_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete organization {org_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def create_repo(self, params: CreateRepoParams) -> Repository:
+        """Register a repository in GARM.
+
+        Args:
+            params: CreateRepoParams instance (owner + name + credentials_name).
+
+        Returns:
+            Created Repository model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return RepositoriesApi(api_client=client).create_repo(
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to create repository ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_repo(self, repo_id: str, params: UpdateEntityParams) -> Repository:
+        """Update an existing GARM repository.
+
+        Args:
+            repo_id: GARM repository UUID.
+            params: UpdateEntityParams instance.
+
+        Returns:
+            Updated Repository model object.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                return RepositoriesApi(api_client=client).update_repo(
+                    repo_id=repo_id,
+                    body=params,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to update repository {repo_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_repo(self, repo_id: str) -> None:
+        """Delete a GARM repository.
+
+        Args:
+            repo_id: GARM repository UUID.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                RepositoriesApi(api_client=client).delete_repo(
+                    repo_id=repo_id,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete repository {repo_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
     def create_org_scaleset(self, org_id: str, params: CreateScaleSetParams) -> ScaleSet:
         """Create a scaleset under a GARM organization.
 
@@ -416,6 +861,54 @@ class GarmAuthenticatedClient(GarmApiClient):
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def update_template(self, template_id: int, data: bytes) -> Template:
+        """Update the body of an existing runner install template in place.
+
+        Args:
+            template_id: Numeric template ID to update.
+            data: New raw shell script bytes for the template body.
+
+        Returns:
+            The updated Template.
+
+        Raises:
+            GarmApiError: If the API call fails.
+        """
+        with self._api_client() as client:
+            api = TemplatesApi(api_client=client)
+            try:
+                return api.update_template(
+                    template_id=template_id,
+                    body=UpdateTemplateParams(data=base64.b64encode(data).decode("utf-8")),
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"GARM update_template({template_id}) failed ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_template(self, template_id: int) -> None:
+        """Delete a runner install template by ID.
+
+        Args:
+            template_id: Numeric template ID to delete.
+
+        Raises:
+            GarmApiError: If the API call fails.
+        """
+        with self._api_client() as client:
+            api = TemplatesApi(api_client=client)
+            try:
+                api.delete_template(template_id=template_id, _request_timeout=_REQUEST_TIMEOUT)
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"GARM delete_template({template_id}) failed ({exc.status}): {exc.body}"
                 ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc

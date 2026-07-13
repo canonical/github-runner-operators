@@ -6,7 +6,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **created_at** | **datetime** |  | [optional] 
-**data** | **List[int]** |  | [optional] 
+**data** | **bytes** |  | [optional] 
 **description** | **str** |  | [optional] 
 **forge_type** | **str** |  | [optional] 
 **id** | **int** |  | [optional] 

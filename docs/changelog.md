@@ -8,6 +8,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-07-13
+
+- `garm`: reliably apply proxy changes to the GARM workload. The charm gated the workload's Pebble layer rewrite on a hash of the on-disk config file, which excluded the proxy environment *values* — so changing or clearing a proxy value while the variable set stayed the same never rewrote the layer, leaving the old value in the plan. The on-disk file could also drift from the layer and wedge it permanently. The charm now compares the freshly rendered hash (which includes the proxy values) against the `config_hash` stored in the container's current Pebble plan, so proxy value changes and clears reliably replan the workload.
+
+## 2026-07-12
+
+- `garm`: fix the injected runner-option environment variables so the runner actually reads them. They were written to a file named `env`, but the GitHub Actions runner sources a `.env` file, so the Docker mirror, OpenTelemetry endpoint, job-started hook, and pre-job-script options were silently ignored. They are now written to the `.env` file the runner reads.
+- `garm`: delete GARM scalesets when the `garm-configurator` relation is removed. Removing the relation left its scalesets registered in GARM (still shown by `garm-cli scaleset list`), because the charm's reconcile short-circuited on the now-missing relation before reaching the scaleset reconciler that prunes orphaned scalesets. The charm now still runs the reconcile when no configurator relation is present, so scalesets orphaned by the relation removal are disabled and deleted.
+
+## 2026-07-09
+
+- `garm`: apply the Docker registry mirror and runner host preparation on the runner. GARM runs the injected runner-install steps as the unprivileged `runner` user, but the Docker-mirror and host-prep steps ran without `sudo`, so writing `/etc/docker/daemon.json`, restarting Docker, and adding the runner to the `lxd`/`adm` groups all failed silently — the mirror and group membership were never applied. These steps now escalate with `sudo`, matching the rest of the install script.
+
+- `garm`: fix runner provisioning on proxy-only networks. GARM injects a compiled-in wrapper as the cloud-init install script that must reach the GARM API before any runner-template content runs, so the aproxy bootstrap embedded in the template could never bring up egress in time and runners never registered. The aproxy setup is now delivered as a pre-install script (which GARM runs before the wrapper), apt updates are disabled on boot when a proxy is configured, and `snap set aproxy proxy=` now receives a bare `host:port` as aproxy requires.
+- `garm`: fix a charm crash when a runner fails to provision. GARM reports the IaaS provider error as a base64 string in the instance's `provider_fault`, but the generated GARM API client expected an integer array and raised a validation error, aborting every reconcile until GARM removed the faulted instance. The client is now pinned to a GARM revision that declares its byte fields as base64 strings (upstream GARM #802), so faulted instances deserialize correctly.
+
+## 2026-07-08
+
+-  Add webhook gateway dashboard panels: three new panels show webhook ingestion, webhook delivery, and webhook redelivery for the webhook gateway. The panels are co-located in the planner dashboard for a better viewing experience, making webhook-related errors such as delivery failures easier to monitor.
+-  Fix runner provisioning in the GARM workload: the OpenStack provider binary in the bare-base rock was built dynamically linked, so GARM could not execute it (`fork/exec /usr/local/bin/garm-provider-openstack: no such file or directory`) and no runners were spawned, even though the charm reported `active`. The provider is now built as a fully static, pure-Go binary, matching the GARM binary.
+- `garm-configurator`: log the full config-validation detail when configuration is invalid. Juju truncates the blocked unit status to its first line, so a multi-line validation error (for example from an invalid runner option) was not fully visible. The charm now also logs the complete detail at warning level, so it is discoverable in `juju debug-log`.
+
+## 2026-07-06
+
+- `garm`: fix the application status freezing on a stale value. The charm wrote the unit status directly on its own reconcile paths, so the leader's application status was never refreshed and could stay stuck (for example showing `Waiting for pebble ready` while the unit was `active`). Status writes now go through the shared unit/application status helper so both stay in sync.
+
+- `garm-configurator`: reject `max-runner=0` during config validation. GARM rejects scale set creation with `max_runners cannot be 0`, so the charm now surfaces the invalid configuration before publishing unusable scale set data to GARM.
+
+## 2026-07-02
+
+- Fix GARM organization and repository registration: the charm now sets a webhook secret when registering entities. GARM requires a non-empty webhook secret to register an org/repo, so registration previously failed with an opaque server error and scalesets were never created. The charm generates a throwaway secret automatically, so no operator configuration is required.
+
+- Fix TLS verification in the GARM workload: the GARM rock is built on a bare base and previously shipped without a CA trust store, so GARM's statically-linked binary rejected every HTTPS certificate (including GitHub's) with `x509: certificate signed by unknown authority`. The rock now bundles the system CA certificates.
+
+## 2026-06-30
+
+- Register GARM organization and repository entities from the garm-configurator relation over the GARM REST API, binding each to its managed GitHub App credential. Entities are now created before scalesets are reconciled, so scalesets no longer wait indefinitely for an org/repo that nothing registered. Registration is best-effort: if GARM cannot register an entity yet (for example GitHub is briefly unreachable), the charm defers and retries rather than failing the whole sync. Entities that fall out of the relation are deleted once their scalesets have drained.
+
+## 2026-06-29
+
+- Implement the webhook redelivery service.
+- route the GARM charm's outbound traffic through the Juju model proxy: model-level `juju-http-proxy`/`juju-https-proxy`/`juju-no-proxy` settings are now applied to GARM and forwarded to the OpenStack provider executable, so OpenStack and GitHub API calls egress via the proxy.
+
+## 2026-06-26
+
+- Sync GARM GitHub App credentials from the garm-configurator relation over the GARM REST API, without restarting the service. Only the built-in `github.com` endpoint is supported.
+- `garm-configurator`: add a new required `github-app-id` config option (the numeric GitHub App ID, which GARM uses to authenticate the App) and remove the unused `github-app-client-id` option (GARM authenticates Apps by app ID, not the OAuth client ID). Existing deployments must set `github-app-id`. The `github-app-id` and `github-app-installation-id` options are now integer-typed, so non-numeric values are rejected at config-set time.
+
+## 2026-06-24
+
+- Add debug-ssh relation support for the GARM charm. This allows the GARM charm to be integrated with the tmate-ssh-server charm to enable remote debugging of the runner spawned by the GARM charm.
+
 ## 2026-06-23
 
 - `waiting-p80-report`: count only jobs we own (those with a non-NULL `assigned_flavor`). Jobs served by runners we don't manage — for example, third-party self-hosted runners on repositories we ingest webhooks from — never match a flavor and were skewing the reported P80. Caveat: for date ranges before the 2026-06-18 case-insensitive label-matching fix, some owned completed jobs were left with a NULL `assigned_flavor` and are likewise excluded, so `sample_count` may be lower than the true total for those older ranges.

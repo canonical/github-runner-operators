@@ -4,7 +4,16 @@
 """State of the GARM configurator charm."""
 
 import ops
-from pydantic import BaseModel
+from pydantic import (
+    BaseModel,
+    HttpUrl,
+    IPvAnyNetwork,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 OPENSTACK_AUTH_URL_CONFIG_NAME = "openstack-auth-url"
 OPENSTACK_USERNAME_CONFIG_NAME = "openstack-username"
@@ -15,7 +24,7 @@ OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME = "openstack-project-domain-name"
 OPENSTACK_REGION_NAME_CONFIG_NAME = "openstack-region-name"
 OPENSTACK_NETWORK_CONFIG_NAME = "openstack-network"
 
-GITHUB_APP_CLIENT_ID_CONFIG_NAME = "github-app-client-id"
+GITHUB_APP_ID_CONFIG_NAME = "github-app-id"
 GITHUB_APP_INSTALLATION_ID_CONFIG_NAME = "github-app-installation-id"
 GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 
@@ -29,6 +38,16 @@ SCALESET_REPO_CONFIG_NAME = "repo"
 SCALESET_ORG_CONFIG_NAME = "org"
 SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
+
+DOCKERHUB_MIRROR_CONFIG_NAME = "dockerhub-mirror"
+RUNNER_HTTP_PROXY_CONFIG_NAME = "runner-http-proxy"
+APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME = "aproxy-exclude-addresses"
+APROXY_REDIRECT_PORTS_CONFIG_NAME = "aproxy-redirect-ports"
+OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
+PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
+
+_HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
+_IP_NETWORK_ADAPTER: TypeAdapter[IPvAnyNetwork] = TypeAdapter(IPvAnyNetwork)
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
@@ -139,13 +158,13 @@ class GithubAppConfig(BaseModel):
     """GitHub App configuration.
 
     Attributes:
-        client_id: GitHub App client ID.
+        app_id: GitHub App ID (numeric).
         installation_id: GitHub App installation ID.
         private_key: GitHub App private key (resolved from secret).
     """
 
-    client_id: str
-    installation_id: str
+    app_id: int
+    installation_id: int
     private_key: str
 
     @classmethod
@@ -161,14 +180,14 @@ class GithubAppConfig(BaseModel):
         Returns:
             The parsed GitHub App configuration.
         """
-        client_id = charm.config.get(GITHUB_APP_CLIENT_ID_CONFIG_NAME)
-        if not client_id or not str(client_id).strip():
+        app_id = charm.config.get(GITHUB_APP_ID_CONFIG_NAME)
+        if app_id is None:
             raise CharmConfigInvalidError(
-                f"Missing required configuration: {GITHUB_APP_CLIENT_ID_CONFIG_NAME}"
+                f"Missing required configuration: {GITHUB_APP_ID_CONFIG_NAME}"
             )
 
         installation_id = charm.config.get(GITHUB_APP_INSTALLATION_ID_CONFIG_NAME)
-        if not installation_id or not str(installation_id).strip():
+        if installation_id is None:
             raise CharmConfigInvalidError(
                 f"Missing required configuration: {GITHUB_APP_INSTALLATION_ID_CONFIG_NAME}"
             )
@@ -187,8 +206,8 @@ class GithubAppConfig(BaseModel):
             ) from e
 
         return cls(
-            client_id=str(client_id),
-            installation_id=str(installation_id),
+            app_id=int(app_id),
+            installation_id=int(installation_id),
             private_key=private_key,
         )
 
@@ -250,9 +269,9 @@ class ScalesetConfig(BaseModel):
             )
 
         max_runner = int(charm.config.get(SCALESET_MAX_RUNNER_CONFIG_NAME, 0))
-        if max_runner < 0:
+        if max_runner <= 0:
             raise CharmConfigInvalidError(
-                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be non-negative"
+                f"{SCALESET_MAX_RUNNER_CONFIG_NAME} must be greater than 0"
             )
         if max_runner < min_idle_runner:
             raise CharmConfigInvalidError(
@@ -296,6 +315,153 @@ class ScalesetConfig(BaseModel):
         )
 
 
+class RunnerConfig(BaseModel):
+    """Optional runner-level configuration forwarded to the GARM scaleset.
+
+    Attributes:
+        dockerhub_mirror: Optional Docker registry mirror URL.
+        runner_http_proxy: HTTP proxy address for aproxy to forward to.
+        aproxy_exclude_addresses: Comma-separated IPs/CIDRs excluded from aproxy forwarding.
+        aproxy_redirect_ports: Comma-separated ports or N-M ranges forwarded to aproxy.
+        otel_collector_endpoint: OTEL exporter address for the otel-collector.
+        pre_job_script: Bash snippet appended to the runner pre-job script.
+    """
+
+    dockerhub_mirror: str | None = None
+    runner_http_proxy: str | None = None
+    aproxy_exclude_addresses: str | None = None
+    aproxy_redirect_ports: str | None = None
+    otel_collector_endpoint: str | None = None
+    pre_job_script: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_to_none(cls, data: object) -> object:
+        """Strip whitespace and treat empty/whitespace-only values as unset."""
+        if not isinstance(data, dict):
+            return data
+        return {
+            key: (str(value).strip() or None) if value is not None else None
+            for key, value in data.items()
+        }
+
+    @field_validator("dockerhub_mirror", "runner_http_proxy", "otel_collector_endpoint")
+    @classmethod
+    def _validate_http_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Require a set option to be a well-formed http(s) URL."""
+        if value is None:
+            return None
+        # Field names are the snake_case form of the kebab-case config option.
+        msg = f"{(info.field_name or '').replace('_', '-')} must be a valid http(s) URL"
+        # Reject whitespace: the value is rendered into scripts and env files,
+        # where a newline could inject extra lines.
+        if any(char.isspace() for char in value):
+            raise ValueError(msg)
+        try:
+            parsed = _HTTP_URL_ADAPTER.validate_python(value)
+        except ValidationError as exc:
+            raise ValueError(msg) from exc
+        if parsed.port == 0:
+            raise ValueError(msg)
+        return value
+
+    @field_validator("aproxy_exclude_addresses")
+    @classmethod
+    def _validate_ipv4_list(cls, value: str | None) -> str | None:
+        """Require a comma-separated list of IPv4 addresses/CIDRs; normalise spacing."""
+        if value is None:
+            return None
+        tokens = [token.strip() for token in value.split(",")]
+        for token in tokens:
+            # The values are rendered into an nft IPv4 (table ip) ruleset, so a
+            # hostname or IPv6 address would validate here but fail at runtime.
+            try:
+                network = _IP_NETWORK_ADAPTER.validate_python(token)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
+                    f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
+                ) from exc
+            if network.version != 4:
+                raise ValueError(
+                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
+                    f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
+                )
+        return ",".join(tokens)
+
+    @field_validator("aproxy_redirect_ports")
+    @classmethod
+    def _validate_port_list(cls, value: str | None) -> str | None:
+        """Require a comma-separated list of ports or N-M ranges in 1..65535."""
+        if value is None:
+            return None
+        msg = (
+            f"{APROXY_REDIRECT_PORTS_CONFIG_NAME} must be a comma-separated list of "
+            "ports or N-M ranges in 1..65535"
+        )
+        tokens = [token.strip() for token in value.split(",")]
+        for token in tokens:
+            bounds = token.split("-")
+            if len(bounds) > 2:
+                raise ValueError(msg)
+            try:
+                ports = [int(part) for part in bounds]
+            except ValueError as exc:
+                raise ValueError(msg) from exc
+            if not all(1 <= port <= 65535 for port in ports) or ports != sorted(ports):
+                raise ValueError(msg)
+        return ",".join(tokens)
+
+    @model_validator(mode="after")
+    def _aproxy_requires_proxy(self) -> "RunnerConfig":
+        """The aproxy options only take effect alongside a proxy.
+
+        The runner template renders the aproxy block solely when runner-http-proxy
+        is set, so reject these options on their own rather than letting them no-op.
+        """
+        if (self.aproxy_exclude_addresses or self.aproxy_redirect_ports) and (
+            not self.runner_http_proxy
+        ):
+            raise ValueError(
+                f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} and {APROXY_REDIRECT_PORTS_CONFIG_NAME} "
+                f"require {RUNNER_HTTP_PROXY_CONFIG_NAME} to be set"
+            )
+        return self
+
+    @classmethod
+    def from_charm(cls, charm: ops.CharmBase) -> "RunnerConfig":
+        """Build and validate the runner config from charm configuration.
+
+        All options are optional; unset, empty, or whitespace-only values become None.
+
+        Args:
+            charm: The charm instance.
+
+        Raises:
+            CharmConfigInvalidError: If a set option fails validation.
+
+        Returns:
+            The parsed runner configuration.
+        """
+
+        def config_str(name: str) -> str | None:
+            """Return a string config value, or None when unset."""
+            value = charm.config.get(name)
+            return None if value is None else str(value)
+
+        try:
+            return cls(
+                dockerhub_mirror=config_str(DOCKERHUB_MIRROR_CONFIG_NAME),
+                runner_http_proxy=config_str(RUNNER_HTTP_PROXY_CONFIG_NAME),
+                aproxy_exclude_addresses=config_str(APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME),
+                aproxy_redirect_ports=config_str(APROXY_REDIRECT_PORTS_CONFIG_NAME),
+                otel_collector_endpoint=config_str(OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME),
+                pre_job_script=config_str(PRE_JOB_SCRIPT_CONFIG_NAME),
+            )
+        except ValidationError as exc:
+            raise CharmConfigInvalidError(str(exc)) from exc
+
+
 class CharmState:
     """The charm state.
 
@@ -303,6 +469,7 @@ class CharmState:
         provider_config: OpenStack provider configuration.
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
+        runner_config: Optional runner-level configuration.
         image_id: OpenStack image UUID received from the image builder relation, or None.
     """
 
@@ -312,6 +479,7 @@ class CharmState:
         provider_config: ProviderConfig,
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
+        runner_config: RunnerConfig,
         image_id: str | None,
     ) -> None:
         """Initialize the charm state.
@@ -320,11 +488,13 @@ class CharmState:
             provider_config: The OpenStack provider configuration.
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
+            runner_config: The optional runner configuration.
             image_id: The OpenStack image UUID from the image builder relation.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
+        self.runner_config = runner_config
         self.image_id = image_id
 
     @classmethod
@@ -343,11 +513,13 @@ class CharmState:
         provider_config = ProviderConfig.from_charm(charm)
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
+        runner_config = RunnerConfig.from_charm(charm)
         image_id = _get_image_id_from_relation(charm)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
+            runner_config=runner_config,
             image_id=image_id,
         )
 

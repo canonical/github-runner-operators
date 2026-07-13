@@ -1,0 +1,57 @@
+#!/bin/bash
+# aproxy proxy bootstrap, delivered as a GARM pre-install script so it runs
+# before the runner-install wrapper. cloud-init runs each pre-install script as
+# its own runcmd entry and continues past a non-zero exit, so strict mode here
+# would not protect GARM's sequence anyway -- a failure already surfaces
+# downstream as the wrapper's curl to the GARM API failing. Instead we log each
+# step (to /var/log/cloud-init-output.log and the serial console) so a broken
+# proxy bootstrap is diagnosable, and we install the nftables redirect only once
+# aproxy is actually listening: a DNAT to a dead :54969 would black-hole all
+# :80/:443 egress instead of leaving the box on whatever path it had.
+
+log() { echo "[aproxy-bootstrap] $*"; }
+
+# snapd itself needs the proxy to reach the snap store before aproxy exists.
+snap set system proxy.http={{ proxy }}
+snap set system proxy.https={{ proxy }}
+
+log "installing aproxy snap"
+# A non-zero exit is expected when aproxy is already baked into the image; only
+# bail if the snap is genuinely absent afterwards.
+if ! snap install aproxy --edge && ! snap list aproxy >/dev/null 2>&1; then
+    log "ERROR: aproxy install failed and the snap is not present; skipping redirect"
+    exit 0
+fi
+
+if ! snap set aproxy proxy={{ proxy_host_port }} listen=:54969; then
+    log "ERROR: failed to point aproxy at the upstream proxy; skipping redirect"
+    exit 0
+fi
+
+# Only redirect once aproxy is actually listening; otherwise the DNAT would
+# black-hole all :80/:443 egress by sending it to a dead port. Runner VMs are
+# single-use and never reboot, so the ruleset is piped straight into the kernel
+# rather than persisted to a file and reloaded by nftables.service on boot.
+if snap services aproxy 2>/dev/null | grep -q active; then
+    log "aproxy is listening; applying nftables redirect"
+    nft -f - << EOF
+define default-ipv4 = $(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \K\S+') | grep -oP 'src \K\S+')
+table ip aproxy {
+      set exclude {
+          type ipv4_addr;
+          flags interval; auto-merge;
+          elements = { {{ exclude_elements }} }
+      }
+      chain prerouting {
+              type nat hook prerouting priority dstnat; policy accept;
+              {{ dnat_rule }}
+      }
+      chain output {
+              type nat hook output priority -100; policy accept;
+              {{ dnat_rule }}
+      }
+}
+EOF
+else
+    log "ERROR: aproxy service is not active; leaving egress unchanged (no redirect)"
+fi

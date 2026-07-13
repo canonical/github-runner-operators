@@ -36,9 +36,7 @@ class TestControllerInfo(unittest.TestCase):
         if include_optional:
             return ControllerInfo(
                 agent_url = '',
-                ca_cert_bundle = [
-                    56
-                    ],
+                ca_cert_bundle = 'YQ==',
                 cached_garm_agent_release_fetched_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 callback_url = '',
                 controller_id = '',

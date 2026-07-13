@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 from pydantic_core import to_jsonable_python
@@ -29,11 +30,24 @@ class CreateGithubEndpointParams(BaseModel):
     """ # noqa: E501
     api_base_url: Optional[StrictStr] = None
     base_url: Optional[StrictStr] = None
-    ca_cert_bundle: Optional[List[StrictInt]] = None
+    ca_cert_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = None
     description: Optional[StrictStr] = None
     name: Optional[StrictStr] = None
     upload_base_url: Optional[StrictStr] = None
     __properties: ClassVar[List[str]] = ["api_base_url", "base_url", "ca_cert_bundle", "description", "name", "upload_base_url"]
+
+    @field_validator('ca_cert_bundle')
+    def ca_cert_bundle_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        if not re.match(r"^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$", value):
+            raise ValueError(r"must validate the regular expression /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/")
+        return value
 
     model_config = ConfigDict(
         validate_by_name=True,

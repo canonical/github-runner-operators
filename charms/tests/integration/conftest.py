@@ -6,12 +6,27 @@ import secrets
 import string
 import subprocess
 import textwrap
+from contextlib import suppress
 import time
 from typing import Iterator
+from uuid import uuid4
 
 import jubilant
 import pytest
 import requests
+from requests.adapters import HTTPAdapter
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+from urllib3.util.retry import Retry
+
+from tests.integration.helpers import GITHUB_PATH_ENV_VAR, create_github_app_client, required_env, TEST_RSA_PRIVATE_KEY
+
+GARM_API_PORT = 8080
+GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +226,25 @@ def integrate_webhook_gateway_rabbitmq_fixture(
         delay=30,
     )
     return webhook_gateway_app
+
+@pytest.fixture(name="github_test_hook")
+def github_test_hook_fixture():
+    """Create and cleanup a temporary webhook in the test repository."""
+    github_path = required_env(GITHUB_PATH_ENV_VAR)
+    github_client = create_github_app_client()
+    repo = github_client.get_repo(github_path)
+    hook = repo.create_hook(
+        name="web",
+        events=["workflow_job"],
+        config={
+            "url": f"http://unreachable.url/{uuid4().hex}",
+            "content_type": "json",
+            "insecure_ssl": "0",
+        },
+    )
+    yield hook
+    with suppress(Exception):
+        hook.delete()
 
 
 @pytest.fixture(scope="module", name="postgresql")
@@ -478,11 +512,48 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
+@pytest.fixture(scope="module", name="any_charm_debug_ssh_app")
+def deploy_any_charm_debug_ssh_app_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any-charm as a fake tmate server providing the debug-ssh relation."""
+    app_name = "fake-tmate"
+
+    any_charm_src_overwrite = {
+        "any_charm.py": textwrap.dedent("""\
+            from any_charm_base import AnyCharmBase
+
+            class AnyCharm(AnyCharmBase):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.framework.observe(
+                        self.on['provide-debug-ssh'].relation_joined,
+                        self._on_debug_ssh_joined,
+                    )
+
+                def _on_debug_ssh_joined(self, event):
+                    event.relation.data[self.unit]["host"] = "tmate.example.com"
+                    event.relation.data[self.unit]["port"] = "2200"
+                    event.relation.data[self.unit]["rsa_fingerprint"] = "SHA256:fakefingerprint1234"
+                    event.relation.data[self.unit]["ed25519_fingerprint"] = "SHA256:fakeed25519abcd"
+            """),
+    }
+    juju.deploy(
+        "any-charm",
+        app=app_name,
+        channel="latest/beta",
+        config={"src-overwrite": json.dumps(any_charm_src_overwrite)},
+    )
+    juju.wait(
+        lambda status: jubilant.all_active(status, app_name),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return app_name
+
+
 @pytest.fixture(scope="module", name="garm_configurator_charm_file")
 def garm_configurator_charm_file_fixture(charm_paths) -> str:
     """Return the path to the built garm-configurator charm file."""
     return charm_paths["garm-configurator"].path
-
 
 @pytest.fixture(scope="module", name="configurator_with_image")
 def deploy_configurator_with_image_fixture(
@@ -505,7 +576,7 @@ def deploy_configurator_with_image_fixture(
     )
     private_key_secret = juju.add_secret(
         name="configurator-github-private-key",
-        content={"value": "test-github-private-key"},
+        content={"value": TEST_RSA_PRIVATE_KEY},
     )
 
     juju.deploy(charm=garm_configurator_charm_file, app=app_name)
@@ -529,8 +600,8 @@ def deploy_configurator_with_image_fixture(
             "openstack-project-domain-name": "Default",
             "openstack-region-name": "RegionOne",
             "openstack-network": "external-net",
-            "github-app-client-id": "test-client-id",
-            "github-app-installation-id": "test-installation-id",
+            "github-app-id": "12345",
+            "github-app-installation-id": "67890",
             "github-app-private-key": private_key_secret,
             "name": "test-scaleset",
             "flavor": "m1.large",
@@ -561,7 +632,7 @@ def integrate_configurator_with_garm_fixture(
 
     The configurator should remain Active after integration. GARM may
     restart when it receives the relation data (TOML change detection),
-    then run _reconcile_scalesets() which may set WaitingStatus if
+    then run _reconcile_runners() which may set WaitingStatus if
     credentials/providers are not yet configured. The fixture only
     confirms that GARM has finished processing the integration event
     (Juju agent idle); individual tests that need GARM fully active
@@ -570,11 +641,11 @@ def integrate_configurator_with_garm_fixture(
     Returns the garm app name.
     """
     juju.integrate(configurator_with_image, garm_app)
-    # GARM may end up in a split state: app_status=active (set by paas_charm)
-    # while unit workload_status=waiting (set by _reconcile_scalesets when
-    # credentials/providers are not yet configured). all_active and all_waiting
-    # both require BOTH app and unit to match, so neither would pass. Using
-    # all_agents_idle checks only that hooks have finished running, which is
+    # The charm keeps app and unit status in sync, so after integration GARM
+    # settles into a consistent state that is usually waiting (both app and unit)
+    # because _reconcile_runners() is still pending until credentials/providers
+    # are configured -- not active. Waiting for all_active would therefore time
+    # out; all_agents_idle checks only that hooks have finished running, which is
     # sufficient to confirm the integration event was processed.
     juju.wait(
         lambda status: jubilant.all_agents_idle(status, garm_app)
@@ -792,3 +863,185 @@ def deploy_fake_github_api_url_fixture(juju: jubilant.Juju) -> str:
         time.sleep(3)
 
     return f"http://{pod_ip}:8085"
+
+
+def _get_garm_address(juju: jubilant.Juju, app_name: str) -> str:
+    """Get the IP address of the GARM unit.
+
+    Args:
+        juju: Jubilant Juju handle.
+        app_name: GARM application name.
+
+    Returns:
+        IP address string.
+    """
+    status = juju.status()
+    unit_name = f"{app_name}/0"
+    return status.apps[app_name].units[unit_name].address
+
+
+def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
+    """Retrieve GARM admin credentials from the garm-admin-credentials Juju secret.
+
+    Args:
+        juju: Jubilant Juju handle.
+
+    Returns:
+        Dict with at least ``username`` and ``password`` keys as stored by the charm.
+    """
+    secrets_json = juju.cli("secrets", "--format=json")
+    all_secrets = json.loads(secrets_json)
+    admin_creds_uri = None
+    for uri, info in all_secrets.items():
+        if info.get("label") == GARM_ADMIN_CREDENTIALS_LABEL:
+            admin_creds_uri = uri
+            break
+    assert (
+        admin_creds_uri is not None
+    ), f"Expected a Juju secret labelled '{GARM_ADMIN_CREDENTIALS_LABEL}' to exist"
+    secret_json = juju.cli("show-secret", "--reveal", "--format=json", admin_creds_uri)
+    secret = json.loads(secret_json)
+    content = secret[admin_creds_uri]["content"]["Data"]
+    for key in ("username", "password"):
+        assert (
+            key in content
+        ), f"Expected '{key}' key in '{GARM_ADMIN_CREDENTIALS_LABEL}', got: {list(content)}"
+    return content
+
+
+def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
+    """Log in to GARM with charm-managed credentials and return an admin JWT.
+
+    The charm creates the admin user automatically via _maybe_first_run().
+    This function reads credentials from the garm-admin-credentials Juju secret,
+    logs in to obtain a JWT, and configures required controller URLs so GARM will
+    serve operational API endpoints.
+
+    Retries with backoff to allow GARM time to finish starting and the charm's
+    first-run initialization to complete.
+
+    Args:
+        juju: Jubilant Juju handle (used to read admin credentials from Juju secret).
+        address: GARM unit IP address.
+
+    Returns:
+        JWT token string for authenticated API calls.
+    """
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    creds = _get_admin_credentials(juju)
+
+    session = requests.Session()
+    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+
+    class _LoginRetryable(Exception):
+        pass
+
+    @retry(
+        retry=retry_if_exception_type(
+            (requests.exceptions.ConnectionError, _LoginRetryable)
+        ),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(10),
+        reraise=True,
+    )
+    def _do_login() -> str:
+        resp = session.post(
+            f"{base_url}/auth/login",
+            json={"username": creds["username"], "password": creds["password"]},
+            timeout=30,
+        )
+        logger.info(
+            "login response: status=%d body=%s", resp.status_code, resp.text[:500]
+        )
+        if resp.status_code != 200:
+            raise _LoginRetryable(
+                f"Unexpected login status {resp.status_code}: {resp.text[:200]}"
+            )
+        token = resp.json().get("token", "")
+        assert token, "Expected non-empty JWT token from login"
+        return token
+
+    token = _do_login()
+
+    # Configure controller URLs — GARM requires metadata_url and callback_url
+    # before it will serve operational endpoints (returns 409 otherwise)
+    headers = {"Authorization": f"Bearer {token}"}
+    controller_payload = {
+        "metadata_url": f"http://{address}:{GARM_API_PORT}/api/v1/metadata",
+        "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
+        "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
+    }
+    resp = session.put(
+        f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
+    )
+    logger.info(
+        "controller setup response: status=%d body=%s",
+        resp.status_code,
+        resp.text[:300],
+    )
+    resp.raise_for_status()
+
+    return token
+
+
+@pytest.fixture(scope="module", name="garm_with_debug_ssh")
+def integrate_garm_with_debug_ssh_fixture(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    any_charm_debug_ssh_app: str,
+) -> str:
+    """Integrate GARM with the fake tmate debug-ssh provider.
+
+    GARM seeds the github_linux base template itself on first-start DB migration,
+    so the charm can derive github_linux_charmed from it when the debug-ssh
+    relation joins — no test-side base template creation is needed.
+
+    Returns the GARM app name after agents are idle.
+    """
+    _garm_first_run(juju, _get_garm_address(juju, configurator_garm))
+
+    logger.info(
+        "Integrating '%s' with debug-ssh provider '%s'",
+        configurator_garm,
+        any_charm_debug_ssh_app,
+    )
+    juju.integrate(
+        f"{configurator_garm}:debug-ssh",
+        f"{any_charm_debug_ssh_app}:provide-debug-ssh",
+    )
+    juju.wait(
+        lambda status: jubilant.all_agents_idle(status, configurator_garm),
+        timeout=5 * 60,
+        delay=10,
+    )
+    return configurator_garm
+
+
+@pytest.fixture(scope="module", name="garm_without_debug_ssh")
+def remove_garm_debug_ssh_fixture(
+    juju: jubilant.Juju,
+    garm_with_debug_ssh: str,
+    any_charm_debug_ssh_app: str,
+) -> str:
+    """Remove the debug-ssh integration from GARM.
+
+    Depends on garm_with_debug_ssh so the relation exists before removal.
+    Returns the GARM app name after agents are idle.
+    """
+    garm_app = garm_with_debug_ssh
+    logger.info(
+        "Removing debug-ssh integration between '%s' and '%s'",
+        garm_app,
+        any_charm_debug_ssh_app,
+    )
+    juju.remove_relation(
+        f"{garm_app}:debug-ssh",
+        f"{any_charm_debug_ssh_app}:provide-debug-ssh",
+    )
+    juju.wait(
+        lambda status: jubilant.all_agents_idle(status, garm_app),
+        timeout=5 * 60,
+        delay=10,
+    )
+    return garm_app

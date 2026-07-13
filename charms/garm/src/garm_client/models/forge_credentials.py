@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing_extensions import Annotated
 from garm_client.models.forge_endpoint import ForgeEndpoint
 from garm_client.models.github_rate_limit import GithubRateLimit
 from typing import Optional, Set
@@ -33,7 +34,7 @@ class ForgeCredentials(BaseModel):
     api_base_url: Optional[StrictStr] = None
     auth_type: Optional[StrictStr] = Field(default=None, alias="auth-type")
     base_url: Optional[StrictStr] = None
-    ca_bundle: Optional[List[StrictInt]] = None
+    ca_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = None
     created_at: Optional[datetime] = None
     description: Optional[StrictStr] = None
     endpoint: Optional[ForgeEndpoint] = None
@@ -47,6 +48,19 @@ class ForgeCredentials(BaseModel):
     updated_at: Optional[datetime] = None
     upload_base_url: Optional[StrictStr] = None
     __properties: ClassVar[List[str]] = ["api_base_url", "auth-type", "base_url", "ca_bundle", "created_at", "description", "endpoint", "enterprises", "forge_type", "id", "name", "organizations", "rate_limit", "repositories", "updated_at", "upload_base_url"]
+
+    @field_validator('ca_bundle')
+    def ca_bundle_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        if not re.match(r"^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$", value):
+            raise ValueError(r"must validate the regular expression /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/")
+        return value
 
     model_config = ConfigDict(
         validate_by_name=True,

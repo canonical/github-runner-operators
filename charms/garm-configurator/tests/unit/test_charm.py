@@ -34,8 +34,8 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
         "openstack-project-domain-name": "Default",
         "openstack-region-name": "RegionOne",
         "openstack-network": "external-net",
-        "github-app-client-id": "12345",
-        "github-app-installation-id": "67890",
+        "github-app-id": 99999,
+        "github-app-installation-id": 67890,
         "github-app-private-key": private_key_secret.id,
         "name": "my-scaleset",
         "flavor": "m1.large",
@@ -88,9 +88,9 @@ _MISSING_CONFIG_SENTINEL = object()
             id="whitespace-only-network",
         ),
         pytest.param(
-            {"github-app-client-id": _MISSING_CONFIG_SENTINEL},
-            "Missing required configuration: github-app-client-id",
-            id="missing-github-app-client-id",
+            {"github-app-id": _MISSING_CONFIG_SENTINEL},
+            "Missing required configuration: github-app-id",
+            id="missing-github-app-id",
         ),
         pytest.param(
             {"github-app-installation-id": _MISSING_CONFIG_SENTINEL},
@@ -129,8 +129,13 @@ _MISSING_CONFIG_SENTINEL = object()
         ),
         pytest.param(
             {"max-runner": -5},
-            "max-runner must be non-negative",
+            "max-runner must be greater than 0",
             id="negative-max-runner",
+        ),
+        pytest.param(
+            {"max-runner": 0},
+            "max-runner must be greater than 0",
+            id="zero-max-runner",
         ),
         pytest.param(
             {"min-idle-runner": 5, "max-runner": 3},
@@ -167,6 +172,27 @@ def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: 
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(expected_message)
+
+
+def test_charm_logs_invalid_config_detail(caplog: pytest.LogCaptureFixture):
+    """
+    arrange: A required config value is missing.
+    act: Run config-changed.
+    assert: The full validation detail is logged at WARNING level, so it is
+        discoverable in juju debug-log even when Juju truncates the status.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    del config["openstack-auth-url"]
+    state = State(config=config, secrets=[secret, pk_secret])
+    ctx.run(ctx.on.config_changed(), state)
+    assert any(
+        record.levelname == "WARNING"
+        and "Missing required configuration: openstack-auth-url" in record.message
+        for record in caplog.records
+    )
 
 
 def test_charm_blocked_password_secret_missing_value_key():
@@ -527,7 +553,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert garm_out.local_unit_data["openstack_network"] == "external-net"
 
     # GitHub config
-    assert garm_out.local_unit_data["github_client_id"] == "12345"
+    assert garm_out.local_unit_data["github_app_id"] == "99999"
     assert garm_out.local_unit_data["github_installation_id"] == "67890"
     assert "github_private_key" not in garm_out.local_unit_data
     assert "github_private_key_secret_uri" in garm_out.local_unit_data
@@ -569,7 +595,7 @@ def test_reconcile_does_not_write_garm_data_without_image_uuid():
     assert garm_out.local_unit_data["name"] == "my-scaleset"
     # image_id is empty string when no UUID yet; ops-scenario omits empty strings
     assert "image_id" not in garm_out.local_unit_data
-    assert "github_client_id" not in garm_out.local_unit_data
+    assert "github_app_id" not in garm_out.local_unit_data
     assert "openstack_auth_url" not in garm_out.local_unit_data
 
 
@@ -594,7 +620,7 @@ def test_reconcile_writes_garm_data_on_relation_joined():
     garm_out = out.get_relation(garm_relation.id)
     assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
     assert garm_out.local_unit_data["name"] == "my-scaleset"
-    assert garm_out.local_unit_data["github_client_id"] == "12345"
+    assert garm_out.local_unit_data["github_app_id"] == "99999"
     assert garm_out.local_unit_data["openstack_username"] == "admin"
 
 
@@ -631,3 +657,167 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         {"pre_install.sh": '{"setup.sh": "#!/bin/bash\\necho hello"}'}
     )
     assert "repo" not in garm_out.local_unit_data
+
+@pytest.mark.parametrize(
+    "config_key, bad_value, expected_fragment",
+    [
+        pytest.param(
+            "dockerhub-mirror",
+            "ftp://registry.example.com",
+            "dockerhub-mirror must be a valid http(s) URL",
+            id="dockerhub-mirror-bad-scheme",
+        ),
+        pytest.param(
+            "runner-http-proxy",
+            "not-a-url",
+            "runner-http-proxy must be a valid http(s) URL",
+            id="runner-http-proxy-no-scheme",
+        ),
+        pytest.param(
+            "otel-collector-endpoint",
+            "://missing-host",
+            "otel-collector-endpoint must be a valid http(s) URL",
+            id="otel-collector-endpoint-missing-host",
+        ),
+        pytest.param(
+            "aproxy-redirect-ports",
+            "80,not-a-port",
+            "aproxy-redirect-ports must be a comma-separated list of ports or N-M ranges in 1..65535",
+            id="aproxy-redirect-ports-non-numeric",
+        ),
+        pytest.param(
+            "aproxy-redirect-ports",
+            "0",
+            "aproxy-redirect-ports must be a comma-separated list of ports or N-M ranges in 1..65535",
+            id="aproxy-redirect-ports-out-of-range",
+        ),
+        pytest.param(
+            "aproxy-redirect-ports",
+            "443-80",
+            "aproxy-redirect-ports must be a comma-separated list of ports or N-M ranges in 1..65535",
+            id="aproxy-redirect-ports-inverted-range",
+        ),
+        pytest.param(
+            "aproxy-exclude-addresses",
+            "10.0.0.1,not-an-ip",
+            "aproxy-exclude-addresses must be a comma-separated list of IPv4 addresses or CIDRs",
+            id="aproxy-exclude-addresses-non-ip",
+        ),
+        pytest.param(
+            "aproxy-exclude-addresses",
+            "2001:db8::1",
+            "aproxy-exclude-addresses only supports IPv4",
+            id="aproxy-exclude-addresses-ipv6",
+        ),
+        pytest.param(
+            "runner-http-proxy",
+            "http://pro xy.example.com",
+            "runner-http-proxy must be a valid http(s) URL",
+            id="runner-http-proxy-embedded-whitespace",
+        ),
+        pytest.param(
+            "runner-http-proxy",
+            "http://proxy.example.com:bad",
+            "runner-http-proxy must be a valid http(s) URL",
+            id="runner-http-proxy-invalid-port",
+        ),
+    ],
+)
+def test_charm_blocked_invalid_runner_config(
+    config_key: str, bad_value: str, expected_fragment: str
+):
+    """
+    arrange: A single runner config option is set to an invalid value.
+    act: Run config-changed.
+    assert: Unit status is Blocked with a message matching the expected fragment.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config[config_key] = bad_value
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert expected_fragment in out.unit_status.message
+
+
+def test_runner_config_aproxy_options_require_proxy():
+    """
+    arrange: aproxy options set without runner-http-proxy.
+    act: Run config-changed.
+    assert: Unit is Blocked — the aproxy options would otherwise silently no-op.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["aproxy-redirect-ports"] = "80,443"
+    state = State(config=config, secrets=[secret, pk_secret])
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert "require runner-http-proxy to be set" in out.unit_status.message
+
+
+def test_runner_config_fields_written_to_garm_configurator_relation():
+    """
+    arrange: Valid config with all six runner config options set.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: All six runner config keys appear in the relation databag with correct values.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["dockerhub-mirror"] = "https://mirror.example.com"
+    config["runner-http-proxy"] = "http://proxy.example.com:3128"
+    config["aproxy-exclude-addresses"] = "10.0.0.1,192.168.0.0/16"
+    config["aproxy-redirect-ports"] = "80,443,8000-9000"
+    config["otel-collector-endpoint"] = "http://otel.example.com:4317"
+    config["pre-job-script"] = "  echo start  "
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    rel_out = out.get_relation(garm_relation.id)
+    assert rel_out.local_unit_data["dockerhub_mirror"] == "https://mirror.example.com"
+    assert rel_out.local_unit_data["runner_http_proxy"] == "http://proxy.example.com:3128"
+    assert rel_out.local_unit_data["aproxy_exclude_addresses"] == "10.0.0.1,192.168.0.0/16"
+    assert rel_out.local_unit_data["aproxy_redirect_ports"] == "80,443,8000-9000"
+    assert rel_out.local_unit_data["otel_collector_endpoint"] == "http://otel.example.com:4317"
+    assert rel_out.local_unit_data["pre_job_script"] == "echo start"
+
+
+def test_runner_config_fields_absent_when_unset():
+    """
+    arrange: Valid config with no runner config options set.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: The six runner config keys are absent from the databag.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    rel_out = out.get_relation(garm_relation.id)
+    for key in (
+        "dockerhub_mirror",
+        "runner_http_proxy",
+        "aproxy_exclude_addresses",
+        "aproxy_redirect_ports",
+        "otel_collector_endpoint",
+        "pre_job_script",
+    ):
+        assert rel_out.local_unit_data.get(key, "") == ""

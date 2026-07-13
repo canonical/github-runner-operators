@@ -47,3 +47,4 @@ build/
 
 # Git worktrees
 .worktrees/
+.claude

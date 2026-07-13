@@ -1,0 +1,7 @@
+cat > /tmp/custom_pre_job_script <<'{{ delim }}'
+{{ script }}
+{{ delim }}
+chmod +x /tmp/custom_pre_job_script
+logger -s "Running custom pre-job script"
+/tmp/custom_pre_job_script || logger -s "Custom pre-job script failed, continuing with the job"
+rm /tmp/custom_pre_job_script || logger -s "Failed to remove custom pre-job script"
