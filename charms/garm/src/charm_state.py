@@ -173,6 +173,23 @@ def credential_name(app_id: int, installation_id: int) -> str:
     return f"app-{app_id}-{installation_id}"
 
 
+def configurator_related(charm: ops.CharmBase) -> bool:
+    """Whether a garm-configurator relation is present.
+
+    An absent relation and one that is present but not yet publishing its provider fields both
+    yield empty desired state, so callers can't tell them apart from the desired state alone.
+    Only a removed relation orphans the scalesets it configured, so only the absent case should
+    trigger their pruning.
+
+    Args:
+        charm: The charm instance.
+
+    Returns:
+        True if the garm-configurator relation exists.
+    """
+    return charm.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME) is not None
+
+
 def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     """Read SSH debug connection info from the debug-ssh relation.
 
