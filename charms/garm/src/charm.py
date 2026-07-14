@@ -501,6 +501,13 @@ class GarmCharm(paas_charm.go.Charm):
         for path, content in provider_files.items():
             container.push(path, content, permissions=0o600, make_dirs=True)
 
+        # The framework's layer has to be laid down before ours. The first time it runs it
+        # snapshots whatever services the plan already holds and republishes them from a layer
+        # that takes precedence over ours, so a snapshot taken once our service exists pins that
+        # service's environment — proxy values and config_hash alike — for the container's
+        # lifetime, and no later change can reach the running workload.
+        super().restart(rerun_migrations=rerun_migrations)
+
         container.add_layer(
             "garm-command",
             {
@@ -520,8 +527,9 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
+        # Reconcile last: the framework's restart finishes by reporting active unconditionally,
+        # which would bury the status a failed GARM sync reports here.
         self._reconcile_runners()
-        super().restart(rerun_migrations=rerun_migrations)
 
     def _warn_unsupported_port_options(self) -> None:
         """Warn when app-port/metrics-port/metrics-path are set to non-default values.
