@@ -88,4 +88,5 @@ OAuth
 aproxy
 [Dd]eserializ(e|es|ed|ing|ation)
 [Ss]erializ(e|es|ed|ing|ation)
+tmate
 [Rr]eplan(s|ned|ning)?

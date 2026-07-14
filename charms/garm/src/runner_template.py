@@ -42,13 +42,13 @@ import urllib.parse
 import jinja2
 
 from charm_state import RunnerConfig
-
-# GARM installs the runner under the `runner` user's home; the GitHub Actions
-# runner sources a `.env` dotfile from that directory.
-RUNNER_USER = "runner"
-RUNNER_HOME = "/home/runner/actions-runner"
-PRE_JOB_HOOK_PATH = f"{RUNNER_HOME}/pre-job.sh"
-RUNNER_ENV_PATH = f"{RUNNER_HOME}/.env"
+from runner_paths import (
+    PRE_JOB_HOOK_PATH,
+    RUNNER_ENV_PATH,
+    RUNNER_HOME,
+    RUNNER_USER,
+    prepend_after_shebang,
+)
 
 _TEMPLATES_DIR = pathlib.Path(__file__).parent / "templates"
 _JINJA_ENV = jinja2.Environment(
@@ -96,10 +96,7 @@ def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
     """
     text = base.decode("utf-8")
     injection = render_pre_install(config) + render_pre_job_hooks(config)
-    if "\n" in text:
-        shebang, rest = text.split("\n", 1)
-        return f"{shebang}\n{injection}{rest}".encode("utf-8")
-    return f"{text}\n{injection}".encode("utf-8")
+    return prepend_after_shebang(text, injection).encode("utf-8")
 
 
 def render_pre_install(config: RunnerConfig) -> str:
@@ -152,6 +149,9 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
     # since the delimiter depends on the already-rendered hook body.
     prejob_delim = _heredoc_delimiter(hook_body, "GARM_CHARM_PREJOB")
     env_delim = _heredoc_delimiter("\n".join(env_entries), "GARM_CHARM_ENV")
+    # Per-scaleset env write: these vars come from the scaleset's RunnerConfig, so
+    # they land in the per-scaleset template (a separate .env append from the
+    # global tmate one in garm_template.build_tmate_env_snippet).
     return _PRE_JOB_HOOKS_TEMPLATE.render(
         runner_home=RUNNER_HOME,
         hook_path=PRE_JOB_HOOK_PATH,
