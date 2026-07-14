@@ -525,6 +525,48 @@ def test_maybe_first_run_skips_on_missing_credential_key():
     mock_client_cls.assert_not_called()
 
 
+def test_get_credentials_action_returns_credentials_when_available():
+    """
+    arrange: Admin credentials secret exists and contains valid content.
+    act: Call _on_get_credentials_action().
+    assert: event.set_results is called once with the credentials dict and
+        event.fail is not called.
+    """
+    charm = MagicMock()
+    event = MagicMock()
+    credentials = {
+        "username": "admin",
+        "password": "s3cr3t",
+        "email": "admin@garm.local",
+        "full-name": "GARM Admin",
+    }
+    charm._get_admin_credentials.return_value = credentials
+
+    GarmCharm._on_get_credentials_action(charm, event)
+
+    event.set_results.assert_called_once_with(credentials)
+    event.fail.assert_not_called()
+
+
+def test_get_credentials_action_fails_when_credentials_unavailable():
+    """
+    arrange: Admin credentials secret does not exist yet.
+    act: Call _on_get_credentials_action().
+    assert: event.fail is called with a message containing "not yet available" and
+            event.set_results is not called.
+    """
+    charm = MagicMock()
+    event = MagicMock()
+    charm._get_admin_credentials.return_value = None
+
+    GarmCharm._on_get_credentials_action(charm, event)
+
+    event.fail.assert_called_once()
+    fail_message = event.fail.call_args[0][0]
+    assert "not yet available" in fail_message
+    event.set_results.assert_not_called()
+
+
 def test_proxy_environment_happy_path():
     """
     arrange: All three JUJU_CHARM_* proxy vars are set in the environment.
