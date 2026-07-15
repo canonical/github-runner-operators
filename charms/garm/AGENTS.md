@@ -35,16 +35,11 @@ charm conventions; this file lists only what's specific to `garm`.
   rather than blocking). The port is pinned in the `_workload_config` property.
 - Tests: unit in `tests/unit/`; integration via `tox -e garm-integration`
   (`charms/tests/integration/test_garm.py`).
-- **Scenario tests of this paas charm need three fixtures** that a plain `ops` charm doesn't
-  (all provided by the state builder in `tests/unit/test_charm.py`) — `ops-scenario` expands the
-  `go-framework` extension itself, so the `app` container and `secret-storage` peer exist
-  without a packed charm:
-  - **DO** give the `app` container a base layer declaring the rock's `go` service; the
-    framework's layer overrides that service and can't find it otherwise.
-  - **DO** put `go_secret_key` in the `secret-storage` peer app databag — `is_ready()` gates
-    on it and reports `Waiting for peer integration` without it.
-  - **DO** publish postgresql connection data; `postgresql` is `optional: false`, so the
-    framework blocks with `missing integrations: postgresql` before `restart()` runs.
+- **Scenario tests** — `ops-scenario` expands the `go-framework` extension itself, so this charm
+  is testable from source with no packed charm. Reaching `ActiveStatus` needs a few fixtures a
+  plain `ops` charm doesn't; the state builder in `tests/unit/test_charm.py` assembles them, each
+  annotated with the `paas_charm` behaviour that demands it. **DO** start from it rather than
+  building a `State` from scratch.
   - **DON'T** rebuild the mock-`self` pattern (`GarmCharm.restart(MagicMock())`) these tests
     replaced: it can't see what the charm pushed or replanned, so it hid real bugs. Stub only
     GARM's HTTP surface (the `garm_api` fixture) and assert on the output `State`.

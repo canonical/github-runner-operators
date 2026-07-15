@@ -72,6 +72,22 @@ For **`garm-configurator`** (plain `ops`):
 
 - New unit tests use **Scenario** (`scenario.Context` / `State` / `Relation` / `Secret`),
   not `Harness` — see `charms/garm-configurator/tests/unit/`.
+- **DO** give every Python test an arrange/act/assert docstring — the convention `STYLE.md`
+  documents for Go (`// Arrange:` comments), spelled as a docstring:
+  ```python
+  def test_leader_creates_garm_secrets():
+      """
+      arrange: A leader unit with no GARM secrets yet.
+      act: Run install.
+      assert: Both labelled secrets are created, so other units can fetch them by label.
+      """
+  ```
+  State the *why* in the assert line where it isn't obvious ("so other units can fetch them
+  by label"), not just the mechanical result. For a `parametrize`d test, write one docstring
+  covering the cases — **DON'T** write one per case.
+- **DO** fix a missing AAA docstring on any test you move or edit. It's followed unevenly
+  (`planner-operator` and `garm` yes; `garm-configurator` and `webhook-gateway-operator` not
+  yet), so imitating the nearest neighbour is not a reliable guide.
 - Integration tests live in the shared `charms/tests/integration/`.
 
 ## 12-factor divergences from the canonical charm-engineer guidance
