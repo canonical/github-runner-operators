@@ -41,7 +41,6 @@ from github_reconciler import (
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
 SERVICE_NAME = "app"
-WORKLOAD_LAYER_NAME = "garm-command"
 
 # The rock ships a `go` service that the go-framework's layer overrides; without it in the
 # container's base layer paas_charm's restart() fails to find the service to replace.
@@ -247,12 +246,6 @@ def _service_environment(state: State) -> dict[str, str]:
     return state.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME].environment
 
 
-def _workload_layer_environment(state: State) -> dict[str, str]:
-    """Return the app service's environment from the layer the charm itself writes."""
-    layer = state.get_container(CONTAINER_NAME).layers[WORKLOAD_LAYER_NAME]
-    return layer.services[SERVICE_NAME].environment
-
-
 def _stop_workload(state: State) -> State:
     """Stop the app service, so that a subsequent replan is observable as a restart."""
     container = state.get_container(CONTAINER_NAME)
@@ -420,12 +413,12 @@ def test_unchanged_config_does_not_restart_the_workload(ctx: Context, garm_api: 
     assert out.unit_status == ops.ActiveStatus()
 
 
-def test_proxy_value_change_rewrites_the_workload_layer(ctx: Context, garm_api: _GarmApiMocks):
+def test_proxy_value_change_restarts_the_workload(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configured workload whose model proxy then changes value only — the same
         variable stays set, so the variable names embedded in the TOML do not change.
     act: Run update-status.
-    assert: The layer is rewritten with the new value, i.e. a value-only change is detected
+    assert: The service is replanned with the new value, i.e. a value-only change is detected
         rather than being missed as an unchanged config.
     """
     with patch.dict(os.environ, {"JUJU_CHARM_HTTP_PROXY": "http://proxy-a:3128"}, clear=True):
@@ -433,26 +426,25 @@ def test_proxy_value_change_rewrites_the_workload_layer(ctx: Context, garm_api: 
     with patch.dict(os.environ, {"JUJU_CHARM_HTTP_PROXY": "http://proxy-b:3128"}, clear=True):
         out = ctx.run(ctx.on.update_status(), _stop_workload(configured))
 
-    environment = _workload_layer_environment(out)
+    environment = _service_environment(out)
     assert environment["http_proxy"] == "http://proxy-b:3128"
     assert environment["HTTP_PROXY"] == "http://proxy-b:3128"
+    assert _workload_status(out) == pebble.ServiceStatus.ACTIVE
 
 
-def test_clearing_the_proxy_removes_it_from_the_workload_layer(
-    ctx: Context, garm_api: _GarmApiMocks
-):
+def test_clearing_the_proxy_removes_it_from_the_workload(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configured workload whose model proxy is then cleared.
     act: Run update-status.
-    assert: The rewritten layer drops the proxy variables rather than carrying them over from
-        the previous one.
+    assert: The proxy variables are gone from the running service's environment rather than
+        lingering from the previous layer.
     """
     with patch.dict(os.environ, {"JUJU_CHARM_HTTP_PROXY": "http://proxy-a:3128"}, clear=True):
         configured = ctx.run(ctx.on.update_status(), _state())
     with patch.dict(os.environ, {}, clear=True):
         out = ctx.run(ctx.on.update_status(), configured)
 
-    environment = _workload_layer_environment(out)
+    environment = _service_environment(out)
     assert "http_proxy" not in environment
     assert "HTTP_PROXY" not in environment
 
@@ -706,21 +698,22 @@ def test_successful_reconcile_refreshes_stale_app_status(ctx: Context, garm_api:
 
 def test_charmed_template_error_degrades_to_waiting(ctx: Context, garm_api: _GarmApiMocks):
     """
-    arrange: A configured, steady-state charm whose charmed runner template then fails to apply.
+    arrange: A charm whose charmed runner template cannot be applied, on the reconcile that
+        also rewrites the workload config — the path where the framework's restart reports
+        active unconditionally.
     act: Run update-status.
-    assert: The unit waits carrying the error message rather than erroring, and scalesets are
-        not reconciled — each one references the template.
+    assert: Unit and app wait carrying the error message rather than erroring or reporting a
+        spurious active, and scalesets are not reconciled — each one references the template.
     """
-    with patch.dict(os.environ, {}, clear=True):
-        configured = ctx.run(ctx.on.update_status(), _state())
-        garm_api.apply_template.side_effect = garm_template.CharmedTemplateError(
-            "base template missing"
-        )
-        garm_api.scaleset.return_value.reconcile.reset_mock()
+    garm_api.apply_template.side_effect = garm_template.CharmedTemplateError(
+        "base template missing"
+    )
 
-        out = ctx.run(ctx.on.update_status(), configured)
+    out = ctx.run(ctx.on.update_status(), _state())
 
+    assert SERVICE_NAME in out.get_container(CONTAINER_NAME).plan.services
     assert out.unit_status == ops.WaitingStatus("base template missing")
+    assert out.app_status == ops.WaitingStatus("base template missing")
     garm_api.scaleset.return_value.reconcile.assert_not_called()
 
 
