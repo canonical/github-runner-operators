@@ -76,7 +76,12 @@ def _render(**overrides) -> dict:
 
 
 def test_render_garm_toml_postgresql_backend():
-    """The [database] section uses postgresql backend with correct fields."""
+    """
+    arrange: A postgresql connection config.
+    act: Call render_garm_toml().
+    assert: The [database] section selects the postgresql backend and carries every
+            connection field, with no sqlite3 section left behind.
+    """
     parsed = _render(
         postgresql_config={
             "username": "garm",
@@ -98,7 +103,12 @@ def test_render_garm_toml_postgresql_backend():
 
 
 def test_render_garm_toml_passphrase_in_database_section():
-    """The passphrase appears in the [database] section."""
+    """
+    arrange: A 32-character database passphrase.
+    act: Call render_garm_toml().
+    assert: The passphrase is rendered into the [database] section, where GARM reads it
+            to encrypt provider credentials at rest.
+    """
     passphrase = "b" * 32
     parsed = _render(db_passphrase=passphrase)
     assert parsed["database"]["passphrase"] == passphrase
@@ -108,7 +118,11 @@ def test_render_garm_toml_passphrase_in_database_section():
     "sslmode", ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]
 )
 def test_render_garm_toml_sslmode_propagated(sslmode: str):
-    """The sslmode value is propagated to the postgresql section."""
+    """
+    arrange: Each sslmode libpq accepts.
+    act: Call render_garm_toml().
+    assert: The value reaches the postgresql section verbatim, unvalidated by the charm.
+    """
     pg_config = {**_DEFAULT_PG_CONFIG, "sslmode": sslmode}
     parsed = _render(postgresql_config=pg_config)
     assert parsed["database"]["postgresql"]["sslmode"] == sslmode
@@ -136,13 +150,21 @@ def test_render_garm_toml_sslmode_propagated(sslmode: str):
     ],
 )
 def test_render_garm_toml_section_fields(section: str, key: str, value, kwargs: dict):
-    """Config sections reflect the given parameters."""
+    """
+    arrange: A field in each of the apiserver, jwt_auth and metrics sections.
+    act: Call render_garm_toml().
+    assert: The rendered value matches, pinning the defaults GARM is served with.
+    """
     parsed = _render(**kwargs)
     assert parsed[section][key] == value
 
 
 def test_render_garm_toml_provider_section():
-    """The [[provider]] section has the OpenStack provider binary."""
+    """
+    arrange: No configurator-supplied providers.
+    act: Call render_garm_toml().
+    assert: A single external provider points at the OpenStack binary shipped in the rock.
+    """
     parsed = _render()
     assert len(parsed["provider"]) == 1
     provider = parsed["provider"][0]
@@ -152,7 +174,12 @@ def test_render_garm_toml_provider_section():
 
 
 def test_generate_garm_secrets_returns_jwt_and_passphrase():
-    """Returns a dict with jwt-secret (64-char hex) and db-passphrase (32-char alnum)."""
+    """
+    arrange: No setup required.
+    act: Call _generate_garm_secrets().
+    assert: The JWT secret is 64 hex characters and the passphrase 32 alphanumerics —
+            GARM rejects a passphrase of any other length.
+    """
     result = _generate_garm_secrets()
     assert "jwt-secret" in result
     assert "db-passphrase" in result
@@ -164,7 +191,11 @@ def test_generate_garm_secrets_returns_jwt_and_passphrase():
 
 
 def test_generate_garm_secrets_produces_unique_values():
-    """Two calls return different secrets."""
+    """
+    arrange: No setup required.
+    act: Call _generate_garm_secrets() twice.
+    assert: The two results differ, so the values are drawn randomly rather than fixed.
+    """
     first = _generate_garm_secrets()
     second = _generate_garm_secrets()
     assert first["jwt-secret"] != second["jwt-secret"]
