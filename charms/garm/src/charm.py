@@ -360,6 +360,7 @@ class GarmCharm(paas_charm.go.Charm):
             self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
             self._reconcile,
         )
+        self.framework.observe(self.on.get_credentials_action, self._on_get_credentials_action)
         self.framework.observe(
             self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
             self._reconcile,
@@ -382,6 +383,18 @@ class GarmCharm(paas_charm.go.Charm):
     def _reconcile(self, _: ops.EventBase) -> None:
         """Reconcile charm state."""
         self.restart()
+
+    def _on_get_credentials_action(self, event: ops.ActionEvent) -> None:
+        """Return the GARM admin credentials to the operator.
+
+        Args:
+            event: The action event.
+        """
+        credentials = self._get_admin_credentials()
+        if credentials is None:
+            event.fail("GARM admin credentials are not yet available")
+            return
+        event.set_results(credentials)
 
     @property
     def _workload_config(self) -> WorkloadConfig:

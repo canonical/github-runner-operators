@@ -35,3 +35,7 @@ requires:
   debug-ssh:
     interface: debug-ssh
     limit: 1
+
+actions:
+  get-credentials:
+    description: Show the GARM admin credentials.

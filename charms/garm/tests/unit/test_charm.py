@@ -20,7 +20,7 @@ import ops
 import pytest
 import yaml
 from ops import pebble
-from scenario import Container, Context, Model, PeerRelation, Relation, Secret, State
+from scenario import ActionFailed, Container, Context, Model, PeerRelation, Relation, Secret, State
 from scenario.errors import UncaughtCharmError
 
 try:
@@ -594,6 +594,40 @@ def test_first_run_connection_error_errors_out_for_retry(
 
     assert isinstance(exc_info.value.__cause__, GarmConnectionError)
     garm_api.client.return_value.is_initialized.assert_not_called()
+
+
+# --- The get-credentials action -----------------------------------------------------------
+
+
+def test_get_credentials_action_returns_the_stored_credentials(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A leader whose admin-credentials secret exists.
+    act: Run the get-credentials action.
+    assert: The results carry the credentials an operator needs to log into GARM, read from
+        the secret rather than regenerated.
+    """
+    ctx.run(ctx.on.action("get-credentials"), _state(secrets=_owned_secrets()))
+
+    assert ctx.action_results == _ADMIN_CREDENTIALS_CONTENT
+
+
+def test_get_credentials_action_fails_before_the_credentials_exist(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A charm that cannot read its admin-credentials secret.
+    act: Run the get-credentials action.
+    assert: The action fails rather than returning an empty result, so the operator can tell
+        the credentials are not ready yet from a partial answer.
+    """
+    with patch.object(GarmCharm, "_get_admin_credentials", return_value=None):
+        with pytest.raises(ActionFailed) as exc_info:
+            ctx.run(ctx.on.action("get-credentials"), _state())
+
+    assert "not yet available" in exc_info.value.message
+    assert ctx.action_results is None
 
 
 # --- Reconciling GARM ---------------------------------------------------------------------
