@@ -66,3 +66,12 @@ make linkcheck
 make vale
 make lint-md
 ```
+
+## Charmhub
+
+| Name | Listing |
+|------|---------|
+| `garm` | https://charmhub.io/garm |
+| `garm-configurator` | https://charmhub.io/garm-configurator |
+| `github-runner-planner` | https://charmhub.io/github-runner-planner |
+| `github-runner-webhook-gateway` | https://charmhub.io/github-runner-webhook-gateway |
