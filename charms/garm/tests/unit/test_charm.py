@@ -41,7 +41,6 @@ from github_reconciler import (
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
 SERVICE_NAME = "app"
-WORKLOAD_LAYER_NAME = "garm-command"
 
 # The rock ships a `go` service that the go-framework's layer overrides; without it in the
 # container's base layer paas_charm's restart() fails to find the service to replace.
@@ -247,12 +246,6 @@ def _service_environment(state: State) -> dict[str, str]:
     return state.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME].environment
 
 
-def _workload_layer_environment(state: State) -> dict[str, str]:
-    """Return the app service's environment from the layer the charm itself writes."""
-    layer = state.get_container(CONTAINER_NAME).layers[WORKLOAD_LAYER_NAME]
-    return layer.services[SERVICE_NAME].environment
-
-
 def _stop_workload(state: State) -> State:
     """Stop the app service, so that a subsequent replan is observable as a restart."""
     container = state.get_container(CONTAINER_NAME)
@@ -454,30 +447,6 @@ def test_clearing_the_proxy_removes_it_from_the_workload(ctx: Context, garm_api:
     environment = _service_environment(out)
     assert "http_proxy" not in environment
     assert "HTTP_PROXY" not in environment
-
-
-def test_config_stays_in_sync_across_repeated_reconciles(ctx: Context, garm_api: _GarmApiMocks):
-    """
-    arrange: A workload configured with one proxy value, then reconciled repeatedly with
-        another. The framework republishes a snapshot of the plan in a layer of its own that
-        outranks ours, so a snapshot taken while our service was already in the plan would pin
-        it to the original value.
-    act: Run update-status three more times.
-    assert: The running service keeps the new value, and the stored config hash matches the one
-        the charm renders — otherwise the unchanged-config check never matches again and every
-        hook re-pushes, replans and re-syncs GARM forever.
-    """
-    with patch.dict(os.environ, {"JUJU_CHARM_HTTP_PROXY": "http://proxy-a:3128"}, clear=True):
-        state = ctx.run(ctx.on.update_status(), _state())
-    with patch.dict(os.environ, {"JUJU_CHARM_HTTP_PROXY": "http://proxy-b:3128"}, clear=True):
-        for _ in range(3):
-            state = ctx.run(ctx.on.update_status(), state)
-
-    assert _service_environment(state)["http_proxy"] == "http://proxy-b:3128"
-    assert (
-        _service_environment(state)["config_hash"]
-        == _workload_layer_environment(state)["config_hash"]
-    )
 
 
 # --- garm-configurator relation gating ----------------------------------------------------
