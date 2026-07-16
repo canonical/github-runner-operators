@@ -37,6 +37,15 @@ This repository contains two charms — the **planner-operator** and the
 [Charms](https://canonical.com/juju/docs/github-runner-charms/latest/reference/charms/)
 in the documentation for their roles and integrations.
 
+### Charmhub
+
+| Name | Listing |
+|------|---------|
+| `garm` | https://charmhub.io/garm |
+| `garm-configurator` | https://charmhub.io/garm-configurator |
+| `github-runner-planner` | https://charmhub.io/github-runner-planner |
+| `github-runner-webhook-gateway` | https://charmhub.io/github-runner-webhook-gateway |
+
 ## Documentation
 
 Our documentation is stored in the `docs` directory
