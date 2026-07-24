@@ -8,13 +8,17 @@ import base64
 import logging
 from dataclasses import dataclass, field
 
-from charm_state import RunnerConfig
+from charm_state import RunnerConfig, SSHDebugInfo
 from garm_api import GarmApiError, GarmAuthenticatedClient
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.scale_set import ScaleSet
 from garm_client.models.template import Template
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
-from runner_template import build_template_data, render_aproxy_pre_install_script
+from runner_template import (
+    build_template_data,
+    render_aproxy_pre_install_script,
+    render_tmate_proxy_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,11 @@ SYSTEM_TEMPLATE_NAME = "github_linux"
 # before the configurator's "pre_install.sh", so the proxy is up before any
 # operator-supplied script runs.
 APROXY_SCRIPT_NAME = "00-aproxy"
+
+# The tmate-proxy socat unit only needs the proxy (aproxy) already configured,
+# not necessarily listening, so it sorts after "00-aproxy" but before operator
+# scripts.
+TMATE_PROXY_SCRIPT_NAME = "01-tmate-proxy"
 
 
 @dataclass
@@ -47,6 +56,8 @@ class ScalesetSpec:
     pre_install_scripts: dict[str, str] = field(default_factory=dict)
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
+    tmate_connection: SSHDebugInfo | None = None
+    use_runner_proxy_for_tmate: bool = False
 
 
 class ScalesetReconciler:
@@ -480,6 +491,18 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
         # cloud-init's apt upgrade runs before any pre-install script, so it can
         # never use the proxy — skip it instead of timing out on every mirror.
         extra_specs["disable_updates"] = True
+    if (
+        spec.use_runner_proxy_for_tmate
+        and spec.runner_config.runner_http_proxy
+        and spec.tmate_connection is not None
+    ):
+        # tmate can't reach the tmate server IP directly from the runner tenant,
+        # so tunnel it through the runner proxy via a local socat relay. The env
+        # vars redirecting the tmate client to that relay are written globally by
+        # garm_template.build_tmate_env_snippet; here we install the relay.
+        scripts[TMATE_PROXY_SCRIPT_NAME] = render_tmate_proxy_service(
+            spec.tmate_connection, spec.runner_config.runner_http_proxy
+        )
     if scripts:
         extra_specs["pre_install_scripts"] = {
             name: base64.b64encode(content.encode("utf-8")).decode("utf-8")

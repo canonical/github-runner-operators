@@ -7,8 +7,13 @@ import shlex
 
 import pytest
 
-from charm_state import RunnerConfig
-from runner_template import RUNNER_ENV_PATH, build_template_data, render_aproxy_pre_install_script
+from charm_state import RunnerConfig, SSHDebugInfo
+from runner_template import (
+    RUNNER_ENV_PATH,
+    build_template_data,
+    render_aproxy_pre_install_script,
+    render_tmate_proxy_service,
+)
 
 SAMPLE_BASE = b"#!/bin/bash\nset -e\necho original-bootstrap\n"
 
@@ -236,6 +241,51 @@ def test_heredoc_delimiter_avoids_collision_with_pre_job_script():
 
     assert "<<'GARM_CHARM_PREJOB_'" in result
     assert "echo bye" in result
+
+
+def test_render_tmate_proxy_service_builds_socat_unit():
+    """
+    arrange: A tmate connection and a runner HTTP proxy with an explicit port.
+    act: Render the tmate-proxy pre-install script.
+    assert: The script writes the tmate-proxy systemd unit whose socat ExecStart
+        listens on the local proxy endpoint and tunnels to the tmate server via
+        HTTP CONNECT through the runner proxy.
+    """
+    conn = SSHDebugInfo(
+        host="10.152.117.224",
+        port=10022,
+        rsa_fingerprint="SHA256:rsa",
+        ed25519_fingerprint="SHA256:ed",
+    )
+
+    result = render_tmate_proxy_service(conn, "http://egress.ps7.internal:3128")
+
+    assert result.splitlines()[0] == "#!/bin/bash"
+    assert "/etc/systemd/system/tmate-proxy.service" in result
+    assert (
+        "ExecStart=socat TCP-LISTEN:3129,fork,bind=127.0.0.1 "
+        "PROXY:egress.ps7.internal:10.152.117.224:10022,proxyport=3128" in result
+    )
+    assert "WantedBy=multi-user.target" in result
+
+
+def test_render_tmate_proxy_service_omits_proxyport_when_absent():
+    """
+    arrange: A tmate connection and a runner HTTP proxy without an explicit port.
+    act: Render the tmate-proxy pre-install script.
+    assert: The socat PROXY address carries no proxyport option.
+    """
+    conn = SSHDebugInfo(
+        host="tmate.internal",
+        port=10022,
+        rsa_fingerprint="SHA256:rsa",
+        ed25519_fingerprint="SHA256:ed",
+    )
+
+    result = render_tmate_proxy_service(conn, "http://egress.ps7.internal")
+
+    assert "PROXY:egress.ps7.internal:tmate.internal:10022" in result
+    assert "proxyport=" not in result
 
 
 def test_build_template_data_from_untrusted_databag_drops_malformed_values():

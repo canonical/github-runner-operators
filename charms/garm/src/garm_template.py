@@ -7,7 +7,11 @@ import base64
 import logging
 import typing
 
-from charm_state import SSHDebugInfo
+from charm_state import (
+    TMATE_LOCAL_PROXY_HOST,
+    TMATE_LOCAL_PROXY_PORT,
+    SSHDebugInfo,
+)
 from garm_api import GarmApiError, GarmAuthenticatedClient
 from runner_paths import RUNNER_ENV_PATH, prepend_after_shebang
 
@@ -24,6 +28,7 @@ class CharmedTemplateError(Exception):
 def apply_charmed_template(
     client: GarmAuthenticatedClient,
     connections: list[SSHDebugInfo],
+    use_runner_proxy_for_tmate: bool = False,
 ) -> int:
     """Create or update the charmed runner install template and return its id.
 
@@ -36,6 +41,9 @@ def apply_charmed_template(
     Args:
         client: Authenticated GARM API client.
         connections: Current debug-ssh connections; empty means no tmate snippet.
+        use_runner_proxy_for_tmate: When True, the tmate env vars point at the
+            local socat proxy (127.0.0.1:3129) instead of the real tmate host so
+            tmate traffic is tunnelled through the runner HTTP proxy.
 
     Returns:
         The id of the charmed template.
@@ -55,17 +63,27 @@ def apply_charmed_template(
     if base.id is None:
         raise CharmedTemplateError(f"Base template '{GARM_BASE_TEMPLATE_NAME}' has no ID")
 
-    patched_data = _build_charmed_template_data(client, base.id, connections)
+    patched_data = _build_charmed_template_data(
+        client, base.id, connections, use_runner_proxy_for_tmate
+    )
     return _sync_charmed_template(client, charmed, patched_data, len(connections))
 
 
-def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
+def build_tmate_env_snippet(
+    connections: list[SSHDebugInfo],
+    use_runner_proxy_for_tmate: bool = False,
+) -> str:
     """Build a shell snippet that writes tmate env vars to the runner's .env file.
 
     Uses only the first connection (caller must sort for stability).
 
     Args:
         connections: List of SSHDebugInfo from the debug-ssh relation.
+        use_runner_proxy_for_tmate: When True, point ``TMATE_SERVER_HOST``/``PORT``
+            at the local socat proxy (127.0.0.1:3129) rather than the real tmate
+            host, so the tmate client tunnels through the runner HTTP proxy. The
+            real host fingerprints are preserved because socat is a transparent
+            TCP tunnel and the server still presents its own host keys.
 
     Returns:
         A shell snippet string (no shebang) to be prepended to the base template,
@@ -74,6 +92,12 @@ def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
     if not connections:
         return ""
     conn = connections[0]
+    if use_runner_proxy_for_tmate:
+        host: str = TMATE_LOCAL_PROXY_HOST
+        port: int = TMATE_LOCAL_PROXY_PORT
+    else:
+        host = conn.host
+        port = conn.port
     # Global env write: injected into the shared github_linux_charmed template, so
     # these tmate vars apply to every scaleset (a separate .env append from the
     # per-scaleset one in runner_template.render_pre_job_hooks).
@@ -81,8 +105,8 @@ def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
     lines = [
         f"mkdir -p $(dirname {runner_env})",
         f'cat >> {runner_env} << "EOF"',
-        f"TMATE_SERVER_HOST={conn.host}",
-        f"TMATE_SERVER_PORT={conn.port}",
+        f"TMATE_SERVER_HOST={host}",
+        f"TMATE_SERVER_PORT={port}",
         f"TMATE_SERVER_RSA_FINGERPRINT={conn.rsa_fingerprint}",
         f"TMATE_SERVER_ED25519_FINGERPRINT={conn.ed25519_fingerprint}",
         "EOF",
@@ -95,6 +119,7 @@ def _build_charmed_template_data(
     client: GarmAuthenticatedClient,
     base_id: int,
     connections: list[SSHDebugInfo],
+    use_runner_proxy_for_tmate: bool = False,
 ) -> bytes:
     """Fetch the base template and build the patched script bytes.
 
@@ -102,6 +127,7 @@ def _build_charmed_template_data(
         client: Authenticated GARM API client.
         base_id: ID of the base template to fetch.
         connections: Debug-ssh connections used to build the tmate snippet.
+        use_runner_proxy_for_tmate: Passed through to the tmate env snippet.
 
     Returns:
         Patched shell script as bytes.
@@ -119,7 +145,7 @@ def _build_charmed_template_data(
 
     # GARM returns the template body as a base64-encoded string.
     base_script = base64.b64decode(base_template.data).decode("utf-8")
-    snippet = build_tmate_env_snippet(connections)
+    snippet = build_tmate_env_snippet(connections, use_runner_proxy_for_tmate)
     if not snippet:
         return base_script.encode("utf-8")
     return prepend_after_shebang(base_script, snippet).encode("utf-8")

@@ -1,0 +1,34 @@
+#!/bin/bash
+# tmate-proxy bootstrap, delivered as a GARM pre-install script so it runs as
+# root before the runner-install wrapper. It writes a systemd unit that runs a
+# socat TCP relay: the tmate client is pointed (via TMATE_SERVER_HOST/PORT in
+# the runner .env) at 127.0.0.1:{{ local_proxy_port }}, and socat forwards that
+# connection to the real tmate server through the runner HTTP proxy using an
+# HTTP CONNECT tunnel. This mirrors the reactive github-runner charm's
+# use-runner-proxy-for-tmate behaviour, letting tmate work on runner tenants
+# where the tmate server IP is not directly routable.
+#
+# action-tmate enables and starts this unit itself (systemctl enable
+# tmate-proxy --now), so this script only needs to install the unit file.
+# cloud-init runs each pre-install script as its own runcmd entry and continues
+# past a non-zero exit, so no strict mode; steps are logged for diagnosability.
+
+log() { echo "[tmate-proxy-bootstrap] $*"; }
+
+log "installing tmate-proxy systemd unit"
+cat > /etc/systemd/system/tmate-proxy.service << 'TMATE_PROXY_UNIT_EOF'
+[Unit]
+Description=tmate proxy tunnel via runner HTTP proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=socat TCP-LISTEN:{{ local_proxy_port }},fork,bind={{ local_proxy_host }} PROXY:{{ proxy_host }}:{{ tmate_host }}:{{ tmate_port }}{% if proxy_port %},proxyport={{ proxy_port }}{% endif %}
+
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+TMATE_PROXY_UNIT_EOF
+
+systemctl daemon-reload || log "ERROR: systemctl daemon-reload failed"

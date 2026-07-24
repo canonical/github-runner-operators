@@ -442,11 +442,15 @@ def test_garm_charmed_template_created_on_debug_ssh(
     """
     arrange: The debug-ssh relation is integrated with a fake tmate server; the
         github_linux base template was pre-created in GARM.
-    act: Query GET /api/v1/templates with an admin JWT.
-    assert: The github_linux_charmed template exists and its body contains
-        the tmate env-var snippet for the fake server's host and port.
+    act: Query GET /api/v1/templates with an admin JWT, first with the default
+        direct-tmate routing and then with use-runner-proxy-for-tmate enabled.
+    assert: The github_linux_charmed template exists and its body contains the
+        tmate env-var snippet pointing at the fake server directly by default,
+        and flips to the local socat proxy endpoint (127.0.0.1:3129) when the
+        use-runner-proxy-for-tmate config is enabled.
     """
-    address = _get_garm_address(juju, garm_with_debug_ssh)
+    garm_app = garm_with_debug_ssh
+    address = _get_garm_address(juju, garm_app)
     token = _garm_first_run(juju, address)
 
     templates = _list_templates(address, token)
@@ -472,6 +476,52 @@ def test_garm_charmed_template_created_on_debug_ssh(
     assert "TMATE_SERVER_PORT=2200" in body, (
         f"Expected TMATE_SERVER_PORT in charmed template body; got:\n{body[:500]}"
     )
+
+    # Enabling use-runner-proxy-for-tmate re-points the tmate client at the local
+    # socat relay (127.0.0.1:3129) so tmate tunnels through the runner HTTP proxy
+    # rather than dialing the (cross-tenant, unroutable) tmate server directly.
+    # The real host fingerprints are preserved (socat is a transparent tunnel).
+    try:
+        juju.config(garm_app, values={"use-runner-proxy-for-tmate": True})
+        juju.wait(
+            lambda status: jubilant.all_agents_idle(status, garm_app),
+            timeout=5 * 60,
+            delay=10,
+        )
+
+        proxied_body = _get_template_body(address, token, charmed["id"])
+        logger.info(
+            "Charmed template body with proxy toggle (first 500 chars):\n%s",
+            proxied_body[:500],
+        )
+
+        assert "TMATE_SERVER_HOST=127.0.0.1" in proxied_body, (
+            "Expected TMATE_SERVER_HOST to point at the local socat proxy when "
+            f"use-runner-proxy-for-tmate is enabled; got:\n{proxied_body[:500]}"
+        )
+        assert "TMATE_SERVER_PORT=3129" in proxied_body, (
+            "Expected TMATE_SERVER_PORT to be the local socat listener (3129) when "
+            f"use-runner-proxy-for-tmate is enabled; got:\n{proxied_body[:500]}"
+        )
+        assert "TMATE_SERVER_HOST=tmate.example.com" not in proxied_body, (
+            "Expected the direct tmate host to be replaced by the local proxy when "
+            f"use-runner-proxy-for-tmate is enabled; got:\n{proxied_body[:500]}"
+        )
+        # Fingerprints must survive the redirect so the tmate client still trusts
+        # the real server presented through the transparent socat tunnel.
+        assert "TMATE_SERVER_RSA_FINGERPRINT=SHA256:fakefingerprint1234" in proxied_body, (
+            "Expected the real RSA fingerprint to be preserved under the proxy "
+            f"toggle; got:\n{proxied_body[:500]}"
+        )
+    finally:
+        # Restore the default so the ordering-dependent removal test (and any
+        # other test sharing this module-scoped model) sees the direct routing.
+        juju.config(garm_app, values={"use-runner-proxy-for-tmate": False})
+        juju.wait(
+            lambda status: jubilant.all_agents_idle(status, garm_app),
+            timeout=5 * 60,
+            delay=10,
+        )
 
 
 def test_garm_charmed_template_persists_without_tmate_on_debug_ssh_removal(

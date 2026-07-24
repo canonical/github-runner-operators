@@ -39,3 +39,19 @@ requires:
 actions:
   get-credentials:
     description: Show the GARM admin credentials.
+
+config:
+  options:
+    use-runner-proxy-for-tmate:
+      type: boolean
+      default: false
+      description: >
+        Tunnel tmate (action-tmate debugging) traffic through the runner HTTP
+        proxy instead of connecting to the tmate server directly. Enable this on
+        deployments where the tmate server is not directly routable from the
+        runner network (for example, a cross-tenant OpenStack runner tenant that
+        can only reach the tmate server via the configured runner proxy). When
+        enabled, the runner's tmate client is pointed at a local socat relay
+        (127.0.0.1:3129) that forwards to the tmate server over the proxy via an
+        HTTP CONNECT tunnel. Requires a runner HTTP proxy to be configured via
+        the garm-configurator relation; otherwise it has no effect.

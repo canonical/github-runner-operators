@@ -41,7 +41,12 @@ import urllib.parse
 
 import jinja2
 
-from charm_state import RunnerConfig
+from charm_state import (
+    TMATE_LOCAL_PROXY_HOST,
+    TMATE_LOCAL_PROXY_PORT,
+    RunnerConfig,
+    SSHDebugInfo,
+)
 from runner_paths import (
     PRE_JOB_HOOK_PATH,
     RUNNER_ENV_PATH,
@@ -74,6 +79,7 @@ _OTEL_COLLECTOR_SETUP_TEMPLATE = _JINJA_ENV.get_template("otel_collector_setup.j
 _HOOK_BODY_TEMPLATE = _JINJA_ENV.get_template("hook_body.j2")
 _CUSTOM_PRE_JOB_SCRIPT_TEMPLATE = _JINJA_ENV.get_template("custom_pre_job_script.j2")
 _APROXY_TEMPLATE = _JINJA_ENV.get_template("aproxy.j2")
+_TMATE_PROXY_TEMPLATE = _JINJA_ENV.get_template("tmate_proxy.j2")
 _DOCKERHUB_MIRROR_TEMPLATE = _JINJA_ENV.get_template("dockerhub_mirror.j2")
 _STATIC_HOST_PREP_TEMPLATE = _JINJA_ENV.get_template("static_host_prep.j2")
 _PRE_INSTALL_TEMPLATE = _JINJA_ENV.get_template("pre_install.j2")
@@ -216,6 +222,59 @@ def _proxy_host_port(proxy: str) -> str:
     """
     candidate = proxy if "//" in proxy else f"//{proxy}"
     return urllib.parse.urlsplit(candidate).netloc
+
+
+def render_tmate_proxy_service(connection: SSHDebugInfo, runner_http_proxy: str) -> str:
+    """Render the standalone tmate-proxy bootstrap script.
+
+    The script installs a ``tmate-proxy`` systemd unit whose socat process
+    listens on ``127.0.0.1:3129`` and tunnels to the real tmate server through
+    the runner HTTP proxy via an HTTP CONNECT. The tmate client is pointed at
+    that local listener by ``TMATE_SERVER_HOST``/``PORT`` in the runner ``.env``
+    (written globally by ``garm_template.build_tmate_env_snippet`` when the
+    proxy toggle is on). ``action-tmate`` enables and starts the unit itself.
+
+    Args:
+        connection: The tmate server debug-ssh connection to forward to. Must be
+            the same connection used to write the global tmate env vars so the
+            host-key fingerprints match the socat target.
+        runner_http_proxy: The runner HTTP proxy to tunnel tmate through.
+
+    Returns:
+        A complete best-effort bash script (shebang first line, no ``set -e``)
+        installing the tmate-proxy systemd unit.
+    """
+    proxy_host, proxy_port = _proxy_host_and_port(runner_http_proxy)
+    return _TMATE_PROXY_TEMPLATE.render(
+        local_proxy_host=TMATE_LOCAL_PROXY_HOST,
+        local_proxy_port=TMATE_LOCAL_PROXY_PORT,
+        proxy_host=proxy_host,
+        proxy_port=proxy_port,
+        tmate_host=connection.host,
+        tmate_port=connection.port,
+    )
+
+
+def _proxy_host_and_port(proxy: str) -> tuple[str, str]:
+    """Split a proxy value into its host and (possibly empty) port.
+
+    socat's ``PROXY:`` address takes the proxy host and port as separate
+    fields (``PROXY:<host>:<tmate_host>:<tmate_port>,proxyport=<port>``), so the
+    authority must be decomposed rather than passed as ``host:port``. Accepts a
+    URL (``http://host:port``) or an already-bare ``host:port``.
+
+    Args:
+        proxy: The configured proxy value, with or without a URL scheme.
+
+    Returns:
+        A ``(host, port)`` tuple; ``port`` is an empty string when the proxy
+        value carries no explicit port.
+    """
+    candidate = proxy if "//" in proxy else f"//{proxy}"
+    split = urllib.parse.urlsplit(candidate)
+    host = split.hostname or ""
+    port = str(split.port) if split.port is not None else ""
+    return host, port
 
 
 def _render_pre_job_hook_body(config: RunnerConfig, otel_endpoint: str) -> str:

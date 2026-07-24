@@ -28,6 +28,16 @@ _PORT_TOKEN_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
 DEBUG_SSH_INTEGRATION_NAME: typing.Final[str] = "debug-ssh"
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
+# Config option (garm charm) toggling whether tmate traffic is tunnelled through
+# the runner HTTP proxy instead of connecting to the tmate server directly.
+USE_RUNNER_PROXY_FOR_TMATE_CONFIG_NAME: typing.Final[str] = "use-runner-proxy-for-tmate"
+
+# Local socat endpoint the tmate client connects to when the proxy toggle is on.
+# 127.0.0.0/8 is excluded from the aproxy nftables redirect, so the client hits
+# the local socat, which then CONNECTs to the real tmate server via the proxy.
+TMATE_LOCAL_PROXY_HOST: typing.Final[str] = "127.0.0.1"
+TMATE_LOCAL_PROXY_PORT: typing.Final[int] = 3129
+
 
 @dataclasses.dataclass(frozen=True)
 class SSHDebugInfo:
@@ -320,11 +330,14 @@ class CharmState:
         ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
         configurator_related: Whether a garm-configurator relation is present.
+        use_runner_proxy_for_tmate: Whether tmate traffic should be tunnelled through the
+            runner HTTP proxy (via a local socat) instead of connecting directly.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
     desired_entities: list[EntitySpec]
     configurator_related: bool
+    use_runner_proxy_for_tmate: bool
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -341,5 +354,8 @@ class CharmState:
             desired_entities=_get_desired_entities(charm),
             configurator_related=(
                 charm.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME) is not None
+            ),
+            use_runner_proxy_for_tmate=bool(
+                charm.config.get(USE_RUNNER_PROXY_FOR_TMATE_CONFIG_NAME, False)
             ),
         )

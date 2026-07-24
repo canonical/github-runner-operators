@@ -789,8 +789,15 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
+    def _build_desired_scalesets(
+        self, template_id: int | None, charm_state: CharmState
+    ) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
+        tmate_connection = (
+            charm_state.ssh_debug_connections[0]
+            if charm_state.ssh_debug_connections
+            else None
+        )
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
             for unit in relation.units:
@@ -854,6 +861,8 @@ class GarmCharm(paas_charm.go.Charm):
                         ),
                         template_id=template_id,
                         runner_config=RunnerConfig.from_databag(data),
+                        tmate_connection=tmate_connection,
+                        use_runner_proxy_for_tmate=charm_state.use_runner_proxy_for_tmate,
                     )
                 )
         return specs
@@ -946,8 +955,14 @@ class GarmCharm(paas_charm.go.Charm):
             self._ensure_controller_urls(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client).reconcile(charm_state.desired_entities)
-            template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
-            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
+            template_id = _apply_garm_template(
+                auth_client,
+                charm_state.ssh_debug_connections,
+                charm_state.use_runner_proxy_for_tmate,
+            )
+            ScalesetReconciler(auth_client).reconcile(
+                self._build_desired_scalesets(template_id, charm_state)
+            )
             self.update_app_and_unit_status(ops.ActiveStatus())
         except CharmedTemplateError as exc:
             logger.warning("GARM charmed template error during reconcile: %s", exc)

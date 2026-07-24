@@ -7,7 +7,7 @@ import base64
 
 import pytest
 
-from charm_state import RunnerConfig
+from charm_state import RunnerConfig, SSHDebugInfo
 from garm_client.models.template import Template
 from runner_template import build_template_data
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec, _effective_extra_specs
@@ -139,6 +139,8 @@ def _spec(
     pre_install_scripts=None,
     template_id=None,
     runner_config=None,
+    tmate_connection=None,
+    use_runner_proxy_for_tmate=False,
 ):
     return ScalesetSpec(
         name=name,
@@ -155,6 +157,8 @@ def _spec(
         pre_install_scripts=pre_install_scripts or {},
         template_id=template_id,
         runner_config=runner_config or RunnerConfig(),
+        tmate_connection=tmate_connection,
+        use_runner_proxy_for_tmate=use_runner_proxy_for_tmate,
     )
 
 
@@ -402,6 +406,88 @@ def test_aproxy_pre_install_script_injected_when_proxy_configured():
     assert set(scripts.keys()) == {"00-aproxy", "pre_install.sh"}
     aproxy_script = base64.b64decode(scripts["00-aproxy"]).decode()
     assert "snap set aproxy proxy=squid.internal:3128" in aproxy_script
+
+
+def _tmate_conn():
+    return SSHDebugInfo(
+        host="10.152.117.224",
+        port=10022,
+        rsa_fingerprint="SHA256:rsa",
+        ed25519_fingerprint="SHA256:ed",
+    )
+
+
+def test_tmate_proxy_script_injected_when_enabled_with_proxy_and_connection():
+    """
+    arrange: A spec with the tmate-proxy toggle on, a runner proxy, and a tmate connection.
+    act: Compute the effective extra_specs.
+    assert: A "01-tmate-proxy" script is present whose decoded content installs the
+        socat tmate-proxy systemd unit tunneling via the runner proxy.
+    """
+
+    spec = _spec(
+        runner_config=RunnerConfig(runner_http_proxy="http://egress.ps7.internal:3128"),
+        tmate_connection=_tmate_conn(),
+        use_runner_proxy_for_tmate=True,
+    )
+
+    extra_specs = _effective_extra_specs(spec)
+    scripts = extra_specs["pre_install_scripts"]
+    assert "01-tmate-proxy" in scripts
+    script = base64.b64decode(scripts["01-tmate-proxy"]).decode()
+    assert "/etc/systemd/system/tmate-proxy.service" in script
+    assert (
+        "PROXY:egress.ps7.internal:10.152.117.224:10022,proxyport=3128" in script
+    )
+
+
+def test_tmate_proxy_script_absent_when_toggle_disabled():
+    """
+    arrange: A spec with a runner proxy and tmate connection but the toggle disabled.
+    act: Compute the effective extra_specs.
+    assert: No tmate-proxy script is injected.
+    """
+
+    spec = _spec(
+        runner_config=RunnerConfig(runner_http_proxy="http://egress.ps7.internal:3128"),
+        tmate_connection=_tmate_conn(),
+        use_runner_proxy_for_tmate=False,
+    )
+
+    scripts = _effective_extra_specs(spec).get("pre_install_scripts", {})
+    assert "01-tmate-proxy" not in scripts
+
+
+def test_tmate_proxy_script_absent_when_no_proxy():
+    """
+    arrange: A spec with the toggle on and a connection but no runner proxy.
+    act: Compute the effective extra_specs.
+    assert: No tmate-proxy script is injected (nothing to tunnel through).
+    """
+
+    spec = _spec(
+        tmate_connection=_tmate_conn(),
+        use_runner_proxy_for_tmate=True,
+    )
+
+    scripts = _effective_extra_specs(spec).get("pre_install_scripts", {})
+    assert "01-tmate-proxy" not in scripts
+
+
+def test_tmate_proxy_script_absent_when_no_connection():
+    """
+    arrange: A spec with the toggle on and a runner proxy but no tmate connection.
+    act: Compute the effective extra_specs.
+    assert: No tmate-proxy script is injected (no target to forward to).
+    """
+
+    spec = _spec(
+        runner_config=RunnerConfig(runner_http_proxy="http://egress.ps7.internal:3128"),
+        use_runner_proxy_for_tmate=True,
+    )
+
+    scripts = _effective_extra_specs(spec).get("pre_install_scripts", {})
+    assert "01-tmate-proxy" not in scripts
 
 
 def test_no_update_when_extra_specs_already_match_encoded_desired_state():

@@ -42,6 +42,43 @@ def test_ssh_debug_info_env_vars():
     assert "echo 'hello'" in patched
 
 
+def test_build_tmate_env_snippet_uses_local_proxy_when_enabled():
+    """
+    arrange: One SSHDebugInfo connection.
+    act: Call build_tmate_env_snippet() with use_runner_proxy_for_tmate=True.
+    assert: TMATE_SERVER_HOST/PORT point at the local socat forwarder
+            (127.0.0.1:3129) while the fingerprints stay the real server's.
+    """
+    conn = SSHDebugInfo(
+        host="10.10.0.5",
+        port=2222,
+        rsa_fingerprint="SHA256:rsa",
+        ed25519_fingerprint="SHA256:ed",
+    )
+
+    snippet = garm_template.build_tmate_env_snippet([conn], use_runner_proxy_for_tmate=True)
+
+    assert "TMATE_SERVER_HOST=127.0.0.1" in snippet
+    assert "TMATE_SERVER_PORT=3129" in snippet
+    assert "TMATE_SERVER_HOST=10.10.0.5" not in snippet
+    # Fingerprints must remain the real tmate server's (socat is transparent TCP).
+    assert "TMATE_SERVER_RSA_FINGERPRINT=SHA256:rsa" in snippet
+    assert "TMATE_SERVER_ED25519_FINGERPRINT=SHA256:ed" in snippet
+
+
+def test_build_tmate_env_snippet_direct_host_when_proxy_disabled():
+    """
+    arrange: One SSHDebugInfo connection.
+    act: Call build_tmate_env_snippet() with the default (proxy disabled).
+    assert: TMATE_SERVER_HOST/PORT are the real tmate server's (unchanged behaviour).
+    """
+    snippet = garm_template.build_tmate_env_snippet([_CONN])
+
+    assert "TMATE_SERVER_HOST=h" in snippet
+    assert "TMATE_SERVER_PORT=10022" in snippet
+    assert "127.0.0.1" not in snippet
+
+
 def test_prepend_after_shebang_no_shebang_prepends_at_start():
     """
     arrange: A script that does not start with a shebang and a snippet.
@@ -178,6 +215,41 @@ def test_apply_charmed_template_syncs_when_connections_and_base_exists():
     garm_template.apply_charmed_template(client, [_CONN])
 
     client.update_template.assert_called_once()
+
+
+def test_apply_charmed_template_threads_use_runner_proxy_for_tmate():
+    """
+    arrange: list_templates returns base + charmed; one connection present.
+    act: Call apply_charmed_template() with use_runner_proxy_for_tmate=True.
+    assert: The data sent to update_template routes tmate at the local proxy
+            (127.0.0.1:3129), not the real tmate host.
+    """
+    client = MagicMock()
+    base = MagicMock()
+    base.name = garm_template.GARM_BASE_TEMPLATE_NAME
+    base.id = 1
+    charmed = MagicMock()
+    charmed.name = garm_template.GARM_CHARMED_TEMPLATE_NAME
+    charmed.id = 2
+    client.list_templates.return_value = [base, charmed]
+
+    base_template = MagicMock()
+    base_template.data = base64.b64encode(b"#!/bin/bash\necho hi\n").decode()
+    client.get_template.side_effect = [
+        base_template,
+        MagicMock(data=None),
+    ]
+
+    garm_template.apply_charmed_template(client, [_CONN], use_runner_proxy_for_tmate=True)
+
+    _, kwargs = client.update_template.call_args
+    sent = kwargs.get("data")
+    if sent is None:
+        sent = client.update_template.call_args.args[1]
+    body = sent.decode() if isinstance(sent, bytes) else sent
+    assert "TMATE_SERVER_HOST=127.0.0.1" in body
+    assert "TMATE_SERVER_PORT=3129" in body
+    assert "TMATE_SERVER_HOST=h\n" not in body
 
 
 def test_apply_charmed_template_propagates_garm_api_error_from_list_templates():
