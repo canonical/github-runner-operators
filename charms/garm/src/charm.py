@@ -466,8 +466,10 @@ class GarmCharm(paas_charm.go.Charm):
         try:
             secret = self.model.get_secret(id=secret_uri)
             return secret.get_content(refresh=True).get("value", "")
-        except ops.SecretNotFoundError:
-            logger.warning("Secret %s is not accessible", secret_uri)
+        except (ops.SecretNotFoundError, ops.ModelError):
+            # Secret grants can race the relation-joined hook. The following
+            # relation-changed event retries once Juju has propagated access.
+            logger.warning("Secret %s is not accessible yet", secret_uri)
             return ""
 
     def _get_admin_credentials(self) -> dict[str, str] | None:
