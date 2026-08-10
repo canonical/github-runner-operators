@@ -13,11 +13,6 @@ import typing
 
 import ops
 import paas_charm.go
-from paas_charm.app import App, WorkloadConfig
-from paas_charm.charm_state import CharmState as PaasCharmState
-from paas_charm.charm_utils import block_if_invalid_data
-from paas_charm.database_migration import DatabaseMigration
-
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
@@ -35,6 +30,10 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
+from paas_charm.app import App, WorkloadConfig
+from paas_charm.charm_state import CharmState as PaasCharmState
+from paas_charm.charm_utils import block_if_invalid_data
+from paas_charm.database_migration import DatabaseMigration
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -182,13 +181,8 @@ class GarmApp(App):
         env.update(self._compute_state.env)
         return env
 
-    def restart(self, rerun_migrations: bool = False) -> None:
-        """Apply the Pebble layer and delegate migration execution to paas-charm.
-
-        Args:
-            rerun_migrations: Whether to force rerunning database migrations even if they have
-                already been applied.
-        """
+    def restart(self) -> None:
+        """Apply the Pebble layer and delegate migration execution to paas-charm."""
         super().restart()
 
 
@@ -318,7 +312,14 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Pebble compares the generated service environment and restarts only
         # when one of the actual configuration inputs changes.
-        self._create_app(compute_state).restart(rerun_migrations=rerun_migrations)
+        app = self._create_app(compute_state)
+        # The framework's layer has to be laid down before ours. The first time it runs it
+        # snapshots whatever services the plan already holds and republishes them from a layer
+        # that takes precedence over ours, so a snapshot taken once our service exists pins that
+        # service's environment — proxy values and config_hash alike — for the container's
+        # lifetime, and no later change can reach the running workload.
+        super().restart(rerun_migrations=rerun_migrations)
+        app.restart()
         self._maybe_first_run()
         # Reconcile last: the framework's restart finishes by reporting active unconditionally,
         # which would bury the status a failed GARM sync reports here.
