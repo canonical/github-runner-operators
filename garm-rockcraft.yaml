@@ -65,13 +65,11 @@ parts:
       - ca-certificates_data
 
   python:
-    plugin: python
-    source: .
-    python-packages:
-      - tomli-w==1.2.0
-      - PyYAML==6.0.3
+    plugin: nil
     stage-packages:
-      - python3-venv
+      - python3-minimal
+      - python3-tomli-w
+      - python3-yaml
 
   garm-entrypoint:
     plugin: dump
