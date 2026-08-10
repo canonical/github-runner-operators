@@ -241,6 +241,9 @@ class GarmCharm(paas_charm.go.Charm):
 
         super().restart(rerun_migrations=rerun_migrations)
         container = self.unit.get_container(CONTAINER_NAME)
+        entrypoint_environment = self._entrypoint_environment(
+            postgresql_config, secrets_data, provider_configs
+        )
         container.add_layer(
             "garm-command",
             {
@@ -249,13 +252,17 @@ class GarmCharm(paas_charm.go.Charm):
                         "override": "replace",
                         "startup": "enabled",
                         "command": "/usr/local/bin/garm-entrypoint.py",
-                        "environment": self._entrypoint_environment(
-                            postgresql_config, secrets_data, provider_configs
-                        ),
+                        "environment": entrypoint_environment,
                     }
                 }
             },
             combine=True,
+        )
+        logger.info(
+            "Configured GARM workload: command=%s provider_count=%d env_keys=%s",
+            "/usr/local/bin/garm-entrypoint.py",
+            len(provider_configs),
+            sorted(entrypoint_environment),
         )
         container.replan()
         self._maybe_first_run()
