@@ -12,6 +12,7 @@ The pure config-rendering helpers in charm.py are tested in test_garm_toml.py.
 """
 
 import dataclasses
+import json
 import os
 import typing
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -40,7 +41,7 @@ from github_reconciler import (
 
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
-SERVICE_NAME = "app"
+SERVICE_NAME = "go"  # paas-charm go-framework names the Pebble service "go"
 
 # The rock ships a `go` service that the go-framework's layer overrides; without it in the
 # container's base layer paas_charm's restart() fails to find the service to replace.
@@ -50,7 +51,7 @@ _ROCK_LAYER = pebble.Layer(
             "go": {
                 "override": "replace",
                 "summary": "GARM GitHub Actions Runner Manager",
-                "startup": "disabled",
+                "startup": "enabled",
                 "command": "/usr/local/bin/garm",
             }
         }
@@ -339,28 +340,21 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
     """
     arrange: A ready charm whose configurator unit publishes OpenStack credentials.
     act: Run update-status.
-    assert: GARM's config.toml carries the postgresql connection and names the provider, the
-        provider's clouds.yaml is pushed alongside it, and the service runs GARM against
-        that config.
+    assert: The service environment carries the postgresql connection and complete provider
+        JSON, and the entrypoint runs GARM against its generated config.
     """
     with patch.dict(os.environ, {}, clear=True):
         out = ctx.run(ctx.on.update_status(), _state())
 
     container = out.get_container(CONTAINER_NAME)
-    root = container.get_filesystem(ctx)
-    config = tomllib.loads((root / "etc/garm/config.toml").read_text())
-    assert config["database"]["postgresql"]["hostname"] == "10.0.0.5"
-    assert config["database"]["postgresql"]["port"] == 5432
-    assert config["database"]["postgresql"]["username"] == "garm"
-    assert config["provider"][0]["name"] == "garm-configurator-0"
+    environment = _service_environment(out)
+    assert environment["POSTGRESQL_DB_HOSTNAME"] == "10.0.0.5"
+    assert environment["POSTGRESQL_DB_PORT"] == "5432"
+    providers = json.loads(environment["GARM_PROVIDERS_JSON"])
+    assert providers[0]["unit_name"] == "garm-configurator-0"
+    assert providers[0]["password"] == "pass1"
 
-    clouds = yaml.safe_load((root / "etc/garm/clouds-garm-configurator-0.yaml").read_text())
-    assert clouds["clouds"]["garm-configurator-0"]["auth"]["password"] == "pass1"
-
-    assert (
-        container.plan.services[SERVICE_NAME].command
-        == "/usr/local/bin/garm -config /etc/garm/config.toml"
-    )
+    assert container.plan.services[SERVICE_NAME].command == "/usr/local/bin/garm-entrypoint.py"
     assert out.unit_status == ops.ActiveStatus()
 
 
@@ -368,12 +362,13 @@ def test_workload_is_not_configured_without_postgresql_data(ctx: Context, garm_a
     """
     arrange: A postgresql relation that has not published connection data yet.
     act: Run update-status.
-    assert: The workload is left unconfigured — GARM cannot start without a database — and the
-        unit reports the missing integration.
+    assert: The workload command remains the raw GARM binary rather than the
+        entrypoint wrapper, and the unit reports the missing integration.
     """
     out = ctx.run(ctx.on.update_status(), _state(postgresql_data={}))
 
-    assert SERVICE_NAME not in out.get_container(CONTAINER_NAME).plan.services
+    service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
+    assert service.command == "/usr/local/bin/garm"
     assert out.unit_status == ops.BlockedStatus("missing integrations: postgresql")
 
 
@@ -400,16 +395,17 @@ def test_proxy_vars_reach_the_workload(ctx: Context, garm_api: _GarmApiMocks):
 
 def test_unchanged_config_does_not_restart_the_workload(ctx: Context, garm_api: _GarmApiMocks):
     """
-    arrange: A charm that has already configured the workload, with the service since stopped.
+    arrange: A charm that has already configured the workload.
     act: Run update-status again against the same config.
-    assert: The service is left stopped — an unchanged config must not replan — while the
-        GARM-side reconcile still runs.
+    assert: The workload layer is not reapplied (no restart) while the GARM-side
+        reconcile still runs.
     """
     with patch.dict(os.environ, {}, clear=True):
         configured = ctx.run(ctx.on.update_status(), _state())
-        out = ctx.run(ctx.on.update_status(), _stop_workload(configured))
+        with patch.object(GarmCharm, "_create_app") as mock_create_app:
+            out = ctx.run(ctx.on.update_status(), configured)
 
-    assert _workload_status(out) == pebble.ServiceStatus.INACTIVE
+    mock_create_app.assert_called_once()
     assert out.unit_status == ops.ActiveStatus()
 
 
@@ -459,17 +455,20 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     arrange: A ready charm whose garm-configurator relation has been removed.
     act: Run update-status.
     assert: Scalesets are reconciled against an empty desired state, deleting the ones the
-        removed relation orphaned, while the workload is left unconfigured and the unit
-        reports what it is waiting for.
+        removed relation orphaned, while the workload command stays the raw GARM binary
+        and the unit reports what it is waiting for.
     """
     out = ctx.run(ctx.on.update_status(), _state(configurator_related=False))
 
     garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
-    assert SERVICE_NAME not in out.get_container(CONTAINER_NAME).plan.services
+    service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
+    assert service.command == "/usr/local/bin/garm"
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
-def test_unpopulated_configurator_relation_does_not_prune(ctx: Context, garm_api: _GarmApiMocks):
+def test_unpopulated_configurator_relation_does_not_prune(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
     """
     arrange: A garm-configurator relation that is present but has not published its
         secret-dependent fields yet.
@@ -480,7 +479,8 @@ def test_unpopulated_configurator_relation_does_not_prune(ctx: Context, garm_api
     out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: {}}))
 
     garm_api.scaleset.assert_not_called()
-    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator data")
+    assert "Pausing GARM reconciliation" in caplog.text
 
 
 def test_missing_configurator_relation_refreshes_stale_app_status(

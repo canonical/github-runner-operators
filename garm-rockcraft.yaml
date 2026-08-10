@@ -64,6 +64,21 @@ parts:
     stage-packages:
       - ca-certificates_data
 
+  python:
+    plugin: python
+    source: .
+    python-packages:
+      - tomli-w==1.2.0
+      - PyYAML==6.0.3
+    stage-packages:
+      - python3-venv
+
+  garm-entrypoint:
+    plugin: dump
+    source: charms/garm/src/garm_entrypoint.py
+    organize:
+      garm_entrypoint.py: usr/local/bin/garm-entrypoint.py
+
   pebble-layer:
     plugin: nil
     override-build: |
@@ -74,6 +89,6 @@ parts:
         go:
           override: replace
           summary: GARM GitHub Actions Runner Manager
-          startup: disabled
-          command: /usr/local/bin/garm
+          startup: enabled
+          command: python3 /usr/local/bin/garm-entrypoint.py
       EOF
