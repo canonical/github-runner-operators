@@ -76,6 +76,7 @@ parts:
   garm-entrypoint:
     plugin: dump
     source: charms/garm/src/garm_entrypoint.py
+    source-type: local
     organize:
       garm_entrypoint.py: usr/local/bin/garm-entrypoint.py
 
