@@ -217,24 +217,31 @@ def write_config(content: str) -> None:
 def main() -> None:
     """Render GARM config and exec the GARM binary."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    env = _read_env_vars()
-    config = render_garm_config(env)
-    _, provider_files = _build_provider_files(env)
-    write_config(config)
-    GARM_PROVIDER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    expected_paths = set(provider_files)
-    for path in GARM_PROVIDER_CONFIG_DIR.iterdir():
-        name = path.name
-        if not (name.startswith(("provider-", "clouds-")) and name.endswith((".toml", ".yaml"))):
-            continue
-        if str(path) not in expected_paths:
-            path.unlink()
-    for path, content in provider_files.items():
-        provider_path = Path(path)
-        provider_path.parent.mkdir(parents=True, exist_ok=True)
-        provider_path.write_text(content, encoding="utf-8")
-        os.chmod(provider_path, 0o600)
-    os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
+    try:
+        env = _read_env_vars()
+        config = render_garm_config(env)
+        _, provider_files = _build_provider_files(env)
+        write_config(config)
+        GARM_PROVIDER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        expected_paths = set(provider_files)
+        for path in GARM_PROVIDER_CONFIG_DIR.iterdir():
+            name = path.name
+            if not (
+                name.startswith(("provider-", "clouds-"))
+                and name.endswith((".toml", ".yaml"))
+            ):
+                continue
+            if str(path) not in expected_paths:
+                path.unlink()
+        for path, content in provider_files.items():
+            provider_path = Path(path)
+            provider_path.parent.mkdir(parents=True, exist_ok=True)
+            provider_path.write_text(content, encoding="utf-8")
+            os.chmod(provider_path, 0o600)
+        os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
+    except Exception:
+        logger.exception("Failed to prepare GARM configuration")
+        raise
 
 
 if __name__ == "__main__":
