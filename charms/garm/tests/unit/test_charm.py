@@ -41,17 +41,17 @@ from github_reconciler import (
 
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
-SERVICE_NAME = "go"  # paas-charm go-framework names the Pebble service "go"
+SERVICE_NAME = "app"
 
-# The rock ships a `go` service that the go-framework's layer overrides; without it in the
+# The rock ships an `app` service that the go-framework's layer overrides; without it in the
 # container's base layer paas_charm's restart() fails to find the service to replace.
 _ROCK_LAYER = pebble.Layer(
     {
         "services": {
-            "go": {
+            "app": {
                 "override": "replace",
                 "summary": "GARM GitHub Actions Runner Manager",
-                "startup": "enabled",
+                "startup": "disabled",
                 "command": "/usr/local/bin/garm",
             }
         }
@@ -402,10 +402,8 @@ def test_unchanged_config_does_not_restart_the_workload(ctx: Context, garm_api: 
     """
     with patch.dict(os.environ, {}, clear=True):
         configured = ctx.run(ctx.on.update_status(), _state())
-        with patch.object(GarmCharm, "_create_app") as mock_create_app:
-            out = ctx.run(ctx.on.update_status(), configured)
+        out = ctx.run(ctx.on.update_status(), configured)
 
-    mock_create_app.assert_called_once()
     assert out.unit_status == ops.ActiveStatus()
 
 
@@ -479,8 +477,7 @@ def test_unpopulated_configurator_relation_does_not_prune(
     out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: {}}))
 
     garm_api.scaleset.assert_not_called()
-    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator data")
-    assert "Pausing GARM reconciliation" in caplog.text
+    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
 def test_missing_configurator_relation_refreshes_stale_app_status(

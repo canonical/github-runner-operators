@@ -7,12 +7,16 @@
 import dataclasses
 import json
 import logging
+import os
 import secrets
 import string
 import typing
 
 import ops
 import paas_charm.go
+from paas_charm.app import WorkloadConfig
+from paas_charm.charm_utils import block_if_invalid_data
+
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
@@ -30,10 +34,6 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
-from paas_charm.app import App, WorkloadConfig
-from paas_charm.charm_state import CharmState as PaasCharmState
-from paas_charm.charm_utils import block_if_invalid_data
-from paas_charm.database_migration import DatabaseMigration
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
 CONTAINER_NAME: typing.Final[str] = "app"
-SERVICE_NAME: typing.Final[str] = "go"
+PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 
 
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -53,23 +53,6 @@ GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
 GARM_CONFIG_VERSION: typing.Final[str] = "1"
-
-
-@dataclasses.dataclass(frozen=True)
-class ComputeState:
-    """Desired workload state derived from the charm.
-
-    This is a charm-side abstraction that mirrors the planned paas-charm
-    ``_compute_state`` return shape. When paas-charm gains native support for
-    this pattern, the charm can drop its custom App subclass and file-pushing
-    logic and return this object directly.
-
-    Attributes:
-        env: Environment variables to inject into the workload service.
-
-    """
-
-    env: dict[str, str]
 
 
 def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
@@ -134,56 +117,6 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     except ValueError:
         pass
     return {}
-
-
-class GarmApp(App):
-    """GARM-specific application manager.
-
-    Bridges the charm-side ``ComputeState`` to the paas-charm 12-factor
-    machinery. Injects GARM-specific environment variables and points the
-    Pebble service at the entrypoint script.
-    """
-
-    def __init__(
-        self,
-        *,
-        container: ops.Container,
-        charm_state: PaasCharmState,
-        workload_config: WorkloadConfig,
-        database_migration: DatabaseMigration,
-        compute_state: ComputeState,
-    ) -> None:
-        """Initialize the GARM application manager.
-
-        Args:
-            container: the application container.
-            charm_state: the paas-charm state instance.
-            workload_config: the workload configuration.
-            database_migration: the database migration manager.
-            compute_state: the desired GARM state to apply.
-        """
-        super().__init__(
-            container=container,
-            charm_state=charm_state,
-            workload_config=workload_config,
-            database_migration=database_migration,
-        )
-        self._compute_state = compute_state
-        self._alternate_service_command = "/usr/local/bin/garm-entrypoint.py"
-
-    def gen_environment(self) -> dict[str, str]:
-        """Generate environment variables for the GARM entrypoint.
-
-        Returns:
-            Merged dictionary of paas-charm framework env vars and GARM vars.
-        """
-        env = super().gen_environment()
-        env.update(self._compute_state.env)
-        return env
-
-    def restart(self) -> None:
-        """Apply the Pebble layer and delegate migration execution to paas-charm."""
-        super().restart()
 
 
 class GarmCharm(paas_charm.go.Charm):
@@ -261,32 +194,15 @@ class GarmCharm(paas_charm.go.Charm):
         paas-config.yaml, so metrics_target is set to None to suppress the
         framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
-
-    def _create_app(self, compute_state: ComputeState | None = None) -> GarmApp:
-        """Create the GARM application manager.
-
-        Args:
-            compute_state: Previously computed workload state, when available.
-
-        Returns:
-            A ``GarmApp`` configured with the current ``ComputeState``.
-        """
-        if compute_state is None:
-            # paas-charm calls _create_app() from is_ready() when it needs to
-            # stop services for a blocked integration. Do not recompute GARM
-            # relation state from that framework readiness path.
-            compute_state = ComputeState(env={})
-        return GarmApp(
-            container=self._container,
-            charm_state=self._create_charm_state(),
-            workload_config=self._workload_config,
-            database_migration=self._database_migration,
-            compute_state=compute_state,
+        return dataclasses.replace(
+            super()._workload_config,
+            port=GARM_PORT,
+            metrics_target=None,
+            service_name=PEBBLE_SERVICE_NAME,
         )
 
     def restart(self, rerun_migrations: bool = False) -> None:
-        """Write GARM config then restart the workload.
+        """Configure the wrapper and restart the workload.
 
         Ensures secrets before the readiness gate so they exist on
         install/leader_elected before pebble is ready, then gates on
@@ -296,88 +212,87 @@ class GarmCharm(paas_charm.go.Charm):
             rerun_migrations: Passed through to the parent restart.
         """
         self._ensure_secrets()
-        secrets_data = typing.cast(dict[str, str], self._get_secrets())
 
         if not self.is_ready():
             return
 
         self._warn_unsupported_port_options()
 
-        compute_state = self._compute_state(secrets_data=secrets_data)
-
-        # _compute_state sets the status and returns empty state when a required
-        # input is unavailable.
-        if not compute_state.env:
+        postgresql_config = self._get_postgresql_config()
+        if not postgresql_config:
+            logger.info("PostgreSQL relation data not yet available; blocking")
+            self.update_app_and_unit_status(ops.WaitingStatus("Waiting for postgresql relation"))
             return
 
-        # Pebble compares the generated service environment and restarts only
-        # when one of the actual configuration inputs changes.
-        app = self._create_app(compute_state)
-        # The framework's layer has to be laid down before ours. The first time it runs it
-        # snapshots whatever services the plan already holds and republishes them from a layer
-        # that takes precedence over ours, so a snapshot taken once our service exists pins that
-        # service's environment — proxy values and config_hash alike — for the container's
-        # lifetime, and no later change can reach the running workload.
+        secrets_data = self._get_secrets()
+        if secrets_data is None:
+            logger.info("GARM secrets not yet available; blocking until leader initialises")
+            self.update_app_and_unit_status(ops.WaitingStatus("Waiting for GARM secrets"))
+            return
+
+        provider_configs = self._get_configurator_provider_configs()
+        if not provider_configs:
+            if not CharmState.from_charm(self).configurator_related:
+                self._reconcile_runners()
+            self.update_app_and_unit_status(
+                ops.WaitingStatus("Waiting for garm-configurator relation")
+            )
+            return
+
         super().restart(rerun_migrations=rerun_migrations)
-        app.restart()
+        container = self.unit.get_container(CONTAINER_NAME)
+        container.add_layer(
+            "garm-command",
+            {
+                "services": {
+                    PEBBLE_SERVICE_NAME: {
+                        "override": "replace",
+                        "startup": "enabled",
+                        "command": "/usr/local/bin/garm-entrypoint.py",
+                        "environment": self._entrypoint_environment(
+                            postgresql_config, secrets_data, provider_configs
+                        ),
+                    }
+                }
+            },
+            combine=True,
+        )
+        container.replan()
         self._maybe_first_run()
         # Reconcile last: the framework's restart finishes by reporting active unconditionally,
         # which would bury the status a failed GARM sync reports here.
         self._reconcile_runners()
 
-    def _compute_state(self, secrets_data: dict[str, str]) -> ComputeState:
-        """Derive the desired workload state from Juju state.
-
-        Returns a ``ComputeState`` containing the environment variables the
-        GARM entrypoint needs and the provider configuration files to push.
-        When paas-charm gains native ``_compute_state`` support, this data
-        gathering can be returned directly and the ``GarmApp`` wrapper
-        removed.
-
-        Returns:
-            The desired GARM workload state.
-        """
-        env: dict[str, str] = {}
-
-        # PostgreSQL is supplied by paas-charm as POSTGRESQL_DB_* environment
-        # variables. Keep those native names; the entrypoint consumes them directly.
-        postgresql_config = self._get_postgresql_config()
-        if not postgresql_config:
-            # paas_charm.is_ready() already blocks on a missing required relation,
-            # but a joined relation may not yet carry data. Return empty state so
-            # no incomplete config reaches the workload.
-            logger.info("PostgreSQL relation data not yet available; waiting")
-            self.update_app_and_unit_status(ops.WaitingStatus("Waiting for postgresql relation"))
-            return ComputeState(env={})
-
-        provider_configs = self._get_configurator_provider_configs()
-        if not provider_configs:
-            # Empty configs don't distinguish a removed relation from one still
-            # mid-publish, but only a removed relation orphans scalesets. Prune
-            # them (via _reconcile_runners) only when the relation is truly gone;
-            # reconciling mid-publish would delete live scalesets against an empty
-            # desired state.
-            if not CharmState.from_charm(self).configurator_related:
-                logger.warning(
-                    "Pausing GARM reconciliation: waiting for garm-configurator relation"
-                )
-                self._reconcile_runners()
-            self.update_app_and_unit_status(
-                ops.WaitingStatus("Waiting for garm-configurator data")
-            )
-            return ComputeState(env={})
-
-        env["GARM_JWT_SECRET"] = secrets_data["jwt-secret"]
-        env["GARM_PASSPHRASE"] = secrets_data["db-passphrase"]
-
-        # Provider configuration is passed as one canonical environment value;
-        # the entrypoint owns rendering config.toml and provider files.
-        env["GARM_PROVIDERS_JSON"] = json.dumps(
-            provider_configs, sort_keys=True, separators=(",", ":")
-        )
-
-        env["GARM_CONFIG_VERSION"] = GARM_CONFIG_VERSION
-        return ComputeState(env=env)
+    def _entrypoint_environment(
+        self,
+        postgresql_config: dict[str, typing.Any],
+        secrets_data: dict[str, str],
+        provider_configs: list[dict[str, str]],
+    ) -> dict[str, str]:
+        """Build the environment consumed by the GARM entrypoint."""
+        environment = {
+            "POSTGRESQL_DB_HOSTNAME": str(postgresql_config["hostname"]),
+            "POSTGRESQL_DB_PORT": str(postgresql_config["port"]),
+            "POSTGRESQL_DB_USERNAME": str(postgresql_config["username"]),
+            "POSTGRESQL_DB_PASSWORD": str(postgresql_config["password"]),
+            "POSTGRESQL_DB_NAME": str(postgresql_config["database"]),
+            "GARM_JWT_SECRET": secrets_data["jwt-secret"],
+            "GARM_PASSPHRASE": secrets_data["db-passphrase"],
+            "GARM_PROVIDERS_JSON": json.dumps(
+                provider_configs, sort_keys=True, separators=(",", ":")
+            ),
+            "APP_BASE_URL": self._base_url,
+        }
+        for juju_name, name in {
+            "JUJU_CHARM_HTTP_PROXY": "http_proxy",
+            "JUJU_CHARM_HTTPS_PROXY": "https_proxy",
+            "JUJU_CHARM_NO_PROXY": "no_proxy",
+        }.items():
+            value = os.environ.get(juju_name, "").strip()
+            if value:
+                environment[name] = value
+                environment[name.upper()] = value
+        return environment
 
     def _warn_unsupported_port_options(self) -> None:
         """Warn when app-port/metrics-port/metrics-path are set to non-default values.

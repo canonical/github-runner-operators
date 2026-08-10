@@ -86,9 +86,9 @@ parts:
       cat > "$CRAFT_PART_INSTALL/var/lib/pebble/default/layers/001-garm.yaml" << 'EOF'
       summary: GARM service
       services:
-        go:
+        app:
           override: replace
           summary: GARM GitHub Actions Runner Manager
-          startup: enabled
-          command: python3 /usr/local/bin/garm-entrypoint.py
+          startup: disabled
+          command: /usr/local/bin/garm-entrypoint.py
       EOF

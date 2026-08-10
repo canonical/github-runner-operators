@@ -10,16 +10,12 @@
 
 # Test binary, built with `go test -c`
 *.test
-.venv/
 
 # Built binaries
 /planner
 /webhook-gateway
 *.rock
 *.charm
-charms/**/lib/
-charms/**/terraform/tests/.terraform/
-charms/**/terraform/tests/.terraform.lock.hcl
 
 # Python cache files
 __pycache__/
