@@ -238,6 +238,11 @@ def main() -> None:
             provider_path.parent.mkdir(parents=True, exist_ok=True)
             provider_path.write_text(content, encoding="utf-8")
             os.chmod(provider_path, 0o600)
+        logger.info(
+            "Prepared GARM configuration: provider_count=%d config_path=%s",
+            len(provider_files) // 2,
+            GARM_CONFIG_PATH,
+        )
         os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
     except Exception:
         logger.exception("Failed to prepare GARM configuration")
