@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
-GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
 GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 
@@ -223,7 +222,7 @@ def test_garm_pebble_service_command(
     """
     arrange: The GARM charm is deployed and active.
     act: Read the Pebble plan from the workload container.
-    assert: The Pebble service runs the GARM binary with the canonical config flag.
+    assert: The Pebble service starts the GARM entrypoint wrapper.
     """
     unit = f"{configurator_garm}/0"
     logger.info("Reading Pebble plan from unit %s", unit)
@@ -233,11 +232,8 @@ def test_garm_pebble_service_command(
     )
     plan_output = result.stdout
     logger.info("Pebble plan:\n%s", plan_output)
-    assert GARM_BINARY in plan_output, (
-        f"Expected {GARM_BINARY} in pebble plan, got: {plan_output}"
-    )
-    assert f"-config {GARM_CONFIG_PATH}" in plan_output, (
-        f"Expected '-config {GARM_CONFIG_PATH}' in pebble plan, got: {plan_output}"
+    assert "/usr/local/bin/garm-entrypoint.py" in plan_output, (
+        f"Expected GARM entrypoint in pebble plan, got: {plan_output}"
     )
 
 
