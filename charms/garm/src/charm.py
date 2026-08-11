@@ -43,8 +43,6 @@ GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
-
-
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_PORT: typing.Final[int] = 8080
@@ -433,12 +431,10 @@ class GarmCharm(paas_charm.go.Charm):
             return []
 
         configs: list[dict[str, str]] = []
-        incomplete_unit_count = 0
         for unit in relation.units:
             data = relation.data[unit]
             # Only include units that have sent the full provider config
             if "openstack_auth_url" not in data:
-                incomplete_unit_count += 1
                 continue
 
             # Resolve password: may be a plain value or a secret URI.
@@ -464,10 +460,9 @@ class GarmCharm(paas_charm.go.Charm):
 
         logger.info(
             "GARM configurator provider data: relation_unit_count=%d "
-            "configured_provider_count=%d incomplete_unit_count=%d",
+            "configured_provider_count=%d",
             len(relation.units),
             len(configs),
-            incomplete_unit_count,
         )
         return configs
 
