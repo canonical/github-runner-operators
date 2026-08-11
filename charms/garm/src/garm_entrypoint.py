@@ -37,6 +37,18 @@ SENSITIVE_ENV_VARS: Final[tuple[str, ...]] = (
 )
 
 
+class GarmEntrypointError(Exception):
+    """Base exception for expected entrypoint configuration failures."""
+
+
+class MissingEnvironmentError(GarmEntrypointError):
+    """Raised when a required environment variable is missing."""
+
+
+class InvalidConfigurationError(GarmEntrypointError):
+    """Raised when an environment value cannot configure GARM."""
+
+
 def _read_env_vars() -> dict[str, str]:
     """Read and validate the environment variables required by GARM.
 
@@ -44,7 +56,7 @@ def _read_env_vars() -> dict[str, str]:
         A dictionary of environment variable name to value.
 
     Raises:
-        SystemExit: If any required variable is missing.
+        MissingEnvironmentError: If any required variable is missing.
     """
     required = (
         "POSTGRESQL_DB_HOSTNAME",
@@ -55,8 +67,9 @@ def _read_env_vars() -> dict[str, str]:
     )
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
-        logger.error("Missing required environment variables: %s", ", ".join(missing))
-        sys.exit(1)
+        raise MissingEnvironmentError(
+            f"Missing required environment variables: {', '.join(missing)}"
+        )
 
     return {
         name: os.environ.get(name, "")
@@ -86,7 +99,12 @@ def _build_config(env: dict[str, str]) -> dict[str, typing.Any]:
     Returns:
         Configuration dictionary suitable for tomli_w.
     """
-    db_port = int(env.get("POSTGRESQL_DB_PORT", DEFAULT_DB_PORT))
+    try:
+        db_port = int(env.get("POSTGRESQL_DB_PORT", DEFAULT_DB_PORT))
+    except ValueError as exc:
+        raise InvalidConfigurationError("POSTGRESQL_DB_PORT must be an integer") from exc
+    if not 1 <= db_port <= 65535:
+        raise InvalidConfigurationError("POSTGRESQL_DB_PORT must be between 1 and 65535")
     db_name = env.get("POSTGRESQL_DB_NAME", DEFAULT_DB_NAME)
     base_url = env.get("APP_BASE_URL", "").rstrip("/")
 
@@ -131,7 +149,15 @@ def _build_provider_files(
     """Build GARM provider entries and their OpenStack config files."""
     env = dict(os.environ) if env is None else env
     providers_json = env.get("GARM_PROVIDERS_JSON", "")
-    providers = json.loads(providers_json) if providers_json else []
+    if providers_json:
+        try:
+            providers = json.loads(providers_json)
+        except json.JSONDecodeError as exc:
+            raise InvalidConfigurationError("GARM_PROVIDERS_JSON must contain valid JSON") from exc
+    else:
+        providers = []
+    if not isinstance(providers, list):
+        raise InvalidConfigurationError("GARM_PROVIDERS_JSON must contain a JSON list")
     proxy_vars = sorted(
         name
         for name in (
@@ -147,10 +173,28 @@ def _build_provider_files(
     entries: list[dict[str, typing.Any]] = []
     files: dict[str, str] = {}
 
+    required = (
+        "unit_name",
+        "network",
+        "auth_url",
+        "username",
+        "password",
+        "project_name",
+        "user_domain_name",
+        "project_domain_name",
+        "region_name",
+    )
     for provider in providers:
-        unit_name = provider["unit_name"]
+        if not isinstance(provider, dict):
+            raise InvalidConfigurationError("Each GARM provider must be a JSON object")
+        unit_name = provider.get("unit_name")
         if not isinstance(unit_name, str) or not unit_name or Path(unit_name).name != unit_name:
-            raise ValueError(f"Invalid provider unit name: {unit_name!r}")
+            raise InvalidConfigurationError(f"Invalid provider unit name: {unit_name!r}")
+        missing = [name for name in required if name not in provider]
+        if missing:
+            raise InvalidConfigurationError(
+                f"GARM provider is missing required fields: {', '.join(missing)}"
+            )
         provider_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}.toml"
         clouds_path = GARM_PROVIDER_CONFIG_DIR / f"clouds-{unit_name}.yaml"
         entries.append(
@@ -240,9 +284,8 @@ def main() -> None:
         expected_paths = set(provider_files)
         for path in GARM_PROVIDER_CONFIG_DIR.iterdir():
             name = path.name
-            if not (
-                name.startswith(("provider-", "clouds-"))
-                and name.endswith((".toml", ".yaml"))
+            if not name.startswith(("provider-", "clouds-")) or not name.endswith(
+                (".toml", ".yaml")
             ):
                 continue
             if str(path) not in expected_paths:
@@ -263,7 +306,7 @@ def main() -> None:
             GARM_CONFIG_PATH,
         )
         os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
-    except Exception:
+    except (GarmEntrypointError, OSError):
         logger.exception("Failed to prepare GARM configuration")
         sys.exit(1)
 

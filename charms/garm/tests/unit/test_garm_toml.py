@@ -68,7 +68,9 @@ def test_provider_unit_name_cannot_escape_config_directory():
     act: Build provider configuration files.
     assert: The entrypoint rejects the name before creating an escaped path.
     """
-    with pytest.raises(ValueError, match="Invalid provider unit name"):
+    with pytest.raises(
+        garm_entrypoint.InvalidConfigurationError, match="Invalid provider unit name"
+    ):
         garm_entrypoint._build_provider_files({"GARM_PROVIDERS_JSON": '[{"unit_name":"../x"}]'})
 
 

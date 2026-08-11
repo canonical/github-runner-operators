@@ -84,6 +84,33 @@ def test_missing_required_variable_exits(caplog):
     assert "Missing required environment variables" in caplog.text
 
 
+def test_invalid_database_port_exits(caplog, monkeypatch, tmp_path):
+    """arrange: PostgreSQL port is not an integer.
+
+    act: Run main.
+    assert: The entrypoint reports a configuration error and does not exec GARM.
+    """
+    env = {
+        "POSTGRESQL_DB_HOSTNAME": "db",
+        "POSTGRESQL_DB_USERNAME": "u",
+        "POSTGRESQL_DB_PASSWORD": "p",
+        "GARM_JWT_SECRET": "j",
+        "GARM_PASSPHRASE": "d" * 32,
+        "POSTGRESQL_DB_PORT": "not-a-port",
+    }
+    monkeypatch.setattr(garm_entrypoint, "GARM_CONFIG_PATH", tmp_path / "config.toml")
+
+    with (
+        caplog.at_level(logging.ERROR),
+        patch.dict(os.environ, env, clear=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        garm_entrypoint.main()
+
+    assert exc_info.value.code == 1
+    assert "POSTGRESQL_DB_PORT must be an integer" in caplog.text
+
+
 @patch("garm_entrypoint.os.execvp")
 @patch("garm_entrypoint.os.chmod")
 def test_main_writes_config_and_execs(mock_chmod, mock_execvp, monkeypatch, tmp_path):
@@ -211,7 +238,9 @@ def test_provider_unit_name_cannot_escape_config_directory():
     act: Build the provider configuration.
     assert: The untrusted name is rejected before any file path is created.
     """
-    with pytest.raises(ValueError, match="Invalid provider unit name"):
+    with pytest.raises(
+        garm_entrypoint.InvalidConfigurationError, match="Invalid provider unit name"
+    ):
         garm_entrypoint._build_provider_files({"GARM_PROVIDERS_JSON": '[{"unit_name": "../x"}]'})
 
 
