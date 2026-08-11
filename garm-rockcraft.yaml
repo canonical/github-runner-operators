@@ -67,6 +67,7 @@ parts:
   python:
     plugin: nil
     stage-packages:
+      - base-files
       - python3-minimal
       - python3-tomli-w
       - python3-yaml
