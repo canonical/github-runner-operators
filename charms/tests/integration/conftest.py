@@ -424,7 +424,7 @@ def _assert_garm_unit_healthy(juju: jubilant.Juju, app_name: str) -> None:
         "GARM unit status: unit=%s workload=%s agent=%s address=%s message=%s",
         unit_name,
         unit.workload_status.current,
-        unit.agent_status.current,
+        unit.juju_status.current,
         unit.address,
         unit.workload_status.message,
     )
