@@ -28,6 +28,13 @@ DEFAULT_DB_PORT: Final[int] = 5432
 DEFAULT_DB_NAME: Final[str] = "garm"
 GARM_LISTEN_ADDRESS: Final[str] = "0.0.0.0"
 GARM_PORT: Final[int] = 8080
+SENSITIVE_ENV_VARS: Final[tuple[str, ...]] = (
+    "POSTGRESQL_DB_USERNAME",
+    "POSTGRESQL_DB_PASSWORD",
+    "GARM_JWT_SECRET",
+    "GARM_PASSPHRASE",
+    "GARM_PROVIDERS_JSON",
+)
 
 
 def _read_env_vars() -> dict[str, str]:
@@ -214,6 +221,12 @@ def write_config(content: str) -> None:
     logger.info("Wrote GARM configuration to %s", GARM_CONFIG_PATH)
 
 
+def _scrub_sensitive_env_vars() -> None:
+    """Remove sensitive values from the process environment before exec."""
+    for name in SENSITIVE_ENV_VARS:
+        os.environ.pop(name, None)
+
+
 def main() -> None:
     """Render GARM config and exec the GARM binary."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -238,15 +251,16 @@ def main() -> None:
             provider_path.parent.mkdir(parents=True, exist_ok=True)
             provider_path.write_text(content, encoding="utf-8")
             os.chmod(provider_path, 0o600)
+        _scrub_sensitive_env_vars()
         logger.info(
             "Prepared GARM configuration: provider_count=%d config_path=%s",
             len(provider_files) // 2,
             GARM_CONFIG_PATH,
         )
         os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
-    except Exception:
-        logger.exception("Failed to prepare GARM configuration")
-        raise
+    except Exception as exc:
+        logger.error("Failed to prepare GARM configuration: %s", exc)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

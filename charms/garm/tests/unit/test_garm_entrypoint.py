@@ -114,6 +114,71 @@ def test_main_writes_config_and_execs(mock_chmod, mock_execvp, monkeypatch, tmp_
 
 
 @patch("garm_entrypoint.os.execvp")
+@patch("garm_entrypoint.os.chmod")
+def test_main_scrubs_sensitive_env_before_exec(mock_chmod, mock_execvp, monkeypatch, tmp_path):
+    """arrange: Sensitive config is provided through environment variables.
+
+    act: Run main.
+    assert: Sensitive values are removed from the process environment before exec.
+    """
+    env = {
+        "POSTGRESQL_DB_HOSTNAME": "db",
+        "POSTGRESQL_DB_USERNAME": "u",
+        "POSTGRESQL_DB_PASSWORD": "p",
+        "GARM_JWT_SECRET": "j",
+        "GARM_PASSPHRASE": "d" * 32,
+    }
+    config_path = tmp_path / "config.toml"
+    provider_dir = tmp_path / "provider"
+    monkeypatch.setattr(garm_entrypoint, "GARM_CONFIG_PATH", config_path)
+    monkeypatch.setattr(garm_entrypoint, "GARM_PROVIDER_CONFIG_DIR", provider_dir)
+    with patch.dict(os.environ, env, clear=True):
+        garm_entrypoint.main()
+
+        assert "POSTGRESQL_DB_USERNAME" not in os.environ
+        assert "POSTGRESQL_DB_PASSWORD" not in os.environ
+        assert "GARM_JWT_SECRET" not in os.environ
+        assert "GARM_PASSPHRASE" not in os.environ
+
+    mock_chmod.assert_called_once_with(config_path, 0o600)
+    mock_execvp.assert_called_once_with(
+        "/usr/local/bin/garm", ["garm", "-config", str(config_path)]
+    )
+
+
+@patch("garm_entrypoint.os.execvp")
+def test_main_logs_clean_exit_on_config_error(mock_execvp, caplog, monkeypatch, tmp_path):
+    """arrange: Provider JSON is malformed.
+
+    act: Run main.
+    assert: The script logs one error line and exits cleanly.
+    """
+    env = {
+        "POSTGRESQL_DB_HOSTNAME": "db",
+        "POSTGRESQL_DB_USERNAME": "u",
+        "POSTGRESQL_DB_PASSWORD": "p",
+        "GARM_JWT_SECRET": "j",
+        "GARM_PASSPHRASE": "d" * 32,
+        "GARM_PROVIDERS_JSON": "not-json",
+    }
+    config_path = tmp_path / "config.toml"
+    provider_dir = tmp_path / "provider"
+    monkeypatch.setattr(garm_entrypoint, "GARM_CONFIG_PATH", config_path)
+    monkeypatch.setattr(garm_entrypoint, "GARM_PROVIDER_CONFIG_DIR", provider_dir)
+
+    with (
+        caplog.at_level(logging.ERROR),
+        patch.dict(os.environ, env, clear=True),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        garm_entrypoint.main()
+
+    assert exc_info.value.code == 1
+    assert "Failed to prepare GARM configuration:" in caplog.text
+    mock_execvp.assert_not_called()
+
+
+@patch("garm_entrypoint.os.execvp")
 def test_main_rewrites_config_and_execs(mock_execvp, monkeypatch, tmp_path):
     """arrange: Environment variables describe the complete GARM configuration.
 
