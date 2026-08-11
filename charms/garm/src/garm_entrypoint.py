@@ -232,6 +232,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         env = _read_env_vars()
+        logger.info("Starting GARM configuration preparation: env_keys=%s", sorted(env))
         config = render_garm_config(env)
         _, provider_files = _build_provider_files(env)
         write_config(config)
@@ -257,9 +258,13 @@ def main() -> None:
             len(provider_files) // 2,
             GARM_CONFIG_PATH,
         )
+        logger.info(
+            "Starting GARM process: command=/usr/local/bin/garm config_path=%s",
+            GARM_CONFIG_PATH,
+        )
         os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
-    except Exception as exc:
-        logger.error("Failed to prepare GARM configuration: %s", exc)
+    except Exception:
+        logger.exception("Failed to prepare GARM configuration")
         sys.exit(1)
 
 

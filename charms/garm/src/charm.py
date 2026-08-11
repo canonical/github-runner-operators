@@ -214,6 +214,7 @@ class GarmCharm(paas_charm.go.Charm):
         self._ensure_secrets()
 
         if not self.is_ready():
+            logger.info("GARM workload prerequisites are not ready; waiting")
             return
 
         self._warn_unsupported_port_options()
@@ -234,6 +235,7 @@ class GarmCharm(paas_charm.go.Charm):
         if not provider_configs:
             if not CharmState.from_charm(self).configurator_related:
                 self._reconcile_runners()
+            logger.info("GARM configurator provider data not yet available; blocking")
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
@@ -428,13 +430,16 @@ class GarmCharm(paas_charm.go.Charm):
         """
         relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
         if relation is None:
+            logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
         configs: list[dict[str, str]] = []
+        incomplete_unit_count = 0
         for unit in relation.units:
             data = relation.data[unit]
             # Only include units that have sent the full provider config
             if "openstack_auth_url" not in data:
+                incomplete_unit_count += 1
                 continue
 
             # Resolve password: may be a plain value or a secret URI.
@@ -458,6 +463,13 @@ class GarmCharm(paas_charm.go.Charm):
                 }
             )
 
+        logger.info(
+            "GARM configurator provider data: relation_unit_count=%d "
+            "configured_provider_count=%d incomplete_unit_count=%d",
+            len(relation.units),
+            len(configs),
+            incomplete_unit_count,
+        )
         return configs
 
     def _resolve_secret_value(self, secret_uri: str) -> str:

@@ -13,6 +13,7 @@ The pure config-rendering helpers in charm.py are tested in test_garm_toml.py.
 
 import dataclasses
 import json
+import logging
 import os
 import typing
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -474,10 +475,12 @@ def test_unpopulated_configurator_relation_does_not_prune(
     assert: Scalesets are NOT reconciled — pruning against the empty desired state would
         delete live scalesets — and the unit waits for the relation to finish publishing.
     """
-    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: {}}))
+    with caplog.at_level(logging.INFO):
+        out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: {}}))
 
     garm_api.scaleset.assert_not_called()
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+    assert "GARM configurator provider data not yet available" in caplog.text
 
 
 def test_missing_configurator_relation_refreshes_stale_app_status(

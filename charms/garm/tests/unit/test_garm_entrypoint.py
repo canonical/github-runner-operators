@@ -174,7 +174,8 @@ def test_main_logs_clean_exit_on_config_error(mock_execvp, caplog, monkeypatch, 
         garm_entrypoint.main()
 
     assert exc_info.value.code == 1
-    assert "Failed to prepare GARM configuration:" in caplog.text
+    assert "Failed to prepare GARM configuration" in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
     mock_execvp.assert_not_called()
 
 
