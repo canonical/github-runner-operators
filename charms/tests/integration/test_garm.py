@@ -22,6 +22,9 @@ from tenacity import (
 from tests.integration.conftest import (
     GARM_ADMIN_CREDENTIALS_LABEL,
     GARM_API_PORT,
+    PEBBLE_PREFIX,
+    _assert_garm_unit_healthy,
+    _collect_debug_info,
     _garm_first_run,
     _get_garm_address,
 )
@@ -32,7 +35,6 @@ GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
 GARM_CONFIG_PATH = "/etc/garm/config.toml"
 GARM_SECRETS_LABEL = "garm-secrets"
-PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 
 # Generated once per session so all test functions that call _garm_first_run use
@@ -136,6 +138,7 @@ def test_garm_charm_reaches_active(
     API) the application legitimately reports ``waiting`` instead of a stale
     ``active``.  Either state confirms the workload came up cleanly.
     """
+    _assert_garm_unit_healthy(juju, configurator_garm)
     status = juju.status()
     app_status = status.apps[configurator_garm].app_status
     logger.info("GARM app status: %s (%s)", app_status.current, app_status.message)
@@ -161,14 +164,22 @@ def test_garm_api_controller_info(
     address = _get_garm_address(juju, configurator_garm)
     logger.info("GARM address: %s", address)
 
-    token = _garm_first_run(juju, address)
+    try:
+        token = _garm_first_run(juju, address)
+    except Exception:
+        _collect_debug_info(juju, configurator_garm)
+        raise
     assert token, "Expected non-empty JWT token from first-run/login"
     logger.info("Got admin JWT token (length=%d)", len(token))
 
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(f"{base_url}/controller-info", headers=headers, timeout=30)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(f"{base_url}/controller-info", headers=headers, timeout=30)
+        resp.raise_for_status()
+    except Exception:
+        _collect_debug_info(juju, configurator_garm)
+        raise
 
     info = resp.json()
     logger.info("Controller info: %s", json.dumps(info, indent=2))

@@ -27,6 +27,7 @@ from tests.integration.helpers import GITHUB_PATH_ENV_VAR, create_github_app_cli
 
 GARM_API_PORT = 8080
 GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
+PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 
 logger = logging.getLogger(__name__)
 
@@ -363,9 +364,10 @@ def _pre_pull_garm_image(image: str) -> None:
         logger.warning("GARM image pre-pull timed out after 600s; proceeding anyway")
 
 
-def _collect_debug_info(app_name: str) -> None:
-    """Collect k8s and Juju debug information after a deployment failure."""
-    logger.error("=== Debug info for failed GARM deployment ===")
+def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
+    """Collect k8s, Juju, and Pebble debug information after a deployment failure."""
+    unit = f"{app_name}/0"
+    logger.error("=== Debug info for failed GARM deployment: unit=%s ===", unit)
     for cmd in [
         ["sudo", "microk8s.kubectl", "get", "pods", "-A", "-o", "wide"],
         [
@@ -384,6 +386,53 @@ def _collect_debug_info(app_name: str) -> None:
             logger.error("$ %s\n%s%s", " ".join(cmd), out.stdout, out.stderr)
         except Exception as exc:
             logger.error("Failed to run %s: %s", cmd, exc)
+
+    for args in (
+        ("status", "--relations", "--format=json"),
+        ("show-unit", unit, "--format=json"),
+        ("debug-log", "--replay", f"--include={unit}"),
+    ):
+        try:
+            output = juju.cli(*args)
+            logger.error("$ juju %s\n%s", " ".join(args), output)
+        except Exception:
+            logger.exception("Failed to collect: juju %s", " ".join(args))
+
+    for command in (
+        f"{PEBBLE_PREFIX} services",
+        f"{PEBBLE_PREFIX} logs -n all app",
+    ):
+        try:
+            result = juju.exec(command, unit=unit)
+            logger.error(
+                "$ juju exec --unit %s -- %s\n%s%s",
+                unit,
+                command,
+                result.stdout,
+                result.stderr,
+            )
+        except Exception:
+            logger.exception("Failed to collect workload command: %s", command)
+
+
+def _assert_garm_unit_healthy(juju: jubilant.Juju, app_name: str) -> None:
+    """Fail immediately and collect diagnostics when the GARM unit is errored."""
+    unit_name = f"{app_name}/0"
+    status = juju.status()
+    unit = status.apps[app_name].units[unit_name]
+    logger.info(
+        "GARM unit status: unit=%s workload=%s agent=%s address=%s message=%s",
+        unit_name,
+        unit.workload_status.current,
+        unit.agent_status.current,
+        unit.address,
+        unit.workload_status.message,
+    )
+    if unit.workload_status.current == "error":
+        _collect_debug_info(juju, app_name)
+    assert unit.workload_status.current != "error", (
+        f"{unit_name} entered error: {unit.workload_status.message}"
+    )
 
 
 @pytest.fixture(scope="module", name="garm_app_deployed")
@@ -428,7 +477,7 @@ def deploy_garm_app_no_integration_fixture(
         )
     except TimeoutError:
         logger.error("GARM app '%s' did not reach blocked status within 600s", app_name)
-        _collect_debug_info(app_name)
+        _collect_debug_info(juju, app_name)
         raise
 
     logger.info("GARM app '%s' is blocked as expected (no postgresql)", app_name)
@@ -462,7 +511,7 @@ def integrate_garm_with_postgresql_fixture(
         )
     except TimeoutError:
         logger.error("GARM app '%s' did not reach active status within 600s", app_name)
-        _collect_debug_info(app_name)
+        _collect_debug_info(juju, app_name)
         raise
 
     logger.info("GARM app '%s' is active", app_name)
@@ -653,6 +702,7 @@ def integrate_configurator_with_garm_fixture(
         timeout=10 * 60,
         delay=10,
     )
+    _assert_garm_unit_healthy(juju, garm_app)
     return garm_app
 
 
