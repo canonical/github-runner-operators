@@ -53,7 +53,7 @@ _ROCK_LAYER = pebble.Layer(
                 "override": "replace",
                 "summary": "GARM GitHub Actions Runner Manager",
                 "startup": "disabled",
-                "command": "/usr/local/bin/garm",
+                "command": "/usr/local/bin/garm-entrypoint.py",
             }
         }
     }
@@ -359,17 +359,49 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
     assert out.unit_status == ops.ActiveStatus()
 
 
+def test_provider_environment_is_sorted_by_configurator_unit(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: Two configurator units publish provider data.
+    act: Reconcile the charm.
+    assert: Providers are serialized in unit-name order, so unchanged relation data produces a
+        stable Pebble environment.
+    """
+    provider_data = {
+        1: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA},
+        0: {
+            **_PROVIDER_UNIT_DATA,
+            **_SCALESET_UNIT_DATA,
+            "openstack_auth_url": "https://ks0.example.com:5000/v3",
+        },
+    }
+
+    first = ctx.run(ctx.on.update_status(), _state(configurator_units_data=provider_data))
+    second = ctx.run(ctx.on.update_status(), first)
+
+    first_environment = _service_environment(first)
+    second_environment = _service_environment(second)
+    assert first_environment["GARM_PROVIDERS_JSON"] == second_environment["GARM_PROVIDERS_JSON"]
+    providers = json.loads(first_environment["GARM_PROVIDERS_JSON"])
+    assert [provider["unit_name"] for provider in providers] == [
+        "garm-configurator-0",
+        "garm-configurator-1",
+    ]
+
+
 def test_workload_is_not_configured_without_postgresql_data(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A postgresql relation that has not published connection data yet.
     act: Run update-status.
-    assert: The workload command remains the raw GARM binary rather than the
-        entrypoint wrapper, and the unit reports the missing integration.
+    assert: The entrypoint remains disabled until PostgreSQL data is available, and the unit
+        reports the missing integration.
     """
     out = ctx.run(ctx.on.update_status(), _state(postgresql_data={}))
 
     service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
-    assert service.command == "/usr/local/bin/garm"
+    assert service.command == "/usr/local/bin/garm-entrypoint.py"
+    assert service.startup == "disabled"
     assert out.unit_status == ops.BlockedStatus("missing integrations: postgresql")
 
 
@@ -396,16 +428,16 @@ def test_proxy_vars_reach_the_workload(ctx: Context, garm_api: _GarmApiMocks):
 
 def test_unchanged_config_does_not_restart_the_workload(ctx: Context, garm_api: _GarmApiMocks):
     """
-    arrange: A charm that has already configured the workload.
+    arrange: A charm that has already configured the workload, then stopped its service.
     act: Run update-status again against the same config.
-    assert: The workload layer is not reapplied (no restart) while the GARM-side
-        reconcile still runs.
+    assert: Pebble leaves the stopped service inactive because the effective plan is unchanged.
     """
     with patch.dict(os.environ, {}, clear=True):
         configured = ctx.run(ctx.on.update_status(), _state())
-        out = ctx.run(ctx.on.update_status(), configured)
+        out = ctx.run(ctx.on.update_status(), _stop_workload(configured))
 
     assert out.unit_status == ops.ActiveStatus()
+    assert _workload_status(out) == pebble.ServiceStatus.INACTIVE
 
 
 def test_proxy_value_change_restarts_the_workload(ctx: Context, garm_api: _GarmApiMocks):
@@ -454,14 +486,15 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     arrange: A ready charm whose garm-configurator relation has been removed.
     act: Run update-status.
     assert: Scalesets are reconciled against an empty desired state, deleting the ones the
-        removed relation orphaned, while the workload command stays the raw GARM binary
-        and the unit reports what it is waiting for.
+        removed relation orphaned, while the entrypoint remains disabled and the unit reports
+        what it is waiting for.
     """
     out = ctx.run(ctx.on.update_status(), _state(configurator_related=False))
 
     garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
     service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
-    assert service.command == "/usr/local/bin/garm"
+    assert service.command == "/usr/local/bin/garm-entrypoint.py"
+    assert service.startup == "disabled"
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 

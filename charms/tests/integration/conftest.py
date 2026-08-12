@@ -8,12 +8,13 @@ import subprocess
 import textwrap
 from contextlib import suppress
 import time
-from typing import Iterator
+from typing import Any, Iterator
 from uuid import uuid4
 
 import jubilant
 import pytest
 import requests
+import yaml
 from requests.adapters import HTTPAdapter
 from tenacity import (
     retry,
@@ -30,6 +31,28 @@ GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_pebble_output(output: str) -> str:
+    """Remove environment mappings before logging structured Pebble output."""
+    try:
+        parsed = yaml.safe_load(output)
+    except yaml.YAMLError:
+        return output
+
+    def redact(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: "[REDACTED]" if key == "environment" else redact(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        return value
+
+    if isinstance(parsed, (dict, list)):
+        return yaml.safe_dump(redact(parsed), sort_keys=False)
+    return output
 
 
 @pytest.fixture(scope="module")
@@ -408,8 +431,8 @@ def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
                 "$ juju exec --unit %s -- %s\n%s%s",
                 unit,
                 command,
-                result.stdout,
-                result.stderr,
+                _redact_pebble_output(result.stdout),
+                _redact_pebble_output(result.stderr),
             )
         except Exception:
             logger.exception("Failed to collect workload command: %s", command)

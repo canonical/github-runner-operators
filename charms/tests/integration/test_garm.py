@@ -12,6 +12,7 @@ import urllib.request
 import jubilant
 import pytest
 import requests
+import yaml
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -219,10 +220,11 @@ def test_garm_pebble_service_command(
         f"{PEBBLE_PREFIX} plan",
         unit=unit,
     )
-    plan_output = result.stdout
-    logger.info("Pebble plan:\n%s", plan_output)
-    assert "/usr/local/bin/garm-entrypoint.py" in plan_output, (
-        f"Expected GARM entrypoint in pebble plan, got: {plan_output}"
+    plan = yaml.safe_load(result.stdout)
+    command = plan["services"]["app"]["command"]
+    logger.info("Pebble plan command: %s", command)
+    assert command == "/usr/local/bin/garm-entrypoint.py", (
+        f"Expected GARM entrypoint in pebble plan, got: {command}"
     )
 
 
