@@ -64,6 +64,23 @@ parts:
     stage-packages:
       - ca-certificates_data
 
+  python:
+    plugin: nil
+    stage-packages:
+      - base-files
+      - python3-minimal
+      - python3-tomli-w
+      - python3-yaml
+
+  garm-entrypoint:
+    plugin: dump
+    source: charms/garm/src
+    source-type: local
+    organize:
+      garm_entrypoint.py: usr/local/bin/garm-entrypoint.py
+    prime:
+      - usr/local/bin/garm-entrypoint.py
+
   pebble-layer:
     plugin: nil
     override-build: |
@@ -71,9 +88,9 @@ parts:
       cat > "$CRAFT_PART_INSTALL/var/lib/pebble/default/layers/001-garm.yaml" << 'EOF'
       summary: GARM service
       services:
-        go:
+        app:
           override: replace
           summary: GARM GitHub Actions Runner Manager
           startup: disabled
-          command: /usr/local/bin/garm
+          command: /usr/local/bin/garm-entrypoint.py
       EOF

@@ -5,7 +5,6 @@
 """GARM charm entrypoint."""
 
 import dataclasses
-import hashlib
 import json
 import logging
 import os
@@ -15,8 +14,6 @@ import typing
 
 import ops
 import paas_charm.go
-import tomli_w
-import yaml
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
@@ -41,7 +38,6 @@ from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
 
-GARM_CONFIG_PATH: typing.Final[str] = "/etc/garm/config.toml"
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
@@ -52,6 +48,8 @@ OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-ope
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
+
+GARM_CONFIG_VERSION: typing.Final[str] = "1"
 
 
 def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
@@ -65,220 +63,6 @@ def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
     """
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
-# Juju injects model proxy config (juju-http-proxy/...) into the hook
-# environment as JUJU_CHARM_*. GARM and its child provider executables
-# (garm-provider-openstack -> gophercloud) honour the conventional proxy
-# variables, so we mirror each configured value into both the lower- and
-# upper-case form.
-_JUJU_PROXY_VARS: typing.Final[dict[str, str]] = {
-    "JUJU_CHARM_HTTP_PROXY": "http_proxy",
-    "JUJU_CHARM_HTTPS_PROXY": "https_proxy",
-    "JUJU_CHARM_NO_PROXY": "no_proxy",
-}
-
-
-def _proxy_environment() -> dict[str, str]:
-    """Build proxy env vars from Juju model proxy config.
-
-    Returns a mapping with both lower- and upper-case variants for each
-    non-empty Juju proxy setting, suitable for a Pebble service environment.
-    """
-    env: dict[str, str] = {}
-    for juju_var, target in _JUJU_PROXY_VARS.items():
-        value = os.environ.get(juju_var, "").strip()
-        if value:
-            env[target] = value
-            env[target.upper()] = value
-    return env
-
-
-def _build_provider_list(
-    providers: list[dict[str, str]] | None,
-    proxy_var_names: list[str] | None = None,
-) -> tuple[list[dict[str, typing.Any]], dict[str, str]]:
-    r"""Build the list of [[provider]] TOML entries and provider config files.
-
-    The garm-provider-openstack binary reads its credentials from a
-    provider-specific TOML config file that references a clouds.yaml file
-    -- it does NOT read OPENSTACK_* environment variables.
-
-    This function generates both the GARM provider entries and the
-    provider config file contents that must be pushed to the container.
-
-    Args:
-        providers: List of provider config dicts from Configurator units,
-            each with keys: unit_name, auth_url, username, password,
-            project_name, user_domain_name, project_domain_name,
-            region_name, network.
-        proxy_var_names: Optional list of environment variable names to
-            whitelist in each provider's ``external.environment_variables``
-            so GARM forwards them to the child provider process. When None
-            or empty, the key is omitted (preserving existing behaviour).
-
-    Returns:
-        A tuple of (provider_entries, provider_files):
-        - provider_entries: List of provider dicts for the GARM TOML
-          [[provider]] section, with config_file paths set.
-        - provider_files: Dict mapping container file paths to their
-          contents (provider TOML + clouds.yaml for each provider).
-    """
-    if not providers:
-        return [
-            {
-                "name": "openstack",
-                "provider_type": "external",
-                "description": "OpenStack provider",
-                "external": _build_external_block("", proxy_var_names),
-            }
-        ], {}
-
-    result: list[dict[str, typing.Any]] = []
-    provider_files: dict[str, str] = {}
-
-    for provider in providers:
-        unit_name = provider["unit_name"]
-
-        provider_toml_path = f"{GARM_PROVIDER_CONFIG_DIR}/provider-{unit_name}.toml"
-        clouds_yaml_path = f"{GARM_PROVIDER_CONFIG_DIR}/clouds-{unit_name}.yaml"
-
-        # Build the provider-specific TOML config that garm-provider-openstack reads.
-        provider_toml = tomli_w.dumps(
-            {
-                "cloud": unit_name,
-                "network_id": provider["network"],
-                "credentials": {
-                    "clouds": clouds_yaml_path,
-                },
-                # 2025/07/24 - This option is set to mitigate CVE-2024-6174
-                "use_config_drive": True,
-            }
-        )
-
-        # Build the clouds.yaml that gophercloud reads for OpenStack credentials.
-        auth_block = {
-            "auth_url": provider["auth_url"],
-            "username": provider["username"],
-            "password": provider["password"],
-            "project_name": provider["project_name"],
-            "user_domain_name": provider["user_domain_name"],
-            "project_domain_name": provider["project_domain_name"],
-        }
-
-        clouds_yaml = _render_clouds_yaml(unit_name, auth_block, provider["region_name"])
-
-        provider_files[provider_toml_path] = provider_toml
-        provider_files[clouds_yaml_path] = clouds_yaml
-
-        result.append(
-            {
-                "name": unit_name,
-                "provider_type": "external",
-                "description": f"OpenStack provider ({unit_name})",
-                "external": _build_external_block(provider_toml_path, proxy_var_names),
-            }
-        )
-    return result, provider_files
-
-
-def _build_external_block(
-    config_file: str, proxy_var_names: list[str] | None
-) -> dict[str, typing.Any]:
-    """Build a provider ``external`` block, whitelisting proxy vars when set.
-
-    Args:
-        config_file: Path to the provider-specific TOML config file.
-        proxy_var_names: Optional environment variable names to forward to the
-            child provider process. When None or empty, the key is omitted.
-
-    Returns:
-        The ``external`` dict for a GARM [[provider]] entry.
-    """
-    external: dict[str, typing.Any] = {
-        "config_file": config_file,
-        "provider_executable": OPENSTACK_PROVIDER_BINARY,
-    }
-    if proxy_var_names:
-        external["environment_variables"] = proxy_var_names
-    return external
-
-
-def _render_clouds_yaml(cloud_name: str, auth: dict[str, str], region_name: str) -> str:
-    """Render a minimal clouds.yaml for gophercloud using PyYAML.
-
-    Args:
-        cloud_name: The cloud name in the ``clouds`` dict.
-        auth: Auth parameters (auth_url, username, password, project_name,
-            user_domain_name, project_domain_name).
-        region_name: OpenStack region name.
-
-    Returns:
-        YAML-formatted string.
-    """
-    clouds = {
-        "clouds": {
-            cloud_name: {
-                "auth": auth,
-                "region_name": region_name,
-            }
-        }
-    }
-    return yaml.dump(clouds, default_flow_style=False)
-
-
-def render_garm_toml(
-    *,
-    jwt_secret: str,
-    db_passphrase: str,
-    postgresql_config: dict[str, typing.Any],
-    providers: list[dict[str, str]] | None = None,
-    proxy_var_names: list[str] | None = None,
-) -> tuple[str, dict[str, str]]:
-    """Render GARM's TOML configuration file content.
-
-    Args:
-        jwt_secret: Secret string used to sign GARM JWT tokens.
-        db_passphrase: 32-character passphrase for AES-256 encryption of secrets in the DB.
-        postgresql_config: PostgreSQL connection parameters (username, password,
-            hostname, port, database, sslmode).
-        providers: Optional list of provider config dicts from Configurator
-            units. If None or empty, a default single "openstack" provider
-            is used for backward compatibility.
-        proxy_var_names: Optional list of environment variable names to
-            whitelist in each provider's ``external.environment_variables``
-            so GARM forwards them to child provider processes. When None
-            or empty, the key is omitted from the provider entries.
-
-    Returns:
-        A tuple of (toml_content, provider_files):
-        - toml_content: TOML-formatted string ready to be written to disk.
-        - provider_files: Dict mapping container file paths to their
-          contents (provider config TOML + clouds.yaml for each provider).
-    """
-    provider_entries, provider_files = _build_provider_list(providers, proxy_var_names)
-    config: dict[str, typing.Any] = {
-        "database": {
-            "backend": "postgresql",
-            "passphrase": db_passphrase,
-            "postgresql": postgresql_config,
-        },
-        "apiserver": {
-            "bind": GARM_LISTEN_ADDRESS,
-            "port": GARM_PORT,
-            "use_tls": False,
-        },
-        "jwt_auth": {
-            "secret": jwt_secret,
-            "time_to_live": "8760h",
-        },
-        "metrics": {
-            "disable_auth": True,
-            "enable": True,
-        },
-        "provider": provider_entries,
-    }
-    return tomli_w.dumps(config), provider_files
 
 
 def _generate_garm_secrets() -> dict[str, str]:
@@ -407,10 +191,15 @@ class GarmCharm(paas_charm.go.Charm):
         paas-config.yaml, so metrics_target is set to None to suppress the
         framework's default metrics-port scrape job.
         """
-        return dataclasses.replace(super()._workload_config, port=GARM_PORT, metrics_target=None)
+        return dataclasses.replace(
+            super()._workload_config,
+            port=GARM_PORT,
+            metrics_target=None,
+            service_name=PEBBLE_SERVICE_NAME,
+        )
 
     def restart(self, rerun_migrations: bool = False) -> None:
-        """Write GARM config then restart the workload.
+        """Configure the wrapper and restart the workload.
 
         Ensures secrets before the readiness gate so they exist on
         install/leader_elected before pebble is ready, then gates on
@@ -422,12 +211,11 @@ class GarmCharm(paas_charm.go.Charm):
         self._ensure_secrets()
 
         if not self.is_ready():
+            logger.info("GARM workload prerequisites are not ready; waiting")
             return
 
         self._warn_unsupported_port_options()
 
-        # Short-circuit if postgresql relation data is not yet available.
-        # GARM cannot start without a database connection.
         postgresql_config = self._get_postgresql_config()
         if not postgresql_config:
             logger.info("PostgreSQL relation data not yet available; blocking")
@@ -442,72 +230,19 @@ class GarmCharm(paas_charm.go.Charm):
 
         provider_configs = self._get_configurator_provider_configs()
         if not provider_configs:
-            # Empty configs don't distinguish a removed relation from one still
-            # mid-publish, but only a removed relation orphans scalesets. Prune
-            # them (via _reconcile_runners) only when the relation is truly gone;
-            # reconciling mid-publish would delete live scalesets against an empty
-            # desired state.
             if not CharmState.from_charm(self).configurator_related:
                 self._reconcile_runners()
+            logger.info("GARM configurator provider data not yet available; blocking")
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
             return
 
-        proxy_env = _proxy_environment()
-        toml_content, provider_files = render_garm_toml(
-            jwt_secret=secrets_data["jwt-secret"],
-            db_passphrase=secrets_data["db-passphrase"],
-            postgresql_config=postgresql_config,
-            providers=provider_configs,
-            proxy_var_names=sorted(proxy_env.keys()),
-        )
-
-        # Detect config changes by comparing the freshly rendered config hash against the
-        # config_hash stored in the container's current Pebble plan. The proxy *values* live
-        # only in the service environment, so they are folded into the hash input here; the
-        # stored hash was computed from the same input last time, making the comparison
-        # symmetric. This catches a proxy-value-only change (variable set unchanged) that the
-        # TOML-embedded variable *names* alone would miss, and — by comparing against the
-        # actual plan rather than the on-disk TOML — avoids the desync where a matching
-        # on-disk file wedged the layer permanently.
-        hash_input = (
-            toml_content
-            + "\n"
-            + "\n".join(f"{path}\n{content}" for path, content in sorted(provider_files.items()))
-        )
-        # Only extend the input when a proxy is configured, so the no-proxy hash matches
-        # earlier charm revisions and upgrading doesn't force a spurious one-time replan.
-        if proxy_env:
-            hash_input += "\n" + "\n".join(f"{k}={v}" for k, v in sorted(proxy_env.items()))
-        new_hash = self._hash_toml(hash_input)
-
         container = self.unit.get_container(CONTAINER_NAME)
-        previous_hash = self._current_config_hash(container)
-        if previous_hash == new_hash:
-            logger.debug(
-                "Workload config (TOML, provider files, proxy env) unchanged; skipping replan"
-            )
-            self._reconcile_runners()
-            return
-
-        # Log non-sensitive metadata about the config change.
-        # Do NOT log toml_content here — it contains secrets
-        # (jwt_secret, db_passphrase, passwords).
-        provider_names = [p.get("unit_name") for p in provider_configs]
-        logger.info("Updating GARM config for providers: %s", provider_names)
-
-        container.push(GARM_CONFIG_PATH, toml_content, permissions=0o600, make_dirs=True)
-        for path, content in provider_files.items():
-            container.push(path, content, permissions=0o600, make_dirs=True)
-
-        # The framework's layer has to be laid down before ours. The first time it runs it
-        # snapshots whatever services the plan already holds and republishes them from a layer
-        # that takes precedence over ours, so a snapshot taken once our service exists pins that
-        # service's environment — proxy values and config_hash alike — for the container's
-        # lifetime, and no later change can reach the running workload.
+        entrypoint_environment = self._entrypoint_environment(
+            postgresql_config, secrets_data, provider_configs
+        )
         super().restart(rerun_migrations=rerun_migrations)
-
         container.add_layer(
             "garm-command",
             {
@@ -515,21 +250,55 @@ class GarmCharm(paas_charm.go.Charm):
                     PEBBLE_SERVICE_NAME: {
                         "override": "replace",
                         "startup": "enabled",
-                        "command": f"{GARM_BINARY} -config {GARM_CONFIG_PATH}",
-                        "environment": {
-                            "config_hash": new_hash,
-                            **proxy_env,
-                        },
+                        "command": "/usr/local/bin/garm-entrypoint.py",
+                        "environment": entrypoint_environment,
                     }
                 }
             },
             combine=True,
+        )
+        logger.info(
+            "Configured GARM workload: command=%s provider_count=%d env_keys=%s",
+            "/usr/local/bin/garm-entrypoint.py",
+            len(provider_configs),
+            sorted(entrypoint_environment),
         )
         container.replan()
         self._maybe_first_run()
         # Reconcile last: the framework's restart finishes by reporting active unconditionally,
         # which would bury the status a failed GARM sync reports here.
         self._reconcile_runners()
+
+    def _entrypoint_environment(
+        self,
+        postgresql_config: dict[str, typing.Any],
+        secrets_data: dict[str, str],
+        provider_configs: list[dict[str, str]],
+    ) -> dict[str, str]:
+        """Build the environment consumed by the GARM entrypoint."""
+        environment = {
+            "POSTGRESQL_DB_HOSTNAME": str(postgresql_config["hostname"]),
+            "POSTGRESQL_DB_PORT": str(postgresql_config["port"]),
+            "POSTGRESQL_DB_USERNAME": str(postgresql_config["username"]),
+            "POSTGRESQL_DB_PASSWORD": str(postgresql_config["password"]),
+            "POSTGRESQL_DB_NAME": str(postgresql_config["database"]),
+            "GARM_JWT_SECRET": secrets_data["jwt-secret"],
+            "GARM_PASSPHRASE": secrets_data["db-passphrase"],
+            "GARM_PROVIDERS_JSON": json.dumps(
+                provider_configs, sort_keys=True, separators=(",", ":")
+            ),
+            "APP_BASE_URL": self._base_url,
+        }
+        for juju_name, name in {
+            "JUJU_CHARM_HTTP_PROXY": "http_proxy",
+            "JUJU_CHARM_HTTPS_PROXY": "https_proxy",
+            "JUJU_CHARM_NO_PROXY": "no_proxy",
+        }.items():
+            value = os.environ.get(juju_name, "").strip()
+            if value:
+                environment[name] = value
+                environment[name.upper()] = value
+        return environment
 
     def _warn_unsupported_port_options(self) -> None:
         """Warn when app-port/metrics-port/metrics-path are set to non-default values.
@@ -556,37 +325,6 @@ class GarmCharm(paas_charm.go.Charm):
                     value,
                     GARM_PORT,
                 )
-
-    @staticmethod
-    def _hash_toml(toml_content: str) -> str:
-        """Return the SHA-256 hex digest of the given TOML content.
-
-        Args:
-            toml_content: The TOML string to hash.
-
-        Returns:
-            A 64-character hex digest string.
-        """
-        return hashlib.sha256(toml_content.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _current_config_hash(container: ops.Container) -> str | None:
-        """Return the config_hash stored in the container's current Pebble plan.
-
-        This is the config hash computed during the previous successful replan;
-        it lives in the app service's environment. Returns None when the service
-        (or the key) is absent, i.e. the container was never configured.
-
-        Args:
-            container: The workload container to read the plan from.
-
-        Returns:
-            The stored config_hash, or None if it has not been set yet.
-        """
-        service = container.get_plan().services.get(PEBBLE_SERVICE_NAME)
-        if service is None:
-            return None
-        return service.environment.get("config_hash")
 
     def _ensure_secrets(self) -> None:
         """Create garm-secrets and garm-admin-credentials (leader only)."""
@@ -689,10 +427,11 @@ class GarmCharm(paas_charm.go.Charm):
         """
         relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
         if relation is None:
+            logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
         configs: list[dict[str, str]] = []
-        for unit in relation.units:
+        for unit in sorted(relation.units, key=lambda unit: unit.name):
             data = relation.data[unit]
             # Only include units that have sent the full provider config
             if "openstack_auth_url" not in data:
@@ -719,6 +458,12 @@ class GarmCharm(paas_charm.go.Charm):
                 }
             )
 
+        logger.info(
+            "GARM configurator provider data: relation_unit_count=%d "
+            "configured_provider_count=%d",
+            len(relation.units),
+            len(configs),
+        )
         return configs
 
     def _resolve_secret_value(self, secret_uri: str) -> str:
@@ -734,8 +479,10 @@ class GarmCharm(paas_charm.go.Charm):
         try:
             secret = self.model.get_secret(id=secret_uri)
             return secret.get_content(refresh=True).get("value", "")
-        except ops.SecretNotFoundError:
-            logger.warning("Secret %s is not accessible", secret_uri)
+        except (ops.SecretNotFoundError, ops.ModelError):
+            # Secret grants can race the relation-joined hook. The following
+            # relation-changed event retries once Juju has propagated access.
+            logger.warning("Secret %s is not accessible yet", secret_uri)
             return ""
 
     def _get_admin_credentials(self) -> dict[str, str] | None:
