@@ -426,18 +426,19 @@ def test_proxy_vars_reach_the_workload(ctx: Context, garm_api: _GarmApiMocks):
     assert environment["HTTPS_PROXY"] == "https://proxy.example.com:3129"
 
 
-def test_unchanged_config_does_not_restart_the_workload(ctx: Context, garm_api: _GarmApiMocks):
+def test_unchanged_config_restarts_stopped_workload(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A charm that has already configured the workload, then stopped its service.
     act: Run update-status again against the same config.
-    assert: Pebble leaves the stopped service inactive because the effective plan is unchanged.
+    assert: Pebble's replan starts the startup-enabled service, even though its configuration is
+        unchanged.
     """
     with patch.dict(os.environ, {}, clear=True):
         configured = ctx.run(ctx.on.update_status(), _state())
         out = ctx.run(ctx.on.update_status(), _stop_workload(configured))
 
     assert out.unit_status == ops.ActiveStatus()
-    assert _workload_status(out) == pebble.ServiceStatus.INACTIVE
+    assert _workload_status(out) == pebble.ServiceStatus.ACTIVE
 
 
 def test_proxy_value_change_restarts_the_workload(ctx: Context, garm_api: _GarmApiMocks):

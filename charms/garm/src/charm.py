@@ -242,37 +242,28 @@ class GarmCharm(paas_charm.go.Charm):
         entrypoint_environment = self._entrypoint_environment(
             postgresql_config, secrets_data, provider_configs
         )
-        service = container.get_plan().services.get(PEBBLE_SERVICE_NAME)
-        unchanged = (
-            not rerun_migrations
-            and service is not None
-            and service.startup == "enabled"
-            and service.command == "/usr/local/bin/garm-entrypoint.py"
-            and service.environment == entrypoint_environment
-        )
-        if not unchanged:
-            super().restart(rerun_migrations=rerun_migrations)
-            container.add_layer(
-                "garm-command",
-                {
-                    "services": {
-                        PEBBLE_SERVICE_NAME: {
-                            "override": "replace",
-                            "startup": "enabled",
-                            "command": "/usr/local/bin/garm-entrypoint.py",
-                            "environment": entrypoint_environment,
-                        }
+        super().restart(rerun_migrations=rerun_migrations)
+        container.add_layer(
+            "garm-command",
+            {
+                "services": {
+                    PEBBLE_SERVICE_NAME: {
+                        "override": "replace",
+                        "startup": "enabled",
+                        "command": "/usr/local/bin/garm-entrypoint.py",
+                        "environment": entrypoint_environment,
                     }
-                },
-                combine=True,
-            )
-            logger.info(
-                "Configured GARM workload: command=%s provider_count=%d env_keys=%s",
-                "/usr/local/bin/garm-entrypoint.py",
-                len(provider_configs),
-                sorted(entrypoint_environment),
-            )
-            container.replan()
+                }
+            },
+            combine=True,
+        )
+        logger.info(
+            "Configured GARM workload: command=%s provider_count=%d env_keys=%s",
+            "/usr/local/bin/garm-entrypoint.py",
+            len(provider_configs),
+            sorted(entrypoint_environment),
+        )
+        container.replan()
         self._maybe_first_run()
         # Reconcile last: the framework's restart finishes by reporting active unconditionally,
         # which would bury the status a failed GARM sync reports here.
