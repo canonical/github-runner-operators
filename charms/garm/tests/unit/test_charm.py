@@ -39,6 +39,7 @@ from github_reconciler import (
     MANAGED_CREDENTIAL_DESCRIPTION,
     CredentialSpec,
 )
+from scaleset_reconciler import ScalesetProgress
 
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
@@ -144,6 +145,8 @@ def garm_api_fixture() -> typing.Iterator[_GarmApiMocks]:
         patch("charm._apply_garm_template", return_value=_TEMPLATE_ID) as apply_template,
     ):
         auth_client = auth_cls.from_login.return_value
+        # No scaleset is mid-replacement by default, so the charm reports active.
+        scaleset_cls.return_value.reconcile.return_value = []
         calls = MagicMock()
         calls.attach_mock(auth_client.update_controller, "controller")
         calls.attach_mock(github_cls.return_value.reconcile, "github")
@@ -533,6 +536,88 @@ def test_missing_configurator_relation_refreshes_stale_app_status(
 
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
     assert out.app_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+
+
+# --- Scaleset replacement progress --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "progress, expected",
+    [
+        (
+            ScalesetProgress("my-scaleset", "my-scaleset-1a2b3c4d", "my-scaleset-5e6f7a8b", 3),
+            "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (draining 3 runners)",
+        ),
+        (
+            ScalesetProgress("my-scaleset", "my-scaleset-1a2b3c4d", "my-scaleset-5e6f7a8b", 1),
+            "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (draining 1 runner)",
+        ),
+        (
+            ScalesetProgress(
+                "my-scaleset",
+                "my-scaleset-1a2b3c4d",
+                "my-scaleset-5e6f7a8b",
+                0,
+                handed_over=False,
+            ),
+            "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (creating replacement)",
+        ),
+        (
+            ScalesetProgress("my-scaleset", "my-scaleset-1a2b3c4d", "my-scaleset-5e6f7a8b", 0),
+            "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (awaiting deletion)",
+        ),
+    ],
+    ids=["draining", "single-runner", "before-handover", "drained-not-yet-deleted"],
+)
+def test_scaleset_being_replaced_is_reported_in_the_status(
+    ctx: Context, garm_api: _GarmApiMocks, progress: ScalesetProgress, expected: str
+):
+    """
+    arrange: A ready charm whose scaleset reconcile reports a replacement in flight, at each
+        phase it can be in.
+    act: Run update-status.
+    assert: The unit names the scaleset by the name the operator configured and reports the
+        phase, so a long drain can be told apart from a stuck charm — and a replacement that
+        has not been created yet does not read as a finished drain.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = [progress]
+
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    assert out.unit_status == ops.MaintenanceStatus(expected)
+
+
+def test_many_scalesets_being_replaced_are_summarised(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A ready charm replacing four scalesets at once.
+    act: Run update-status.
+    assert: Only the first two are named and the rest are counted, so Juju does not truncate
+        the status into uselessness.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = [
+        ScalesetProgress(f"scaleset-{index}", f"old-{index}", f"new-{index}", index)
+        for index in range(1, 5)
+    ]
+
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    assert out.unit_status == ops.MaintenanceStatus(
+        "Replacing scaleset scaleset-1 -> new-1 (draining 1 runner),"
+        " scaleset-2 -> new-2 (draining 2 runners), +2 more"
+    )
+
+
+def test_status_returns_to_active_once_the_replacement_is_complete(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A ready charm whose scaleset reconcile reports nothing draining.
+    act: Run update-status.
+    assert: The unit is active — the replacement converged without operator intervention.
+    """
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    assert out.unit_status == ops.ActiveStatus()
 
 
 # --- First-run initialisation -------------------------------------------------------------

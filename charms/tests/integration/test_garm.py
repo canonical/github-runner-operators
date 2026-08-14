@@ -6,6 +6,7 @@
 import base64
 import json
 import logging
+import re
 import secrets
 import urllib.request
 
@@ -40,6 +41,11 @@ GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 # uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
 _GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 _SCALESET_TEST_NAME = "test-scaleset"
+# The charm names live scalesets "<configured name>-<label hash>" so a label change
+# can be applied by creating a replacement, so tests match a generation of the
+# configured name rather than the name itself (mirrors target_scaleset_name in the
+# charm's scaleset_reconciler; the hash length is LABEL_HASH_LENGTH).
+_SCALESET_GENERATION_SUFFIX = r"-[0-9a-f]{8}"
 # Credential name the GARM charm derives from the configurator's github-app-id +
 # installation id (12345 / 67890).
 _SYNCED_CREDENTIAL_NAME = "app-12345-67890"
@@ -375,7 +381,13 @@ def test_charm_reconciles_org_and_scaleset(
     )
 
     scaleset = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-    assert scaleset["name"] == _SCALESET_TEST_NAME
+    assert re.fullmatch(
+        rf"{re.escape(_SCALESET_TEST_NAME)}{_SCALESET_GENERATION_SUFFIX}",
+        scaleset["name"],
+    ), (
+        f"Expected a label-hashed generation of {_SCALESET_TEST_NAME!r}, "
+        f"got {scaleset['name']!r}"
+    )
     assert scaleset["max_runners"] == 10
 
     templates = _list_templates(address, token)
@@ -624,9 +636,21 @@ def _list_scalesets(base_url: str, token: str) -> list[dict]:
 
 
 def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
-    """Return the first scaleset with the requested name."""
+    """Return the live scaleset serving a configured name, whatever generation it is on.
+
+    The live name carries a label hash, so an exact match on the configured name
+    would find nothing. A superseded generation lingers, disabled, until it has
+    drained, so only an enabled scaleset counts as the one currently serving.
+    """
+    generation = re.compile(rf"^{re.escape(name)}({_SCALESET_GENERATION_SUFFIX})?$")
     return next(
-        (scaleset for scaleset in scalesets if scaleset.get("name") == name), None
+        (
+            scaleset
+            for scaleset in scalesets
+            if generation.match(scaleset.get("name") or "")
+            and scaleset.get("enabled") is not False
+        ),
+        None,
     )
 
 

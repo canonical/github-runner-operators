@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-08-14
+
+- `garm`: apply scaleset label changes automatically. Labels are immutable once a GitHub scale set exists, so changing them in the `garm-configurator` relation data previously did nothing but log a warning telling the operator to remove and re-add the relation. The charm now applies a label change by creating a replacement scale set and retiring the one it replaces.
+
 ## 2026-07-13
 
 - `garm`: fix the SSH debug (tmate) connection details so the runner actually reads them. The `TMATE_SERVER_*` variables injected into the shared runner template were written to `/home/runner/.env`, but the GitHub Actions runner sources a `.env` file from its install directory (`/home/runner/actions-runner/.env`), so the debug-SSH server host, port, and fingerprints were silently ignored. They are now written to the `.env` file the runner reads, matching the per-scaleset runner options.
