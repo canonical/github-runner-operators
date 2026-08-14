@@ -130,8 +130,8 @@ class FakeGarmClient:
         return [object()] * self._instances.get(scaleset_id, 0)
 
     def update_scaleset(self, scaleset_id, params):
-        # GARM may refuse max_runners=0; the reconciler must fall back to
-        # disabling the scaleset on its own.
+        # Models a GARM that rejects max_runners=0 on update. Today's GARM does not
+        # (see _retire), so this only exercises the reconciler's defensive fallback.
         if self.reject_zero_max_runners and params.max_runners == 0:
             raise GarmApiError("max_runners must be greater than 0")
         self.updated.append((scaleset_id, params))
@@ -829,9 +829,8 @@ def test_delete_custom_template_skips_missing_id_and_api_errors():
     _reconcile(failing_client, [])
 
 
-# Labels are immutable in GitHub, so a label change is applied by creating a
-# replacement scaleset and draining the one it replaces. The tests below cover
-# that changeover; "generation" means one live scaleset of a logical spec.
+# A label change is applied by replacement (docs/adr/003); "generation" below means
+# one live scaleset of a logical spec.
 _LABELS_OLD = ["jammy", "x64"]
 _LABELS_NEW = ["jammy", "arm64"]
 _OLD_NAME = target_scaleset_name("my-scaleset", _LABELS_OLD)
@@ -935,7 +934,8 @@ def test_cutover_disables_and_zeroes_the_old_scaleset():
 
 def test_cutover_falls_back_when_zeroing_max_runners_is_rejected():
     """
-    arrange: Both generations live and GARM refuses max_runners=0.
+    arrange: Both generations live and a hypothetical GARM refuses max_runners=0 on
+        update, which today's GARM accepts.
     act: Reconcile.
     assert: The scaleset is still disabled, so the handover happens even though the
         runner counts could not be zeroed.

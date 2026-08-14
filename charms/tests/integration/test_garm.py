@@ -41,10 +41,8 @@ GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 # uppercase (A), lowercase (dmin + hex), digit (1 + hex), symbols (-, !).
 _GARM_ADMIN_PASSWORD = f"Admin-{secrets.token_hex(8)}-X1!"
 _SCALESET_TEST_NAME = "test-scaleset"
-# The charm names live scalesets "<configured name>-<label hash>" so a label change
-# can be applied by creating a replacement, so tests match a generation of the
-# configured name rather than the name itself (mirrors target_scaleset_name in the
-# charm's scaleset_reconciler; the hash length is LABEL_HASH_LENGTH).
+# Live scalesets are named "<configured name>-<label hash>", so match a generation
+# rather than the configured name (mirrors target_scaleset_name in the charm).
 _SCALESET_GENERATION_SUFFIX = r"-[0-9a-f]{8}"
 # Credential name the GARM charm derives from the configurator's github-app-id +
 # installation id (12345 / 67890).

@@ -30,23 +30,14 @@ SYSTEM_TEMPLATE_NAME = "github_linux"
 # operator-supplied script runs.
 APROXY_SCRIPT_NAME = "00-aproxy"
 
-# Labels are immutable once a GitHub scale set exists, so a label change can only
-# be applied by creating a replacement scaleset. The live scaleset name therefore
-# carries a hash of its labels: the name a spec *should* have is a pure function of
-# the spec, which lets every reconcile re-derive which live scaleset is current and
-# which are replaced predecessors, with no charm-side state to persist.
 LABEL_HASH_LENGTH = 8
 
 # GitHub rejects over-long scale set names; keep the generated name inside a
 # conservative bound by truncating the operator-supplied part, never the hash.
 MAX_SCALESET_NAME_LENGTH = 64
 
-# GitHub caps a workflow job at 6 hours, so a runner still attached to a retired
-# scaleset well past that is stuck (a provider-side failure GARM never reaped),
-# not busy. Beyond this the charm stops trusting its own runner count and simply
-# attempts the delete on every reconcile: GARM refuses with a 400 while runners
-# are genuinely active, so this can never cut a job short — it only stops a
-# permanently faulted instance from pinning a dead scaleset on GitHub forever.
+# Past GitHub's 6h job cap a remaining runner is stuck, not busy: stop gating on the
+# count and retry the delete, which GARM rejects while runners are active.
 DRAIN_DEADLINE = datetime.timedelta(hours=7)
 
 
@@ -58,9 +49,6 @@ class ScalesetProgress:
     retiring_name: str
     replacement_name: str
     remaining_runners: int
-    # False until the replacement is up and the labels have been handed over, so a
-    # caller can tell "still creating the replacement" from "draining": the runner
-    # count is only meaningful once the handover has happened.
     handed_over: bool = True
 
 
@@ -236,10 +224,8 @@ class ScalesetReconciler:
 
         templates = self._load_templates(desired, observed)
         families = self._resolve_families(desired, observed)
-        # Claimed names cover in-flight replacements and draining predecessors, so
-        # the orphan pass below can't delete a scaleset mid-changeover. It is built
-        # from the desired specs alone, before the provider/entity gates, so a
-        # temporarily ungated spec doesn't hand its scalesets to the orphan pass.
+        # Covers in-flight replacements and draining predecessors, so the orphan pass
+        # can't delete one mid-changeover. Built before the provider/entity gates.
         claimed: set[str] = {name for family in families.values() for name in family}
 
         progress: list[ScalesetProgress] = []
@@ -254,9 +240,6 @@ class ScalesetReconciler:
             except GarmConnectionError:
                 raise
             except GarmApiError as exc:
-                # Containing the failure here keeps one bad spec — a label set GitHub
-                # rejects, a quota — from wedging every other scaleset and freezing
-                # any changeover already in flight.
                 logger.warning("Failed to reconcile scaleset %s: %s", spec.name, exc)
                 failure = failure or exc
 
@@ -435,9 +418,8 @@ class ScalesetReconciler:
         Returns:
             One entry per replaced generation not yet gone.
         """
-        # Wait for the replacement to actually exist before closing the old
-        # session: disabling first — or in the same pass the create is issued —
-        # would leave the labels unserved if the charm died in between.
+        # Close the old session only once the replacement exists: disabling any
+        # earlier leaves the labels unserved if the charm dies in between.
         replacement_live = active_name in observed and observed[active_name].enabled is True
 
         progress: list[ScalesetProgress] = []
@@ -478,9 +460,10 @@ class ScalesetReconciler:
     def _retire(self, scaleset: ScaleSet) -> None:
         """Disable a replaced scaleset and stop it launching runners.
 
-        Disabling closes the scaleset's listener session, which is what hands the
-        shared labels to its replacement. Zeroing the runner counts reaps idle
-        runners; runners mid-job are not killed and are reaped when they finish.
+        Disabling closes its listener session, handing the shared labels to the
+        replacement. GARM's handleScaleDown then reaps idle runners but skips
+        RunnerActive, so a runner mid-job finishes instead of being killed. The
+        second call is defensive: GARM rejects max_runners=0 on create only.
 
         Args:
             scaleset: The replaced scaleset.
@@ -785,12 +768,6 @@ class ScalesetReconciler:
     def _maybe_update(self, observed: ScaleSet, spec: ScalesetSpec, template_id: int) -> None:
         observed_labels = _observed_labels(observed)
         if observed_labels != sorted(spec.labels):
-            # A label change is normally applied by creating a replacement scaleset,
-            # so the scaleset resolved as active already carries the desired labels.
-            # Reaching here means its name says otherwise — GARM reporting tags it
-            # normalised or added, a hash collision, or a hand-edited scaleset. Report
-            # it, but still apply the update: refusing to would freeze every unrelated
-            # field (image, flavor, runner counts) for as long as the mismatch lasts.
             logger.warning(
                 "Scaleset %s carries labels %s but %s were expected; updating its other"
                 " fields anyway. Labels are immutable in GitHub — delete this scaleset"
