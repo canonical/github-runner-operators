@@ -787,7 +787,7 @@ class ScalesetReconciler:
 
         # UpdateScaleSetParams omits None fields (exclude_none), so None can only
         # leave extra_specs untouched, never clear them. Send an explicit empty
-        # dict when the desired specs are empty but the scaleset still carries
+        # dict when the desired extra specs are empty but the scaleset still carries
         # some (e.g. a proxy was unset) — otherwise a stale aproxy script would
         # persist and _needs_update would loop forever trying to converge.
         desired_extra = _effective_extra_specs(spec)
