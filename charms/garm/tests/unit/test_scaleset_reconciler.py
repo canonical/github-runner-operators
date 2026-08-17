@@ -1035,7 +1035,7 @@ def test_every_generation_is_deleted_when_the_spec_is_removed():
     assert sorted(client.deleted) == [1, 2]
 
 
-def test_label_revert_readopts_the_draining_scaleset():
+def test_label_revert_re_adopts_the_draining_scaleset():
     """
     arrange: The old generation is disabled and draining, the new one is live.
     act: Reconcile a spec whose labels are reverted to the old ones.
