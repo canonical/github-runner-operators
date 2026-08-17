@@ -231,3 +231,59 @@ rockcraft.skopeo copy \
   oci-archive:webhook-gateway_0.1_amd64.rock \
   docker://localhost:32000/webhook-gateway:0.1
 ```
+
+### GARM E2E
+
+The GARM end-to-end test validates the full chain: GARM bootstraps a provider,
+authenticates to OpenStack, spawns a VM, the runner registers with GitHub, and
+a dispatched job completes successfully.
+
+#### Required secrets and variables
+
+These must be set as repository secrets or variables:
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `VAULT_ADDR` | secret | Vault server address for tenant credentials |
+| `VAULT_APPROLE_ROLE_ID` | secret | Vault AppRole role ID |
+| `VAULT_APPROLE_SECRET_ID` | secret | Vault AppRole secret ID |
+| `OS_AUTH_URL` | secret | Keystone auth endpoint URL (e.g. `https://keystone.example.com:5000/v3`) |
+| `OS_PROJECT_NAME` | secret | OpenStack project/tenant name |
+| `OS_USER_DOMAIN_NAME` | secret | OpenStack user domain name (e.g. `Default`) |
+| `OS_PROJECT_DOMAIN_NAME` | secret | OpenStack project domain name (e.g. `Default`) |
+| `OS_REGION_NAME` | secret | OpenStack region name (e.g. `RegionOne`) |
+| `OS_NETWORK` | secret | OpenStack network name for runner VMs |
+| `TEST_GITHUB_APP_ID` | secret | GitHub App ID with org-level runner scaleset management |
+| `TEST_GITHUB_APP_INSTALLATION_ID` | secret | GitHub App installation ID |
+| `TEST_GITHUB_APP_PRIVATE_KEY` | secret | GitHub App private key (base64-encoded) |
+| `TEST_GITHUB_PATH` | secret | `org/repo` path for the test repository |
+| `E2E_RUNNER_IMAGE_NAME` | variable | Stable runner image name in the tenant |
+| `E2E_OPENSTACK_FLAVOR` | variable | OpenStack flavor for runner VMs |
+| `E2E_RUNNER_HTTP_PROXY` | variable | Runner HTTP proxy URL (aproxy) |
+
+#### Vault KV path
+
+The `garm_e2e.yaml` workflow fetches tenant authentication credentials (`OS_USERNAME` and `OS_PASSWORD`) from Vault using the AppRole method. The expected KV v2 secret path is `kv/data/garm-e2e/prodstack`, containing:
+
+| Field | Description |
+| --- | --- |
+| `OS_USERNAME` | OpenStack username |
+| `OS_PASSWORD` | OpenStack password |
+
+#### Dispatch a run
+
+Both workflow files must exist on the **default branch** before `workflow_dispatch`
+works — the REST dispatch endpoint 404s otherwise.
+
+1. Land the skeleton PR to register the workflows on `main`.
+2. Dispatch from `main` with `ref:` set to your feature branch:
+   ```shell
+   gh workflow run garm_e2e.yaml --ref <feature-branch>
+   ```
+
+#### Credential hygiene
+
+- Credentials are fetched in a workflow step and `::add-mask::`ed before any subsequent step runs.
+- They reach later steps via `$GITHUB_ENV` — never via command line arguments.
+- Diagnostic output in tests is redacted before logging (see `_redact_pebble_output` in
+  `charms/tests/integration/conftest.py`).

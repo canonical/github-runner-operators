@@ -1,0 +1,126 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# GARM end-to-end test workflow (ISD-285).
+#
+# workflow_dispatch: Manual trigger on feature branches (after this workflow file
+#   has landed on the default branch).
+#
+# This workflow is NOT a merge gate.
+
+name: GARM E2E
+
+"on":
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: GARM E2E test
+    runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up tmate session (self-hosted)
+        if: runner.debug == 1 && runner.environment == 'self-hosted'
+        uses: canonical/action-tmate@main
+        with:
+          detached: true
+          timeout-minutes: 60
+
+      - name: Fetch tenant credentials from Vault and GitHub secrets
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_APPROLE_ROLE_ID: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
+          VAULT_APPROLE_SECRET_ID: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_NETWORK: ${{ secrets.OS_NETWORK }}
+        run: |
+          set -euo pipefail
+
+          # Fail fast with an actionable message if any prerequisite Vault secret is missing
+          if [ -z "${VAULT_ADDR:-}" ]; then
+            echo "::error::Missing required secret: VAULT_ADDR. Please configure it in repository secrets."
+            exit 1
+          fi
+          if [ -z "${VAULT_APPROLE_ROLE_ID:-}" ]; then
+            echo "::error::Missing required secret: VAULT_APPROLE_ROLE_ID. Please configure it in repository secrets."
+            exit 1
+          fi
+          if [ -z "${VAULT_APPROLE_SECRET_ID:-}" ]; then
+            echo "::error::Missing required secret: VAULT_APPROLE_SECRET_ID. Please configure it in repository secrets."
+            exit 1
+          fi
+
+          # Fail fast if any prerequisite GitHub OpenStack secret is missing
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK; do
+            VALUE="${!KEY:-}"
+            if [ -z "$VALUE" ]; then
+              echo "::error::Missing required secret: $KEY. Please configure it in repository secrets."
+              exit 1
+            fi
+            echo "::add-mask::$VALUE"
+            echo "${KEY}=${VALUE}" >> "$GITHUB_ENV"
+          done
+
+          echo "Logging in to Vault via AppRole..."
+          LOGIN_PAYLOAD=$(jq -n \
+            --arg role_id "$VAULT_APPROLE_ROLE_ID" \
+            --arg secret_id "$VAULT_APPROLE_SECRET_ID" \
+            '{"role_id": $role_id, "secret_id": $secret_id}')
+
+          LOGIN_RESPONSE=$(curl -sS --fail -X POST \
+            -H "Content-Type: application/json" \
+            -d "$LOGIN_PAYLOAD" \
+            "${VAULT_ADDR}/v1/auth/approle/login")
+
+          VAULT_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.auth.client_token')
+          if [ -z "$VAULT_TOKEN" ] || [ "$VAULT_TOKEN" = "null" ]; then
+            echo "::error::Failed to obtain Vault client token from AppRole login."
+            exit 1
+          fi
+          echo "::add-mask::$VAULT_TOKEN"
+
+          echo "Reading OS_USERNAME and OS_PASSWORD from Vault KV..."
+          SECRET_RESPONSE=$(curl -sS --fail -X GET \
+            -H "X-Vault-Token: $VAULT_TOKEN" \
+            "${VAULT_ADDR}/v1/kv/data/garm-e2e/prodstack")
+
+          SECRET_DATA=$(echo "$SECRET_RESPONSE" | jq -r '.data.data')
+          if [ -z "$SECRET_DATA" ] || [ "$SECRET_DATA" = "null" ]; then
+            echo "::error::No secret data found at kv/data/garm-e2e/prodstack in Vault."
+            exit 1
+          fi
+
+          # Extract OS_USERNAME and OS_PASSWORD from Vault, mask immediately, export to GITHUB_ENV
+          for KEY in OS_USERNAME OS_PASSWORD; do
+            VALUE=$(echo "$SECRET_DATA" | jq -r --arg k "$KEY" '.[$k] // empty')
+            if [ -z "$VALUE" ]; then
+              echo "::error::Required field '$KEY' missing from Vault secret at kv/data/garm-e2e/prodstack."
+              exit 1
+            fi
+            echo "::add-mask::$VALUE"
+            echo "${KEY}=${VALUE}" >> "$GITHUB_ENV"
+          done
+
+          echo "Successfully fetched and masked OpenStack credentials."
+
+      - name: Assert tenant connectivity and credentials
+        run: |
+          set -euo pipefail
+
+          echo "Verifying OpenStack tenant connectivity..."
+          pip install --quiet python-openstackclient
+
+          # Issue token and verify validity without printing secret material
+          TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
+          if [ -z "$TOKEN_EXPIRES" ]; then
+            echo "::error::Failed to issue OpenStack token: response was empty."
+            exit 1
+          fi
+
+          echo "OpenStack token issued successfully (expires: $TOKEN_EXPIRES). Tenant connectivity confirmed."
