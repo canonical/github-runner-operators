@@ -1,0 +1,163 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# GARM end-to-end test workflow.
+#
+# Manual trigger only, and deliberately not a merge gate. Dispatch it with
+# --ref <branch> to run a feature branch's version.
+
+name: GARM E2E
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: GARM E2E test
+    runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up tmate session (self-hosted)
+        if: runner.debug == 1 && runner.environment == 'self-hosted'
+        uses: canonical/action-tmate@main
+        with:
+          detached: true
+          timeout-minutes: 60
+
+      # These are all secrets, so the runner masks them in the log without an
+      # explicit ::add-mask::. The E2E_GITHUB_APP_* trio is a GitHub App of its
+      # own, separate from the TEST_GITHUB_APP_* one the integration suite uses:
+      # this one has to manage runner scale sets, which that one must not.
+      - name: Load tenant and GitHub App configuration
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_NETWORK: ${{ secrets.OS_NETWORK }}
+          E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
+          E2E_GITHUB_APP_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_APP_INSTALLATION_ID }}
+          E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.E2E_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
+                     E2E_GITHUB_APP_PRIVATE_KEY; do
+            if [ -z "${!KEY:-}" ]; then
+              echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
+              exit 1
+            fi
+          done
+
+          # Everything but the key is single-line already.
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID; do
+            echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+          done
+
+          # The key travels through two channels that take one KEY=value per line —
+          # this file, and later opcli's pytest-environment-template, which rejects a
+          # line without an '='. Normalising here rather than requiring a pre-encoded
+          # secret keeps the encoding out of everyone's setup instructions. An
+          # already-encoded value passes through, so both forms work.
+          case "$E2E_GITHUB_APP_PRIVATE_KEY" in
+            *-----BEGIN*)
+              KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | base64 -w0)
+              ;;
+            *)
+              KEY_B64=$E2E_GITHUB_APP_PRIVATE_KEY
+              ;;
+          esac
+          # The encoded form is a different string from the secret, so the runner does
+          # not mask it on its own.
+          echo "::add-mask::$KEY_B64"
+          echo "E2E_GITHUB_APP_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
+
+          # openstackclient needs this stated explicitly for a v3 auth URL.
+          echo "OS_IDENTITY_API_VERSION=3" >> "$GITHUB_ENV"
+
+      - name: Fetch tenant credentials from Vault
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_APPROLE_ROLE_ID: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
+          VAULT_APPROLE_SECRET_ID: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
+          VAULT_KV_PATH: ${{ secrets.E2E_VAULT_KV_PATH || 'kv/data/garm-e2e/prodstack' }}
+        run: |
+          set -euo pipefail
+
+          for KEY in VAULT_ADDR VAULT_APPROLE_ROLE_ID VAULT_APPROLE_SECRET_ID; do
+            if [ -z "${!KEY:-}" ]; then
+              echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
+              exit 1
+            fi
+          done
+
+          # The response body holds the tenant credentials, so remove it however this
+          # step exits — set -e would otherwise skip the cleanup on every failure path,
+          # on a runner whose disk outlives the job.
+          RESPONSE=$(mktemp)
+          trap 'rm -f "$RESPONSE"' EXIT
+
+          # curl --fail suppresses the response body, which would reduce a 403 to a
+          # bare exit code on the step whose job is to say what is misconfigured.
+          vault_call() {
+            curl -sS -o "$RESPONSE" -w '%{http_code}' "$@"
+          }
+
+          STATUS=$(vault_call -X POST -H "Content-Type: application/json" \
+            -d "$(jq -n --arg r "$VAULT_APPROLE_ROLE_ID" --arg s "$VAULT_APPROLE_SECRET_ID" \
+                  '{role_id: $r, secret_id: $s}')" \
+            "${VAULT_ADDR}/v1/auth/approle/login")
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Vault AppRole login failed with HTTP $STATUS: $(jq -rc '.errors // empty' "$RESPONSE")"
+            exit 1
+          fi
+
+          VAULT_TOKEN=$(jq -r '.auth.client_token' "$RESPONSE")
+          echo "::add-mask::$VAULT_TOKEN"
+          if [ -z "$VAULT_TOKEN" ] || [ "$VAULT_TOKEN" = "null" ]; then
+            echo "::error::Vault AppRole login returned no client token."
+            exit 1
+          fi
+
+          STATUS=$(vault_call -X GET -H "X-Vault-Token: $VAULT_TOKEN" \
+            "${VAULT_ADDR}/v1/${VAULT_KV_PATH}")
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Vault read of ${VAULT_KV_PATH} failed with HTTP $STATUS: $(jq -rc '.errors // empty' "$RESPONSE")"
+            exit 1
+          fi
+
+          for KEY in OS_USERNAME OS_PASSWORD; do
+            VALUE=$(jq -r --arg k "$KEY" '.data.data[$k] // empty' "$RESPONSE")
+            echo "::add-mask::$VALUE"
+            if [ -z "$VALUE" ]; then
+              echo "::error::Field '$KEY' missing from the Vault secret at ${VAULT_KV_PATH}."
+              exit 1
+            fi
+            echo "${KEY}=${VALUE}" >> "$GITHUB_ENV"
+          done
+
+          echo "Tenant credentials fetched and masked."
+
+      - name: Assert the credentials authenticate against the tenant
+        run: |
+          set -euo pipefail
+
+          # Ubuntu 24.04 enforces PEP 668, so a bare pip install into the system
+          # interpreter fails with externally-managed-environment.
+          pipx install python-openstackclient
+
+          TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
+          echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
+
+      - name: Run the E2E suite
+        run: |
+          set -euo pipefail
+          pipx install tox
+          tox -e garm-e2e

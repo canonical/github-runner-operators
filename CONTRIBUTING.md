@@ -231,3 +231,75 @@ rockcraft.skopeo copy \
   oci-archive:webhook-gateway_0.1_amd64.rock \
   docker://localhost:32000/webhook-gateway:0.1
 ```
+
+### GARM E2E
+
+The GARM end-to-end test (`charms/tests/e2e/`) exercises the full chain on ProdStack:
+the charm starts, the configurator delivers config, the GARM API becomes reachable, the
+provider authenticates to OpenStack, a VM is created from the runner image, the runner
+registers with GitHub, and a dispatched job runs and exits clean.
+
+> **TODO:** only the workflows and the credential path exist so far. The test currently
+> asserts nothing beyond the credentials reaching pytest; the deployment and the
+> end-to-end assertions land in a follow-up.
+
+It is triggered manually and is **not** a merge gate:
+
+```shell
+gh workflow run garm_e2e.yaml --ref <feature-branch>
+```
+
+`--ref` selects which branch's version of both the workflow and the test code runs, so
+changes to the end-to-end test can be exercised without merging them first.
+
+#### Required secrets and variables
+
+Infrastructure details are secrets, not variables — endpoints, project and network names
+included. The runner masks secret values in the log automatically, so the workflow does
+not register masks for these itself.
+
+| Name | Description |
+| --- | --- |
+| `VAULT_ADDR` | Vault server address |
+| `VAULT_APPROLE_ROLE_ID` | Vault AppRole role ID |
+| `VAULT_APPROLE_SECRET_ID` | Vault AppRole secret ID |
+| `OS_AUTH_URL` | Keystone endpoint, e.g. `https://keystone.example.com:5000/v3` |
+| `OS_PROJECT_NAME` | OpenStack project/tenant name |
+| `OS_USER_DOMAIN_NAME` | OpenStack user domain name |
+| `OS_PROJECT_DOMAIN_NAME` | OpenStack project domain name |
+| `OS_REGION_NAME` | OpenStack region name |
+| `OS_NETWORK` | OpenStack network for runner VMs |
+| `E2E_GITHUB_APP_ID` | GitHub App ID |
+| `E2E_GITHUB_APP_INSTALLATION_ID` | Installation ID of that App on this repository |
+| `E2E_GITHUB_APP_PRIVATE_KEY` | That App's private key (PEM), base64-encoded |
+| `E2E_VAULT_KV_PATH` | Optional. Defaults to `kv/data/garm-e2e/prodstack` |
+
+The OpenStack username and password are **not** repository secrets. They are read at run
+time from the Vault KV v2 secret above, which must hold `OS_USERNAME` and `OS_PASSWORD`.
+
+The `E2E_GITHUB_APP_*` trio is a GitHub App of its own, distinct from the
+`TEST_GITHUB_APP_*` one the integration suite uses. The end-to-end test registers and
+tears down a runner scale set on this repository, so its App needs `Administration:
+read & write` here, which the integration App has no reason to hold.
+
+Paste the private key into `E2E_GITHUB_APP_PRIVATE_KEY` exactly as GitHub issues it —
+the PEM, newlines and all. The workflow reduces it to a single line before it enters the
+two `KEY=value` channels that carry it to pytest, neither of which can hold a multi-line
+value. A key that is already base64-encoded is accepted unchanged, so
+`TEST_GITHUB_APP_PRIVATE_KEY`'s existing encoded form stays valid.
+
+#### Credential hygiene
+
+The test authenticates against a production tenant, so the run logs are part of the
+contract:
+
+- Values read from Vault are `::add-mask::`ed in the same step that reads them, before any
+  later step runs. Masking registered with the runner scrubs every subsequent log line,
+  including output from code we do not control; a secret read inside the test process gets
+  none of that. Repository secrets are masked by the runner already.
+- They reach later steps through `$GITHUB_ENV` and pytest through tox's `pass_env` — never
+  through command line arguments, which would expose them in `ps` and in pytest's header.
+- Steps handling credentials use `set -euo pipefail` and never `set -x`.
+- Assertions report the *name* of a missing setting, never its value, and use
+  `pytest.fail` rather than `assert` so that assertion rewriting cannot introspect
+  `os.environ` into the failure output.
