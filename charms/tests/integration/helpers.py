@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 import base64
+import datetime
 import json
 import os
 import time
@@ -100,3 +101,72 @@ def trigger_failed_workflow_job_delivery(
     repo = github_client.get_repo(repo_path)
     workflow = repo.get_workflow(workflow_path)
     workflow.create_dispatch(ref=repo.default_branch)
+
+
+def dispatch_workflow(
+    github_client: Github,
+    repo_path: str,
+    workflow_path: str,
+    ref: str,
+    inputs: dict[str, Any],
+) -> int:
+    """Dispatch a workflow run and return its run ID.
+
+    Args:
+        github_client: Authenticated PyGithub instance.
+        repo_path: ``org/repo`` string.
+        workflow_path: Path in the repository to the workflow file.
+        ref: Git ref (branch or tag) to run the workflow on.
+        inputs: Workflow dispatch inputs.
+
+    Returns:
+        The workflow run ID.
+    """
+    from github import GithubException
+
+    repo = github_client.get_repo(repo_path)
+    workflow = repo.get_workflow(workflow_path)
+    try:
+        workflow.create_dispatch(ref=ref, inputs=inputs)
+    except GithubException as e:
+        pytest.fail(f"dispatch_workflow failed: {e.status} {e.data}")
+    # After dispatch, find the run. It may take a moment to appear.
+    for _ in range(30):
+        time.sleep(2)
+        runs = workflow.get_runs(branch=ref, event="workflow_dispatch")
+        if runs.totalCount > 0:
+            return runs[0].id
+    pytest.fail(
+        f"Workflow {workflow_path} did not produce a run on {ref} after dispatch"
+    )
+
+
+def wait_for_completion(
+    github_client: Github,
+    repo_path: str,
+    run_id: int,
+    poll_interval: int = 15,
+    timeout: int = 600,
+) -> str:
+    """Poll a workflow run until it completes, returning the conclusion.
+
+    Args:
+        github_client: Authenticated PyGithub instance.
+        repo_path: ``org/repo`` string.
+        run_id: Workflow run ID to monitor.
+        poll_interval: Seconds between polls.
+        timeout: Max seconds to wait.
+
+    Returns:
+        The run conclusion string (e.g. ``"success"``, ``"failure"``).
+    """
+    repo = github_client.get_repo(repo_path)
+    deadline = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        seconds=timeout
+    )
+    while datetime.datetime.now(datetime.timezone.utc) < deadline:
+        run = repo.get_workflow_run(run_id)
+        if run.status == "completed":
+            return run.conclusion
+        time.sleep(poll_interval)
+    pytest.fail(f"Workflow run {run_id} did not complete within {timeout}s")

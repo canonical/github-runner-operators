@@ -201,6 +201,9 @@ The respective charm code is in the `charms/charm-name` directory.
 
 Integration tests for the charm are in the `charms/tests/integration` directory.
 
+The GARM end-to-end test lives in `charms/tests/e2e` and is described in the
+[GARM E2E](#garm-e2e) section below.
+
 Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)
 for a step-by-step guide to develop a Kubernetes charm using Go.
 
@@ -231,3 +234,63 @@ rockcraft.skopeo copy \
   oci-archive:webhook-gateway_0.1_amd64.rock \
   docker://localhost:32000/webhook-gateway:0.1
 ```
+
+### GARM E2E
+
+The GARM end-to-end test (`charms/tests/e2e/`) validates the full chain: GARM bootstraps
+a provider, authenticates to OpenStack, spawns a VM, the runner registers with GitHub,
+and a dispatched job completes successfully.
+
+#### Required secrets
+
+These must be set as repository secrets or variables:
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `TEST_GITHUB_APP_ID` | secret | GitHub App ID with org-level runner scaleset management |
+| `TEST_GITHUB_APP_INSTALLATION_ID` | secret | GitHub App installation ID |
+| `TEST_GITHUB_APP_PRIVATE_KEY` | secret | GitHub App private key (base64-encoded) |
+| `TEST_GITHUB_PATH` | secret | `org/repo` path for the test repository |
+| `VAULT_ADDR` | secret | Vault server address for tenant credentials |
+| `VAULT_APPROLE_ROLE_ID` | secret | Vault AppRole role ID |
+| `VAULT_APPROLE_SECRET_ID` | secret | Vault AppRole secret ID |
+| `E2E_RUNNER_IMAGE_NAME` | variable | Stable runner image name in the tenant |
+| `E2E_OPENSTACK_NETWORK` | variable | OpenStack network for runner VMs |
+| `E2E_OPENSTACK_FLAVOR` | variable | OpenStack flavor for runner VMs |
+| `E2E_RUNNER_HTTP_PROXY` | variable | Runner HTTP proxy URL (aproxy) |
+
+#### Dispatch a run
+
+Both workflow files must exist on the **default branch** before `workflow_dispatch`
+works — the REST dispatch endpoint 404s otherwise.
+
+1. Land the skeleton PR to register the workflows on `main`.
+2. Dispatch from `main` with `ref:` set to your feature branch:
+   ```shell
+   gh workflow run garm_e2e.yaml --ref <feature-branch>
+   ```
+3. The workflow builds artifacts on `ubuntu-latest` and runs the E2E suite on the
+   private-endpoint runner (collect-only in the skeleton; full test after wiring).
+
+#### Vault KV path
+
+The `garm_e2e.yaml` workflow fetches tenant credentials from Vault using the AppRole
+method. The expected KV v2 secret path is `kv/data/garm-e2e/prodstack`, containing:
+
+```yaml
+OS_AUTH_URL: <value>
+OS_USERNAME: <value>
+OS_PASSWORD: <value>
+OS_PROJECT_NAME: <value>
+OS_USER_DOMAIN_NAME: <value>
+OS_PROJECT_DOMAIN_NAME: <value>
+OS_REGION_NAME: <value>
+OS_NETWORK: <value>
+```
+
+#### Credential hygiene
+
+- Credentials are fetched in a workflow step and `::add-mask::`ed before pytest sees them.
+- They reach pytest via environment variables only — never via CLI options.
+- Diagnostic output is redacted before logging (see `_redact_pebble_output` in
+  `charms/tests/integration/conftest.py`).

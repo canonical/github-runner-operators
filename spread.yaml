@@ -11,6 +11,14 @@ backends:
           cpu: 4
           memory: 8
           disk: 20
+  e2e-test:
+    type: integration-test
+    systems:
+      - ubuntu-24.04-e2e:
+          runner: [self-hosted-linux-amd64-noble-private-endpoint-medium]
+          cpu: 4
+          memory: 8
+          disk: 40
 environment:
   CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
   OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'
@@ -36,3 +44,26 @@ integration-suites:
       TEST_GITHUB_APP_INSTALLATION_ID={{ env.get("TEST_GITHUB_APP_INSTALLATION_ID", "") }}
       TEST_GITHUB_APP_PRIVATE_KEY={{ env.get("TEST_GITHUB_APP_PRIVATE_KEY", "") }}
       TEST_GITHUB_PATH={{ env.get("TEST_GITHUB_PATH", "") }}
+  charms/tests/e2e/:
+    summary: GARM end-to-end test on ProdStack
+    working-dir: ./
+    backends:
+    - e2e-test
+    environment:
+      TOX_ENV: garm-e2e
+    pytest-environment-template: |
+      TEST_GITHUB_APP_ID={{ env.get("TEST_GITHUB_APP_ID", "") }}
+      TEST_GITHUB_APP_INSTALLATION_ID={{ env.get("TEST_GITHUB_APP_INSTALLATION_ID", "") }}
+      TEST_GITHUB_APP_PRIVATE_KEY={{ env.get("TEST_GITHUB_APP_PRIVATE_KEY", "") }}
+      TEST_GITHUB_PATH={{ env.get("TEST_GITHUB_PATH", "") }}
+      OS_AUTH_URL={{ env.get("OS_AUTH_URL", "") }}
+      OS_USERNAME={{ env.get("OS_USERNAME", "") }}
+      OS_PASSWORD={{ env.get("OS_PASSWORD", "") }}
+      OS_PROJECT_NAME={{ env.get("OS_PROJECT_NAME", "") }}
+      OS_USER_DOMAIN_NAME={{ env.get("OS_USER_DOMAIN_NAME", "") }}
+      OS_PROJECT_DOMAIN_NAME={{ env.get("OS_PROJECT_DOMAIN_NAME", "") }}
+      OS_REGION_NAME={{ env.get("OS_REGION_NAME", "") }}
+      OS_NETWORK={{ env.get("OS_NETWORK", "") }}
+      E2E_RUNNER_IMAGE_NAME={{ env.get("E2E_RUNNER_IMAGE_NAME", "") }}
+      E2E_RUNNER_HTTP_PROXY={{ env.get("E2E_RUNNER_HTTP_PROXY", "") }}
+      E2E_OPENSTACK_FLAVOR={{ env.get("E2E_OPENSTACK_FLAVOR", "") }}

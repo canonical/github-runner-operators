@@ -1,0 +1,59 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# GARM end-to-end test workflow.
+#
+# workflow_dispatch: Manual trigger on feature branches (after both workflow files
+#   have landed on the default branch).
+#
+# This workflow is NOT a merge gate. It is intentionally excluded from PR
+# required status checks via spread-jobs-include in charms_integration.yaml.
+#
+# The `workflow_call` trigger will be added by Story 2 (edge→candidate promote).
+
+name: GARM E2E
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build artifacts
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v0.0.1-alpha.10
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
+  e2e:
+    name: GARM E2E test
+    needs:
+      - build
+    runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
+    timeout-minutes: 120
+    env:
+      # Forward-looking: GitHub App credentials are needed by the follow-up PR
+      # that wires the full job body (Vault creds, spread run, cleanup).  The
+      # skeleton only runs --collect-only which doesn't resolve fixtures, so
+      # these are unused here but harmless.
+      TEST_GITHUB_APP_ID: ${{ secrets.TEST_GITHUB_APP_ID }}
+      TEST_GITHUB_APP_INSTALLATION_ID: ${{ secrets.TEST_GITHUB_APP_INSTALLATION_ID }}
+      TEST_GITHUB_APP_PRIVATE_KEY: ${{ secrets.TEST_GITHUB_APP_PRIVATE_KEY }}
+      TEST_GITHUB_PATH: ${{ secrets.TEST_GITHUB_PATH }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tox
+        run: pip install tox
+
+      - name: Collect-only (skeleton — exercises fixture wiring)
+        run: |
+          tox -e garm-e2e -- --collect-only -v
+
+      # Post-skeleton — the second PR replaces the collect-only step above with:
+      #
+      # - Vault AppRole login → tenant creds → ::add-mask:: → $GITHUB_ENV
+      # - Write concierge-e2e.yaml with metallb:$HOST_IP-$HOST_IP
+      # - opcli spread run -- e2e-test-ci:... (ADDRESS localhost)
+      # - always(): dump diagnostics (redacted), delete leaked servers

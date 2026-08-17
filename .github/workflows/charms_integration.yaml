@@ -16,6 +16,7 @@ jobs:
       actions: read
     with:
       working-directory: .
+      spread-jobs-include: 'integration-test-ci:*'
       test-secret-1-name: TEST_GITHUB_APP_ID
       test-secret-2-name: TEST_GITHUB_APP_INSTALLATION_ID
       test-secret-3-name: TEST_GITHUB_APP_PRIVATE_KEY
