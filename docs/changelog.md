@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-08-14
 
-- `garm`: apply scaleset label changes automatically. Labels are immutable once a GitHub scale set exists, so changing them in the `garm-configurator` relation data previously did nothing but log a warning telling the operator to remove and re-add the relation. The charm now applies a label change by creating a replacement scale set and retiring the one it replaces.
+- `garm`: apply scaleset label changes automatically. Labels are immutable once a GitHub scale set exists, so changing them in the `garm-configurator` relation data previously did nothing but log a warning telling the operator to remove and re-add the relation. The charm now applies a label change by creating a replacement scale set and retiring the one it replaces. Both generations run concurrently until the retired one has drained, so the idle runner count doubles for the duration; size the OpenStack quota accordingly. The unit stays active throughout and reports the changeover phase in its status.
 
 ## 2026-07-13
 

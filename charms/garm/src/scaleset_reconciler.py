@@ -226,7 +226,9 @@ class ScalesetReconciler:
         families = self._resolve_families(desired, observed)
         # Covers in-flight replacements and draining predecessors, so the orphan pass
         # can't delete one mid-changeover. Built before the provider/entity gates.
-        claimed: set[str] = {name for family in families.values() for name in family}
+        claimed: set[str] = set()
+        for family in families.values():
+            claimed.update(family)
 
         progress: list[ScalesetProgress] = []
         failure: GarmApiError | None = None
@@ -354,7 +356,10 @@ class ScalesetReconciler:
         try:
             create_params = self._to_create_params(spec, active_name)
         except Exception as exc:
-            logger.warning("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
+            # Error, not warning: unlike the provider/entity gates below this does not
+            # resolve on its own — the spec is malformed and will fail every pass until
+            # the operator changes it.
+            logger.error("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
             return []
 
         if spec.provider_name not in providers:
@@ -432,7 +437,9 @@ class ScalesetReconciler:
                     ScalesetProgress(spec.name, name, active_name, 0, handed_over=False)
                 )
                 continue
-            if old.enabled is not False:
+            # Truthy, not `is not False`: GARM tags Enabled `omitempty`, so a disabled
+            # scaleset comes back with no `enabled` key at all and the client reads None.
+            if old.enabled:
                 self._retire(old)
                 progress.append(
                     ScalesetProgress(spec.name, name, active_name, self._remaining_runners(old))
@@ -467,6 +474,9 @@ class ScalesetReconciler:
 
         Args:
             scaleset: The replaced scaleset.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners``.
         """
         if scaleset.id is None:
             return
@@ -477,6 +487,8 @@ class ScalesetReconciler:
                 UpdateScaleSetParams(enabled=False, min_idle_runners=0, max_runners=0),
             )
             return
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning(
                 "Could not zero runner counts on scaleset %s; disabling only: %s",
@@ -487,6 +499,8 @@ class ScalesetReconciler:
             self._client.update_scaleset(
                 scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
             )
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning(
                 "Could not disable scaleset %s (will retry on next reconcile): %s",
@@ -503,11 +517,18 @@ class ScalesetReconciler:
         Returns:
             The instance count, or 1 when it cannot be read — an unknown count must
             never be mistaken for a drained scaleset and delete live runners.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable. Contained failures are
+                per-scaleset; an outage is not, and must reach the charm's status
+                rather than be reported as drain progress.
         """
         if scaleset.id is None:
             return 0
         try:
             return len(self._client.list_scaleset_instances(scaleset.id))
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning(
                 "Could not count runners of scaleset %s; assuming still draining: %s",
@@ -528,12 +549,17 @@ class ScalesetReconciler:
             scaleset, so the replacement has not converged yet. An id-less scaleset is
             untouchable rather than gone, but reporting it forever would wedge the
             status, so it reads as done — matching ``_remaining_runners``.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners``.
         """
         if scaleset.id is None:
             return True
         logger.info("Deleting drained scaleset %s (id=%s)", scaleset.name, scaleset.id)
         try:
             self._client.delete_scaleset(scaleset.id)
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning(
                 "Could not delete drained scaleset %s (will retry on next reconcile): %s",

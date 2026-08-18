@@ -28,9 +28,9 @@ Each reconcile advances the changeover by one step:
 3. While the predecessor reports runners, report progress and take no action.
 4. When it reports no runners, delete it and its runner template.
 
-Disabling closes the predecessor's listener session, ending job assignment to it.
-Labels common to both generations are served by one scale set or the other for the duration.
-The charm reports a maintenance status naming the configured scale set and its phase, and returns to active once the predecessor is deleted.
+Disabling closes the predecessor's listener session: `listener.Stop()` calls `DeleteMessageSession`, so the session is deleted GitHub-side rather than dropped locally, and `keepListenerAlive` does not restart it while the scale set is disabled.
+Labels common to both generations are served by one scale set or the other for the duration, subject to the open question recorded below.
+The charm reports an active status naming the configured scale set and its phase, and drops the phase from the status once the predecessor is deleted.
 
 The design depends on four behaviors, verified against the GitHub API and the GARM source:
 
@@ -38,6 +38,12 @@ The design depends on four behaviors, verified against the GitHub API and the GA
 - `handleScaleDown` skips instances whose `RunnerStatus` is `RunnerActive` or `RunnerTerminated`, so an instance executing a job is not removed. `handleScaleUp` returns when `Enabled` is false.
 - `handleAutoScale` runs on a five-second ticker and is not gated on `Enabled`. `handleScaleSetUpdateOperation` retains the worker; only `handleScaleSetDeleteOperation` stops it. Disabling stops the listener alone.
 - `targetRunners` evaluates `min(MinIdleRunners + DesiredRunnerCount, MaxRunners)`, which is 0 when `max_runners` is 0. `UpdateScaleSetByID` validates only `min_idle_runners <= max_runners`; the `max_runners != 0` constraint applies to `CreateScaleSetParams.Validate` alone.
+
+One behavior is not established by either source.
+Deleting the message session stops GARM receiving job assignments; whether GitHub stops assigning jobs to a scale set that still exists with the same labels in the same runner group is undocumented, and the GARM source cannot answer it.
+If GitHub does continue to assign, a job routed to the predecessor after the disable is not delivered, because GARM does not reopen the session to resume from `last_message_id`; the job waits until the predecessor is deleted, bounded by the seven-hour drain deadline below.
+Both generations carry the shared labels for the whole drain, so this would not be a rare case.
+Confirming it requires an observed run rather than a source reference.
 
 ## Alternatives considered
 
@@ -57,7 +63,12 @@ The configured name remains the operator-facing identity and is what the unit st
 Names are capped at 64 characters; a longer configured name is truncated and suffixed with a digest of its full value, so names sharing a prefix resolve to distinct scale sets.
 
 A changeover spans three reconciles, so at the default update-status interval a label change with no in-flight jobs completes in approximately 15 minutes.
-The unit reports maintenance throughout, so callers waiting on active status wait for the drain.
+The unit stays active throughout, carrying the phase as its status message.
+Maintenance was rejected: the service is fully functional for the whole drain, and a drain reaching the deadline below would otherwise block `juju wait-for` and integration tests on hours of healthy background convergence.
+
+Both generations carry the full `min_idle_runners` until the predecessor is deleted, so the idle runner count doubles for the duration of the drain.
+Against a fixed OpenStack quota the replacement may be unable to spawn runners at all, which stalls the changeover it is meant to complete.
+Operators should size the quota for twice the configured idle count.
 
 Each generation owns a runner template named after its live scale set, so a draining predecessor retains the template its runners were built from.
 

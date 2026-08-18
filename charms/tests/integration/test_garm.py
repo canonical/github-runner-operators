@@ -401,6 +401,84 @@ def test_charm_reconciles_org_and_scaleset(
     )
 
 
+def test_label_change_replaces_the_scaleset_and_removes_the_predecessor(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+    fake_github_api_url: str,
+):
+    """
+    arrange: The charm has converged a scaleset against the mock GitHub API (the preceding
+        test leaves github.com repointed), and update-status is driven fast enough to let
+        the multi-reconcile changeover advance within the test.
+    act: Change the configured labels, which GitHub offers no API to update in place.
+    assert: One enabled generation remains, under a different label-hashed name, and the
+        predecessor is gone entirely — exercising the create/hand-over/drain/delete path
+        end to end. The unit fixtures cannot cover this: they cannot reproduce how GARM
+        reports a disabled scaleset, which is where the changeover previously wedged.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+
+    before = _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+
+    # No VMs are involved — the OpenStack provider binary is only checked for presence, so
+    # the generations carry zero instances and the drain completes as fast as the charm is
+    # asked to reconcile. The changeover spans three reconciles by design, so drive
+    # update-status rather than waiting out the model's default interval.
+    original_interval = juju.cli("model-config", "update-status-hook-interval").strip()
+    juju.cli("model-config", "update-status-hook-interval=10s")
+    try:
+        juju.config(configurator_with_image, values={"labels": "jammy,x64"})
+        juju.wait(
+            lambda status: jubilant.all_active(status, configurator_with_image)
+            and jubilant.all_agents_idle(status, configurator_garm),
+            timeout=3 * 60,
+            delay=10,
+        )
+        _wait_for_single_generation(base_url, token, _SCALESET_TEST_NAME, before["name"])
+    finally:
+        juju.cli("model-config", f"update-status-hook-interval={original_interval}")
+
+
+@retry(
+    retry=retry_if_exception_type(
+        (AssertionError, requests.exceptions.RequestException)
+    ),
+    wait=wait_exponential(multiplier=1, min=5, max=20),
+    stop=stop_after_attempt(30),
+)
+def _wait_for_single_generation(
+    base_url: str, token: str, name: str, previous_name: str
+) -> dict:
+    """Wait until only the replacement generation of *name* is left.
+
+    Retries until the whole changeover has run: the replacement is created, the
+    predecessor is disabled, and the predecessor is finally deleted. Asserting on the
+    end state rather than on each phase keeps the test independent of how many
+    update-status ticks the model happens to deliver.
+    """
+    generation = re.compile(rf"^{re.escape(name)}({_SCALESET_GENERATION_SUFFIX})?$")
+    matching = [
+        scaleset
+        for scaleset in _list_scalesets(base_url, token)
+        if generation.match(scaleset.get("name") or "")
+    ]
+    names = [scaleset.get("name") for scaleset in matching]
+    assert previous_name not in names, (
+        f"Expected the predecessor {previous_name!r} to be deleted once drained, "
+        f"still present among {names!r}"
+    )
+    assert len(matching) == 1, (
+        f"Expected exactly one generation of {name!r} after the changeover, got {names!r}"
+    )
+    assert matching[0].get("enabled") is True, (
+        f"Expected the replacement {names[0]!r} to be serving, got {matching[0]!r}"
+    )
+    return matching[0]
+
+
 def _list_templates(address: str, token: str) -> list[dict]:
     """List all runner install templates from the GARM API.
 
@@ -639,6 +717,10 @@ def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
     The live name carries a label hash, so an exact match on the configured name
     would find nothing. A superseded generation lingers, disabled, until it has
     drained, so only an enabled scaleset counts as the one currently serving.
+
+    GARM tags Enabled ``omitempty``, so a disabled scaleset comes back with no
+    ``enabled`` key at all: test for the key being true, not for it being false,
+    or every draining predecessor reads as still serving.
     """
     generation = re.compile(rf"^{re.escape(name)}({_SCALESET_GENERATION_SUFFIX})?$")
     return next(
@@ -646,7 +728,7 @@ def _find_scaleset(scalesets: list[dict], name: str) -> dict | None:
             scaleset
             for scaleset in scalesets
             if generation.match(scaleset.get("name") or "")
-            and scaleset.get("enabled") is not False
+            and scaleset.get("enabled") is True
         ),
         None,
     )

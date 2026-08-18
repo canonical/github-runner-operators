@@ -50,6 +50,11 @@ GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 # Juju truncates long statuses; name a couple of scalesets and count the rest.
 _MAX_DRAINING_IN_STATUS: typing.Final[int] = 2
+# The phases a scaleset replacement passes through, in order. Named here rather than
+# spelled inline so the status vocabulary is greppable; not an enum, because the
+# draining phase carries the runner count and so is formatted, not selected.
+_PHASE_CREATING: typing.Final[str] = "creating replacement"
+_PHASE_AWAITING_DELETION: typing.Final[str] = "awaiting deletion"
 
 GARM_CONFIG_VERSION: typing.Final[str] = "1"
 
@@ -131,10 +136,10 @@ def _scaleset_replacement_phase(progress: ScalesetProgress) -> str:
         its deletion, which is a distinct thing to be waiting on.
     """
     if not progress.handed_over:
-        return "creating replacement"
+        return _PHASE_CREATING
     runners = progress.remaining_runners
     if not runners:
-        return "awaiting deletion"
+        return _PHASE_AWAITING_DELETION
     return f"draining {runners} runner{'' if runners == 1 else 's'}"
 
 
@@ -743,9 +748,13 @@ class GarmCharm(paas_charm.go.Charm):
             )
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
+            # Active, not maintenance: every label is served throughout the drain, by
+            # the replacement or the predecessor, so nothing is degraded. A drain can
+            # run to DRAIN_DEADLINE, and blocking `juju wait-for` on hours of healthy
+            # background convergence would be wrong.
             if replacing:
                 self.update_app_and_unit_status(
-                    ops.MaintenanceStatus(_scaleset_replacement_status(replacing))
+                    ops.ActiveStatus(_scaleset_replacement_status(replacing))
                 )
             else:
                 self.update_app_and_unit_status(ops.ActiveStatus())

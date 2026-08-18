@@ -578,13 +578,15 @@ def test_scaleset_being_replaced_is_reported_in_the_status(
     act: Run update-status.
     assert: The unit names the scaleset by the name the operator configured and reports the
         phase, so a long drain can be told apart from a stuck charm — and a replacement that
-        has not been created yet does not read as a finished drain.
+        has not been created yet does not read as a finished drain. The status stays active
+        throughout: every label is served during the drain, so nothing waiting on the model
+        should block on it.
     """
     garm_api.scaleset.return_value.reconcile.return_value = [progress]
 
     out = ctx.run(ctx.on.update_status(), _state())
 
-    assert out.unit_status == ops.MaintenanceStatus(expected)
+    assert out.unit_status == ops.ActiveStatus(expected)
 
 
 def test_many_scalesets_being_replaced_are_summarised(ctx: Context, garm_api: _GarmApiMocks):
@@ -601,7 +603,7 @@ def test_many_scalesets_being_replaced_are_summarised(ctx: Context, garm_api: _G
 
     out = ctx.run(ctx.on.update_status(), _state())
 
-    assert out.unit_status == ops.MaintenanceStatus(
+    assert out.unit_status == ops.ActiveStatus(
         "Replacing scaleset scaleset-1 -> new-1 (draining 1 runner),"
         " scaleset-2 -> new-2 (draining 2 runners), +2 more"
     )

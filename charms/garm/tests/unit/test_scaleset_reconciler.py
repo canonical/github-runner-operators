@@ -59,7 +59,11 @@ class _FakeScaleset:
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
         self.template_id = template_id
-        self.enabled = enabled
+        # GARM tags Enabled `omitempty` and has no custom marshaller, so a disabled
+        # scaleset arrives with no `enabled` key at all and the generated client reads
+        # it back as None — `False` is a shape the API never returns. Model the wire,
+        # or the whole retirement half of this suite passes against a fiction.
+        self.enabled = True if enabled else None
         # GARM stamps this on every write, so for a retired scaleset it is the
         # moment it was disabled — which is what the drain deadline measures from.
         self.updated_at = updated_at or datetime.datetime.now(datetime.timezone.utc)
@@ -1379,6 +1383,54 @@ def test_a_connection_error_aborts_the_pass_immediately():
         _reconcile(client, [_spec(name="one"), _spec(name="two")])
 
     assert client.attempts == 1
+
+
+class _UnreachableWhenRetiring(FakeGarmClient):
+    def update_scaleset(self, scaleset_id, params):
+        raise GarmConnectionError("connection refused")
+
+
+class _UnreachableWhenCounting(FakeGarmClient):
+    def list_scaleset_instances(self, scaleset_id):
+        raise GarmConnectionError("connection refused")
+
+
+class _UnreachableWhenDeleting(FakeGarmClient):
+    def delete_scaleset(self, scaleset_id):
+        raise GarmConnectionError("connection refused")
+
+
+@pytest.mark.parametrize(
+    "client_class, old_enabled",
+    [
+        (_UnreachableWhenRetiring, True),
+        (_UnreachableWhenCounting, False),
+        (_UnreachableWhenDeleting, False),
+    ],
+    ids=["retiring", "counting-runners", "deleting"],
+)
+def test_a_connection_error_during_a_drain_is_not_reported_as_progress(
+    client_class, old_enabled
+):
+    """
+    arrange: A generation being retired or already draining, and a GARM that is unreachable
+        at each of the three calls the drain makes.
+    act: Reconcile.
+    assert: The error propagates rather than being contained as a per-scaleset failure, so
+        the charm reports the outage instead of a drain that is not actually advancing.
+        GarmConnectionError subclasses GarmApiError, so the containing handlers would
+        otherwise swallow it and report progress.
+    """
+    client = client_class(
+        providers=["openstack-demo"],
+        scalesets=[
+            _generation(_LABELS_OLD, id=1, enabled=old_enabled),
+            _generation(_LABELS_NEW, id=2),
+        ],
+    )
+
+    with pytest.raises(GarmConnectionError):
+        _reconcile(client, [_spec(labels=_LABELS_NEW)])
 
 
 def test_duplicate_desired_names_are_ignored():
