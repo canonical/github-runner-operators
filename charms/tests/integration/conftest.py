@@ -33,17 +33,25 @@ PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pe
 logger = logging.getLogger(__name__)
 
 
-def _redact_pebble_output(output: str) -> str:
-    """Remove environment mappings before logging structured Pebble output."""
+def _redact_pebble_output(output: str, sentinel_values: list[str] | None = None) -> str:
+    """Remove environment mappings and redact sensitive values before logging output."""
+    res = output
+    if sentinel_values:
+        for val in sentinel_values:
+            if val:
+                res = res.replace(val, "[REDACTED]")
+
     try:
-        parsed = yaml.safe_load(output)
+        parsed = yaml.safe_load(res)
     except yaml.YAMLError:
-        return output
+        return res
 
     def redact(value: Any) -> Any:
         if isinstance(value, dict):
             return {
-                key: "[REDACTED]" if key == "environment" else redact(item)
+                key: "[REDACTED]"
+                if key in ("environment", "GARM_PROVIDERS_JSON")
+                else redact(item)
                 for key, item in value.items()
             }
         if isinstance(value, list):
@@ -52,7 +60,7 @@ def _redact_pebble_output(output: str) -> str:
 
     if isinstance(parsed, (dict, list)):
         return yaml.safe_dump(redact(parsed), sort_keys=False)
-    return output
+    return res
 
 
 @pytest.fixture(scope="module")

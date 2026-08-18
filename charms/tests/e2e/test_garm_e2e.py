@@ -1,55 +1,81 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""GARM end-to-end test — one test for the full chain.
 
-"""GARM end-to-end test (ISD-285).
+Arrange:
+    GARM deployed with postgresql + traefik ingress; garm-configurator holding real
+    ProdStack credentials, a stable runner-image name, and a unique run label;
+    GARM's controller metadata_url resolved to the routable LB address.
 
-TODO: This module is deliberately incomplete. Its purpose right now is to give
-``garm_e2e.yaml`` something to run, so that the workflows can land on the default
-branch and become dispatchable at all — ``workflow_dispatch`` does not work until
-they are there. The end-to-end implementation lands in a follow-up.
+Act:
+    Dispatch ``garm_e2e_test_run.yaml`` against the run label and wait for completion.
 
-What is here asserts only that the tenant credentials reach pytest.
-
-Still to come, covering the chain ISD-285 specifies: deploy postgresql, GARM, a
-traefik ingress and garm-configurator; assert the GARM API is reachable and the
-provider authenticates to OpenStack; assert a VM is created from the runner image and
-the runner registers with GitHub; then dispatch ``garm_e2e_test_run.yaml`` at the
-scale set's label and assert the job is picked up and exits clean.
+Assert:
+    The workflow run concludes ``"success"`` — which is only reachable if GARM
+    authenticated to OpenStack, booted a VM on the published image, the runner
+    registered with GitHub, picked up the job, and exited clean.
 """
 
+import logging
 import os
 
 import pytest
 
-# Tenant settings the deployment fixtures will need. The username and password come
-# from Vault, the rest from repository secrets; both routes converge on the job
-# environment, which tox forwards to pytest.
-REQUIRED_SETTINGS = (
-    "OS_AUTH_URL",
-    "OS_USERNAME",
-    "OS_PASSWORD",
-    "OS_PROJECT_NAME",
-    "OS_USER_DOMAIN_NAME",
-    "OS_PROJECT_DOMAIN_NAME",
-    "OS_REGION_NAME",
-    "OS_NETWORK",
+from tests.integration.helpers import (
+    create_github_app_client,
+    dispatch_workflow,
+    required_env,
+    wait_for_completion,
 )
 
+logger = logging.getLogger(__name__)
 
-@pytest.mark.parametrize("setting", REQUIRED_SETTINGS)
-def test_tenant_setting_reaches_pytest(setting: str):
+WORKFLOW_PATH = ".github/workflows/garm_e2e_test_run.yaml"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("GITHUB_RUN_ID"),
+    reason="Only runs inside a GitHub Actions workflow",
+)
+@pytest.mark.skipif(
+    not os.environ.get("E2E_RUNNER_IMAGE_NAME"),
+    reason="E2E_RUNNER_IMAGE_NAME not set — runner image unknown",
+)
+def test_garm_e2e(e2e_scaleset: str):
     """
-    arrange: The workflow has resolved the tenant settings, taking the username and
-        password from Vault and the rest from repository secrets, and exported them.
-    act: Read the setting pytest inherited through tox.
-    assert: It is present, so the deployment fixtures can authenticate to the tenant.
-        Only the name is reported on failure — printing the value would defeat the
-        masking the workflow applied.
+    arrange: GARM deployed with postgresql + traefik ingress; garm-configurator holding real
+        ProdStack credentials, a stable runner-image name, and a unique run label;
+        GARM's controller metadata_url resolved to the routable LB address.
+    act: Dispatch garm_e2e_test_run.yaml against the run label and wait for completion.
+    assert: The workflow run concludes 'success' — which is only reachable if GARM
+        authenticated to OpenStack, booted a VM on the published image, the runner
+        registered with GitHub, picked up the job, and exited clean.
     """
-    # pytest.fail rather than assert: assertion rewriting would introspect the
-    # expression and dump the whole of os.environ into the failure output.
-    if not os.environ.get(setting):
-        pytest.fail(
-            f"{setting} did not reach pytest. Check that the workflow exports it and "
-            f"that tox passes it through in the garm-e2e environment."
-        )
+    repo_path = required_env("TEST_GITHUB_PATH")
+    label = e2e_scaleset  # Unique runner label returned by e2e_scaleset fixture
+    ref = os.environ.get("GITHUB_REF_NAME", "main")
+
+    github_client = create_github_app_client()
+
+    logger.info("Dispatching %s on %s with label %s", WORKFLOW_PATH, ref, label)
+    run_id = dispatch_workflow(
+        github_client=github_client,
+        repo_path=repo_path,
+        workflow_path=WORKFLOW_PATH,
+        ref=ref,
+        inputs={"runner-label": label},
+    )
+
+    logger.info("Workflow run %d dispatched, waiting for completion", run_id)
+    conclusion = wait_for_completion(
+        github_client=github_client,
+        repo_path=repo_path,
+        run_id=run_id,
+        poll_interval=15,
+        timeout=600,
+    )
+
+    assert conclusion == "success", (
+        f"Workflow run {run_id} concluded as '{conclusion}', expected 'success'"
+    )
+    logger.info("GARM E2E test passed: workflow run %s concluded as 'success'", run_id)

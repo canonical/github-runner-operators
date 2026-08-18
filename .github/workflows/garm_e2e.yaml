@@ -3,19 +3,33 @@
 #
 # GARM end-to-end test workflow (ISD-285).
 #
-# Manual trigger only, and deliberately not a merge gate. Dispatch it with
-# --ref <branch> to run a feature branch's version.
+# Triggered on workflow_dispatch and pull_request (NOTE: pull_request trigger
+# is temporary for testing in draft mode and will be removed before merging).
+# This workflow is NOT a merge gate.
 
 name: GARM E2E
 
 on:
   workflow_dispatch:
+  # Temporary trigger for testing on branch in draft PR — to be removed before merge.
+  pull_request:
+    types: [opened, synchronize, labeled]
 
 jobs:
+  build:
+    name: Build artifacts
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v0.0.1-alpha.10
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
   e2e:
     name: GARM E2E test
+    needs:
+      - build
     runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
-    timeout-minutes: 15
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -26,8 +40,7 @@ jobs:
           detached: true
           timeout-minutes: 60
 
-      # Tenant settings are secrets, so the runner masks them in the log without
-      # an explicit ::add-mask::.
+      # Load tenant configuration from GitHub secrets
       - name: Load tenant configuration
         env:
           OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
@@ -36,19 +49,34 @@ jobs:
           OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
           OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
           OS_NETWORK: ${{ secrets.OS_NETWORK }}
+          TEST_GITHUB_APP_ID: ${{ secrets.TEST_GITHUB_APP_ID }}
+          TEST_GITHUB_APP_INSTALLATION_ID: ${{ secrets.TEST_GITHUB_APP_INSTALLATION_ID }}
+          TEST_GITHUB_APP_PRIVATE_KEY: ${{ secrets.TEST_GITHUB_APP_PRIVATE_KEY }}
+          TEST_GITHUB_PATH: ${{ secrets.TEST_GITHUB_PATH }}
+          E2E_RUNNER_IMAGE_NAME: ${{ vars.E2E_RUNNER_IMAGE_NAME }}
+          E2E_OPENSTACK_FLAVOR: ${{ vars.E2E_OPENSTACK_FLAVOR }}
+          E2E_RUNNER_HTTP_PROXY: ${{ vars.E2E_RUNNER_HTTP_PROXY }}
         run: |
           set -euo pipefail
 
           for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
-                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK; do
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     TEST_GITHUB_APP_ID TEST_GITHUB_APP_INSTALLATION_ID \
+                     TEST_GITHUB_APP_PRIVATE_KEY TEST_GITHUB_PATH; do
             if [ -z "${!KEY:-}" ]; then
               echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
               exit 1
             fi
+            echo "::add-mask::${!KEY}"
             echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
           done
 
-          # openstackclient needs this stated explicitly for a v3 auth URL.
+          for KEY in E2E_RUNNER_IMAGE_NAME E2E_OPENSTACK_FLAVOR E2E_RUNNER_HTTP_PROXY; do
+            if [ -n "${!KEY:-}" ]; then
+              echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+            fi
+          done
+
           echo "OS_IDENTITY_API_VERSION=3" >> "$GITHUB_ENV"
 
       - name: Fetch tenant credentials from Vault
@@ -67,8 +95,6 @@ jobs:
             fi
           done
 
-          # curl --fail suppresses the response body, which would reduce a 403 to a
-          # bare exit code on the step whose job is to say what is misconfigured.
           vault_call() {
             curl -sS -o /tmp/vault-response.json -w '%{http_code}' "$@"
           }
@@ -109,19 +135,26 @@ jobs:
           rm -f /tmp/vault-response.json
           echo "Tenant credentials fetched and masked."
 
-      - name: Assert the credentials authenticate against the tenant
+      - name: Assert tenant connectivity and credentials
         run: |
           set -euo pipefail
 
-          # Ubuntu 24.04 enforces PEP 668, so a bare pip install into the system
-          # interpreter fails with externally-managed-environment.
-          pipx install python-openstackclient
+          pipx install python-openstackclient || pip install --quiet python-openstackclient
 
           TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
           echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
 
-      - name: Run the E2E suite
+      - name: Prepare concierge configuration for MetalLB
         run: |
           set -euo pipefail
-          pipx install tox
-          tox -e garm-e2e
+          HOST_IP=$(hostname -I | awk '{print $1}')
+          sed "s/@HOST_IP@/${HOST_IP}/g" concierge-e2e.yaml.tmpl > concierge.yaml
+          echo "CONCIERGE=concierge.yaml" >> "$GITHUB_ENV"
+
+      - name: Run E2E test via spread
+        run: |
+          set -euo pipefail
+          pipx install 'opcli[cli] @ git+https://github.com/canonical/charm-ci.git@main' || \
+            pip install 'opcli[cli] @ git+https://github.com/canonical/charm-ci.git@main'
+          opcli install spread
+          opcli spread run -- e2e-test-ci:...
