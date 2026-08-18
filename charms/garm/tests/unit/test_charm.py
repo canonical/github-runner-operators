@@ -499,6 +499,24 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
+def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_api: _GarmApiMocks):
+    """Application removal drains GARM resources before the charm is removed."""
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        out = ctx.run(ctx.on.remove(), _state(secrets=_owned_secrets()))
+
+    cleanup_cls.assert_called_once_with(garm_api.auth_client)
+    cleanup_cls.return_value.run.assert_called_once_with()
+    assert out is not None
+
+
+def test_remove_refuses_without_admin_credentials(ctx: Context, garm_api: _GarmApiMocks):
+    """Removal fails rather than orphaning resources when credentials are unavailable."""
+    with pytest.raises(UncaughtCharmError, match="credentials are unavailable"):
+        ctx.run(ctx.on.remove(), _state())
+
+    garm_api.auth.from_login.assert_not_called()
+
+
 def test_unpopulated_configurator_relation_does_not_prune(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):

@@ -34,6 +34,7 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
+from resource_cleanup import GarmResourceCleanup
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -162,11 +163,24 @@ class GarmCharm(paas_charm.go.Charm):
             self._reconcile,
         )
         self.framework.observe(self.on.update_status, self._reconcile)
+        self.framework.observe(self.on.remove, self._on_remove)
 
     @block_if_invalid_data
     def _reconcile(self, _: ops.EventBase) -> None:
         """Reconcile charm state."""
         self.restart()
+
+    def _on_remove(self, _: ops.RemoveEvent) -> None:
+        """Drain GARM resources before Juju removes the application."""
+        admin_creds = self._get_admin_credentials()
+        if not admin_creds:
+            raise RuntimeError("GARM admin credentials are unavailable; refusing removal")
+
+        base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+        auth_client = GarmAuthenticatedClient.from_login(
+            base_url, admin_creds["username"], admin_creds["password"]
+        )
+        GarmResourceCleanup(auth_client).run()
 
     def _on_get_credentials_action(self, event: ops.ActionEvent) -> None:
         """Return the GARM admin credentials to the operator.
