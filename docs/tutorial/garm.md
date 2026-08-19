@@ -352,7 +352,7 @@ The scale set registered on GitHub is removed along with GARM. If it is still li
 **Settings > Actions > Runners** afterwards, you can delete it from that page.
 
 For a full teardown of Juju and MicroK8s, see
-[Tear down your test environment](https://documentation.ubuntu.com/juju/3.6/howto/manage-your-juju-deployment/tear-down-your-juju-deployment-local-testing-and-development/).
+[Tear down your test environment](https://canonical.com/juju/docs/juju-cli/3.6/howto/manage-your-juju-deployment/tear-down-your-juju-deployment-local-testing-and-development/).
 
 ## Next steps
 
