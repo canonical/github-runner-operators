@@ -308,8 +308,11 @@ Congratulations! You have a working GARM deployment with a scale set registered 
 
 ## What changes with a real OpenStack cloud
 
-At this point every part of the deployment is real except the runners. Jobs labeled `tutorial`
-queue against the scale set, but no runner picks them up. Three things stand between this
+At this point every part of the deployment is real except the runners. GARM registers the scale set
+under its own name and under the configured labels, so a workflow job that sets either
+`runs-on: tutorial-scaleset` or `runs-on: tutorial` is assigned to it. GARM picks the job up over
+its connection to GitHub and asks OpenStack for a runner, which fails against the placeholder
+credentials — `juju debug-log --include garm/0` shows the failure. Three things stand between this
 deployment and one that runs jobs:
 
 - **Real OpenStack credentials.** The eight `openstack-*` options take the values of an existing
