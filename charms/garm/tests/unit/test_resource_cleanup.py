@@ -35,7 +35,11 @@ class _FakeClient:
 
 
 def test_cleanup_drains_runners_before_deleting_scaleset():
-    """A runner deletion is asynchronous, so scaleset deletion waits for an empty poll."""
+    """
+    arrange: A scaleset whose runner list is populated, then empty on the next poll.
+    act: Run cleanup.
+    assert: The runner is requested for deletion before the now-empty scaleset is deleted.
+    """
     client = _FakeClient(
         [
             [SimpleNamespace(name="runner-1", status="running")],
@@ -62,7 +66,11 @@ def test_cleanup_drains_runners_before_deleting_scaleset():
 
 
 def test_cleanup_does_not_redelete_pending_runner():
-    """Already pending runner deletion is observed until the row disappears."""
+    """
+    arrange: A scaleset whose runner is already pending deletion, then disappears.
+    act: Run cleanup.
+    assert: Cleanup polls without reissuing runner deletion, then deletes the scaleset.
+    """
     client = _FakeClient(
         [
             [SimpleNamespace(name="runner-1", status="pending_delete")],
