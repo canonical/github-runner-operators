@@ -28,7 +28,7 @@ make runners boot.
 
 ## What you'll need
 
-- A working station, such as a laptop, with an AMD64 architecture, at least 4 CPU cores, 8 GB of
+- A workstation, such as a laptop, with an AMD64 architecture, at least 4 CPU cores, 8 GB of
   RAM, and 50 GB of disk space.
 - A GitHub repository that you administer. The tutorial registers a runner scale set on it. A
   scratch repository is a good choice.
