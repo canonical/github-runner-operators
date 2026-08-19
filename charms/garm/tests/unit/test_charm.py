@@ -500,7 +500,11 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
 
 
 def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_api: _GarmApiMocks):
-    """Application removal drains GARM resources before the charm is removed."""
+    """
+    arrange: A ready charm with GARM admin credentials.
+    act: Emit the application remove event.
+    assert: Cleanup runs with the authenticated client before removal completes.
+    """
     with patch("charm.GarmResourceCleanup") as cleanup_cls:
         out = ctx.run(ctx.on.remove(), _state(secrets=_owned_secrets()))
 
@@ -510,7 +514,11 @@ def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_ap
 
 
 def test_remove_refuses_without_admin_credentials(ctx: Context, garm_api: _GarmApiMocks):
-    """Removal fails rather than orphaning resources when credentials are unavailable."""
+    """
+    arrange: A charm without GARM admin credentials.
+    act: Emit the application remove event.
+    assert: Removal fails and no authenticated client is created.
+    """
     with pytest.raises(UncaughtCharmError, match="credentials are unavailable"):
         ctx.run(ctx.on.remove(), _state())
 
