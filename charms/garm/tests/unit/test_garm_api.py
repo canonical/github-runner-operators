@@ -255,7 +255,11 @@ def test_list_scalesets(api_response, expected_names):
 
 
 def test_list_scale_set_instances_converts_id_to_string():
-    """The generated client requires the scaleset ID as a string."""
+    """
+    arrange: An authenticated client and a generated InstancesApi response.
+    act: List instances for scaleset ID 42.
+    assert: The wrapper converts the integer ID to the generated client's required string.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     instance = Instance(name="runner-1", status="running", scale_set_id=42)
     with _stub_api_client(client):
@@ -270,7 +274,11 @@ def test_list_scale_set_instances_converts_id_to_string():
 
 
 def test_delete_instance_passes_force_and_bypass_flags():
-    """Runner deletion exposes GARM's force and authorization-bypass flags."""
+    """
+    arrange: An authenticated client and a generated InstancesApi stub.
+    act: Delete a runner with both cleanup flags enabled.
+    assert: The wrapper forwards the runner name, flags, and request timeout.
+    """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     with _stub_api_client(client):
         with patch("garm_api.InstancesApi") as MockApi:
