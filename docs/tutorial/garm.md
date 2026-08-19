@@ -122,12 +122,12 @@ available and it has generated its admin credentials:
 :output-only:
 
 App             Version  Status  Scale  Charm           Channel      Rev  Address         Exposed  Message
-garm                     active      1  garm            latest/edge   94  10.152.183.218  no
-postgresql-k8s  16.14    active      1  postgresql-k8s  16/stable    927  10.152.183.83   no
+garm                     active      1  garm            latest/edge   94  10.152.183.171  no
+postgresql-k8s  16.14    active      1  postgresql-k8s  16/stable    927  10.152.183.178  no
 
 Unit               Workload  Agent  Address     Ports  Message
-garm/0*            active    idle   10.1.22.18
-postgresql-k8s/0*  active    idle   10.1.22.22         Primary
+garm/0*            active    idle   10.1.22.21
+postgresql-k8s/0*  active    idle   10.1.22.15         Primary
 ```
 
 ## Deploy a stand-in image provider
@@ -252,16 +252,16 @@ Run `juju status` to check the result:
 :output-only:
 
 App                 Version  Status  Scale  Charm              Channel      Rev  Address         Exposed  Message
-fake-image-builder           active      1  any-charm          latest/beta  175  10.152.183.24   no
-garm                         active      1  garm               latest/edge   94  10.152.183.218  no
-garm-configurator            active      1  garm-configurator  latest/edge   86  10.152.183.72   no       Ready
-postgresql-k8s      16.14    active      1  postgresql-k8s     16/stable    927  10.152.183.83   no
+fake-image-builder           active      1  any-charm          latest/beta  175  10.152.183.31   no
+garm                         active      1  garm               latest/edge   94  10.152.183.171  no
+garm-configurator            active      1  garm-configurator  latest/edge   86  10.152.183.68   no       Ready
+postgresql-k8s      16.14    active      1  postgresql-k8s     16/stable    927  10.152.183.178  no
 
 Unit                   Workload  Agent  Address     Ports  Message
-fake-image-builder/0*  active    idle   10.1.22.44
-garm-configurator/0*   active    idle   10.1.22.28         Ready
-garm/0*                active    idle   10.1.22.18
-postgresql-k8s/0*      active    idle   10.1.22.22         Primary
+fake-image-builder/0*  active    idle   10.1.22.55
+garm-configurator/0*   active    idle   10.1.22.47         Ready
+garm/0*                active    idle   10.1.22.21
+postgresql-k8s/0*      active    idle   10.1.22.15         Primary
 ```
 
 An active GARM unit means the whole reconciliation succeeded, including the calls to GitHub. If
@@ -286,7 +286,8 @@ Then log in to the GARM API and list the scale sets:
 GARM_URL="http://$(juju status --format=json | jq -r '.applications.garm.address'):8080/api/v1"
 TOKEN=$(curl -sS -X POST "$GARM_URL/auth/login" \
   -d '{"username": "admin", "password": "<password-from-the-action>"}' | jq -r .token)
-curl -sS "$GARM_URL/scalesets" -H "Authorization: Bearer $TOKEN" | jq '.[] | {name, max_runners, image}'
+curl -sS "$GARM_URL/scalesets" -H "Authorization: Bearer $TOKEN" \
+  | jq '.[] | {name, repo_name, max_runners, image}'
 ```
 
 ```{terminal}
@@ -294,6 +295,7 @@ curl -sS "$GARM_URL/scalesets" -H "Authorization: Bearer $TOKEN" | jq '.[] | {na
 
 {
   "name": "tutorial-scaleset",
+  "repo_name": "your-user/your-repo",
   "max_runners": 1,
   "image": "00000000-0000-0000-0000-000000000000"
 }
