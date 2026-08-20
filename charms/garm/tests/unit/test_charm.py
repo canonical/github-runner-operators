@@ -184,6 +184,7 @@ def _state(
     secrets: typing.Sequence[Secret] = (),
     unit_status: ops.StatusBase | None = None,
     app_status: ops.StatusBase | None = None,
+    planned_units: int = 1,
 ) -> State:
     """Build a GARM charm State that is ready to serve unless a caller opts out.
 
@@ -234,6 +235,7 @@ def _state(
         ],
         relations=relations,
         secrets=list(secrets),
+        planned_units=planned_units,
         **statuses,
     )
 
@@ -506,23 +508,46 @@ def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_ap
     assert: Cleanup runs with the authenticated client before removal completes.
     """
     with patch("charm.GarmResourceCleanup") as cleanup_cls:
-        out = ctx.run(ctx.on.remove(), _state(secrets=_owned_secrets()))
+        out = ctx.run(
+            ctx.on.remove(), _state(secrets=_owned_secrets(), planned_units=0)
+        )
 
     cleanup_cls.assert_called_once_with(garm_api.auth_client)
     cleanup_cls.return_value.run.assert_called_once_with()
     assert out is not None
 
 
-def test_remove_refuses_without_admin_credentials(ctx: Context, garm_api: _GarmApiMocks):
+def test_remove_unit_skips_global_cleanup_while_application_remains(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A leader unit is being removed while another application unit remains planned.
+    act: Emit the remove event.
+    assert: Global GARM cleanup is skipped so a scale-down does not destroy active runners.
+    """
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(
+            ctx.on.remove(),
+            _state(secrets=_owned_secrets(), planned_units=1),
+        )
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+
+
+def test_remove_refuses_without_admin_credentials(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
     """
     arrange: A charm without GARM admin credentials.
     act: Emit the application remove event.
     assert: Removal fails and no authenticated client is created.
     """
     with pytest.raises(UncaughtCharmError, match="credentials are unavailable"):
-        ctx.run(ctx.on.remove(), _state())
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
 
     garm_api.auth.from_login.assert_not_called()
+    assert "Operator action: restore the labelled admin credentials secret" in caplog.text
 
 
 def test_unpopulated_configurator_relation_does_not_prune(

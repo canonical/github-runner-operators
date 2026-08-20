@@ -34,7 +34,7 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
-from resource_cleanup import GarmResourceCleanup
+from resource_cleanup import GarmCleanupError, GarmResourceCleanup
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -172,15 +172,47 @@ class GarmCharm(paas_charm.go.Charm):
 
     def _on_remove(self, _: ops.RemoveEvent) -> None:
         """Drain GARM resources before Juju removes the application."""
+        if not self.unit.is_leader():
+            logger.info("Skipping GARM removal cleanup on a non-leader unit")
+            return
+        if self.app.planned_units() > 0:
+            logger.info(
+                "Skipping GARM removal cleanup while the application still has planned units"
+            )
+            return
+
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
-            raise RuntimeError("GARM admin credentials are unavailable; refusing removal")
+            message = (
+                "GARM admin credentials are unavailable; refusing removal. "
+                "Operator action: restore the labelled admin credentials secret, "
+                "then retry Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message)
+
+        username = admin_creds.get("username")
+        password = admin_creds.get("password")
+        if not username or not password:
+            message = (
+                "GARM admin credentials are incomplete; refusing removal. "
+                "Operator action: restore username and password in the labelled "
+                "admin credentials secret, then retry Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message)
 
         base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
-        auth_client = GarmAuthenticatedClient.from_login(
-            base_url, admin_creds["username"], admin_creds["password"]
-        )
-        GarmResourceCleanup(auth_client).run()
+        try:
+            auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
+            GarmResourceCleanup(auth_client).run()
+        except GarmApiError as exc:
+            logger.error(
+                "GARM removal cleanup failed: %s. Operator action: resolve the "
+                "reported GARM/API/runner issue, then retry Juju application removal.",
+                exc,
+            )
+            raise
 
     def _on_get_credentials_action(self, event: ops.ActionEvent) -> None:
         """Return the GARM admin credentials to the operator.

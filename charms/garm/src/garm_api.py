@@ -55,12 +55,22 @@ class GarmApiError(Exception):
     """Raised when a GARM API call fails unexpectedly."""
 
 
+class GarmNotFoundError(GarmApiError):
+    """Raised when a requested GARM resource no longer exists."""
+
+
 class GarmConnectionError(GarmApiError):
     """Raised when a network-level connection to GARM fails (port closed, refused)."""
 
 
 class GarmEntityNotFoundError(GarmApiError):
     """Raised when a required GARM entity (org/repo/provider) cannot be found."""
+
+
+def _raise_resource_api_error(message: str, exc: ApiException) -> None:
+    """Raise a resource-specific wrapper error while preserving 404 semantics."""
+    error_type = GarmNotFoundError if exc.status == 404 else GarmApiError
+    raise error_type(message) from exc
 
 
 class GarmApiClient:
@@ -543,10 +553,11 @@ class GarmAuthenticatedClient(GarmApiClient):
                     or []
                 )
             except ApiException as exc:
-                raise GarmApiError(
+                _raise_resource_api_error(
                     f"Failed to list instances for scaleset {scaleset_id} "
-                    f"({exc.status}): {exc.body}"
-                ) from exc
+                    f"({exc.status}): {exc.body}",
+                    exc,
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -567,9 +578,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete runner {instance_name} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_resource_api_error(
+                    f"Failed to delete runner {instance_name} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -909,9 +920,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_resource_api_error(
+                    f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -979,8 +990,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_resource_api_error(
+                    f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
