@@ -15,6 +15,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   e2e-test:
     name: GARM E2E test

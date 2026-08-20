@@ -252,7 +252,7 @@ gh workflow run garm_e2e.yaml --ref <feature-branch>
 `--ref` selects which branch's version of both the workflow and the test code runs, so
 changes to the end-to-end test can be exercised without merging them first.
 
-#### Required secrets and variables
+#### Required secrets
 
 Infrastructure details are secrets, not variables — endpoints, project and network names
 included. The runner masks secret values in the log automatically, so the workflow does
