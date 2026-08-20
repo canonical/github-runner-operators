@@ -79,7 +79,9 @@ jobs:
               KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | base64 -w0)
               ;;
             *)
-              KEY_B64=$E2E_GITHUB_APP_PRIVATE_KEY
+              # Already encoded: strip whitespace, since `base64` wraps at 76 columns
+              # unless told otherwise and a wrapped blob would break the env file.
+              KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | tr -d '[:space:]')
               ;;
           esac
           # The encoded form is a different string from the secret, so the runner does
@@ -146,6 +148,10 @@ jobs:
 
 
           addr = require("VAULT_ADDR").rstrip("/")
+          # Normalising makes this a different string from the secret whenever
+          # VAULT_ADDR carries a trailing slash, and masking matches literal
+          # substrings, so the runner would not mask the derived form.
+          print(f"::add-mask::{addr}")
           kv_path = require("VAULT_KV_PATH").strip("/")
 
           login = call(
