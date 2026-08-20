@@ -19,6 +19,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+
       - name: Set up tmate session (self-hosted)
         if: runner.debug == 1 && runner.environment == 'self-hosted'
         uses: canonical/action-tmate@main
@@ -88,70 +96,91 @@ jobs:
           VAULT_APPROLE_ROLE_ID: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
           VAULT_APPROLE_SECRET_ID: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
           VAULT_KV_PATH: ${{ secrets.E2E_VAULT_KV_PATH || 'kv/data/garm-e2e/prodstack' }}
+        # Python rather than curl and jq: it keeps the response in memory, so the
+        # credentials never reach the runner's disk, and it drops a dependency that
+        # would otherwise have to be installed over the private endpoint's egress.
         run: |
-          set -euo pipefail
+          python3 - <<'SCRIPT'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
 
-          for KEY in VAULT_ADDR VAULT_APPROLE_ROLE_ID VAULT_APPROLE_SECRET_ID; do
-            if [ -z "${!KEY:-}" ]; then
-              echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
-              exit 1
-            fi
-          done
 
-          # The response body holds the tenant credentials, so remove it however this
-          # step exits — set -e would otherwise skip the cleanup on every failure path,
-          # on a runner whose disk outlives the job.
-          RESPONSE=$(mktemp)
-          trap 'rm -f "$RESPONSE"' EXIT
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
 
-          # curl --fail suppresses the response body, which would reduce a 403 to a
-          # bare exit code on the step whose job is to say what is misconfigured.
-          vault_call() {
-            curl -sS -o "$RESPONSE" -w '%{http_code}' "$@"
-          }
 
-          STATUS=$(vault_call -X POST -H "Content-Type: application/json" \
-            -d "$(jq -n --arg r "$VAULT_APPROLE_ROLE_ID" --arg s "$VAULT_APPROLE_SECRET_ID" \
-                  '{role_id: $r, secret_id: $s}')" \
-            "${VAULT_ADDR}/v1/auth/approle/login")
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Vault AppRole login failed with HTTP $STATUS: $(jq -rc '.errors // empty' "$RESPONSE")"
-            exit 1
-          fi
+          def require(name):
+              value = os.environ.get(name)
+              if not value:
+                  fail(f"Missing repository secret: {name} (Settings > Secrets > Actions).")
+              return value
 
-          VAULT_TOKEN=$(jq -r '.auth.client_token' "$RESPONSE")
-          echo "::add-mask::$VAULT_TOKEN"
-          if [ -z "$VAULT_TOKEN" ] || [ "$VAULT_TOKEN" = "null" ]; then
-            echo "::error::Vault AppRole login returned no client token."
-            exit 1
-          fi
 
-          STATUS=$(vault_call -X GET -H "X-Vault-Token: $VAULT_TOKEN" \
-            "${VAULT_ADDR}/v1/${VAULT_KV_PATH}")
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Vault read of ${VAULT_KV_PATH} failed with HTTP $STATUS: $(jq -rc '.errors // empty' "$RESPONSE")"
-            exit 1
-          fi
+          def call(url, token=None, payload=None):
+              request = urllib.request.Request(
+                  url, data=json.dumps(payload).encode() if payload else None
+              )
+              request.add_header("Content-Type", "application/json")
+              if token:
+                  request.add_header("X-Vault-Token", token)
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as exc:
+                  # Vault reports what is misconfigured in the body; a bare status code
+                  # would leave this step unable to say why it failed. Only the errors
+                  # key is surfaced, never the whole body, which on a success would be
+                  # the credentials themselves.
+                  try:
+                      errors = json.load(exc).get("errors", [])
+                  except (ValueError, AttributeError):
+                      errors = []
+                  fail(f"Vault request failed with HTTP {exc.code}: {errors}")
+              except urllib.error.URLError as exc:
+                  fail(f"Vault at {addr} is unreachable: {exc.reason}")
 
-          for KEY in OS_USERNAME OS_PASSWORD; do
-            VALUE=$(jq -r --arg k "$KEY" '.data.data[$k] // empty' "$RESPONSE")
-            echo "::add-mask::$VALUE"
-            if [ -z "$VALUE" ]; then
-              echo "::error::Field '$KEY' missing from the Vault secret at ${VAULT_KV_PATH}."
-              exit 1
-            fi
-            echo "${KEY}=${VALUE}" >> "$GITHUB_ENV"
-          done
 
-          echo "Tenant credentials fetched and masked."
+          addr = require("VAULT_ADDR").rstrip("/")
+          kv_path = require("VAULT_KV_PATH").strip("/")
+
+          login = call(
+              f"{addr}/v1/auth/approle/login",
+              payload={
+                  "role_id": require("VAULT_APPROLE_ROLE_ID"),
+                  "secret_id": require("VAULT_APPROLE_SECRET_ID"),
+              },
+          )
+          token = login.get("auth", {}).get("client_token")
+          if not token:
+              fail("Vault AppRole login returned no client token.")
+          print(f"::add-mask::{token}")
+
+          secret = call(f"{addr}/v1/{kv_path}", token=token).get("data", {}).get("data", {})
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for key in ("OS_USERNAME", "OS_PASSWORD"):
+                  value = secret.get(key)
+                  if not value:
+                      fail(
+                          f"Field {key!r} missing from the Vault secret at the configured "
+                          f"KV path (E2E_VAULT_KV_PATH)."
+                      )
+                  # Mask before writing: everything downstream may echo the env file.
+                  print(f"::add-mask::{value}")
+                  env_file.write(f"{key}={value}\n")
+
+          print("Tenant credentials fetched and masked.")
+          SCRIPT
 
       - name: Assert the credentials authenticate against the tenant
         run: |
           set -euo pipefail
 
-          # Ubuntu 24.04 enforces PEP 668, so a bare pip install into the system
-          # interpreter fails with externally-managed-environment.
-          pipx install python-openstackclient
+          uv tool install python-openstackclient
 
           TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
           echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
@@ -159,5 +188,5 @@ jobs:
       - name: Run the E2E suite
         run: |
           set -euo pipefail
-          pipx install tox
+          uv tool install tox --with tox-uv
           tox -e garm-e2e
