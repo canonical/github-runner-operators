@@ -252,11 +252,6 @@ gh workflow run garm_e2e.yaml --ref <feature-branch>
 `--ref` selects which branch's version of both the workflow and the test code runs, so
 changes to the end-to-end test can be exercised without merging them first.
 
-A pull request labelled `run-e2e` also runs it, on every push while the label is
-applied. That is the way to exercise a change to `garm_e2e.yaml` itself before it
-lands, since `workflow_dispatch` only reads the workflow file from the default branch.
-Remove the label when finished — the job occupies the private-endpoint runner.
-
 #### Required secrets and variables
 
 Infrastructure details are secrets, not variables — endpoints, project and network names
