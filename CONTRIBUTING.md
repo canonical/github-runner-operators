@@ -271,7 +271,7 @@ not register masks for these itself.
 | `OS_NETWORK` | OpenStack network for runner VMs |
 | `E2E_GITHUB_APP_ID` | GitHub App ID |
 | `E2E_GITHUB_APP_INSTALLATION_ID` | Installation ID of that App on this repository |
-| `E2E_GITHUB_APP_PRIVATE_KEY` | That App's private key (PEM), base64-encoded |
+| `E2E_GITHUB_APP_PRIVATE_KEY` | That App's private key. Paste the PEM as issued; base64 is also accepted |
 | `E2E_VAULT_KV_PATH` | Optional. Defaults to `kv/data/garm-e2e/prodstack` |
 
 The OpenStack username and password are **not** repository secrets. They are read at run
@@ -285,8 +285,8 @@ read & write` here, which the integration App has no reason to hold.
 Paste the private key into `E2E_GITHUB_APP_PRIVATE_KEY` exactly as GitHub issues it —
 the PEM, newlines and all. The workflow reduces it to a single line before it enters the
 two `KEY=value` channels that carry it to pytest, neither of which can hold a multi-line
-value. A key that is already base64-encoded is accepted unchanged, so
-`TEST_GITHUB_APP_PRIVATE_KEY`'s existing encoded form stays valid.
+value. A value that is already base64-encoded is accepted unchanged, so an existing
+encoded key does not need re-entering.
 
 #### Credential hygiene
 

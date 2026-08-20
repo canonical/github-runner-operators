@@ -96,9 +96,10 @@ jobs:
           VAULT_APPROLE_ROLE_ID: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
           VAULT_APPROLE_SECRET_ID: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
           VAULT_KV_PATH: ${{ secrets.E2E_VAULT_KV_PATH || 'kv/data/garm-e2e/prodstack' }}
-        # Python rather than curl and jq: it keeps the response in memory, so the
-        # credentials never reach the runner's disk, and it drops a dependency that
-        # would otherwise have to be installed over the private endpoint's egress.
+        # Python rather than curl and jq: the Vault response body never becomes a
+        # temporary file, so only the two values it yields are handed on — through
+        # $GITHUB_ENV, like every other secret in this job. It also drops a dependency
+        # that would otherwise be installed over the private endpoint's egress.
         run: |
           python3 - <<'SCRIPT'
           import json
