@@ -172,19 +172,19 @@ jobs:
 
           secret = call(f"{addr}/v1/{kv_path}", token=token).get("data", {}).get("data", {})
 
+          # The Vault secret is keyed on the plain names; openstackclient and the tests
+          # read them as OS_*.
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              for key in ("OS_USERNAME", "OS_PASSWORD"):
-                  value = secret.get(key)
+              for field, variable in (("username", "OS_USERNAME"), ("password", "OS_PASSWORD")):
+                  value = secret.get(field)
                   if not value:
-                      # Name what the secret does hold: the mismatch is almost always a
-                      # field naming difference, and the keys are not themselves secret.
                       fail(
-                          f"Field {key!r} missing from the Vault secret at the configured "
-                          f"KV path (E2E_VAULT_KV_PATH). Fields present: {sorted(secret)}."
+                          f"Field {field!r} missing from the Vault secret at the "
+                          f"configured KV path (E2E_VAULT_KV_PATH)."
                       )
                   # Mask before writing: everything downstream may echo the env file.
                   print(f"::add-mask::{value}")
-                  env_file.write(f"{key}={value}\n")
+                  env_file.write(f"{variable}={value}\n")
 
           print("Tenant credentials fetched and masked.")
           SCRIPT

@@ -280,7 +280,7 @@ not register masks for these itself.
 | `E2E_VAULT_KV_PATH` | Optional. Defaults to `kv/data/garm-e2e/prodstack` |
 
 The OpenStack username and password are **not** repository secrets. They are read at run
-time from the Vault KV v2 secret above, which must hold `OS_USERNAME` and `OS_PASSWORD`.
+time from the Vault KV v2 secret above, which must hold `username` and `password`.
 
 The `E2E_GITHUB_APP_*` trio is a GitHub App of its own, distinct from the
 `TEST_GITHUB_APP_*` one the integration suite uses. The end-to-end test registers and
