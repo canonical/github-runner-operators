@@ -47,6 +47,7 @@ PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_PORT: typing.Final[int] = 8080
+GARM_LOCAL_API_BASE_URL: typing.Final[str] = f"http://127.0.0.1:{GARM_PORT}/api/v1"
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -202,7 +203,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.error(message)
             raise GarmCleanupError(message)
 
-        base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+        base_url = GARM_LOCAL_API_BASE_URL
         try:
             auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
             GarmResourceCleanup(auth_client).run()
@@ -565,7 +566,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
-        client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
+        client = GarmApiClient(GARM_LOCAL_API_BASE_URL)
 
         try:
             client.wait_for_ready()
@@ -725,7 +726,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Talk to GARM over its fixed local listener (same target as first-run), rather than
         # _get_garm_url() which depends on charm config that is not set for the local API.
-        base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+        base_url = GARM_LOCAL_API_BASE_URL
         try:
             charm_state = CharmState.from_charm(self)
             auth_client = GarmAuthenticatedClient.from_login(
