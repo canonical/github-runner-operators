@@ -517,6 +517,25 @@ def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_ap
     assert out is not None
 
 
+def test_remove_skips_cleanup_when_garm_never_completed_first_run(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: GARM reports HTTP 409 for controller-info and no admin secret exists.
+    act: Emit application removal.
+    assert: Removal succeeds without authentication or cleanup because GARM has no resources.
+    """
+    garm_api.client.return_value.is_initialized.return_value = False
+
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+    garm_api.client.assert_called_once_with("http://127.0.0.1:8080/api/v1")
+    assert "has not completed first-run" in caplog.text
+
+
 def test_remove_unit_skips_global_cleanup_while_application_remains(
     ctx: Context, garm_api: _GarmApiMocks
 ):
@@ -533,6 +552,25 @@ def test_remove_unit_skips_global_cleanup_while_application_remains(
 
     cleanup_cls.assert_not_called()
     garm_api.auth.from_login.assert_not_called()
+
+
+def test_remove_blocks_when_garm_initialization_state_is_unknown(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: The unauthenticated GARM initialization probe cannot reach the API.
+    act: Emit application removal.
+    assert: Removal remains blocked because resources cannot be proven absent.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+
+    with pytest.raises(UncaughtCharmError, match="Cannot determine whether GARM was initialized"):
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    garm_api.auth.from_login.assert_not_called()
+    assert "restore GARM/API availability" in caplog.text
 
 
 def test_remove_refuses_without_admin_credentials(

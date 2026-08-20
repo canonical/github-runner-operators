@@ -182,6 +182,22 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
+        initialization_client = GarmApiClient(GARM_LOCAL_API_BASE_URL)
+        try:
+            if not initialization_client.is_initialized():
+                logger.info(
+                    "GARM has not completed first-run; no resources require removal cleanup"
+                )
+                return
+        except GarmApiError as exc:
+            message = (
+                f"Cannot determine whether GARM was initialized: {exc}. "
+                "Operator action: restore GARM/API availability, then retry "
+                "Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message) from exc
+
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
             message = (
