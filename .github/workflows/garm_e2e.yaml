@@ -10,10 +10,6 @@ name: GARM E2E
 
 on:
   workflow_dispatch:
-  # Temporary: label a pull request `run-e2e` to exercise this workflow from its
-  # branch. Removed again once the run has served its purpose.
-  pull_request:
-    types: [opened, synchronize, labeled]
 
 permissions:
   contents: read
@@ -21,11 +17,6 @@ permissions:
 jobs:
   e2e:
     name: GARM E2E test
-    # `pull_request`, never `pull_request_target`: a fork's code must not run with
-    # access to these secrets. A fork PR gets none, so it can only fail fast.
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || contains(github.event.pull_request.labels.*.name, 'run-e2e')
     runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
     timeout-minutes: 15
     steps:
