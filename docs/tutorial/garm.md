@@ -197,31 +197,31 @@ juju grant-secret openstack-password garm-configurator
 juju grant-secret github-app-private-key garm-configurator
 ```
 
-Now configure the charm. Replace the two secret URIs with the ones printed above, and replace
-`github-app-id`, `github-app-installation-id`, and `repo` with your own values. The OpenStack
-values are placeholders — they are stored and forwarded, but nothing contacts the cloud in this
-tutorial:
+Now configure the charm. Enter the `openstack-*` values exactly as they appear below: they are
+placeholders, stored and forwarded but never used to contact a cloud in this tutorial. Replace
+every value written in angle brackets with your own — the two secret URIs printed above, the app ID
+and installation ID you noted earlier, and your repository:
 
 ```bash
 juju config garm-configurator \
   openstack-auth-url="https://keystone.example.com:5000/v3" \
   openstack-username="tutorial-user" \
-  openstack-password="secret:8rdhlq3nsgh46i3tnpbg" \
+  openstack-password="<openstack-password-secret-uri>" \
   openstack-project-name="tutorial-project" \
   openstack-user-domain-name="Default" \
   openstack-project-domain-name="Default" \
   openstack-region-name="RegionOne" \
   openstack-network="external-net" \
-  github-app-id=123456 \
-  github-app-installation-id=7891011 \
-  github-app-private-key="secret:ebrdkso8hr4vbdnha9rg" \
+  github-app-id=<app-id> \
+  github-app-installation-id=<installation-id> \
+  github-app-private-key="<private-key-secret-uri>" \
   name="tutorial-scaleset" \
   flavor="m1.large" \
   os-arch="amd64" \
   min-idle-runner=0 \
   max-runner=1 \
   labels="tutorial" \
-  repo="your-user/your-repo"
+  repo="<your-user>/<your-repo>"
 ```
 
 `min-idle-runner=0` keeps GARM from trying to create a runner while it has nowhere to create one.
@@ -244,8 +244,9 @@ juju integrate garm-configurator:image fake-image-builder:provide-github-runner-
 juju integrate garm garm-configurator
 ```
 
-The first integration hands the configurator its image ID and turns it active. The second gives
-GARM the scale set configuration, and GARM registers the repository and the scale set with GitHub.
+Over the first integration, `fake-image-builder` publishes its image ID to the configurator, which
+becomes active. Over the second, the configurator hands GARM the scale set configuration, and GARM
+registers the repository and the scale set with GitHub.
 
 Run `juju status` to check the result:
 
