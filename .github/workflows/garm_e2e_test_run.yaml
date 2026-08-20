@@ -32,6 +32,9 @@ jobs:
       - name: Assert egress through aproxy
         run: |
           echo "Checking egress connectivity..."
-          curl -sf --max-time 10 https://github.com > /dev/null 2>&1 && \
-            echo "Egress OK (via aproxy)" || \
-            { echo "Egress FAILED"; exit 1; }
+          if curl -sf --max-time 10 https://github.com > /dev/null 2>&1; then
+            echo "Egress OK (via aproxy)"
+          else
+            echo "Egress FAILED"
+            exit 1
+          fi
