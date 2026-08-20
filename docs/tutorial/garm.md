@@ -114,19 +114,20 @@ juju deploy postgresql-k8s --channel 16/stable --trust
 juju integrate garm postgresql-k8s
 ```
 
-GARM stays blocked until PostgreSQL finishes bootstrapping, which takes a few minutes. Watch the
-deployment settle with `juju status --watch 5s`. GARM becomes active once the database is
-available and it has generated its admin credentials:
+GARM reports `missing integrations: postgresql` until PostgreSQL finishes bootstrapping and hands
+over its credentials, which takes a few minutes. Watch the deployment settle with
+`juju status --watch 5s`. GARM then moves on to waiting for the scale set configuration, which the
+next steps supply:
 
 ```{terminal}
 :output-only:
 
-App             Version  Status  Scale  Charm           Channel      Rev  Address         Exposed  Message
-garm                     active      1  garm            latest/edge   94  10.152.183.171  no
-postgresql-k8s  16.14    active      1  postgresql-k8s  16/stable    927  10.152.183.178  no
+App             Version  Status   Scale  Charm           Channel      Rev  Address         Exposed  Message
+garm                     waiting      1  garm            latest/edge   94  10.152.183.171  no       Waiting for garm-configurator relation
+postgresql-k8s  16.14    active       1  postgresql-k8s  16/stable    927  10.152.183.178  no
 
 Unit               Workload  Agent  Address     Ports  Message
-garm/0*            active    idle   10.1.22.21
+garm/0*            waiting   idle   10.1.22.21         Waiting for garm-configurator relation
 postgresql-k8s/0*  active    idle   10.1.22.15         Primary
 ```
 
