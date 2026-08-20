@@ -176,9 +176,11 @@ jobs:
               for key in ("OS_USERNAME", "OS_PASSWORD"):
                   value = secret.get(key)
                   if not value:
+                      # Name what the secret does hold: the mismatch is almost always a
+                      # field naming difference, and the keys are not themselves secret.
                       fail(
                           f"Field {key!r} missing from the Vault secret at the configured "
-                          f"KV path (E2E_VAULT_KV_PATH)."
+                          f"KV path (E2E_VAULT_KV_PATH). Fields present: {sorted(secret)}."
                       )
                   # Mask before writing: everything downstream may echo the env file.
                   print(f"::add-mask::{value}")
