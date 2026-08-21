@@ -6,6 +6,7 @@
 import base64
 import logging
 import time
+from typing import NoReturn
 
 import urllib3
 import urllib3.exceptions
@@ -67,7 +68,7 @@ class GarmEntityNotFoundError(GarmApiError):
     """Raised when a required GARM entity (org/repo/provider) cannot be found."""
 
 
-def _raise_resource_api_error(message: str, exc: ApiException) -> None:
+def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
     """Raise a resource-specific wrapper error while preserving 404 semantics."""
     error_type = GarmNotFoundError if exc.status == 404 else GarmApiError
     raise error_type(message) from exc
