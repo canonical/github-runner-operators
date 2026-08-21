@@ -255,6 +255,47 @@ def test_list_scalesets(api_response, expected_names):
 
 
 @pytest.mark.parametrize(
+    "api_response, expected_count",
+    [
+        ([MagicMock(), MagicMock()], 2),
+        ([], 0),
+        (None, 0),
+    ],
+    ids=["two-instances", "empty-list", "none-response"],
+)
+def test_list_scaleset_instances(api_response, expected_count):
+    """
+    arrange: GarmAuthenticatedClient with InstancesApi returning the parameterised response.
+    act: Call list_scaleset_instances(7).
+    assert: The runner count is reported, with a None response reading as empty — the
+        reconciler gates a scaleset's deletion on this count.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.InstancesApi") as MockApi:
+            MockApi.return_value.list_scale_set_instances.return_value = api_response
+            result = client.list_scaleset_instances(7)
+    assert len(result) == expected_count
+    MockApi.return_value.list_scale_set_instances.assert_called_once_with(
+        scaleset_id="7", _request_timeout=30
+    )
+
+
+def test_list_scaleset_instances_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with InstancesApi raising ApiException(404).
+    act: Call list_scaleset_instances(99).
+    assert: GarmApiError is raised, so an unreadable count is never mistaken for zero.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.InstancesApi") as MockApi:
+            MockApi.return_value.list_scale_set_instances.side_effect = ApiException(status=404)
+            with pytest.raises(GarmApiError):
+                client.list_scaleset_instances(99)
+
+
+@pytest.mark.parametrize(
     "target, registered, expected",
     [
         ("my-org", ["my-org", "other-org"], "org-uuid-123"),

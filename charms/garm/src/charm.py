@@ -34,7 +34,7 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
-from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
+from scaleset_reconciler import Handover, ScalesetProgress, ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,14 @@ OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-ope
 GARM_PORT: typing.Final[int] = 8080
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
+# Juju truncates long statuses; name a couple of scalesets and count the rest.
+_MAX_DRAINING_IN_STATUS: typing.Final[int] = 2
+# The phases a scaleset replacement passes through, in order. Named here rather than
+# spelled inline so the status vocabulary is greppable; not an enum, because the
+# draining phase carries the runner count and so is formatted, not selected.
+_PHASE_CREATING: typing.Final[str] = "creating replacement"
+_PHASE_RETIRING: typing.Final[str] = "retiring predecessor"
+_PHASE_AWAITING_DELETION: typing.Final[str] = "awaiting deletion"
 
 GARM_CONFIG_VERSION: typing.Final[str] = "1"
 
@@ -114,6 +122,60 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     except ValueError:
         pass
     return {}
+
+
+def _scaleset_replacement_phase(entries: list[ScalesetProgress]) -> str:
+    """Describe where one scaleset's replacement has got to.
+
+    Args:
+        entries: Every generation of one scaleset still being replaced. A label change
+            during an earlier drain leaves several predecessors handing over to the same
+            replacement; to the operator that is one changeover, so they collapse into
+            one phase — the least advanced, with the runner counts summed.
+
+    Returns:
+        The phase, in the operator's terms. The runner count is only reported once
+        the labels have been handed over, since before that nothing is draining yet;
+        with the count at zero the scaleset has drained and GARM has yet to accept
+        its deletion, which is a distinct thing to be waiting on.
+    """
+    handovers = {entry.handover for entry in entries}
+    if Handover.PENDING in handovers:
+        return _PHASE_CREATING
+    if Handover.FAILED in handovers:
+        return _PHASE_RETIRING
+    runners = sum(entry.remaining_runners for entry in entries)
+    if not runners:
+        return _PHASE_AWAITING_DELETION
+    return f"draining {runners} runner{'' if runners == 1 else 's'}"
+
+
+def _scaleset_replacement_status(replacing: list[ScalesetProgress]) -> str:
+    """Summarise in-progress scaleset replacements for the unit status.
+
+    Args:
+        replacing: Scaleset replacements still in flight, one entry per generation
+            being replaced.
+
+    Returns:
+        A status message naming at most two scalesets, so it stays readable when
+        several are replaced at once. Each is named by the logical name the operator
+        configured — the live names carry a label hash the operator never chose — and
+        the live names are logged in full by the reconciler. A scaleset draining two
+        generations at once is named once, so it cannot push the others out of the
+        message with a repeated line.
+    """
+    by_scaleset: dict[str, list[ScalesetProgress]] = {}
+    for progress in replacing:
+        by_scaleset.setdefault(progress.logical_name, []).append(progress)
+    shown = [
+        f"{logical_name} -> {entries[0].replacement_name} ({_scaleset_replacement_phase(entries)})"
+        for logical_name, entries in list(by_scaleset.items())[:_MAX_DRAINING_IN_STATUS]
+    ]
+    remainder = len(by_scaleset) - len(shown)
+    if remainder > 0:
+        shown.append(f"+{remainder} more")
+    return f"Replacing scaleset {', '.join(shown)}"
 
 
 class GarmCharm(paas_charm.go.Charm):
@@ -459,8 +521,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
 
         logger.info(
-            "GARM configurator provider data: relation_unit_count=%d "
-            "configured_provider_count=%d",
+            "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
             len(relation.units),
             len(configs),
         )
@@ -694,8 +755,21 @@ class GarmCharm(paas_charm.go.Charm):
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
-            ScalesetReconciler(auth_client).reconcile(self._build_desired_scalesets(template_id))
-            self.update_app_and_unit_status(ops.ActiveStatus())
+            replacing = ScalesetReconciler(auth_client).reconcile(
+                self._build_desired_scalesets(template_id)
+            )
+            # A label change recreates the scaleset and drains the old one, which
+            # outlives this hook: report progress and let update-status converge it.
+            # Active, not maintenance: every label is served throughout the drain, by
+            # the replacement or the predecessor, so nothing is degraded. A drain can
+            # run to DRAIN_DEADLINE, and blocking `juju wait-for` on hours of healthy
+            # background convergence would be wrong.
+            if replacing:
+                self.update_app_and_unit_status(
+                    ops.ActiveStatus(_scaleset_replacement_status(replacing))
+                )
+            else:
+                self.update_app_and_unit_status(ops.ActiveStatus())
         except CharmedTemplateError as exc:
             logger.warning("GARM charmed template error during reconcile: %s", exc)
             self.update_app_and_unit_status(ops.WaitingStatus(str(exc)))
