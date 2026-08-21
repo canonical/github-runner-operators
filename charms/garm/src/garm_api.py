@@ -68,12 +68,6 @@ class GarmEntityNotFoundError(GarmApiError):
     """Raised when a required GARM entity (org/repo/provider) cannot be found."""
 
 
-def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
-    """Raise a resource-specific wrapper error while preserving 404 semantics."""
-    error_type = GarmNotFoundError if exc.status == 404 else GarmApiError
-    raise error_type(message) from exc
-
-
 class GarmApiClient:
     """HTTP client for the GARM REST API.
 
@@ -996,3 +990,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+
+def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
+    """Raise a resource-specific wrapper error while preserving 404 semantics."""
+    error_type = GarmNotFoundError if exc.status == 404 else GarmApiError
+    raise error_type(message) from exc

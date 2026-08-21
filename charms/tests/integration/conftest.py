@@ -507,7 +507,7 @@ def deploy_garm_app_no_integration_fixture(
     return app_name
 
 
-@pytest.fixture(scope="module", name="garm_app_never_initialized")
+@pytest.fixture(scope="module", name="garm_app_before_database_setup")
 def deploy_garm_app_for_removal_fixture(
     juju: jubilant.Juju,
     garm_charm_file: str,

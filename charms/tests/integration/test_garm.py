@@ -69,18 +69,19 @@ def test_garm_blocks_without_postgresql(
     assert "postgresql" in app_status.message.lower()
 
 
-def test_garm_remove_application_before_first_run(
+def test_garm_remove_application_before_database_setup(
     juju: jubilant.Juju,
-    garm_app_never_initialized: str,
+    garm_app_before_database_setup: str,
 ):
     """
     arrange: A GARM application is blocked before PostgreSQL integration and first-run setup.
     act: Remove the application through Juju.
-    assert: The remove hook observes HTTP 409 from GARM and allows removal without credentials.
+    assert: The remove hook allows removal because GARM cannot have been initialized
+        without PostgreSQL.
     """
-    juju.remove_application(garm_app_never_initialized)
+    juju.remove_application(garm_app_before_database_setup)
     juju.wait(
-        lambda status: garm_app_never_initialized not in status.apps,
+        lambda status: garm_app_before_database_setup not in status.apps,
         timeout=10 * 60,
         delay=10,
     )
