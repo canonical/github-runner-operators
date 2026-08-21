@@ -52,13 +52,16 @@ jobs:
           E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
           E2E_GITHUB_APP_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_APP_INSTALLATION_ID }}
           E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.E2E_GITHUB_APP_PRIVATE_KEY }}
+          E2E_RUNNER_IMAGE_NAME: ${{ secrets.E2E_RUNNER_IMAGE_NAME }}
+          E2E_OPENSTACK_FLAVOR: ${{ secrets.E2E_OPENSTACK_FLAVOR }}
+          E2E_RUNNER_HTTP_PROXY: ${{ secrets.E2E_RUNNER_HTTP_PROXY }}
         run: |
           set -euo pipefail
 
           for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
                      OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
                      E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
-                     E2E_GITHUB_APP_PRIVATE_KEY; do
+                     E2E_GITHUB_APP_PRIVATE_KEY E2E_RUNNER_IMAGE_NAME; do
             if [ -z "${!KEY:-}" ]; then
               echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
               exit 1
@@ -68,8 +71,18 @@ jobs:
           # Everything but the key is single-line already.
           for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
                      OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
-                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID; do
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
+                     E2E_RUNNER_IMAGE_NAME; do
             echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+          done
+
+          # Written only when set: the fixtures fall back to their own defaults for
+          # these two, and an exported empty string is not absent -- it would win
+          # over the default rather than yield to it.
+          for KEY in E2E_OPENSTACK_FLAVOR E2E_RUNNER_HTTP_PROXY; do
+            if [ -n "${!KEY:-}" ]; then
+              echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+            fi
           done
 
           # The key travels through two channels that take one KEY=value per line —
