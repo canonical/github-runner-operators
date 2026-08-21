@@ -133,7 +133,15 @@ def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik:
     """
     address = _get_garm_address(juju, garm_app)
     headers = {"Authorization": f"Bearer {_garm_login(juju, address)}"}
-    traefik_ip = juju.status().apps[traefik].units[f"{traefik}/0"].address
+
+    # traefik reports the address it serves on, which is the one MetalLB handed it. Its
+    # unit address is the pod IP, which is not reachable from outside the cluster and so
+    # is not what GARM should be advertising.
+    message = juju.status().apps[traefik].app_status.message
+    serving = re.search(r"https?://(?P<host>[^/\s]+)", message)
+    if serving is None:
+        pytest.fail(f"Could not read traefik's serving address from its status: {message!r}")
+    traefik_ip = serving.group("host")
 
     response = requests.get(
         f"http://{address}:{GARM_API_PORT}/api/v1/controller-info", headers=headers, timeout=30
