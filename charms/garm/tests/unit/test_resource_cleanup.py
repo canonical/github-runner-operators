@@ -5,7 +5,10 @@
 
 from types import SimpleNamespace
 
-from resource_cleanup import GarmResourceCleanup
+import pytest
+
+from garm_api import GarmNotFoundError
+from resource_cleanup import GarmCleanupError, GarmResourceCleanup
 
 
 class _FakeClient:
@@ -63,6 +66,52 @@ def test_cleanup_drains_runners_before_deleting_scaleset():
         ("list", 7),
         ("delete-scaleset", 7),
     ]
+
+
+class _ScalesetAlreadyGoneClient(_FakeClient):
+    def update_scaleset(self, scaleset_id, params):
+        raise GarmNotFoundError(f"scaleset {scaleset_id} was already removed")
+
+
+def test_cleanup_treats_scaleset_removed_during_drain_as_success():
+    """
+    arrange: A scaleset disappears before cleanup can disable it.
+    act: Run cleanup after the API reports the scaleset is not found.
+    assert: Cleanup treats the already-removed resource as success.
+    """
+    client = _ScalesetAlreadyGoneClient([[]])
+
+    GarmResourceCleanup(client, timeout=1, sleep=lambda _: None, monotonic=lambda: 0).run()
+
+
+def test_cleanup_timeout_identifies_blocking_runner_and_operator_action():
+    """
+    arrange: A scaleset repeatedly reports a runner stuck in pending creation.
+    act: Run cleanup until its deadline expires.
+    assert: The error identifies the resource, state, and action for the operator.
+    """
+    client = _FakeClient(
+        [
+            [SimpleNamespace(name="runner-1", status="pending_create")],
+            [SimpleNamespace(name="runner-1", status="pending_create")],
+        ]
+    )
+    clock = iter([0, 0, 2])
+
+    with pytest.raises(
+        GarmCleanupError,
+        match=(
+            r"scaleset 7.*runner runner-1.*pending_create.*"
+            r"operator action: inspect the runner state"
+        ),
+    ):
+        GarmResourceCleanup(
+            client,
+            timeout=1,
+            poll_interval=0,
+            sleep=lambda _: None,
+            monotonic=lambda: next(clock),
+        ).run()
 
 
 def test_cleanup_does_not_redelete_pending_runner():

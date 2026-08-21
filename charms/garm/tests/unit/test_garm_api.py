@@ -8,7 +8,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
+from garm_api import (
+    GarmApiClient,
+    GarmApiError,
+    GarmAuthenticatedClient,
+    GarmConnectionError,
+    GarmNotFoundError,
+)
 from garm_client.exceptions import ApiException
 from garm_client.models.instance import Instance
 
@@ -273,6 +279,20 @@ def test_list_scale_set_instances_converts_id_to_string():
     assert result == [instance]
 
 
+def test_list_scale_set_instances_raises_not_found_on_404():
+    """
+    arrange: An authenticated client whose generated instances API returns HTTP 404.
+    act: List instances for a scaleset that was removed concurrently.
+    assert: The wrapper raises the not-found error for idempotent cleanup handling.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.InstancesApi") as MockApi:
+            MockApi.return_value.list_scale_set_instances.side_effect = ApiException(status=404)
+            with pytest.raises(GarmNotFoundError, match="scaleset 42"):
+                client.list_scale_set_instances(42)
+
+
 def test_delete_instance_passes_force_and_bypass_flags():
     """
     arrange: An authenticated client and a generated InstancesApi stub.
@@ -292,6 +312,20 @@ def test_delete_instance_passes_force_and_bypass_flags():
         bypass_gh_unauthorized=True,
         _request_timeout=30,
     )
+
+
+def test_delete_instance_raises_not_found_on_404():
+    """
+    arrange: An authenticated client whose generated instance API returns HTTP 404.
+    act: Delete a runner that has already disappeared from GARM.
+    assert: The wrapper raises the not-found error so cleanup can treat the result as idempotent.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.InstancesApi") as MockApi:
+            MockApi.return_value.delete_instance.side_effect = ApiException(status=404)
+            with pytest.raises(GarmNotFoundError, match="runner runner-1"):
+                client.delete_instance("runner-1")
 
 
 @pytest.mark.parametrize(
