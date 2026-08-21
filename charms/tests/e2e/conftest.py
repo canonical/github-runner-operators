@@ -98,49 +98,59 @@ def integrate_garm_ingress_fixture(
     garm_app: str,
     traefik: str,
 ) -> str:
-    """Integrate GARM with traefik and assert controller URLs resolve to the LB IP.
+    """Relate GARM to traefik so its controller URLs become routable.
 
-    This is the guard that the callback path is actually live before a VM is spawned.
+    Args:
+        juju: Juju client for the model GARM is deployed in.
+        garm_app: Name of the deployed GARM application.
+        traefik: Name of the deployed traefik application.
+
+    Returns:
+        The GARM application name.
     """
-    app_name = garm_app
-    juju.integrate(f"{app_name}:ingress", traefik)
-    # GARM cannot reach active here: it reports "Waiting for garm-configurator relation"
-    # until the configurator arrives, and the fixture that deploys the configurator
-    # depends on this one. Waiting for traefik to serve and for GARM's hook to settle is
-    # what says the ingress has actually been taken up.
+    juju.integrate(f"{garm_app}:ingress", traefik)
+    # GARM cannot reach active here, and its API is not up either: the charm's restart()
+    # returns before starting the workload while no configurator has supplied provider
+    # configs. So this waits for traefik to serve and for GARM's hook to settle, and the
+    # controller URLs are checked once the configurator has brought the workload up.
     juju.wait(
         lambda status: jubilant.all_active(status, traefik)
-        and jubilant.all_agents_idle(status, app_name),
-        error=lambda status: jubilant.any_error(status, app_name, traefik),
+        and jubilant.all_agents_idle(status, garm_app),
+        error=lambda status: jubilant.any_error(status, garm_app, traefik),
         timeout=10 * 60,
         delay=10,
     )
+    return garm_app
 
-    address = _get_garm_address(juju, app_name)
-    token = _garm_login(juju, address)
-    headers = {"Authorization": f"Bearer {token}"}
 
-    traefik_status = juju.status()
-    traefik_unit = f"{traefik}/0"
-    traefik_ip = traefik_status.apps[traefik].units[traefik_unit].address
+def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik: str) -> None:
+    """Assert GARM advertises callback URLs a runner VM on the tenant can reach.
 
-    # Assert GARM's controller-info reports metadata_url with the Traefik LB IP
-    resp = requests.get(
-        f"http://{address}:{GARM_API_PORT}/api/v1/controller-info",
-        headers=headers,
-        timeout=30,
+    Args:
+        juju: Juju client for the model GARM is deployed in.
+        garm_app: Name of the deployed GARM application.
+        traefik: Name of the deployed traefik application.
+    """
+    address = _get_garm_address(juju, garm_app)
+    headers = {"Authorization": f"Bearer {_garm_login(juju, address)}"}
+    traefik_ip = juju.status().apps[traefik].units[f"{traefik}/0"].address
+
+    response = requests.get(
+        f"http://{address}:{GARM_API_PORT}/api/v1/controller-info", headers=headers, timeout=30
     )
-    resp.raise_for_status()
-    controller = resp.json()
-    metadata_url = controller.get("metadata_url", "")
-    logger.info("GARM controller metadata_url: %s (expected host: %s)", metadata_url, traefik_ip)
+    response.raise_for_status()
+    metadata_url = response.json().get("metadata_url", "")
+    logger.info("GARM metadata_url: %s (expecting host %s)", metadata_url, traefik_ip)
+
+    # A spawned VM reaches GARM over the load balancer; the in-cluster service name it
+    # would otherwise advertise does not resolve outside the cluster, so a runner would
+    # boot and then never call back.
     assert traefik_ip in metadata_url, (
-        f"Expected metadata_url to contain Traefik LB IP {traefik_ip}, got: {metadata_url}"
+        f"Expected metadata_url on the traefik LB address {traefik_ip}, got: {metadata_url}"
     )
     assert not re.search(r"\.svc\.", metadata_url), (
-        f"Expected metadata_url to be routable (not .svc), got: {metadata_url}"
+        f"Expected a routable metadata_url, got the in-cluster address: {metadata_url}"
     )
-    return app_name
 
 
 @pytest.fixture(scope="module", name="real_image_builder")
@@ -159,6 +169,7 @@ def deploy_real_image_builder_fixture(juju: jubilant.Juju) -> str:
 def deploy_e2e_scaleset_fixture(
     juju: jubilant.Juju,
     garm_with_ingress: str,
+    traefik: str,
     openstack_credentials: dict[str, str],
     real_image_builder: str,
     garm_configurator_charm_file: str,
@@ -233,12 +244,12 @@ def deploy_e2e_scaleset_fixture(
         _collect_debug_info(juju, app_name)
         raise
 
-    # Then integrate with GARM
+    # Then integrate with GARM. This is what starts the workload: until provider configs
+    # arrive from the configurator, the charm's restart() returns before starting it.
     juju.integrate(app_name, garm_app)
     try:
         juju.wait(
-            lambda status: jubilant.all_active(status, app_name)
-            and jubilant.all_agents_idle(status, garm_app),
+            lambda status: jubilant.all_active(status, app_name, garm_app),
             error=lambda status: jubilant.any_error(status, app_name),
             timeout=10 * 60,
             delay=10,
@@ -246,6 +257,12 @@ def deploy_e2e_scaleset_fixture(
     except (TimeoutError, jubilant.WaitError):
         _collect_debug_info(juju, garm_app)
         raise
+
+    # Checked here rather than when the ingress relation is made, which is the first
+    # moment GARM is serving and still before any runner has been asked for: a VM that
+    # boots against an unroutable callback URL never reports back, and the failure
+    # surfaces much later as a runner that simply never registers.
+    assert_controller_urls_routable(juju, garm_app, traefik)
 
     yield label
 
