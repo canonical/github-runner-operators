@@ -19,15 +19,42 @@ permissions:
   contents: read
 
 jobs:
+  # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
+  # for opcli to fetch during the spread prepare.
+  build:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v0.0.1-alpha.10
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    with:
+      working-directory: .
+
   e2e:
     name: GARM E2E test
+    # Waits for the build rather than provisioning alongside it: the private-endpoint
+    # runner is scarce, and starting early would only hold it idle until the artifacts
+    # the spread prepare fetches actually exist.
+    needs: [build]
     # `pull_request`, never `pull_request_target`: a fork's code must not run with
     # access to these secrets. A fork PR gets none, so it can only fail fast.
     if: >-
       github.event_name == 'workflow_dispatch'
       || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    permissions:
+      contents: read
+      packages: read
+      # opcli fetches the build job's artifacts from this workflow run.
+      actions: read
     runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
-    timeout-minutes: 15
+    # Longer than the suite's own kill-timeout in spread.yaml, so spread stops the run
+    # first and says which task hung, rather than the job being cut from underneath it.
+    # Generous on purpose: it is not worth tuning before a real run says how long a
+    # deploy, a spawn and a dispatch actually take here.
+    timeout-minutes: 130
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -224,12 +251,72 @@ jobs:
           set -euo pipefail
 
           uv tool install python-openstackclient
+          # uv installs into ~/.local/bin, which later steps do not inherit; the
+          # cleanup step needs the client too.
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
           TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
           echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
 
-      - name: Run the E2E suite
+      - name: Install opcli and spread
         run: |
           set -euo pipefail
-          uv tool install tox --with tox-uv
-          tox -e garm-e2e
+          uv tool install "opcli[cli] @ git+https://github.com/canonical/charm-ci.git@main"
+          sudo snap install go --classic
+          go install github.com/canonical/spread/cmd/spread@latest
+          sudo ln -sf ~/go/bin/spread /usr/local/bin/spread
+
+      - name: Point concierge at a MetalLB range on this host
+        run: |
+          set -euo pipefail
+
+          # traefik-k8s asks for a LoadBalancer service, which microk8s cannot satisfy
+          # unaided. Pinning the pool to this host's own address is what makes GARM's
+          # callback and metadata URLs resolve to something a runner VM on the tenant
+          # can actually reach -- an in-cluster service address cannot serve them.
+          HOST_IP=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+')
+          echo "MetalLB pool pinned to ${HOST_IP}"
+          sed "s/@HOST_IP@/${HOST_IP}/g" concierge-e2e.yaml.tmpl > concierge-e2e.yaml
+          echo "CONCIERGE=concierge-e2e.yaml" >> "$GITHUB_ENV"
+
+      - name: Run the E2E suite
+        env:
+          CI: "true"
+          # Spread reads this from the host environment and the prepare script uses it
+          # to download the build job's artifacts. Actions does not export it on its own.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Ask opcli for the selector rather than writing it out here, so a rename in
+          # spread.yaml cannot leave this step silently selecting nothing.
+          SELECTOR=$(opcli spread jobs --include 'e2e-test-ci:*' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["include"][0]["selector"])')
+          echo "Running ${SELECTOR}"
+          opcli spread run -- -vv "${SELECTOR}"
+
+      # Deliberately no juju debug-log or status dump here: both replay charm output
+      # that carries the rendered GARM config, and so the tenant password. The suite
+      # collects its own diagnostics through the sentinel redactor instead, and a
+      # re-run with debug logging drops into the tmate session above.
+      - name: Delete runners left behind on the tenant
+        if: always()
+        run: |
+          set -euo pipefail
+
+          # GARM stamps every server it creates with garm-controller-id. Matching that
+          # alongside the runner image scopes the sweep to VMs this suite's GARM
+          # created, so a failure that skips the suite's own teardown cannot leave them
+          # running and billing.
+          ORPHANS=$(openstack server list --long --image "$E2E_RUNNER_IMAGE_NAME" -f json \
+            | python3 -c "import json,sys; print('\n'.join(s['ID'] for s in json.load(sys.stdin) if 'garm-controller-id' in (s.get('Properties') or {})))")
+
+          if [ -z "$ORPHANS" ]; then
+            echo "No runners left on the tenant."
+            exit 0
+          fi
+
+          echo "$ORPHANS" | while read -r ID; do
+            echo "Deleting orphaned runner ${ID}"
+            openstack server delete --wait "$ID" || echo "::warning::Could not delete ${ID}"
+          done
