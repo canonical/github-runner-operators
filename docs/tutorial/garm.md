@@ -47,17 +47,17 @@ You can use Multipass to create an isolated environment:
     multipass shell garm-tutorial-vm
 ```
 
-### Install Juju and MicroK8s
+### Install Juju and Canonical Kubernetes
 
-This tutorial requires Juju 3 and MicroK8s. Use
+This tutorial requires Juju 3 and Canonical Kubernetes. Use
 [Concierge](https://github.com/canonical/concierge) to install and configure both:
 
 ```bash
 sudo snap install --classic concierge
-sudo concierge prepare -p microk8s
+sudo concierge prepare -p k8s
 ```
 
-Concierge also bootstraps a Juju controller on MicroK8s. Verify it with:
+Concierge also bootstraps a Juju controller on Canonical Kubernetes. Verify it with:
 
 ```bash
 juju controllers
@@ -66,7 +66,7 @@ juju controllers
 If Concierge did not bootstrap a controller, run:
 
 ```bash
-juju bootstrap microk8s tutorial-controller
+juju bootstrap k8s tutorial-controller
 ```
 
 The verification step at the end of this tutorial also uses `curl` and `jq`.
@@ -128,12 +128,12 @@ next steps supply:
 :output-only:
 
 App             Version  Status   Scale  Charm           Channel      Rev  Address         Exposed  Message
-garm                     waiting      1  garm            latest/edge   94  10.152.183.171  no       Waiting for garm-configurator relation
-postgresql-k8s  16.14    active       1  postgresql-k8s  16/stable    927  10.152.183.178  no
+garm                     waiting      1  garm            latest/edge   95  10.152.183.123  no       Waiting for garm-configurator relation
+postgresql-k8s  16.14    active       1  postgresql-k8s  16/stable    927  10.152.183.82   no
 
-Unit               Workload  Agent  Address     Ports  Message
-garm/0*            waiting   idle   10.1.22.21         Waiting for garm-configurator relation
-postgresql-k8s/0*  active    idle   10.1.22.15         Primary
+Unit               Workload  Agent  Address    Ports  Message
+garm/0*            waiting   idle   10.1.0.66         Waiting for garm-configurator relation
+postgresql-k8s/0*  active    idle   10.1.0.54         Primary
 ```
 
 ## Deploy a stand-in image provider
@@ -238,8 +238,8 @@ in the output of `juju status`:
 ```{terminal}
 :output-only:
 
-Unit                  Workload  Agent  Address     Ports  Message
-garm-configurator/0*  waiting   idle   10.1.22.28         Waiting for image builder relation
+Unit                   Workload  Agent  Address     Ports  Message
+garm-configurator/0*   waiting   idle   10.1.0.133         Waiting for image builder relation
 ```
 
 ## Integrate the charms
@@ -261,16 +261,16 @@ Run `juju status` to check the result:
 :output-only:
 
 App                 Version  Status  Scale  Charm              Channel      Rev  Address         Exposed  Message
-fake-image-builder           active      1  any-charm          latest/beta  175  10.152.183.31   no
-garm                         active      1  garm               latest/edge   94  10.152.183.171  no
-garm-configurator            active      1  garm-configurator  latest/edge   86  10.152.183.68   no       Ready
-postgresql-k8s      16.14    active      1  postgresql-k8s     16/stable    927  10.152.183.178  no
+fake-image-builder           active      1  any-charm          latest/beta  175  10.152.183.254  no
+garm                         active      1  garm               latest/edge   95  10.152.183.123  no
+garm-configurator            active      1  garm-configurator  latest/edge   87  10.152.183.87   no       Ready
+postgresql-k8s      16.14    active      1  postgresql-k8s     16/stable    927  10.152.183.82   no
 
 Unit                   Workload  Agent  Address     Ports  Message
-fake-image-builder/0*  active    idle   10.1.22.55
-garm-configurator/0*   active    idle   10.1.22.47         Ready
-garm/0*                active    idle   10.1.22.21
-postgresql-k8s/0*      active    idle   10.1.22.15         Primary
+fake-image-builder/0*  active    idle   10.1.0.244
+garm-configurator/0*   active    idle   10.1.0.133         Ready
+garm/0*                active    idle   10.1.0.66
+postgresql-k8s/0*      active    idle   10.1.0.54          Primary
 ```
 
 An active GARM unit means the whole reconciliation succeeded, including the calls to GitHub. If
@@ -367,7 +367,7 @@ scroll to the bottom and select **Delete GitHub App**. See
 [Deleting a GitHub App](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app)
 for details.
 
-For a full teardown of Juju and MicroK8s, see
+For a full teardown of Juju and Canonical Kubernetes, see
 [Tear down your test environment](https://canonical.com/juju/docs/juju-cli/3.6/howto/manage-your-juju-deployment/tear-down-your-juju-deployment-local-testing-and-development/).
 
 ## Next steps
