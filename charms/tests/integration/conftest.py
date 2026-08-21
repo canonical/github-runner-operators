@@ -507,6 +507,29 @@ def deploy_garm_app_no_integration_fixture(
     return app_name
 
 
+@pytest.fixture(scope="module", name="garm_app_never_initialized")
+def deploy_garm_app_for_removal_fixture(
+    juju: jubilant.Juju,
+    garm_charm_file: str,
+    garm_app_image: str,
+) -> str:
+    """Deploy a separate blocked GARM app for the pre-first-run removal test."""
+    app_name = "github-runner-garm-removal"
+    if garm_app_image:
+        _pre_pull_garm_image(garm_app_image)
+    juju.deploy(
+        charm=garm_charm_file,
+        app=app_name,
+        resources={"app-image": garm_app_image},
+    )
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, app_name),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return app_name
+
+
 @pytest.fixture(scope="module", name="garm_app")
 def integrate_garm_with_postgresql_fixture(
     juju: jubilant.Juju,
