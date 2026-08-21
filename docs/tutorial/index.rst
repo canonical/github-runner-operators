@@ -1,3 +1,8 @@
+.. meta::
+   :description: Follow step-by-step tutorials to deploy and operate the GitHub runner charms.
+
+.. _tutorial_index:
+
 Tutorial
 ========
 

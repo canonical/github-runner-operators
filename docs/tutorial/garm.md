@@ -1,6 +1,10 @@
 ---
-description: A step-by-step tutorial for deploying the GARM charm for the first time.
+myst:
+  html_meta:
+    "description lang=en": "A step-by-step tutorial for deploying the GARM charm for the first time."
 ---
+
+(tutorial_garm)=
 
 # Deploy the GARM charm for the first time
 
@@ -8,7 +12,7 @@ GARM (GitHub Actions Runner Manager) deploys and manages self-hosted GitHub Acti
 GARM charm runs GARM on Kubernetes, backed by PostgreSQL, and takes its runner configuration from
 the GARM configurator charm.
 
-In this tutorial you deploy GARM, connect it to a repository of your own through a GitHub App, and
+In this tutorial you'll deploy GARM, connect it to a repository of your own through a GitHub App, and
 watch it register a runner scale set with GitHub.
 
 Runners themselves are created on an OpenStack cloud. Setting up an OpenStack cloud, and building a
@@ -65,7 +69,8 @@ If Concierge did not bootstrap a controller, run:
 juju bootstrap microk8s tutorial-controller
 ```
 
-The verification step at the end of this tutorial also uses `curl` and `jq`:
+The verification step at the end of this tutorial also uses `curl` and `jq`.
+Install them using:
 
 ```bash
 sudo apt install -y curl jq
@@ -136,7 +141,7 @@ postgresql-k8s/0*  active    idle   10.1.22.15         Primary
 Runners boot from an OpenStack image, and the GARM configurator requires an integration with a
 charm that supplies the image ID over the `github_runner_image_v0` interface. Because this tutorial
 does not create real runners, you can satisfy that requirement with
-[any-charm](https://charmhub.io/any-charm), a charm whose behavior you supply as source code.
+[`any-charm`](https://charmhub.io/any-charm), a charm whose behavior you supply as source code.
 
 Write a small charm that publishes a placeholder image ID whenever something integrates with it:
 
@@ -162,7 +167,7 @@ class AnyCharm(AnyCharmBase):
 EOF
 ```
 
-Deploy it, passing that file as the charm's source:
+Deploy the charm as `fake-image-builder`, passing that file as the charm's source:
 
 ```bash
 juju deploy any-charm fake-image-builder --channel latest/beta \
@@ -226,7 +231,8 @@ juju config garm-configurator \
 
 `min-idle-runner=0` keeps GARM from trying to create a runner while it has nowhere to create one.
 
-The configurator now reports that it is waiting for an image provider:
+The configurator now reports that it is waiting for an image provider
+in the output of `juju status`:
 
 ```{terminal}
 :output-only:
@@ -244,8 +250,8 @@ juju integrate garm-configurator:image fake-image-builder:provide-github-runner-
 juju integrate garm garm-configurator
 ```
 
-Over the first integration, `fake-image-builder` publishes its image ID to the configurator, which
-becomes active. Over the second, the configurator hands GARM the scale set configuration, and GARM
+Over the first relation, `fake-image-builder` publishes its image ID to the configurator, which
+becomes active. Over the second relation, the configurator hands GARM the scale set configuration, and GARM
 registers the repository and the scale set with GitHub.
 
 Run `juju status` to check the result:
@@ -268,7 +274,7 @@ postgresql-k8s/0*      active    idle   10.1.22.15         Primary
 
 An active GARM unit means the whole reconciliation succeeded, including the calls to GitHub. If
 GARM reports `GARM sync failed` instead, its GitHub credentials were rejected — see
-[Troubleshooting](#troubleshooting).
+[Troubleshooting](#troubleshooting) for possible reasons.
 
 ## Verify the scale set
 
@@ -291,6 +297,8 @@ TOKEN=$(curl -sS -X POST "$GARM_URL/auth/login" \
 curl -sS "$GARM_URL/scalesets" -H "Authorization: Bearer $TOKEN" \
   | jq '.[] | {name, repo_name, max_runners, image}'
 ```
+
+This command should return:
 
 ```{terminal}
 :output-only:
@@ -318,7 +326,7 @@ credentials — `juju debug-log --include garm/0` shows the failure. Three thing
 deployment and one that runs jobs:
 
 - **Real OpenStack credentials.** The eight `openstack-*` options take the values of an existing
-  project. No other configuration changes.
+  project. No other configuration changes are required.
 - **A runner image.** `fake-image-builder` stands in for a charm that builds a runner image in your
   OpenStack project and publishes its ID. Replace it with a real image provider and remove the
   stand-in.
