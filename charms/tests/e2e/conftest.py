@@ -104,8 +104,13 @@ def integrate_garm_ingress_fixture(
     """
     app_name = garm_app
     juju.integrate(f"{app_name}:ingress", traefik)
+    # GARM cannot reach active here: it reports "Waiting for garm-configurator relation"
+    # until the configurator arrives, and the fixture that deploys the configurator
+    # depends on this one. Waiting for traefik to serve and for GARM's hook to settle is
+    # what says the ingress has actually been taken up.
     juju.wait(
-        lambda status: jubilant.all_active(status, app_name, traefik),
+        lambda status: jubilant.all_active(status, traefik)
+        and jubilant.all_agents_idle(status, app_name),
         error=lambda status: jubilant.any_error(status, app_name, traefik),
         timeout=10 * 60,
         delay=10,
