@@ -10,13 +10,19 @@ name: GARM E2E
 
 on:
   workflow_dispatch:
-  # Temporary: label a pull request `run-e2e` to exercise this workflow from its
-  # branch. Removed again once the run has served its purpose.
+  # Temporary: runs this workflow from its own development branch, so it can be
+  # exercised before it exists on the default branch and can be dispatched.
+  # Removed again once it has served its purpose. A label gate would be tidier but
+  # the repository's labels are managed, and `run-e2e` was deleted from the repo.
   pull_request:
-    types: [opened, synchronize, labeled]
+    types: [opened, synchronize]
 
 permissions:
   contents: read
+
+concurrency:
+  group: garm-e2e-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
@@ -24,7 +30,7 @@ jobs:
   build:
     if: >-
       github.event_name == 'workflow_dispatch'
-      || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+      || github.head_ref == 'feat/garm-e2e-implementation-ISD-5876'
     uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v0.0.1-alpha.10
     permissions:
       contents: read
@@ -43,7 +49,7 @@ jobs:
     # access to these secrets. A fork PR gets none, so it can only fail fast.
     if: >-
       github.event_name == 'workflow_dispatch'
-      || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+      || github.head_ref == 'feat/garm-e2e-implementation-ISD-5876'
     permissions:
       contents: read
       packages: read
