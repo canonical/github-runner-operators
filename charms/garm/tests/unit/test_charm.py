@@ -573,6 +573,26 @@ def test_remove_blocks_when_garm_initialization_state_is_unknown(
     assert "restore GARM/API availability" in caplog.text
 
 
+def test_remove_allows_unreachable_garm_without_postgresql_setup(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: PostgreSQL is not configured and GARM's API is unreachable.
+    act: Emit application removal.
+    assert: Removal succeeds because GARM could not have been initialized without PostgreSQL.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(ctx.on.remove(), _state(planned_units=0, postgresql_data={}))
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+    assert "PostgreSQL is not configured" in caplog.text
+
+
 def test_remove_refuses_without_admin_credentials(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):

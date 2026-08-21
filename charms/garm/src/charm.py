@@ -25,7 +25,12 @@ from charm_state import (
     credential_name,
 )
 from entity_reconciler import EntityReconciler
-from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from garm_api import (
+    GarmApiClient,
+    GarmApiError,
+    GarmAuthenticatedClient,
+    GarmConnectionError,
+)
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
@@ -189,6 +194,20 @@ class GarmCharm(paas_charm.go.Charm):
                     "GARM has not completed first-run; no resources require removal cleanup"
                 )
                 return
+        except GarmConnectionError as exc:
+            if self._get_postgresql_config() is None:
+                logger.info(
+                    "PostgreSQL is not configured and GARM is unreachable; "
+                    "GARM cannot have been initialized, so no cleanup is required"
+                )
+                return
+            message = (
+                f"Cannot determine whether GARM was initialized: {exc}. "
+                "Operator action: restore GARM/API availability, then retry "
+                "Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message) from exc
         except GarmApiError as exc:
             message = (
                 f"Cannot determine whether GARM was initialized: {exc}. "
