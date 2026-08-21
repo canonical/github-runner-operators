@@ -254,6 +254,46 @@ def test_list_scalesets(api_response, expected_names):
     assert [ss.name for ss in result] == expected_names
 
 
+def test_list_scale_set_instances_converts_id_to_string():
+    """
+    arrange: An authenticated client and a generated InstancesApi response.
+    act: List instances for scaleset ID 42.
+    assert: The wrapper converts the integer ID to the generated client's required string.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    instance = Instance(name="runner-1", status="running", scale_set_id=42)
+    with _stub_api_client(client):
+        with patch("garm_api.InstancesApi") as MockApi:
+            MockApi.return_value.list_scale_set_instances.return_value = [instance]
+            result = client.list_scale_set_instances(42)
+
+    MockApi.return_value.list_scale_set_instances.assert_called_once_with(
+        scaleset_id="42", _request_timeout=30
+    )
+    assert result == [instance]
+
+
+def test_delete_instance_passes_force_and_bypass_flags():
+    """
+    arrange: An authenticated client and a generated InstancesApi stub.
+    act: Delete a runner with both cleanup flags enabled.
+    assert: The wrapper forwards the runner name, flags, and request timeout.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.InstancesApi") as MockApi:
+            client.delete_instance(
+                "runner-1", force_remove=True, bypass_gh_unauthorized=True
+            )
+
+    MockApi.return_value.delete_instance.assert_called_once_with(
+        instance_name="runner-1",
+        force_remove=True,
+        bypass_gh_unauthorized=True,
+        _request_timeout=30,
+    )
+
+
 @pytest.mark.parametrize(
     "target, registered, expected",
     [

@@ -14,6 +14,7 @@ from garm_client.api.controller_api import ControllerApi
 from garm_client.api.controller_info_api import ControllerInfoApi
 from garm_client.api.credentials_api import CredentialsApi
 from garm_client.api.first_run_api import FirstRunApi
+from garm_client.api.instances_api import InstancesApi
 from garm_client.api.login_api import LoginApi
 from garm_client.api.organizations_api import OrganizationsApi
 from garm_client.api.providers_api import ProvidersApi
@@ -29,6 +30,7 @@ from garm_client.models.create_repo_params import CreateRepoParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.create_template_params import CreateTemplateParams
 from garm_client.models.forge_credentials import ForgeCredentials
+from garm_client.models.instance import Instance
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.organization import Organization
 from garm_client.models.password_login_params import PasswordLoginParams
@@ -526,6 +528,48 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
             except ApiException as exc:
                 raise GarmApiError(f"Failed to list scalesets ({exc.status}): {exc.body}") from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_scale_set_instances(self, scaleset_id: int) -> list[Instance]:
+        """List runner instances belonging to a scaleset."""
+        with self._api_client() as client:
+            try:
+                return (
+                    InstancesApi(api_client=client).list_scale_set_instances(
+                        scaleset_id=str(scaleset_id),
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list instances for scaleset {scaleset_id} "
+                    f"({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_instance(
+        self,
+        instance_name: str,
+        *,
+        force_remove: bool = False,
+        bypass_gh_unauthorized: bool = False,
+    ) -> None:
+        """Request deletion of a GARM runner instance."""
+        with self._api_client() as client:
+            try:
+                InstancesApi(api_client=client).delete_instance(
+                    instance_name=instance_name,
+                    force_remove=force_remove,
+                    bypass_gh_unauthorized=bypass_gh_unauthorized,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to delete runner {instance_name} ({exc.status}): {exc.body}"
+                ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
