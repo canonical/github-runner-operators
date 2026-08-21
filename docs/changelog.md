@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-08-19
+
+- Add a tutorial for deploying GARM. It walks through a first GARM deployment on Canonical Kubernetes with PostgreSQL and the `garm-configurator`, ending with a runner scale set registered on a GitHub repository. OpenStack is represented by placeholder configuration and a stand-in image provider so the tutorial runs without a cloud, and a closing section states what changes for a deployment that boots runners.
+
 ## 2026-07-13
 
 - `garm`: fix the SSH debug (tmate) connection details so the runner actually reads them. The `TMATE_SERVER_*` variables injected into the shared runner template were written to `/home/runner/.env`, but the GitHub Actions runner sources a `.env` file from its install directory (`/home/runner/actions-runner/.env`), so the debug-SSH server host, port, and fingerprints were silently ignored. They are now written to the `.env` file the runner reads, matching the per-scaleset runner options.
