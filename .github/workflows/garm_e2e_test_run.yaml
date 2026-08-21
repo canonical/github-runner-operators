@@ -4,6 +4,11 @@
 # Trivial workflow that a spawned runner executes to prove the full chain:
 # GARM → OpenStack → VM → runner register → job dispatch → pick up → exit.
 # Modelled on github-runner-operator/.github/workflows/e2e_test_run.yaml.
+#
+# Reaching this workflow at all is most of the assertion: it only runs if a VM
+# was booted from the published image and its runner registered and claimed the
+# job. The steps below cover what that does not — that the runner is usable for
+# real work. Image contents are ISD298's remit, not this workflow's; keep it short.
 
 name: GARM E2E test run
 
@@ -27,17 +32,57 @@ jobs:
     runs-on: "${{ inputs.runner-label }}"
     timeout-minutes: 10
     steps:
-      - name: Assert basic runner liveness
+      - name: Report runner identity
         run: |
           echo "=== GARM E2E test run ==="
           echo "Runner: $(hostname)"
-          echo "Kernel: $(uname -a)"
-      - name: Assert egress through aproxy
+          echo "Kernel: $(uname -sr)"
+          echo "User:   $(whoami)"
+          echo "Home:   $HOME"
+      - name: Assert egress
         run: |
-          echo "Checking egress connectivity..."
-          if curl -sf --max-time 10 https://github.com > /dev/null 2>&1; then
-            echo "Egress OK (via aproxy)"
-          else
-            echo "Egress FAILED"
-            exit 1
+          # The charm exports no proxy variables into the runner environment: it
+          # delivers the proxy transparently, as aproxy plus an nftables redirect of
+          # :80 and :443. A plain curl is therefore what exercises that path, and
+          # --noproxy keeps that true if a future image starts setting http_proxy.
+          # Both ports are probed because aproxy reads the destination differently
+          # for each — Host header on :80, TLS SNI on :443 — and jobs need both
+          # (apt over :80, everything else over :443).
+          curl -sSf --noproxy '*' --max-time 30 -o /dev/null http://github.com
+          curl -sSf --noproxy '*' --max-time 30 -o /dev/null https://github.com
+          echo "Egress reached github.com on :80 and :443"
+      - name: Assert egress traversed aproxy
+        run: |
+          # The aproxy bootstrap fails open by design: every error path in it skips
+          # the nftables redirect and exits 0, so a runner whose proxy was never
+          # wired up still boots, still registers, and still passes the step above
+          # wherever the tenant happens to have a route of its own. aproxy's log is
+          # what tells the two apart.
+          if ! snap list aproxy > /dev/null 2>&1; then
+            echo "No aproxy on this runner, so the scale set was configured without a proxy."
+            exit 0
           fi
+          # Reading the log needs root even for a user in `adm`; treat losing that
+          # as unverified rather than as a failure, so this cannot turn into a red
+          # run over a sudo policy change.
+          if ! APROXY_LOG=$(sudo -n snap logs aproxy.aproxy -n=all 2>/dev/null); then
+            echo "::warning::aproxy's log is unreadable, leaving the redirect unverified."
+            exit 0
+          fi
+          # aproxy logs one `host=<host>:<port>` per relayed connection. The log is
+          # only ever matched, never printed: it sits alongside the snap
+          # configuration, which holds the upstream proxy and may embed credentials.
+          # Matched with a `case` glob rather than a pipe into `grep -q`, because
+          # `grep -q` exits at its first match and so SIGPIPEs the writer feeding it,
+          # which under `set -o pipefail` -- the shell Actions runs steps with -- fails
+          # the pipeline despite the match.
+          for HOSTPORT in github.com:80 github.com:443; do
+            case "$APROXY_LOG" in
+              *"host=$HOSTPORT"*) ;;
+              *)
+                echo "::error::aproxy is installed but relayed no connection to $HOSTPORT, so egress bypassed it. Check the 00-aproxy pre-install script in the runner's cloud-init output."
+                exit 1
+                ;;
+            esac
+          done
+          echo "Egress traversed aproxy on :80 and :443"
