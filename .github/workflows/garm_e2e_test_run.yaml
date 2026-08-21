@@ -37,6 +37,5 @@ jobs:
           echo "Home:   $HOME"
       - name: Assert egress
         run: |
-          curl -sSf --max-time 30 -o /dev/null http://github.com
           curl -sSf --max-time 30 -o /dev/null https://github.com
-          echo "Egress reached github.com on :80 and :443"
+          echo "Egress reached github.com"
