@@ -6,6 +6,7 @@
 
 import base64
 import datetime
+import enum
 import hashlib
 import logging
 import re
@@ -41,6 +42,22 @@ MAX_SCALESET_NAME_LENGTH = 64
 DRAIN_DEADLINE = datetime.timedelta(hours=7)
 
 
+class Handover(enum.Enum):
+    """How far the routing hand-over from a replaced generation has got.
+
+    Attributes:
+        PENDING: The replacement is not up yet, so the predecessor must stay enabled.
+        FAILED: GARM refused to disable the predecessor; the next reconcile retries.
+        DONE: The predecessor is disabled and the replacement holds their shared labels.
+    """
+
+    # Both unfinished states leave the predecessor enabled and serving jobs, so nothing
+    # is draining yet and the runner count reported alongside them is 0.
+    PENDING = "pending"
+    FAILED = "failed"
+    DONE = "done"
+
+
 @dataclass(frozen=True)
 class ScalesetProgress:
     """A scaleset replacement still in flight: the generation it replaced is not gone yet."""
@@ -49,7 +66,7 @@ class ScalesetProgress:
     retiring_name: str
     replacement_name: str
     remaining_runners: int
-    handed_over: bool = True
+    handover: Handover = Handover.DONE
 
 
 @dataclass
@@ -140,8 +157,11 @@ def _drain_deadline_passed(scaleset: ScaleSet) -> bool:
 
     Returns:
         True once ``DRAIN_DEADLINE`` has elapsed since GARM last wrote the scaleset —
-        which, for a retired one, is the moment it was disabled, since nothing updates
-        it afterwards. False when GARM reports no timestamp: an unknown drain age must
+        which, for a retired one, is the moment it was disabled: the only writes to that
+        row while it drains would come from the listener's message handler
+        (``SetScaleSetLastMessageID`` / ``SetScaleSetDesiredRunnerCount``), and disabling
+        stopped the listener. ``handleAutoScale`` keeps running but writes instances, a
+        separate table. False when GARM reports no timestamp: an unknown drain age must
         never read as an expired one.
     """
     retired_at = scaleset.updated_at
@@ -246,8 +266,7 @@ class ScalesetReconciler:
                 failure = failure or exc
 
         for name, scaleset in observed.items():
-            if name not in claimed:
-                self._delete_orphaned(scaleset)
+            if name not in claimed and self._delete_orphaned(scaleset):
                 self._delete_custom_template(name, templates)
         if failure is not None:
             raise failure
@@ -267,12 +286,17 @@ class ScalesetReconciler:
         """
         unique: dict[str, ScalesetSpec] = {}
         for spec in desired:
-            if spec.name in unique:
-                logger.warning(
-                    "Ignoring duplicate desired scaleset %s: a logical name must"
-                    " identify exactly one scaleset",
-                    spec.name,
-                )
+            existing = unique.get(spec.name)
+            if existing is not None:
+                # Only a conflicting duplicate is worth a warning: the scaleset config is
+                # app-level, so every configurator unit's databag yields the same spec and
+                # a multi-unit configurator would otherwise warn on every hook.
+                if existing != spec:
+                    logger.warning(
+                        "Ignoring duplicate desired scaleset %s: a logical name must"
+                        " identify exactly one scaleset",
+                        spec.name,
+                    )
                 continue
             unique[spec.name] = spec
         return list(unique.values())
@@ -434,13 +458,20 @@ class ScalesetReconciler:
                 continue
             if not replacement_live:
                 progress.append(
-                    ScalesetProgress(spec.name, name, active_name, 0, handed_over=False)
+                    ScalesetProgress(spec.name, name, active_name, 0, Handover.PENDING)
                 )
                 continue
             # Truthy, not `is not False`: GARM tags Enabled `omitempty`, so a disabled
             # scaleset comes back with no `enabled` key at all and the client reads None.
             if old.enabled:
-                self._retire(old)
+                if not self._retire(old):
+                    # It is still enabled, so its session is still open and nothing is
+                    # draining: report the stalled hand-over rather than a runner count,
+                    # which would read as a changeover that is quietly making progress.
+                    progress.append(
+                        ScalesetProgress(spec.name, name, active_name, 0, Handover.FAILED)
+                    )
+                    continue
                 progress.append(
                     ScalesetProgress(spec.name, name, active_name, self._remaining_runners(old))
                 )
@@ -464,7 +495,7 @@ class ScalesetReconciler:
                 progress.append(ScalesetProgress(spec.name, name, active_name, remaining))
         return progress
 
-    def _retire(self, scaleset: ScaleSet) -> None:
+    def _retire(self, scaleset: ScaleSet) -> bool:
         """Disable a replaced scaleset and stop it launching runners.
 
         Disabling closes its listener session, handing the shared labels to the
@@ -475,18 +506,24 @@ class ScalesetReconciler:
         Args:
             scaleset: The replaced scaleset.
 
+        Returns:
+            Whether the scaleset is now disabled. False leaves both generations
+            enabled and their min_idle_runners doubled, so the caller must report the
+            changeover as stalled rather than as a drain in progress.
+
         Raises:
             GarmConnectionError: If GARM is unreachable — see ``_remaining_runners``.
         """
         if scaleset.id is None:
-            return
+            logger.warning("Scaleset %s has no id; cannot retire it", scaleset.name)
+            return False
         logger.info("Retiring replaced scaleset %s (id=%s)", scaleset.name, scaleset.id)
         try:
             self._client.update_scaleset(
                 scaleset.id,
                 UpdateScaleSetParams(enabled=False, min_idle_runners=0, max_runners=0),
             )
-            return
+            return True
         except GarmConnectionError:
             raise
         except GarmApiError as exc:
@@ -507,6 +544,8 @@ class ScalesetReconciler:
                 scaleset.name,
                 exc,
             )
+            return False
+        return True
 
     def _remaining_runners(self, scaleset: ScaleSet) -> int:
         """Return how many runners a scaleset still has.
@@ -570,12 +609,27 @@ class ScalesetReconciler:
         self._delete_custom_template(scaleset.name or "", templates)
         return True
 
-    def _delete_orphaned(self, scaleset: ScaleSet) -> None:
-        """Disable then delete a scaleset that is no longer in the desired set."""
+    def _delete_orphaned(self, scaleset: ScaleSet) -> bool:
+        """Disable then delete a scaleset that is no longer in the desired set.
+
+        Args:
+            scaleset: The orphaned scaleset.
+
+        Returns:
+            Whether GARM no longer holds it, and so whether its runner template can go
+            too. A template is only ever deleted after the scaleset referencing it, so
+            a scaleset awaiting a retry keeps the runner config that retry relies on.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — an outage is not a per-scaleset
+                failure and must reach the charm's status rather than read as a sweep
+                that found nothing left to do.
+        """
         name = scaleset.name or ""
         logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
         if scaleset.id is None:
-            return
+            logger.warning("Scaleset %s has no id; skipping delete", name)
+            return False
         try:
             # Disable the scaleset first so GARM stops launching new runners.
             # GARM returns 400 if the scaleset still has active runners,
@@ -583,10 +637,14 @@ class ScalesetReconciler:
             self._client.update_scaleset(
                 scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
             )
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
         try:
             self._client.delete_scaleset(scaleset.id)
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             # 400 means runners are still present; scaleset will be deleted
             # on the next reconcile pass once GARM has cleaned them up.
@@ -596,6 +654,8 @@ class ScalesetReconciler:
                 name,
                 exc,
             )
+            return False
+        return True
 
     def _resolve_entity_id(self, spec: ScalesetSpec) -> str | None:
         """Return the GARM entity UUID for *spec*, or None if not yet registered."""

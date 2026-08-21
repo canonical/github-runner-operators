@@ -39,7 +39,7 @@ from github_reconciler import (
     MANAGED_CREDENTIAL_DESCRIPTION,
     CredentialSpec,
 )
-from scaleset_reconciler import ScalesetProgress
+from scaleset_reconciler import Handover, ScalesetProgress
 
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
@@ -558,16 +558,32 @@ def test_missing_configurator_relation_refreshes_stale_app_status(
                 "my-scaleset-1a2b3c4d",
                 "my-scaleset-5e6f7a8b",
                 0,
-                handed_over=False,
+                Handover.PENDING,
             ),
             "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (creating replacement)",
+        ),
+        (
+            ScalesetProgress(
+                "my-scaleset",
+                "my-scaleset-1a2b3c4d",
+                "my-scaleset-5e6f7a8b",
+                0,
+                Handover.FAILED,
+            ),
+            "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (retiring predecessor)",
         ),
         (
             ScalesetProgress("my-scaleset", "my-scaleset-1a2b3c4d", "my-scaleset-5e6f7a8b", 0),
             "Replacing scaleset my-scaleset -> my-scaleset-5e6f7a8b (awaiting deletion)",
         ),
     ],
-    ids=["draining", "single-runner", "before-handover", "drained-not-yet-deleted"],
+    ids=[
+        "draining",
+        "single-runner",
+        "before-handover",
+        "failed-handover",
+        "drained-not-yet-deleted",
+    ],
 )
 def test_scaleset_being_replaced_is_reported_in_the_status(
     ctx: Context, garm_api: _GarmApiMocks, progress: ScalesetProgress, expected: str
@@ -606,6 +622,51 @@ def test_many_scalesets_being_replaced_are_summarised(ctx: Context, garm_api: _G
     assert out.unit_status == ops.ActiveStatus(
         "Replacing scaleset scaleset-1 -> new-1 (draining 1 runner),"
         " scaleset-2 -> new-2 (draining 2 runners), +2 more"
+    )
+
+
+def test_two_generations_of_one_scaleset_are_reported_as_one_replacement(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A ready charm where one scaleset is draining two predecessors at once (its labels
+        changed again mid-drain) while a second scaleset is also being replaced.
+    act: Run update-status.
+    assert: The doubly-draining scaleset is named once, with its runner counts summed, so it
+        cannot repeat itself and push the other scaleset behind "+N more".
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = [
+        ScalesetProgress("scaleset-a", "old-a1", "new-a", 2),
+        ScalesetProgress("scaleset-a", "old-a2", "new-a", 1),
+        ScalesetProgress("scaleset-b", "old-b", "new-b", 1),
+    ]
+
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    assert out.unit_status == ops.ActiveStatus(
+        "Replacing scaleset scaleset-a -> new-a (draining 3 runners),"
+        " scaleset-b -> new-b (draining 1 runner)"
+    )
+
+
+def test_a_scaleset_reports_its_least_advanced_generation(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A ready charm where one scaleset has one drained predecessor and one whose
+        hand-over has not happened yet.
+    act: Run update-status.
+    assert: The unfinished hand-over is what is reported: the changeover is only as far along
+        as its least advanced generation, and a summed runner count of zero would otherwise
+        read as fully drained.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = [
+        ScalesetProgress("scaleset-a", "old-a1", "new-a", 0),
+        ScalesetProgress("scaleset-a", "old-a2", "new-a", 0, Handover.PENDING),
+    ]
+
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    assert out.unit_status == ops.ActiveStatus(
+        "Replacing scaleset scaleset-a -> new-a (creating replacement)"
     )
 
 

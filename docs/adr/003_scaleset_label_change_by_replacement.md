@@ -32,12 +32,13 @@ Disabling closes the predecessor's listener session: `listener.Stop()` calls `De
 Labels common to both generations are served by one scale set or the other for the duration, subject to the open question recorded below.
 The charm reports an active status naming the configured scale set and its phase, and drops the phase from the status once the predecessor is deleted.
 
-The design depends on four behaviors, verified against the GitHub API and the GARM source:
+The design depends on five behaviors, verified against the GitHub API and the GARM source:
 
 - GitHub enforces uniqueness on `name` within a runner group. A duplicate name returns `400 RunnerScaleSetExistsException`; overlapping and identical label sets under distinct names return `200`.
 - `handleScaleDown` skips instances whose `RunnerStatus` is `RunnerActive` or `RunnerTerminated`, so an instance executing a job is not removed. `handleScaleUp` returns when `Enabled` is false.
 - `handleAutoScale` runs on a five-second ticker and is not gated on `Enabled`. `handleScaleSetUpdateOperation` retains the worker; only `handleScaleSetDeleteOperation` stops it. Disabling stops the listener alone.
 - `targetRunners` evaluates `min(MinIdleRunners + DesiredRunnerCount, MaxRunners)`, which is 0 when `max_runners` is 0. `UpdateScaleSetByID` validates only `min_idle_runners <= max_runners`; the `max_runners != 0` constraint applies to `CreateScaleSetParams.Validate` alone.
+- Nothing writes the `scale_sets` row while a disabled scale set drains, so its `updated_at` is the moment it was disabled — which is what the drain deadline below measures from. The only writes to that row outside an API update are `SetScaleSetLastMessageID` and `SetScaleSetDesiredRunnerCount`, both called from the listener's message handler, and the listener is stopped. `handleAutoScale` keeps running but writes instances, a separate table.
 
 One behavior is not established by either source.
 Deleting the message session stops GARM receiving job assignments; whether GitHub stops assigning jobs to a scale set that still exists with the same labels in the same runner group is undocumented, and the GARM source cannot answer it.

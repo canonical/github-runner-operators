@@ -5,6 +5,7 @@
 
 import base64
 import datetime
+import logging
 
 import pytest
 
@@ -15,6 +16,7 @@ from runner_template import build_template_data
 from scaleset_reconciler import (
     DRAIN_DEADLINE,
     MAX_SCALESET_NAME_LENGTH,
+    Handover,
     ScalesetProgress,
     ScalesetReconciler,
     ScalesetSpec,
@@ -355,6 +357,54 @@ def test_delete_orphaned_scaleset():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted == [42]
+
+
+def test_orphan_template_outlives_a_failed_orphan_delete():
+    """
+    arrange: An orphaned scaleset with a custom template, whose deletion GARM rejects.
+    act: Reconcile a different desired scaleset.
+    assert: Its template is kept — the scaleset still exists and its runners were built
+        from that template, and the next reconcile's retry still needs it.
+    """
+
+    class _DeleteFailingClient(_TemplateTrackingClient):
+        def delete_scaleset(self, scaleset_id):
+            raise GarmApiError("scaleset still has runners")
+
+    client = _DeleteFailingClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42, template_id=2)],
+        templates=[
+            _SYSTEM_TEMPLATE,
+            _FakeTemplate("github_linux-stale-scaleset", tid=2, data=b"x"),
+        ],
+    )
+
+    _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted == []
+    assert client.deleted_templates == []
+
+
+def test_a_connection_error_during_the_orphan_sweep_is_not_reported_as_converged():
+    """
+    arrange: An orphaned scaleset and a GARM that has become unreachable.
+    act: Reconcile a different desired scaleset.
+    assert: The error propagates rather than being contained per-scaleset, so the charm
+        reports the outage instead of an orphan sweep that appears to have finished.
+    """
+
+    class _UnreachableClient(FakeGarmClient):
+        def update_scaleset(self, scaleset_id, params):
+            raise GarmConnectionError("connection refused")
+
+    client = _UnreachableClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+    )
+
+    with pytest.raises(GarmConnectionError):
+        _reconcile(client, [_spec(name="new-scaleset")])
 
 
 def test_unnamed_observed_scaleset_is_skipped():
@@ -905,9 +955,7 @@ def test_label_change_creates_replacement_without_disabling_the_old_one():
     assert params.name == _NEW_NAME
     assert client.updated == []
     assert client.deleted == []
-    assert progress == [
-        ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 0, handed_over=False)
-    ]
+    assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 0, Handover.PENDING)]
 
 
 def test_cutover_disables_and_zeroes_the_old_scaleset():
@@ -957,6 +1005,31 @@ def test_cutover_falls_back_when_zeroing_max_runners_is_rejected():
     assert scaleset_id == 1
     assert params.enabled is False
     assert params.max_runners is None
+
+
+def test_a_refused_cutover_is_not_reported_as_a_drain():
+    """
+    arrange: Both generations live, and GARM refuses to disable the old one.
+    act: Reconcile.
+    assert: The stalled hand-over is reported instead of a runner count: the predecessor
+        is still enabled, so nothing is draining and a plausible "draining N runners"
+        would hide a changeover that is not advancing (and is running both generations'
+        idle runners meanwhile).
+    """
+
+    class _DisableFailsClient(FakeGarmClient):
+        def update_scaleset(self, scaleset_id, params):
+            raise GarmApiError("scaleset is locked")
+
+    client = _DisableFailsClient(
+        providers=["openstack-demo"],
+        scalesets=[_generation(_LABELS_OLD, id=1), _generation(_LABELS_NEW, id=2)],
+        instances={1: 3},
+    )
+
+    progress = _reconcile(client, [_spec(labels=_LABELS_NEW)])
+
+    assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 0, Handover.FAILED)]
 
 
 def test_draining_scaleset_is_not_deleted_while_runners_remain():
@@ -1409,9 +1482,7 @@ class _UnreachableWhenDeleting(FakeGarmClient):
     ],
     ids=["retiring", "counting-runners", "deleting"],
 )
-def test_a_connection_error_during_a_drain_is_not_reported_as_progress(
-    client_class, old_enabled
-):
+def test_a_connection_error_during_a_drain_is_not_reported_as_progress(client_class, old_enabled):
     """
     arrange: A generation being retired or already draining, and a GARM that is unreachable
         at each of the three calls the drain makes.
@@ -1433,19 +1504,39 @@ def test_a_connection_error_during_a_drain_is_not_reported_as_progress(
         _reconcile(client, [_spec(labels=_LABELS_NEW)])
 
 
-def test_duplicate_desired_names_are_ignored():
+def test_duplicate_desired_names_are_ignored(caplog):
     """
     arrange: Two specs sharing a logical name but carrying different labels.
     act: Reconcile.
-    assert: Only the first is applied — both would own the other's scaleset and retire it
-        on every reconcile, replacing each other forever.
+    assert: Only the first is applied, and the conflict is warned about — both would own
+        the other's scaleset and retire it on every reconcile, replacing each other forever.
     """
     client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
 
-    progress = _reconcile(
-        client,
-        [_spec(labels=_LABELS_OLD), _spec(labels=_LABELS_NEW)],
-    )
+    with caplog.at_level(logging.WARNING):
+        progress = _reconcile(
+            client,
+            [_spec(labels=_LABELS_OLD), _spec(labels=_LABELS_NEW)],
+        )
 
     assert [params.name for _, _, params in client.created] == [_OLD_NAME]
     assert progress == []
+    assert "duplicate desired scaleset my-scaleset" in caplog.text
+
+
+def test_identical_duplicate_specs_are_not_warned_about(caplog):
+    """
+    arrange: Two identical specs, as a multi-unit garm-configurator produces — the scaleset
+        config is app-level, so every unit's databag yields the same spec.
+    act: Reconcile.
+    assert: One scaleset is created and nothing is warned about: the duplicate is the
+        expected shape of a scaled configurator, not an operator misconfiguration, and
+        warning on it would fire on every hook.
+    """
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+
+    with caplog.at_level(logging.WARNING):
+        _reconcile(client, [_spec(labels=_LABELS_OLD), _spec(labels=_LABELS_OLD)])
+
+    assert [params.name for _, _, params in client.created] == [_OLD_NAME]
+    assert "duplicate" not in caplog.text
