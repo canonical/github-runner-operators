@@ -194,8 +194,9 @@ juju add-secret openstack-password value=placeholder-password
 juju add-secret github-app-private-key value#file=$HOME/your-app.private-key.pem
 ```
 
-Each command prints a secret URI, such as `secret:8rdhlq3nsgh46i3tnpbg`. Grant both secrets to the
-configurator so it can read them:
+Each command prints a secret URI — the identifier you use to refer to the secret in charm
+configuration — such as `secret:8rdhlq3nsgh46i3tnpbg`. Grant both secrets to the configurator so
+it can read them:
 
 ```bash
 juju grant-secret openstack-password garm-configurator
@@ -274,7 +275,7 @@ postgresql-k8s/0*      active    idle   10.1.22.15         Primary
 
 An active GARM unit means the whole reconciliation succeeded, including the calls to GitHub. If
 GARM reports `GARM sync failed` instead, its GitHub credentials were rejected — see
-[Troubleshooting](#troubleshooting) for possible reasons.
+[Troubleshooting](#tutorial_troubleshooting) for possible reasons.
 
 ## Verify the scale set
 
@@ -334,7 +335,7 @@ deployment and one that runs jobs:
   derives from its own address. The in-cluster address used in this tutorial is not reachable from
   an OpenStack tenant, so GARM needs an ingress with an address that the runner network can reach.
 
-(troubleshooting)=
+(tutorial_troubleshooting)=
 
 ## Troubleshooting
 
@@ -360,6 +361,11 @@ juju destroy-model garm-tutorial --destroy-storage
 
 The scale set registered on GitHub is removed along with GARM. If it is still listed under
 **Settings > Actions > Runners** afterwards, you can delete it from that page.
+
+The GitHub App is not managed by Juju, so remove it separately. Open the app's settings page,
+scroll to the bottom and select **Delete GitHub App**. See
+[Deleting a GitHub App](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app)
+for details.
 
 For a full teardown of Juju and MicroK8s, see
 [Tear down your test environment](https://canonical.com/juju/docs/juju-cli/3.6/howto/manage-your-juju-deployment/tear-down-your-juju-deployment-local-testing-and-development/).
