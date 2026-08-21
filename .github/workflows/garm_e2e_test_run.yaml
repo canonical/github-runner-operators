@@ -4,7 +4,8 @@
 # The job a GARM-spawned runner executes. Reaching it at all is most of the
 # assertion: it only runs if a VM was booted from the published image and its
 # runner registered and claimed the job. The steps cover what that does not —
-# that the runner is usable for real work. Image contents are ISD298's remit.
+# that the runner is usable for real work. Validating the image itself is the
+# image build's concern, not this workflow's.
 
 name: GARM E2E test run
 
