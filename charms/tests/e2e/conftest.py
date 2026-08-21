@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 GARM_API_PORT = 8080
 SCALESET_DRAIN_TIMEOUT = 10 * 60
-TRAEFIK_CHANNEL = "2/stable"
+TRAEFIK_CHANNEL = "latest/stable"
 
 
 @pytest.fixture(scope="module", name="openstack_credentials")
