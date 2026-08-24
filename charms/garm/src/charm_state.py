@@ -236,7 +236,26 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     return sorted(connections, key=lambda c: (c.host, c.port))
 
 
-def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:  # noqa: CCR001  # refactor tracked in #327
+def resolve_entity(data: Mapping[str, str]) -> tuple[str, str] | None:
+    """Resolve the GARM entity a configurator unit names from its org/repo fields.
+
+    Args:
+        data: The relation unit databag.
+
+    Returns:
+        ``("organization", org)`` or ``("repository", repo)``, or None when
+        the unit names neither an org nor a repo.
+    """
+    org = data.get("org", "")
+    if org:
+        return "organization", org
+    repo = data.get("repo", "")
+    if repo:
+        return "repository", repo
+    return None
+
+
+def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
     """Build the desired GARM org/repo entities from configurator relation data.
 
     Each entity is bound to the GitHub App credential the github reconciler creates for the same
@@ -258,58 +277,70 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:  # noqa: CC
     )
     for relation in relations:
         for unit in sorted(relation.units, key=lambda unit: unit.name):
-            data = relation.data[unit]
-            org = data.get("org", "")
-            repo = data.get("repo", "")
-            if org:
-                entity_type, entity_name = "organization", org
-            elif repo:
-                entity_type, entity_name = "repository", repo
-            else:
-                continue
-
-            app_id_raw = data.get("github_app_id", "")
-            installation_id_raw = data.get("github_installation_id", "")
-            # Skip quietly while the App ids are merely absent (the configurator publishes the
-            # entity name before them during bring-up); warn only on malformed values.
-            if not (app_id_raw and installation_id_raw):
-                continue
-            try:
-                app_id = int(app_id_raw)
-                installation_id = int(installation_id_raw)
-            except ValueError:
-                logger.warning(
-                    "Skipping entity %s from %s: non-numeric app/installation id "
-                    "(app_id=%r, installation_id=%r)",
-                    entity_name,
-                    unit.name,
-                    app_id_raw,
-                    installation_id_raw,
-                )
-                continue
-
-            # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
-            # the first spec seen (iteration is ordered above) and warn if a later one derives a
-            # different credential.
-            key = (entity_type, entity_name)
-            credentials_name = credential_name(app_id, installation_id)
-            existing = entities.get(key)
-            if existing is not None:
-                if existing.credentials_name != credentials_name:
-                    logger.warning(
-                        "Conflicting credential for %s '%s' (%s vs %s); keeping the first",
-                        entity_type,
-                        entity_name,
-                        existing.credentials_name,
-                        credentials_name,
-                    )
-                continue
-            entities[key] = EntitySpec(
-                entity_type=entity_type,
-                entity_name=entity_name,
-                credentials_name=credentials_name,
-            )
+            _add_desired_entity(entities, relation.data[unit], unit.name)
     return list(entities.values())
+
+
+def _add_desired_entity(
+    entities: dict[tuple[str, str], EntitySpec], data: Mapping[str, str], unit_name: str
+) -> None:
+    """Add the entity described by one configurator unit to the desired set.
+
+    Skips the unit (quietly, except for malformed ids) when it names no org/repo or
+    its GitHub App ids are unusable. On a duplicate (type, name), keeps the first
+    spec seen and warns if the later one derives a different credential.
+
+    Args:
+        entities: The accumulating desired entities, keyed by (entity_type, entity_name).
+        data: The relation unit databag.
+        unit_name: The configurator unit's name, for log messages.
+    """
+    entity = resolve_entity(data)
+    if entity is None:
+        return
+    entity_type, entity_name = entity
+
+    app_id_raw = data.get("github_app_id", "")
+    installation_id_raw = data.get("github_installation_id", "")
+    # Skip quietly while the App ids are merely absent (the configurator publishes the
+    # entity name before them during bring-up); warn only on malformed values.
+    if not (app_id_raw and installation_id_raw):
+        return
+    try:
+        app_id = int(app_id_raw)
+        installation_id = int(installation_id_raw)
+    except ValueError:
+        logger.warning(
+            "Skipping entity %s from %s: non-numeric app/installation id "
+            "(app_id=%r, installation_id=%r)",
+            entity_name,
+            unit_name,
+            app_id_raw,
+            installation_id_raw,
+        )
+        return
+
+    # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
+    # the first spec seen (iteration is ordered in _get_desired_entities) and warn if a
+    # later one derives a different credential.
+    key = (entity_type, entity_name)
+    credentials_name = credential_name(app_id, installation_id)
+    existing = entities.get(key)
+    if existing is not None:
+        if existing.credentials_name != credentials_name:
+            logger.warning(
+                "Conflicting credential for %s '%s' (%s vs %s); keeping the first",
+                entity_type,
+                entity_name,
+                existing.credentials_name,
+                credentials_name,
+            )
+        return
+    entities[key] = EntitySpec(
+        entity_type=entity_type,
+        entity_name=entity_name,
+        credentials_name=credentials_name,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
