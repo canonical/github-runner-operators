@@ -143,7 +143,7 @@ def _build_config(env: dict[str, str]) -> dict[str, typing.Any]:
     return config
 
 
-def _build_provider_files(
+def _build_provider_files(  # noqa: CCR001  # refactor tracked in #327
     env: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, typing.Any]], dict[str, str]]:
     """Build GARM provider entries and their OpenStack config files."""

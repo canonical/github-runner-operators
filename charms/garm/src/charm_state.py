@@ -236,7 +236,7 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     return sorted(connections, key=lambda c: (c.host, c.port))
 
 
-def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
+def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:  # noqa: CCR001  # refactor tracked in #327
     """Build the desired GARM org/repo entities from configurator relation data.
 
     Each entity is bound to the GitHub App credential the github reconciler creates for the same
