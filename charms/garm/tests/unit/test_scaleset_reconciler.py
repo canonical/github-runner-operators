@@ -4,6 +4,7 @@
 """Unit tests for the scaleset reconciler."""
 
 import base64
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -68,11 +69,13 @@ class _FakeInstance:
         job_status=None,
         status="running",
         job_updated_at=None,
+        provider_fault=None,
     ):
         self.name = name
         self.id = iid
         self.runner_status = runner_status
         self.status = status
+        self.provider_fault = provider_fault
         self.job = _FakeJob(job_status, job_updated_at) if job_status is not None else None
 
 
@@ -420,35 +423,66 @@ def test_garm_side_disable_failure_leaves_runners_in_place():
     assert client.deleted == [42]
 
 
-@pytest.mark.parametrize(
-    "status, expected_force",
-    [
-        ("running", False),
-        ("pending_delete", True),
-        ("pending_force_delete", True),
-        ("deleting", True),
-    ],
-    ids=[
-        "running-not-forced",
-        "pending-delete-forced",
-        "pending-force-delete-forced",
-        "deleting-forced",
-    ],
-)
-def test_force_remove_only_after_a_delete_is_already_stuck(status, expected_force):
+def test_busy_runner_survives_an_unreachable_forge(caplog):
     """
-    arrange: FakeGarmClient with an orphaned scaleset owning a runner in a given instance state.
+    arrange: FakeGarmClient whose disable fails as unauthorized, for an orphaned scaleset owning
+        a runner that last reported running a job.
     act: Reconcile so the scaleset is orphaned.
-    assert: force_remove is set only once GARM has already accepted a delete it could not carry
-        out. Forcing makes GARM drop the runner from its database even when the provider teardown
-        fails, leaking a live cloud instance nothing points at, so a first attempt is left plain
-        and retried with a backoff instead. An already-forced delete keeps its force, so an
-        escalation in flight is never downgraded back to a plain delete.
+    assert: The runner is not deleted and the stall is reported. GARM learns what a runner is
+        doing from the forge, so with the forge unreachable that runner reads as busy on every
+        pass — but its job reports to GitHub with its own registration token, not GARM's
+        credential, so it may still be working and deleting it would fail a live job. The
+        warning names the scaleset and the remedy instead of stalling silently.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
-        instances={42: [{"name": "runner-1", "status": status}]},
+        instances={42: [{"name": "runner-1", "runner_status": "active"}]},
+        update_scaleset_error=GarmUnauthorizedError("401 Unauthorized"),
+    )
+    with caplog.at_level(logging.WARNING):
+        _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted_instances == []
+    assert "Cannot drain scaleset stale-scaleset" in caplog.text
+    assert "credentials" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "status, provider_fault, expected_force",
+    [
+        ("running", None, False),
+        ("pending_delete", None, False),
+        ("deleting", None, False),
+        ("pending_delete", b"nova: instance not found", True),
+        ("pending_force_delete", b"nova: instance not found", True),
+        ("deleting", b"nova: instance not found", True),
+    ],
+    ids=[
+        "healthy-runner-not-forced",
+        "pending-delete-in-flight-not-forced",
+        "deleting-in-flight-not-forced",
+        "pending-delete-with-fault-forced",
+        "pending-force-delete-with-fault-forced",
+        "deleting-with-fault-forced",
+    ],
+)
+def test_force_remove_only_once_the_provider_has_refused_a_delete(
+    status, provider_fault, expected_force
+):
+    """
+    arrange: FakeGarmClient with an orphaned scaleset owning a runner in a given delete state,
+        with or without a fault recorded against it by the provider.
+    act: Reconcile so the scaleset is orphaned.
+    assert: force_remove is set only once a delete has been accepted and the provider reported a
+        fault carrying it out. A delete-pending status alone is also what a healthy teardown
+        looks like while it runs, and forcing that would turn a retryable failure into an
+        instance leaked in the cloud; the recorded fault is what separates the two.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+        instances={42: [{"name": "runner-1", "status": status, "provider_fault": provider_fault}]},
     )
     _reconcile(client, [_spec(name="new-scaleset")])
 
@@ -578,10 +612,16 @@ def test_runner_running_a_job_is_left_alone(instance_kwargs):
     "age, expect_removed",
     [
         (timedelta(minutes=30), False),
-        (timedelta(hours=5, minutes=55), False),
-        (timedelta(hours=7), True),
+        (timedelta(hours=8), False),
+        (timedelta(days=4, hours=23), False),
+        (timedelta(days=6), True),
     ],
-    ids=["recent-job-protects", "just-under-the-limit-protects", "stale-job-frees-runner"],
+    ids=[
+        "recent-job-protects",
+        "long-running-job-protects",
+        "just-under-the-limit-protects",
+        "stale-job-frees-runner",
+    ],
 )
 def test_a_job_only_protects_its_runner_while_it_could_still_be_running(age, expect_removed):
     """
@@ -589,9 +629,11 @@ def test_a_job_only_protects_its_runner_while_it_could_still_be_running(age, exp
         still in progress, last updated a given time ago.
     act: Reconcile so the scaleset is orphaned.
     assert: The job protects its runner only while it is recent enough to describe a live job.
-        GitHub terminates a job at six hours and GARM only reconciles stale queued jobs against
-        the forge, so a dropped completion webhook would otherwise pin the runner as busy
-        forever and strand the scaleset — the very failure this cleanup exists to fix.
+        The bound is the five days GitHub allows a job on a self-hosted runner, not the six
+        hours a GitHub-hosted one gets, so a long but legitimate job keeps its runner. GARM only
+        reconciles stale queued jobs against the forge, so past that ceiling a dropped
+        completion webhook would otherwise pin the runner as busy forever and strand the
+        scaleset — the very failure this cleanup exists to fix.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],
