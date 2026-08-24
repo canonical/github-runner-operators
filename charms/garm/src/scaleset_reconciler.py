@@ -29,9 +29,16 @@ SYSTEM_TEMPLATE_NAME = "github_linux"
 APROXY_SCRIPT_NAME = "00-aproxy"
 
 # GARM's runner status for a runner that is executing a workflow job, and the
-# GitHub job status for one that has finished.
+# GitHub job statuses that still hold one. GARM's job status is a closed set
+# ("queued", "in_progress", "completed"), so matching the holding ones by name
+# means an absent or unrecognised status frees the runner instead of pinning it
+# as busy forever — the same way an unrecognised runner status is treated.
 RUNNER_STATUS_ACTIVE = "active"
-JOB_STATUS_COMPLETED = "completed"
+JOB_STATUSES_HOLDING_RUNNER = frozenset({"queued", "in_progress"})
+
+# GARM instance statuses meaning a delete was accepted but has not completed:
+# the provider teardown is failing and being retried with a backoff.
+PENDING_DELETE_STATUSES = frozenset({"pending_delete", "deleting"})
 
 
 @dataclass
@@ -188,6 +195,11 @@ class ScalesetReconciler:
                 scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
             )
         except GarmApiError as exc:
+            # Carry on rather than deferring the whole removal: disabling goes
+            # through the forge, so expired credentials fail here — the very case
+            # the runner removal below is built to escalate past. Leaving the
+            # scaleset enabled only risks GARM replacing a removed runner for one
+            # pass, and it cannot even do that when the forge is what is broken.
             logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
         # GARM returns 400 while the scaleset still owns runners, so the runners
         # have to go first; anything left behind is retried on the next pass.
@@ -221,6 +233,9 @@ class ScalesetReconciler:
                 exc,
             )
             return
+        # GARM's delete endpoint has no atomic "delete-if-idle" precondition, so a job
+        # assigned to an instance between this list and its delete below is a residual
+        # race this loop cannot close; it relies on the next reconcile to catch it.
         for instance in instances:
             if not instance.name:
                 logger.warning(
@@ -228,10 +243,10 @@ class ScalesetReconciler:
                 )
                 continue
             if _is_running_job(instance):
-                # The scaleset is already disabled with min_idle_runners=0, so GARM
-                # launches no replacement; the runner is left to finish its job and
-                # is removed on a later pass, along with the scaleset. Deleting it
-                # here would fail the workflow job that is currently running on it.
+                # Deleting the runner here would fail the workflow job running on
+                # it, so it is left to finish and removed on a later pass along
+                # with the scaleset — which the disable above has already stopped
+                # sizing up, so no replacement is launched behind it.
                 logger.info(
                     "Leaving runner %s of scaleset %s in place: still running a job"
                     " (will retry on the next reconcile)",
@@ -239,27 +254,44 @@ class ScalesetReconciler:
                     name,
                 )
                 continue
-            self._delete_runner(instance.name, name)
+            self._delete_runner(instance, name)
 
-    def _delete_runner(self, instance_name: str, scaleset_name: str) -> None:
-        """Delete one runner, escalating to a GitHub-unauthorized bypass if needed.
+    def _delete_runner(self, instance: Instance, scaleset_name: str) -> None:
+        """Delete one runner, escalating past a stuck provider or an unauthorized forge.
 
-        Provider errors are always ignored (``force_remove``): the scaleset is going
-        away, so a runner GARM can no longer reach in the provider must not block the
-        removal. The bypass is reserved for a 401 — the only status GARM returns for
-        an unauthorized forge error — because it drops the runner from the provider
-        and GARM's database without deregistering it in GitHub, orphaning it there.
-        Any other failure (a connection error, a 5xx, or a 400 for a runner that is
-        not yet in a deletable state) is transient, so it is left for the next
-        reconcile rather than escalated into a GitHub orphan.
+        Both escalations are withheld until their failure is proven, because each one
+        trades a stuck runner for an orphaned resource nothing points at any more:
+
+        * ``force_remove`` makes GARM drop the runner from its database even when the
+          provider teardown fails, leaving the instance running in the cloud with no
+          record of it. A plain delete instead retries the teardown with a backoff
+          indefinitely, so it is only forced once the instance is already sitting in
+          a pending-delete state — GARM accepted an earlier delete and has not managed
+          to carry it out.
+        * ``bypass_gh_unauthorized`` drops the runner from the provider and GARM's
+          database without deregistering it in GitHub, orphaning it there. It is
+          reserved for a 401 — the only status GARM returns for an unauthorized forge
+          error. Any other failure (a connection error, a 5xx, or a 400 for a runner
+          that is not yet in a deletable state) is transient, so it is left for the
+          next reconcile rather than escalated into a GitHub orphan.
 
         Args:
-            instance_name: Name of the runner instance to delete.
+            instance: The runner instance to delete.
             scaleset_name: Name of the owning scaleset, for logging.
         """
-        logger.info("Removing runner %s from orphaned scaleset %s", instance_name, scaleset_name)
+        instance_name = instance.name or ""
+        # A delete GARM has already accepted but not completed means the provider
+        # teardown is failing and backing off; forcing it is what finally lets the
+        # scaleset go, at the cost of leaking the instance in the cloud.
+        force_remove = (instance.status or "").lower() in PENDING_DELETE_STATUSES
+        logger.info(
+            "Removing runner %s from orphaned scaleset %s (force=%s)",
+            instance_name,
+            scaleset_name,
+            force_remove,
+        )
         try:
-            self._client.delete_instance(instance_name, force_remove=True)
+            self._client.delete_instance(instance_name, force_remove=force_remove)
             return
         except GarmUnauthorizedError as exc:
             logger.warning(
@@ -270,22 +302,20 @@ class ScalesetReconciler:
                 exc,
             )
         except GarmApiError as exc:
-            logger.warning(
-                "Could not remove runner %s (will retry on next reconcile): %s",
-                instance_name,
-                exc,
-            )
+            self._log_deferred_runner_delete(instance_name, exc)
             return
         try:
             self._client.delete_instance(
-                instance_name, force_remove=True, bypass_gh_unauthorized=True
+                instance_name, force_remove=force_remove, bypass_gh_unauthorized=True
             )
         except GarmApiError as exc:
-            logger.warning(
-                "Could not remove runner %s (will retry on next reconcile): %s",
-                instance_name,
-                exc,
-            )
+            self._log_deferred_runner_delete(instance_name, exc)
+
+    @staticmethod
+    def _log_deferred_runner_delete(instance_name: str, exc: GarmApiError) -> None:
+        logger.warning(
+            "Could not remove runner %s (will retry on next reconcile): %s", instance_name, exc
+        )
 
     def _resolve_entity_id(self, spec: ScalesetSpec) -> str | None:
         """Return the GARM entity UUID for *spec*, or None if not yet registered."""
@@ -564,7 +594,7 @@ def _is_running_job(instance: Instance) -> bool:
     if (instance.runner_status or "").lower() == RUNNER_STATUS_ACTIVE:
         return True
     job = instance.job
-    return job is not None and (job.status or "").lower() != JOB_STATUS_COMPLETED
+    return job is not None and (job.status or "").lower() in JOB_STATUSES_HOLDING_RUNNER
 
 
 def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:

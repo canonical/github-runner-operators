@@ -58,10 +58,13 @@ class _FakeJob:
 
 
 class _FakeInstance:
-    def __init__(self, name, iid="instance-uuid", runner_status="idle", job_status=None):
+    def __init__(
+        self, name, iid="instance-uuid", runner_status="idle", job_status=None, status="running"
+    ):
         self.name = name
         self.id = iid
         self.runner_status = runner_status
+        self.status = status
         self.job = _FakeJob(job_status) if job_status is not None else None
 
 
@@ -81,6 +84,7 @@ class FakeGarmClient:
         instances=None,
         delete_instance_error=None,
         bypass_delete_error=None,
+        update_scaleset_error=None,
     ):
         self._providers = [_FakeProvider(n) for n in (providers or [])]
         self._scalesets = [
@@ -107,6 +111,7 @@ class FakeGarmClient:
         }
         self._delete_instance_error = delete_instance_error
         self._bypass_delete_error = bypass_delete_error
+        self._update_scaleset_error = update_scaleset_error
         self.created: list[tuple[str, str, object]] = []
         self.updated: list[tuple[int, object]] = []
         self.deleted: list[int] = []
@@ -131,6 +136,8 @@ class FakeGarmClient:
         self.created.append(("repo", repo_id, params))
 
     def update_scaleset(self, scaleset_id, params):
+        if self._update_scaleset_error is not None:
+            raise self._update_scaleset_error
         self.updated.append((scaleset_id, params))
 
     def delete_scaleset(self, scaleset_id):
@@ -361,6 +368,55 @@ def test_delete_orphaned_scaleset():
     assert client.deleted == [42]
 
 
+def test_disable_failure_does_not_block_removal():
+    """
+    arrange: FakeGarmClient whose update_scaleset (the disable-before-delete call) raises, for
+        an orphaned scaleset that still owns a runner.
+    act: Reconcile so the scaleset is orphaned.
+    assert: The runner and the scaleset are still removed. Disabling goes through the forge, so
+        expired credentials fail it — the very case runner removal is built to escalate past;
+        treating it as a precondition would strand the scaleset forever.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+        instances={42: ["runner-1"]},
+        update_scaleset_error=GarmApiError("500 Server error"),
+    )
+    _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted_instances == [("runner-1", False, False)]
+    assert client.deleted == [42]
+
+
+@pytest.mark.parametrize(
+    "status, expected_force",
+    [
+        ("running", False),
+        ("pending_delete", True),
+        ("deleting", True),
+    ],
+    ids=["running-not-forced", "pending-delete-forced", "deleting-forced"],
+)
+def test_force_remove_only_after_a_delete_is_already_stuck(status, expected_force):
+    """
+    arrange: FakeGarmClient with an orphaned scaleset owning a runner in a given instance state.
+    act: Reconcile so the scaleset is orphaned.
+    assert: force_remove is set only once GARM has already accepted a delete it could not carry
+        out. Forcing makes GARM drop the runner from its database even when the provider teardown
+        fails, leaking a live cloud instance nothing points at, so a first attempt is left plain
+        and retried with a backoff instead.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+        instances={42: [{"name": "runner-1", "status": status}]},
+    )
+    _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted_instances == [("runner-1", expected_force, False)]
+
+
 def test_delete_orphaned_scaleset_removes_runners_first():
     """
     arrange: FakeGarmClient with an orphaned scaleset that still owns two runners.
@@ -377,8 +433,8 @@ def test_delete_orphaned_scaleset_removes_runners_first():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted_instances == [
-        ("runner-1", True, False),
-        ("runner-2", True, False),
+        ("runner-1", False, False),
+        ("runner-2", False, False),
     ]
     assert client.deleted == [42]
 
@@ -399,8 +455,8 @@ def test_runner_removal_falls_back_to_github_unauthorized_bypass():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted_instances == [
-        ("runner-1", True, False),
-        ("runner-1", True, True),
+        ("runner-1", False, False),
+        ("runner-1", False, True),
     ]
     assert client.deleted == [42]
 
@@ -450,7 +506,7 @@ def test_runner_removal_does_not_bypass_github_on_non_401_errors(error):
     )
     _reconcile(client, [_spec(name="new-scaleset")])
 
-    assert client.deleted_instances == [("runner-1", True, False)]
+    assert client.deleted_instances == [("runner-1", False, False)]
 
 
 @pytest.mark.parametrize(
@@ -486,15 +542,26 @@ def test_runner_running_a_job_is_left_alone(instance_kwargs):
         {"runner_status": "idle", "job_status": "completed"},
         {"runner_status": "failed"},
         {"runner_status": None},
+        {"runner_status": "idle", "job_status": ""},
+        {"runner_status": "idle", "job_status": "some-unrecognised-status"},
     ],
-    ids=["idle", "job-completed", "failed", "unknown-status"],
+    ids=[
+        "idle",
+        "job-completed",
+        "failed",
+        "unknown-status",
+        "job-status-empty",
+        "job-status-unrecognised",
+    ],
 )
 def test_idle_runner_is_removed(instance_kwargs):
     """
     arrange: FakeGarmClient with an orphaned scaleset owning a runner that holds no live job.
     act: Reconcile so the scaleset is orphaned.
-    assert: The runner is force-removed, so the busy-runner guard does not stall the cleanup
-        for runners that are safe to delete.
+    assert: The runner is removed, so the busy-runner guard does not stall the cleanup for
+        runners that are safe to delete. An absent or unrecognised job status frees the runner
+        rather than pinning it as busy forever, since GARM's job statuses are a closed set and
+        a stale or unhydrated job record would otherwise strand the scaleset.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],
@@ -503,7 +570,7 @@ def test_idle_runner_is_removed(instance_kwargs):
     )
     _reconcile(client, [_spec(name="new-scaleset")])
 
-    assert client.deleted_instances == [("runner-1", True, False)]
+    assert client.deleted_instances == [("runner-1", False, False)]
 
 
 def test_unnamed_runner_is_skipped():
