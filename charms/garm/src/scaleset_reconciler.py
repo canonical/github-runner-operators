@@ -9,8 +9,9 @@ import logging
 from dataclasses import dataclass, field
 
 from charm_state import RunnerConfig
-from garm_api import GarmApiError, GarmAuthenticatedClient
+from garm_api import GarmApiError, GarmAuthenticatedClient, GarmUnauthorizedError
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
+from garm_client.models.instance import Instance
 from garm_client.models.scale_set import ScaleSet
 from garm_client.models.template import Template
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
@@ -26,6 +27,11 @@ SYSTEM_TEMPLATE_NAME = "github_linux"
 # before the configurator's "pre_install.sh", so the proxy is up before any
 # operator-supplied script runs.
 APROXY_SCRIPT_NAME = "00-aproxy"
+
+# GARM's runner status for a runner that is executing a workflow job, and the
+# GitHub job status for one that has finished.
+RUNNER_STATUS_ACTIVE = "active"
+JOB_STATUS_COMPLETED = "completed"
 
 
 @dataclass
@@ -170,29 +176,114 @@ class ScalesetReconciler:
             self._delete_custom_template(spec.name, templates)
 
     def _delete_orphaned(self, scaleset: ScaleSet) -> None:
-        """Disable then delete a scaleset that is no longer in the desired set."""
+        """Disable, drain, then delete a scaleset that is no longer in the desired set."""
         name = scaleset.name or ""
         logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
         if scaleset.id is None:
             return
         try:
-            # Disable the scaleset first so GARM stops launching new runners.
-            # GARM returns 400 if the scaleset still has active runners,
-            # so disabling first drains it for the next reconcile to clean up.
+            # Disable the scaleset first so GARM stops launching new runners
+            # while its existing ones are being removed.
             self._client.update_scaleset(
                 scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
             )
         except GarmApiError as exc:
             logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
+        # GARM returns 400 while the scaleset still owns runners, so the runners
+        # have to go first; anything left behind is retried on the next pass.
+        self._remove_runners(scaleset.id, name)
         try:
             self._client.delete_scaleset(scaleset.id)
         except GarmApiError as exc:
-            # 400 means runners are still present; scaleset will be deleted
-            # on the next reconcile pass once GARM has cleaned them up.
+            # Runner removal is asynchronous (the provider still has to tear the
+            # instance down), so the scaleset is deleted on a later reconcile
+            # pass once GARM has finished cleaning them up.
             logger.warning(
                 "Could not delete scaleset %s (runners may still be active; "
                 "will retry on next reconcile): %s",
                 name,
+                exc,
+            )
+
+    def _remove_runners(self, scaleset_id: int, name: str) -> None:
+        """Remove every runner belonging to a scaleset being deleted.
+
+        Args:
+            scaleset_id: Id of the scaleset being deleted.
+            name: Name of the scaleset being deleted, for logging.
+        """
+        try:
+            instances = self._client.list_scaleset_instances(scaleset_id)
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not list runners of scaleset %s (will retry on next reconcile): %s",
+                name,
+                exc,
+            )
+            return
+        for instance in instances:
+            if not instance.name:
+                logger.warning(
+                    "Skipping runner with missing name in scaleset %s (id=%s)", name, instance.id
+                )
+                continue
+            if _is_running_job(instance):
+                # The scaleset is already disabled with min_idle_runners=0, so GARM
+                # launches no replacement; the runner is left to finish its job and
+                # is removed on a later pass, along with the scaleset. Deleting it
+                # here would fail the workflow job that is currently running on it.
+                logger.info(
+                    "Leaving runner %s of scaleset %s in place: still running a job"
+                    " (will retry on the next reconcile)",
+                    instance.name,
+                    name,
+                )
+                continue
+            self._delete_runner(instance.name, name)
+
+    def _delete_runner(self, instance_name: str, scaleset_name: str) -> None:
+        """Delete one runner, escalating to a GitHub-unauthorized bypass if needed.
+
+        Provider errors are always ignored (``force_remove``): the scaleset is going
+        away, so a runner GARM can no longer reach in the provider must not block the
+        removal. The bypass is reserved for a 401 — the only status GARM returns for
+        an unauthorized forge error — because it drops the runner from the provider
+        and GARM's database without deregistering it in GitHub, orphaning it there.
+        Any other failure (a connection error, a 5xx, or a 400 for a runner that is
+        not yet in a deletable state) is transient, so it is left for the next
+        reconcile rather than escalated into a GitHub orphan.
+
+        Args:
+            instance_name: Name of the runner instance to delete.
+            scaleset_name: Name of the owning scaleset, for logging.
+        """
+        logger.info("Removing runner %s from orphaned scaleset %s", instance_name, scaleset_name)
+        try:
+            self._client.delete_instance(instance_name, force_remove=True)
+            return
+        except GarmUnauthorizedError as exc:
+            logger.warning(
+                "Could not remove runner %s: GitHub rejected the request as unauthorized;"
+                " retrying with the bypass (this may leave the runner registered in"
+                " GitHub, where it must be removed manually): %s",
+                instance_name,
+                exc,
+            )
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not remove runner %s (will retry on next reconcile): %s",
+                instance_name,
+                exc,
+            )
+            return
+        try:
+            self._client.delete_instance(
+                instance_name, force_remove=True, bypass_gh_unauthorized=True
+            )
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not remove runner %s (will retry on next reconcile): %s",
+                instance_name,
                 exc,
             )
 
@@ -453,6 +544,27 @@ class ScalesetReconciler:
             != bool(desired_extra.get("disable_updates"))
             or (observed.template_id or 0) != template_id
         )
+
+
+def _is_running_job(instance: Instance) -> bool:
+    """Return whether a runner is currently executing a workflow job.
+
+    GARM does not refuse to delete a busy runner, so the charm has to check before
+    force-removing one: tearing down a runner mid-job fails the workflow job.
+
+    Args:
+        instance: The runner instance to inspect.
+
+    Returns:
+        True when the runner is running a job and must be left alone.
+    """
+    # "active" is GARM's runner status for a runner executing a job. The job field
+    # is a second signal: the list endpoint may report an assigned job before the
+    # status catches up, and a completed job no longer holds the runner.
+    if (instance.runner_status or "").lower() == RUNNER_STATUS_ACTIVE:
+        return True
+    job = instance.job
+    return job is not None and (job.status or "").lower() != JOB_STATUS_COMPLETED
 
 
 def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:

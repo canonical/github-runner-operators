@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-08-21
+
+- `garm`: remove a scaleset's runners before deleting the scaleset. Removing every `garm-configurator` relation disabled and deleted the orphaned scalesets, but GARM rejects deleting a scaleset that still owns runners, so a scaleset with active runners was never removed and its runners were left behind. The charm now removes each runner of an orphaned scaleset first, ignoring provider errors so an instance GARM can no longer reach in the provider does not block the cleanup. A runner that is currently executing a workflow job is left alone and removed on a later reconcile once the job finishes, so an in-flight job is never failed by the cleanup. If GARM reports that the forge rejected the removal as unauthorized (expired credentials), the charm retries with GARM's GitHub Unauthorized bypass, which drops the runner from the provider and GARM's database — note that this can leave the runner registered in GitHub, where it must be removed manually. Any other failure is retried on the next reconcile instead, so a transient error never causes a runner to be orphaned in GitHub.
+
 ## 2026-07-13
 
 - `garm`: fix the SSH debug (tmate) connection details so the runner actually reads them. The `TMATE_SERVER_*` variables injected into the shared runner template were written to `/home/runner/.env`, but the GitHub Actions runner sources a `.env` file from its install directory (`/home/runner/actions-runner/.env`), so the debug-SSH server host, port, and fingerprints were silently ignored. They are now written to the `.env` file the runner reads, matching the per-scaleset runner options.
