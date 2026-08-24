@@ -708,7 +708,10 @@ class GarmCharm(paas_charm.go.Charm):
         data: Mapping[str, str],
         unit_name: str,
     ) -> None:
-        """Add the GitHub credential described by one configurator unit, deduped by App ids.
+        """Add the GitHub credential described by one configurator unit.
+
+        Credentials are deduped per (app_id, installation_id): a unit whose
+        App ids were already provided by an earlier unit is skipped.
 
         Skips the unit — quietly while the App fields are merely absent or already
         provided by an earlier unit, with a warning when the ids are malformed or the
