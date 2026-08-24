@@ -9,7 +9,11 @@ import jubilant
 import pytest
 import requests
 
-from tests.integration.conftest import _garm_login, _get_garm_address
+from tests.integration.conftest import (
+    _collect_debug_info,
+    _garm_login,
+    _get_garm_address,
+)
 from tests.integration.helpers import (
     E2E_APP_ENV,
     GITHUB_REPOSITORY_ENV_VAR,
@@ -84,7 +88,7 @@ def _wait_for_runner_online(
     juju: jubilant.Juju,
     garm_app: str,
     scaleset_name: str,
-    timeout: int = 15 * 60,
+    timeout: int = 25 * 60,
     poll_interval: int = 15,
 ) -> None:
     """Block until the named scale set has a runner GitHub has registered.
@@ -96,10 +100,16 @@ def _wait_for_runner_online(
         timeout: Seconds to wait before failing the test.
         poll_interval: Seconds between polls.
     """
+    # Must outlast GARM's own runner bootstrap timeout -- 20 minutes by default,
+    # and not configurable through garm-configurator. Waiting less fails the test
+    # on a runner GARM still considers booting, instead of letting GARM reap a
+    # stuck one and spawn a replacement.
     address = _get_garm_address(juju, garm_app)
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     token = _garm_login(juju, address)
     deadline = time.time() + timeout
+    instances: list[dict] = []
+    last_summary: list[str] | None = None
     logger.info("Waiting for a registered runner in scale set %r", scaleset_name)
 
     while time.time() < deadline:
@@ -116,13 +126,25 @@ def _wait_for_runner_online(
                 (s for s in scalesets.json() or [] if s.get("name") == scaleset_name), None
             )
             if scaleset is not None:
-                instances = requests.get(
+                instances_response = requests.get(
                     f"{base_url}/scalesets/{scaleset['id']}/instances",
                     headers=headers,
                     timeout=30,
                 )
-                instances.raise_for_status()
-                for instance in instances.json() or []:
+                instances_response.raise_for_status()
+                instances = instances_response.json() or []
+                summary = sorted(
+                    f"{i.get('name')}: status={i.get('status')} "
+                    f"runner_status={i.get('runner_status')}"
+                    for i in instances
+                )
+                if summary != last_summary:
+                    # Log on change only: the wait spans many polls, and this trail
+                    # is what shows whether instances are appearing, failing, or
+                    # never being created at all.
+                    last_summary = summary
+                    logger.info("Scale set instances: %s", summary)
+                for instance in instances:
                     if instance.get("runner_status") in REGISTERED_RUNNER_STATUSES:
                         logger.info(
                             "Runner %s registered (runner_status=%s)",
@@ -135,6 +157,24 @@ def _wait_for_runner_online(
 
         time.sleep(poll_interval)
 
+    # Leave the evidence in the log before failing: the instance state says which
+    # stage stalled, since GARM only reaches "registered" after spawning an
+    # instance, booting its VM, and installing the runner against the callback
+    # URL. An empty list means GARM never spawned an instance at all;
+    # pending_create means the provider never picked one up; error means the
+    # provider tried and failed, with GARM's own logs -- collected next, through
+    # the sentinel redactor -- carrying the reason.
+    logger.error(
+        "Instances in scale set %s at timeout: %s",
+        scaleset_name,
+        sorted(
+            f"{i.get('name')}: status={i.get('status')} "
+            f"runner_status={i.get('runner_status')} provider_id={i.get('provider_id')!r}"
+            for i in instances
+        )
+        or "none (GARM never spawned an instance)",
+    )
+    _collect_debug_info(juju, garm_app)
     pytest.fail(
         f"No runner in scale set {scaleset_name!r} reached a registered state "
         f"({' or '.join(REGISTERED_RUNNER_STATUSES)}) within {timeout}s."
