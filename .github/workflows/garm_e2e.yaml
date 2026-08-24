@@ -264,6 +264,35 @@ jobs:
           TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
           echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
 
+      - name: Assert the tenant provides the image, flavor and network
+        # The provider resolves these only at instance creation, deep into the run:
+        # a miss there costs the whole build and deploy before surfacing as an
+        # opaque provider error in the redacted logs. Resolving them here -- with
+        # the same OS_* scope the provider will use, which may differ from the one
+        # a local `openstack flavor list` runs under -- fails the job in minutes
+        # and prints what the tenant does offer.
+        run: |
+          set -euo pipefail
+
+          check() {
+            local KIND="$1" NAME="$2"
+            if openstack "$KIND" show "$NAME" > /dev/null 2>&1; then
+              echo "$KIND '$NAME' resolves on the tenant."
+              return 0
+            fi
+            echo "::error::The $KIND configured for the E2E does not resolve on this tenant. Check that the value exists in the project and region the OS_* secrets point at, and that it is shared with that project if private."
+            echo "Available ${KIND}s on this tenant (name only):"
+            openstack "$KIND" list -c Name -f value | sed 's/^/  /' || true
+            return 1
+          }
+
+          check image "$E2E_RUNNER_IMAGE_NAME"
+          # Optional: unset means the suite falls back to its own default flavor.
+          if [ -n "${E2E_OPENSTACK_FLAVOR:-}" ]; then
+            check flavor "$E2E_OPENSTACK_FLAVOR"
+          fi
+          check network "$OS_NETWORK"
+
       - name: Install opcli and spread
         run: |
           set -euo pipefail
