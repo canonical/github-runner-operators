@@ -27,7 +27,7 @@ description = "Check cyclomatic and cognitive complexity"
 deps = ["ruff", "flake8==7.3.0", "flake8-cognitive-complexity==0.1.0"]
 commands = [
   ["ruff", "check", "--select", "C90", "src"],
-  ["flake8", "--select", "CCR001", "--max-cognitive-complexity=15", "--extend-exclude=garm_client", "src", "tests"],
+  ["flake8", "--select", "CCR001", "--max-cognitive-complexity=15", "--extend-exclude=src/garm_client", "src", "tests"],
 ]
 
 [env.static]
