@@ -866,7 +866,8 @@ class GarmAuthenticatedClient(GarmApiClient):
             Updated ScaleSet model object.
 
         Raises:
-            GarmApiError: On API error.
+            GarmUnauthorizedError: If GARM answers 401 (expired forge credentials).
+            GarmApiError: On any other API error.
         """
         with self._api_client() as client:
             try:
@@ -876,9 +877,10 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                ) from exc
+                message = f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
+                if exc.status == 401:
+                    raise GarmUnauthorizedError(message) from exc
+                raise GarmApiError(message) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 

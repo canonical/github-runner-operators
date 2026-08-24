@@ -7,6 +7,7 @@
 import base64
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from charm_state import RunnerConfig
 from garm_api import GarmApiError, GarmAuthenticatedClient, GarmUnauthorizedError
@@ -37,8 +38,15 @@ RUNNER_STATUS_ACTIVE = "active"
 JOB_STATUSES_HOLDING_RUNNER = frozenset({"queued", "in_progress"})
 
 # GARM instance statuses meaning a delete was accepted but has not completed:
-# the provider teardown is failing and being retried with a backoff.
-PENDING_DELETE_STATUSES = frozenset({"pending_delete", "deleting"})
+# the provider teardown is failing and being retried with a backoff. The forced
+# variant belongs here too — dropping it would downgrade an escalation already in
+# flight back to a plain delete, so a stuck instance could never clear.
+PENDING_DELETE_STATUSES = frozenset({"pending_delete", "pending_force_delete", "deleting"})
+
+# GitHub terminates a workflow job at 6 hours, so a job record still claiming a
+# runner past that has to be stale (a dropped completion webhook) rather than a
+# job that is genuinely still running.
+MAX_JOB_RUNTIME = timedelta(hours=6)
 
 
 @dataclass
@@ -188,22 +196,10 @@ class ScalesetReconciler:
         logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
         if scaleset.id is None:
             return
-        try:
-            # Disable the scaleset first so GARM stops launching new runners
-            # while its existing ones are being removed.
-            self._client.update_scaleset(
-                scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
-            )
-        except GarmApiError as exc:
-            # Carry on rather than deferring the whole removal: disabling goes
-            # through the forge, so expired credentials fail here — the very case
-            # the runner removal below is built to escalate past. Leaving the
-            # scaleset enabled only risks GARM replacing a removed runner for one
-            # pass, and it cannot even do that when the forge is what is broken.
-            logger.warning("Could not disable scaleset %s before delete: %s", name, exc)
-        # GARM returns 400 while the scaleset still owns runners, so the runners
-        # have to go first; anything left behind is retried on the next pass.
-        self._remove_runners(scaleset.id, name)
+        if self._disable(scaleset.id, name):
+            # GARM returns 400 while the scaleset still owns runners, so the runners
+            # have to go first; anything left behind is retried on the next pass.
+            self._remove_runners(scaleset.id, name)
         try:
             self._client.delete_scaleset(scaleset.id)
         except GarmApiError as exc:
@@ -216,6 +212,45 @@ class ScalesetReconciler:
                 name,
                 exc,
             )
+
+    def _disable(self, scaleset_id: int, name: str) -> bool:
+        """Stop a scaleset launching runners, before its existing ones are removed.
+
+        Args:
+            scaleset_id: Id of the scaleset being deleted.
+            name: Name of the scaleset being deleted, for logging.
+
+        Returns:
+            Whether removing its runners should go ahead. A failure here is only
+            survivable when the forge is what rejected it: GARM cannot replace the
+            runners about to be removed if it cannot reach the forge either, and
+            that is the very case the removal below is built to escalate past. Any
+            other failure leaves a scaleset that is still enabled and still sized
+            up, so removing its runners would just have GARM launch replacements —
+            churning instances on every pass instead of draining.
+        """
+        try:
+            self._client.update_scaleset(
+                scaleset_id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
+            )
+            return True
+        except GarmUnauthorizedError as exc:
+            logger.warning(
+                "Could not disable scaleset %s before delete: the forge rejected the request"
+                " as unauthorized. Removing its runners anyway, since GARM cannot launch"
+                " replacements while the forge is unreachable: %s",
+                name,
+                exc,
+            )
+            return True
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not disable scaleset %s; leaving its runners in place so GARM does not"
+                " replace them while it is still enabled (will retry on next reconcile): %s",
+                name,
+                exc,
+            )
+            return False
 
     def _remove_runners(self, scaleset_id: int, name: str) -> None:
         """Remove every runner belonging to a scaleset being deleted.
@@ -588,13 +623,39 @@ def _is_running_job(instance: Instance) -> bool:
     Returns:
         True when the runner is running a job and must be left alone.
     """
-    # "active" is GARM's runner status for a runner executing a job. The job field
-    # is a second signal: the list endpoint may report an assigned job before the
-    # status catches up, and a completed job no longer holds the runner.
+    # "active" is GARM's runner status for a runner executing a job. GARM derives it
+    # from the forge's live view of the runner, so it corrects itself once a job ends.
     if (instance.runner_status or "").lower() == RUNNER_STATUS_ACTIVE:
         return True
+    # The job field is a second signal, covering the window where the list endpoint
+    # reports an assigned job before the runner status catches up. It is only trusted
+    # while it is fresh: GARM reconciles stale *queued* jobs against the forge but not
+    # in-progress ones, so a dropped completion webhook would otherwise leave a job
+    # claiming its runner forever and strand the scaleset the delete is trying to free.
     job = instance.job
-    return job is not None and (job.status or "").lower() in JOB_STATUSES_HOLDING_RUNNER
+    if job is None or (job.status or "").lower() not in JOB_STATUSES_HOLDING_RUNNER:
+        return False
+    return not _is_stale(job.updated_at)
+
+
+def _is_stale(updated_at: datetime | None) -> bool:
+    """Return whether a job record is too old to still describe a running job.
+
+    Args:
+        updated_at: When GARM last updated the job record, if it reported one.
+
+    Returns:
+        True when the record is older than the longest a job can run, so it cannot
+        describe a live job. An absent or unreadable timestamp is not treated as
+        stale: without evidence the record is old, the runner keeps its protection.
+    """
+    if updated_at is None:
+        return False
+    # GARM serialises timestamps as RFC 3339, but a naive value would raise on
+    # comparison; read it as UTC rather than letting the cleanup fail on it.
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - updated_at > MAX_JOB_RUNTIME
 
 
 def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
