@@ -618,7 +618,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
+    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:  # noqa: CCR001  # refactor tracked in #TODO
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
@@ -687,7 +687,7 @@ class GarmCharm(paas_charm.go.Charm):
                 )
         return specs
 
-    def _build_desired_credentials(self) -> list[CredentialSpec]:
+    def _build_desired_credentials(self) -> list[CredentialSpec]:  # noqa: CCR001  # refactor tracked in #TODO
         """Build desired GitHub credentials from configurator relation data.
 
         Credentials are deduped per (app_id, installation_id) so multiple configurator

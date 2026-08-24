@@ -18,5 +18,8 @@ what's specific to `garm-configurator`.
   there and raise `CharmConfigInvalidError`; `_reconcile` turns it into a `BlockedStatus`.
 - Relation databags are string-only: serialise structured values (e.g. `pre_install_scripts`
   via `json.dumps`).
+- **Cognitive complexity gate** — the `complexity` env enforces `flake8-cognitive-complexity`
+  (`CCR001`, max 15) over `src` and `tests`, on top of the ruff cyclomatic check. There is no
+  `noqa` baseline here; keep it that way — refactor instead of suppressing.
 - Tests: Scenario-based unit tests in `tests/unit/test_charm.py`; integration via
   `tox -e garm-configurator-integration`.

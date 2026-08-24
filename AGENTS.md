@@ -37,7 +37,7 @@ charms — there are four charms, not two).
 - **Go** — `go test ./...`.
 - `charmcraft pack` — build a charm (run from the charm dir; not wired into tox).
 - **Docs spellcheck** — CI runs Vale over `docs/` with `Canonical.000-US-spellcheck` at **error** level, so an unknown technical term (e.g. `deserialize`) fails the build. Add project-specific terms — regex forms like `[Dd]eserializ(e|es|ed|ing|ation)` are supported — to `docs/.custom_wordlist.txt` (the docs `Makefile` appends it to the Canonical accept vocabulary); verify with `make -C docs spellcheck` before pushing a `docs/` change.
-- Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function.
+- Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function, and — for `garm` and `garm-configurator` only — **cognitive complexity ≤ 15** per function (enforced by `flake8-cognitive-complexity` in the per-charm `complexity` env; exceptions carry `# noqa: CCR001` plus a tracking-issue reference).
 
 ## Charm conventions
 

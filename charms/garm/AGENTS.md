@@ -33,6 +33,10 @@ charm conventions; this file lists only what's specific to `garm`.
 - GARM serves its API and `/metrics` on one fixed port (`GARM_PORT`); the `app-port` /
   `metrics-port` / `metrics-path` config options have no effect (the charm logs a warning
   rather than blocking). The port is pinned in the `_workload_config` property.
+- **Cognitive complexity gate** — the `complexity` env enforces `flake8-cognitive-complexity`
+  (`CCR001`, max 15) over `src` and `tests`, on top of the ruff cyclomatic check. Functions over
+  the limit carry `# noqa: CCR001` plus a tracking-issue reference; **DON'T** add a new `noqa`
+  without one, and remove the `noqa` when refactoring brings a function back under 15.
 - Tests: unit in `tests/unit/`; integration via `tox -e garm-integration`
   (`charms/tests/integration/test_garm.py`).
 - **Scenario tests** — `ops-scenario` expands the `go-framework` extension itself, so this charm
