@@ -154,7 +154,7 @@ class FakeGarmClient:
     def delete_scaleset(self, scaleset_id):
         self.deleted.append(scaleset_id)
 
-    def list_scaleset_instances(self, scaleset_id):
+    def list_scale_set_instances(self, scaleset_id):
         return self._instances.get(scaleset_id, [])
 
     def delete_instance(self, instance_name, force_remove=False, bypass_gh_unauthorized=False):
@@ -739,14 +739,14 @@ def test_unnamed_runner_is_skipped():
 
 def test_runner_listing_failure_defers_scaleset_delete_attempt():
     """
-    arrange: FakeGarmClient whose list_scaleset_instances raises.
+    arrange: FakeGarmClient whose list_scale_set_instances raises.
     act: Reconcile so the scaleset is orphaned.
     assert: No runner delete is attempted and the reconcile completes, leaving the cleanup to
         the next pass rather than aborting on an unreadable runner list.
     """
 
     class _ListFailsClient(FakeGarmClient):
-        def list_scaleset_instances(self, scaleset_id):
+        def list_scale_set_instances(self, scaleset_id):
             raise GarmApiError("boom")
 
     client = _ListFailsClient(

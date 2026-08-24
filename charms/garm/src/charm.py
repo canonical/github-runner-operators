@@ -25,7 +25,12 @@ from charm_state import (
     credential_name,
 )
 from entity_reconciler import EntityReconciler
-from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
+from garm_api import (
+    GarmApiClient,
+    GarmApiError,
+    GarmAuthenticatedClient,
+    GarmConnectionError,
+)
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
@@ -34,6 +39,7 @@ from github_reconciler import (
     CredentialSpec,
     GithubReconciler,
 )
+from resource_cleanup import GarmCleanupError, GarmResourceCleanup
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec
 
 logger = logging.getLogger(__name__)
@@ -46,6 +52,7 @@ PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
 OPENSTACK_PROVIDER_BINARY: typing.Final[str] = "/usr/local/bin/garm-provider-openstack"
 GARM_PORT: typing.Final[int] = 8080
+GARM_LOCAL_API_BASE_URL: typing.Final[str] = f"http://127.0.0.1:{GARM_PORT}/api/v1"
 GARM_LISTEN_ADDRESS: typing.Final[str] = "0.0.0.0"
 _DB_PASSPHRASE_LENGTH: typing.Final[int] = 32
 
@@ -162,11 +169,86 @@ class GarmCharm(paas_charm.go.Charm):
             self._reconcile,
         )
         self.framework.observe(self.on.update_status, self._reconcile)
+        self.framework.observe(self.on.remove, self._on_remove)
 
     @block_if_invalid_data
     def _reconcile(self, _: ops.EventBase) -> None:
         """Reconcile charm state."""
         self.restart()
+
+    def _on_remove(self, _: ops.RemoveEvent) -> None:
+        """Drain GARM resources before Juju removes the application."""
+        if not self.unit.is_leader():
+            logger.info("Skipping GARM removal cleanup on a non-leader unit")
+            return
+        if self.app.planned_units() > 0:
+            logger.info(
+                "Skipping GARM removal cleanup while the application still has planned units"
+            )
+            return
+
+        initialization_client = GarmApiClient(GARM_LOCAL_API_BASE_URL)
+        try:
+            if not initialization_client.is_initialized():
+                logger.info(
+                    "GARM has not completed first-run; no resources require removal cleanup"
+                )
+                return
+        except GarmConnectionError as exc:
+            if self._get_postgresql_config() is None:
+                logger.info(
+                    "PostgreSQL is not configured and GARM is unreachable; "
+                    "GARM cannot have been initialized, so no cleanup is required"
+                )
+                return
+            message = (
+                f"Cannot determine whether GARM was initialized: {exc}. "
+                "Operator action: restore GARM/API availability, then retry "
+                "Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message) from exc
+        except GarmApiError as exc:
+            message = (
+                f"Cannot determine whether GARM was initialized: {exc}. "
+                "Operator action: restore GARM/API availability, then retry "
+                "Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message) from exc
+
+        admin_creds = self._get_admin_credentials()
+        if not admin_creds:
+            message = (
+                "GARM admin credentials are unavailable; refusing removal. "
+                "Operator action: restore the labelled admin credentials secret, "
+                "then retry Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message)
+
+        username = admin_creds.get("username")
+        password = admin_creds.get("password")
+        if not username or not password:
+            message = (
+                "GARM admin credentials are incomplete; refusing removal. "
+                "Operator action: restore username and password in the labelled "
+                "admin credentials secret, then retry Juju application removal."
+            )
+            logger.error(message)
+            raise GarmCleanupError(message)
+
+        base_url = GARM_LOCAL_API_BASE_URL
+        try:
+            auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
+            GarmResourceCleanup(auth_client).run()
+        except GarmApiError as exc:
+            logger.error(
+                "GARM removal cleanup failed: %s. Operator action: resolve the "
+                "reported GARM/API/runner issue, then retry Juju application removal.",
+                exc,
+            )
+            raise
 
     def _on_get_credentials_action(self, event: ops.ActionEvent) -> None:
         """Return the GARM admin credentials to the operator.
@@ -519,7 +601,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
             return
 
-        client = GarmApiClient(f"http://127.0.0.1:{GARM_PORT}/api/v1")
+        client = GarmApiClient(GARM_LOCAL_API_BASE_URL)
 
         try:
             client.wait_for_ready()
@@ -679,7 +761,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Talk to GARM over its fixed local listener (same target as first-run), rather than
         # _get_garm_url() which depends on charm config that is not set for the local API.
-        base_url = f"http://127.0.0.1:{GARM_PORT}/api/v1"
+        base_url = GARM_LOCAL_API_BASE_URL
         try:
             charm_state = CharmState.from_charm(self)
             auth_client = GarmAuthenticatedClient.from_login(

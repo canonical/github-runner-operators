@@ -6,6 +6,7 @@
 import base64
 import logging
 import time
+from typing import NoReturn
 
 import urllib3
 import urllib3.exceptions
@@ -53,6 +54,10 @@ _READINESS_TIMEOUT = 30  # seconds before giving up
 
 class GarmApiError(Exception):
     """Raised when a GARM API call fails unexpectedly."""
+
+
+class GarmNotFoundError(GarmApiError):
+    """Raised when a requested GARM resource no longer exists."""
 
 
 class GarmConnectionError(GarmApiError):
@@ -540,6 +545,49 @@ class GarmAuthenticatedClient(GarmApiClient):
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
+    def list_scale_set_instances(self, scaleset_id: int) -> list[Instance]:
+        """List runner instances belonging to a scaleset."""
+        with self._api_client() as client:
+            try:
+                return (
+                    InstancesApi(api_client=client).list_scale_set_instances(
+                        scaleset_id=str(scaleset_id),
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    or []
+                )
+            except ApiException as exc:
+                _raise_resource_api_error(
+                    f"Failed to list instances for scaleset {scaleset_id} "
+                    f"({exc.status}): {exc.body}",
+                    exc,
+                )
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_instance(
+        self,
+        instance_name: str,
+        *,
+        force_remove: bool = False,
+        bypass_gh_unauthorized: bool = False,
+    ) -> None:
+        """Request deletion of a GARM runner instance."""
+        with self._api_client() as client:
+            try:
+                InstancesApi(api_client=client).delete_instance(
+                    instance_name=instance_name,
+                    force_remove=force_remove,
+                    bypass_gh_unauthorized=bypass_gh_unauthorized,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                _raise_resource_api_error(
+                    f"Failed to delete runner {instance_name} ({exc.status}): {exc.body}", exc
+                )
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
     def find_org_id(self, org_name: str) -> str | None:
         """Find a GARM organization's UUID by name.
 
@@ -877,10 +925,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                message = f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                if exc.status == 401:
-                    raise GarmUnauthorizedError(message) from exc
-                raise GarmApiError(message) from exc
+                _raise_resource_api_error(
+                    f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -948,74 +995,34 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                ) from exc
-            except urllib3.exceptions.HTTPError as exc:
-                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
-
-    def list_scaleset_instances(self, scaleset_id: int) -> list[Instance]:
-        """List the runner instances belonging to a scaleset.
-
-        Args:
-            scaleset_id: Integer scaleset ID.
-
-        Returns:
-            List of Instance model objects.
-
-        Raises:
-            GarmApiError: On API error.
-        """
-        with self._api_client() as client:
-            try:
-                return (
-                    InstancesApi(api_client=client).list_scale_set_instances(
-                        scaleset_id=str(scaleset_id),
-                        _request_timeout=_REQUEST_TIMEOUT,
-                    )
-                    or []
+                _raise_resource_api_error(
+                    f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
                 )
-            except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to list instances of scaleset {scaleset_id} "
-                    f"({exc.status}): {exc.body}"
-                ) from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
-    def delete_instance(
-        self,
-        instance_name: str,
-        force_remove: bool = False,
-        bypass_gh_unauthorized: bool = False,
-    ) -> None:
-        """Delete a runner instance.
 
-        Args:
-            instance_name: Name of the runner instance to delete.
-            force_remove: Ignore provider errors and still remove the runner from
-                GitHub and the GARM database (the API's ``forceRemove``).
-            bypass_gh_unauthorized: Ignore GitHub Unauthorized errors and remove the
-                runner from the provider and the GARM database (the API's
-                ``bypassGHUnauthorized``). This can leave a runner registered in
-                GitHub when the credentials are no longer valid.
+def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
+    """Raise a resource-specific wrapper error, preserving 404 and 401 semantics.
 
-        Raises:
-            GarmUnauthorizedError: If GARM answers 401 (expired forge credentials).
-            GarmApiError: On any other API error.
-        """
-        with self._api_client() as client:
-            try:
-                InstancesApi(api_client=client).delete_instance(
-                    instance_name=instance_name,
-                    force_remove=force_remove,
-                    bypass_gh_unauthorized=bypass_gh_unauthorized,
-                    _request_timeout=_REQUEST_TIMEOUT,
-                )
-            except ApiException as exc:
-                message = f"Failed to delete instance {instance_name} ({exc.status}): {exc.body}"
-                if exc.status == 401:
-                    raise GarmUnauthorizedError(message) from exc
-                raise GarmApiError(message) from exc
-            except urllib3.exceptions.HTTPError as exc:
-                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+    Args:
+        message: Human-readable description of the failed call.
+        exc: The generated client's exception, whose status selects the wrapper.
+
+    Raises:
+        GarmNotFoundError: If the resource is already gone (404), so callers can
+            treat a cleanup as done rather than failed.
+        GarmUnauthorizedError: If GARM answers 401. GARM returns it only for an
+            unauthorized forge error, so it marks expired credentials specifically
+            rather than a transport failure or a generic 500 — the distinction the
+            runner-removal escalation relies on before it will bypass the forge.
+        GarmApiError: On any other API error.
+    """
+    match exc.status:
+        case 404:
+            error_type: type[GarmApiError] = GarmNotFoundError
+        case 401:
+            error_type = GarmUnauthorizedError
+        case _:
+            error_type = GarmApiError
+    raise error_type(message) from exc

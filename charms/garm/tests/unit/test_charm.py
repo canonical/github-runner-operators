@@ -184,6 +184,7 @@ def _state(
     secrets: typing.Sequence[Secret] = (),
     unit_status: ops.StatusBase | None = None,
     app_status: ops.StatusBase | None = None,
+    planned_units: int = 1,
 ) -> State:
     """Build a GARM charm State that is ready to serve unless a caller opts out.
 
@@ -234,6 +235,7 @@ def _state(
         ],
         relations=relations,
         secrets=list(secrets),
+        planned_units=planned_units,
         **statuses,
     )
 
@@ -497,6 +499,113 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     assert service.command == "/usr/local/bin/garm-entrypoint.py"
     assert service.startup == "disabled"
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+
+
+def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A ready charm with GARM admin credentials.
+    act: Emit the application remove event.
+    assert: Cleanup runs with the authenticated client before removal completes.
+    """
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        out = ctx.run(
+            ctx.on.remove(), _state(secrets=_owned_secrets(), planned_units=0)
+        )
+
+    cleanup_cls.assert_called_once_with(garm_api.auth_client)
+    cleanup_cls.return_value.run.assert_called_once_with()
+    assert out is not None
+
+
+def test_remove_skips_cleanup_when_garm_never_completed_first_run(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: GARM reports HTTP 409 for controller-info and no admin secret exists.
+    act: Emit application removal.
+    assert: Removal succeeds without authentication or cleanup because GARM has no resources.
+    """
+    garm_api.client.return_value.is_initialized.return_value = False
+
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+    garm_api.client.assert_called_once_with("http://127.0.0.1:8080/api/v1")
+    assert "has not completed first-run" in caplog.text
+
+
+def test_remove_unit_skips_global_cleanup_while_application_remains(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A leader unit is being removed while another application unit remains planned.
+    act: Emit the remove event.
+    assert: Global GARM cleanup is skipped so a scale-down does not destroy active runners.
+    """
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(
+            ctx.on.remove(),
+            _state(secrets=_owned_secrets(), planned_units=1),
+        )
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+
+
+def test_remove_blocks_when_garm_initialization_state_is_unknown(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: The unauthenticated GARM initialization probe cannot reach the API.
+    act: Emit application removal.
+    assert: Removal remains blocked because resources cannot be proven absent.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+
+    with pytest.raises(UncaughtCharmError, match="Cannot determine whether GARM was initialized"):
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    garm_api.auth.from_login.assert_not_called()
+    assert "restore GARM/API availability" in caplog.text
+
+
+def test_remove_allows_unreachable_garm_without_postgresql_setup(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: PostgreSQL is not configured and GARM's API is unreachable.
+    act: Emit application removal.
+    assert: Removal succeeds because GARM could not have been initialized without PostgreSQL.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(ctx.on.remove(), _state(planned_units=0, postgresql_data={}))
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+    assert "PostgreSQL is not configured" in caplog.text
+
+
+def test_remove_refuses_without_admin_credentials(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: A charm without GARM admin credentials.
+    act: Emit the application remove event.
+    assert: Removal fails and no authenticated client is created.
+    """
+    with pytest.raises(UncaughtCharmError, match="credentials are unavailable"):
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    garm_api.auth.from_login.assert_not_called()
+    assert "Operator action: restore the labelled admin credentials secret" in caplog.text
 
 
 def test_unpopulated_configurator_relation_does_not_prune(

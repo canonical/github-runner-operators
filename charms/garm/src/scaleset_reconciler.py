@@ -270,7 +270,7 @@ class ScalesetReconciler:
                 doing, so a runner that looks busy may simply be frozen that way.
         """
         try:
-            instances = self._client.list_scaleset_instances(scaleset_id)
+            instances = self._client.list_scale_set_instances(scaleset_id)
         except GarmApiError as exc:
             logger.warning(
                 "Could not list runners of scaleset %s (will retry on next reconcile): %s",
