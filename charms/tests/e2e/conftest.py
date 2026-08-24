@@ -277,48 +277,112 @@ def deploy_e2e_scaleset_fixture(
     # Best effort only: the workflow's own sweep is what guarantees no VM is left
     # behind, since a fixture cannot run if the model or the runner dies mid-test.
     try:
-        address = _get_garm_address(juju, garm_app)
-        headers = {"Authorization": f"Bearer {_garm_login(juju, address)}"}
-        base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-
-        response = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
-        response.raise_for_status()
-        scaleset = next((s for s in response.json() or [] if s.get("name") == label), None)
-        if scaleset is not None:
-            scaleset_id = scaleset["id"]
-            logger.info("Draining E2E scale set %s (%s)", scaleset_id, label)
-            # Disabling stops replacement; min_idle_runners=0 lets the existing ones go.
-            requests.patch(
-                f"{base_url}/scalesets/{scaleset_id}",
-                json={"enabled": False, "min_idle_runners": 0},
-                headers=headers,
-                timeout=30,
-            ).raise_for_status()
-
-            # GARM rejects the delete while the scale set still owns instances, so wait
-            # for the drain rather than racing it -- a failed delete here is a VM left
-            # running on the tenant.
-            deadline = time.time() + SCALESET_DRAIN_TIMEOUT
-            while time.time() < deadline:
-                instances = requests.get(
-                    f"{base_url}/scalesets/{scaleset_id}/instances", headers=headers, timeout=30
-                )
-                instances.raise_for_status()
-                remaining = instances.json() or []
-                if not remaining:
-                    break
-                logger.info("Waiting for %d instance(s) to drain", len(remaining))
-                time.sleep(10)
-            else:
-                logger.warning(
-                    "Scale set %s still had instances after %ds; deleting anyway",
-                    scaleset_id,
-                    SCALESET_DRAIN_TIMEOUT,
-                )
-
-            requests.delete(
-                f"{base_url}/scalesets/{scaleset_id}", headers=headers, timeout=30
-            ).raise_for_status()
-            logger.info("Deleted E2E scale set %s", scaleset_id)
+        _drain_and_delete_scaleset(juju, garm_app, label)
     except (requests.RequestException, ValueError, KeyError) as exc:
         logger.warning("Best-effort scale set teardown did not complete: %s", exc)
+
+
+def _drain_and_delete_scaleset(juju: jubilant.Juju, garm_app: str, label: str) -> None:
+    """Drain and delete the E2E scale set, on GARM and on GitHub.
+
+    Args:
+        juju: Juju client for the model GARM is deployed in.
+        garm_app: Name of the deployed GARM application.
+        label: Name of the scale set to drain and delete.
+    """
+    address = _get_garm_address(juju, garm_app)
+    headers = {"Authorization": f"Bearer {_garm_login(juju, address)}"}
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+
+    response = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
+    response.raise_for_status()
+    scaleset = next((s for s in response.json() or [] if s.get("name") == label), None)
+    if scaleset is None:
+        return
+    scaleset_id = scaleset["id"]
+    logger.info("Draining E2E scale set %s (%s)", scaleset_id, label)
+
+    # Disabling stops replacement; min_idle_runners=0 lets the existing ones go.
+    # PUT, not PATCH: GARM routes only PUT to the scale set update handler, so a
+    # PATCH is answered with a 405 -- which used to abort the whole teardown here,
+    # leaving the scale set, its instances and their GitHub runners behind when
+    # the model was destroyed.
+    requests.put(
+        f"{base_url}/scalesets/{scaleset_id}",
+        json={"enabled": False, "min_idle_runners": 0},
+        headers=headers,
+        timeout=30,
+    ).raise_for_status()
+
+    # GARM rejects the delete while the scale set still owns instances, so wait
+    # for the drain rather than racing it -- a failed delete here is a VM left
+    # running on the tenant.
+    deadline = time.time() + SCALESET_DRAIN_TIMEOUT
+    force_removed: set[str] = set()
+    while time.time() < deadline:
+        instances = requests.get(
+            f"{base_url}/scalesets/{scaleset_id}/instances", headers=headers, timeout=30
+        )
+        instances.raise_for_status()
+        remaining = instances.json() or []
+        if not remaining:
+            break
+        # The post-disable scale-down only reclaims *running* idle runners, so
+        # force-remove anything else once: that covers instances a failed spawn
+        # left in error, and deleting an instance also removes its JIT runner
+        # from GitHub -- the source of the offline garm-* leftovers this suite
+        # used to leave behind.
+        for instance in remaining:
+            _force_remove_instance(base_url, headers, instance, force_removed)
+        logger.info("Waiting for %d instance(s) to drain", len(remaining))
+        time.sleep(10)
+    else:
+        logger.warning(
+            "Scale set %s still had instances after %ds; deleting anyway",
+            scaleset_id,
+            SCALESET_DRAIN_TIMEOUT,
+        )
+
+    # Deletes the scale set on GitHub too, not just in GARM's database.
+    requests.delete(
+        f"{base_url}/scalesets/{scaleset_id}", headers=headers, timeout=30
+    ).raise_for_status()
+    logger.info("Deleted E2E scale set %s", scaleset_id)
+
+
+def _force_remove_instance(
+    base_url: str,
+    headers: dict[str, str],
+    instance: dict,
+    force_removed: set[str],
+) -> None:
+    """Force-remove one scale set instance, at most once, best-effort.
+
+    Args:
+        base_url: GARM API base URL, ending in ``/api/v1``.
+        headers: Authorization headers for the GARM API.
+        instance: Instance payload as returned by the GARM API.
+        force_removed: Instance names already attempted, so a still-draining
+            instance is not re-attempted on every poll.
+    """
+    name = instance.get("name")
+    if not name or name in force_removed:
+        return
+    force_removed.add(name)
+    response = requests.delete(
+        f"{base_url}/instances/{name}",
+        params={"forceRemove": "true"},
+        headers=headers,
+        timeout=30,
+    )
+    if response.ok:
+        logger.info("Force-removing leftover instance %s", name)
+    else:
+        # Expected for states GARM refuses to delete (e.g. pending_create);
+        # the drain timeout below is what bounds those.
+        logger.warning(
+            "Could not force-remove instance %s (status=%s): HTTP %d",
+            name,
+            instance.get("status"),
+            response.status_code,
+        )
