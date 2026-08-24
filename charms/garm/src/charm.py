@@ -11,6 +11,7 @@ import os
 import secrets
 import string
 import typing
+from collections.abc import Mapping
 
 import ops
 import paas_charm.go
@@ -23,14 +24,10 @@ from charm_state import (
     CharmState,
     RunnerConfig,
     credential_name,
+    resolve_entity,
 )
 from entity_reconciler import EntityReconciler
-from garm_api import (
-    GarmApiClient,
-    GarmApiError,
-    GarmAuthenticatedClient,
-    GarmConnectionError,
-)
+from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
@@ -541,8 +538,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
 
         logger.info(
-            "GARM configurator provider data: relation_unit_count=%d "
-            "configured_provider_count=%d",
+            "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
             len(relation.units),
             len(configs),
         )
@@ -618,76 +614,77 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:  # noqa: CCR001  # refactor tracked in #327
+    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
             for unit in relation.units:
-                data = relation.data[unit]
-                name = data.get("name", "")
-                if not name:
-                    continue
-
-                org = data.get("org", "")
-                repo = data.get("repo", "")
-                if org:
-                    entity_type = "organization"
-                    entity_name = org
-                elif repo:
-                    entity_type = "repository"
-                    entity_name = repo
-                else:
-                    logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
-                    continue
-
-                required = {
-                    "provider_name": data.get("provider_name", ""),
-                    "image": data.get("image_id", ""),
-                    "flavor": data.get("flavor", ""),
-                    "os_arch": data.get("os_arch", ""),
-                    "max_runner": data.get("max_runner", ""),
-                }
-                missing = [k for k, v in required.items() if not v]
-                if missing:
-                    logger.warning(
-                        "Skipping scaleset %s: missing required fields %s",
-                        name,
-                        missing,
-                    )
-                    continue
-                try:
-                    min_idle = int(data.get("min_idle_runner", "0"))
-                    max_runners = int(required["max_runner"])
-                except ValueError:
-                    continue
-                specs.append(
-                    ScalesetSpec(
-                        name=name,
-                        provider_name=required["provider_name"],
-                        image=required["image"],
-                        flavor=required["flavor"],
-                        os_arch=required["os_arch"],
-                        os_type="linux",
-                        min_idle_runners=min_idle,
-                        max_runners=max_runners,
-                        entity_type=entity_type,
-                        entity_name=entity_name,
-                        labels=[
-                            label.strip()
-                            for label in data.get("labels", "").split(",")
-                            if label.strip()
-                        ],
-                        runner_group=data.get("runner_group", ""),
-                        pre_install_scripts=_parse_pre_install_scripts(
-                            data.get("pre_install_scripts", "")
-                        ),
-                        template_id=template_id,
-                        runner_config=RunnerConfig.from_databag(data),
-                    )
-                )
+                spec = self._build_scaleset_spec(relation.data[unit], template_id)
+                if spec is not None:
+                    specs.append(spec)
         return specs
 
-    def _build_desired_credentials(self) -> list[CredentialSpec]:  # noqa: CCR001  # refactor tracked in #327
+    @staticmethod
+    def _build_scaleset_spec(
+        data: Mapping[str, str], template_id: int | None
+    ) -> ScalesetSpec | None:
+        """Build the scaleset spec described by one configurator unit's databag.
+
+        Args:
+            data: The relation unit databag.
+            template_id: The charmed runner template the scaleset references.
+
+        Returns:
+            The spec, or None when the databag names no scaleset or is incomplete
+            or invalid, so the caller can skip the unit. Skips are logged except
+            for malformed ``min_idle_runner``/``max_runner`` values, which skip
+            silently.
+        """
+        name = data.get("name", "")
+        if not name:
+            return None
+
+        entity = resolve_entity(data)
+        if entity is None:
+            logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
+            return None
+        entity_type, entity_name = entity
+
+        required = {
+            "provider_name": data.get("provider_name", ""),
+            "image": data.get("image_id", ""),
+            "flavor": data.get("flavor", ""),
+            "os_arch": data.get("os_arch", ""),
+            "max_runner": data.get("max_runner", ""),
+        }
+        missing = [field for field, value in required.items() if not value]
+        if missing:
+            logger.warning("Skipping scaleset %s: missing required fields %s", name, missing)
+            return None
+        try:
+            min_idle = int(data.get("min_idle_runner", "0"))
+            max_runners = int(required["max_runner"])
+        except ValueError:
+            return None
+        return ScalesetSpec(
+            name=name,
+            provider_name=required["provider_name"],
+            image=required["image"],
+            flavor=required["flavor"],
+            os_arch=required["os_arch"],
+            os_type="linux",
+            min_idle_runners=min_idle,
+            max_runners=max_runners,
+            entity_type=entity_type,
+            entity_name=entity_name,
+            labels=[label.strip() for label in data.get("labels", "").split(",") if label.strip()],
+            runner_group=data.get("runner_group", ""),
+            pre_install_scripts=_parse_pre_install_scripts(data.get("pre_install_scripts", "")),
+            template_id=template_id,
+            runner_config=RunnerConfig.from_databag(data),
+        )
+
+    def _build_desired_credentials(self) -> list[CredentialSpec]:
         """Build desired GitHub credentials from configurator relation data.
 
         Credentials are deduped per (app_id, installation_id) so multiple configurator
@@ -702,47 +699,66 @@ class GarmCharm(paas_charm.go.Charm):
         credentials: dict[tuple[int, int], CredentialSpec] = {}
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
             for unit in relation.units:
-                data = relation.data[unit]
-                app_id_raw = data.get("github_app_id", "")
-                installation_id_raw = data.get("github_installation_id", "")
-                key_secret_uri = data.get("github_private_key_secret_uri", "")
-                if not (app_id_raw and installation_id_raw and key_secret_uri):
-                    continue
-                try:
-                    app_id = int(app_id_raw)
-                    installation_id = int(installation_id_raw)
-                except ValueError:
-                    logger.warning(
-                        "Skipping GitHub credential from %s: non-numeric app/installation id "
-                        "(app_id=%r, installation_id=%r)",
-                        unit.name,
-                        app_id_raw,
-                        installation_id_raw,
-                    )
-                    continue
-
-                dedupe_key = (app_id, installation_id)
-                if dedupe_key in credentials:
-                    continue
-
-                private_key = self._resolve_secret_value(str(key_secret_uri))
-                if not private_key:
-                    logger.warning(
-                        "Skipping GitHub credential for app %s: private key secret unavailable",
-                        app_id,
-                    )
-                    continue
-
-                credentials[dedupe_key] = CredentialSpec(
-                    name=credential_name(app_id, installation_id),
-                    endpoint=DEFAULT_GITHUB_ENDPOINT,
-                    app_id=app_id,
-                    installation_id=installation_id,
-                    private_key=private_key,
-                    description=MANAGED_CREDENTIAL_DESCRIPTION,
-                )
-
+                self._add_unit_credential(credentials, relation.data[unit], unit.name)
         return list(credentials.values())
+
+    def _add_unit_credential(
+        self,
+        credentials: dict[tuple[int, int], CredentialSpec],
+        data: Mapping[str, str],
+        unit_name: str,
+    ) -> None:
+        """Add the GitHub credential described by one configurator unit.
+
+        The unit is skipped — quietly — when its (app_id, installation_id) pair
+        was already provided by an earlier unit (the dedupe) or its App fields
+        are merely absent, and with a warning when the ids are malformed or the
+        private-key secret is unreadable.
+
+        Args:
+            credentials: The accumulating desired credentials, keyed by
+                (app_id, installation_id).
+            data: The relation unit databag.
+            unit_name: The configurator unit's name, for log messages.
+        """
+        app_id_raw = data.get("github_app_id", "")
+        installation_id_raw = data.get("github_installation_id", "")
+        key_secret_uri = data.get("github_private_key_secret_uri", "")
+        if not (app_id_raw and installation_id_raw and key_secret_uri):
+            return
+        try:
+            app_id = int(app_id_raw)
+            installation_id = int(installation_id_raw)
+        except ValueError:
+            logger.warning(
+                "Skipping GitHub credential from %s: non-numeric app/installation id "
+                "(app_id=%r, installation_id=%r)",
+                unit_name,
+                app_id_raw,
+                installation_id_raw,
+            )
+            return
+
+        dedupe_key = (app_id, installation_id)
+        if dedupe_key in credentials:
+            return
+
+        private_key = self._resolve_secret_value(str(key_secret_uri))
+        if not private_key:
+            logger.warning(
+                "Skipping GitHub credential for app %s: private key secret unavailable",
+                app_id,
+            )
+            return
+
+        credentials[dedupe_key] = CredentialSpec(
+            name=credential_name(app_id, installation_id),
+            endpoint=DEFAULT_GITHUB_ENDPOINT,
+            app_id=app_id,
+            installation_id=installation_id,
+            private_key=private_key,
+            description=MANAGED_CREDENTIAL_DESCRIPTION,
+        )
 
     def _reconcile_runners(self) -> None:
         """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
