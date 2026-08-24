@@ -120,63 +120,6 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     return {}
 
 
-def _build_scaleset_spec(data: Mapping[str, str], template_id: int | None) -> ScalesetSpec | None:
-    """Build the scaleset spec described by one configurator unit's databag.
-
-    Args:
-        data: The relation unit databag.
-        template_id: The charmed runner template the scaleset references.
-
-    Returns:
-        The spec, or None — logging why whenever the unit named a scaleset —
-        when the databag is absent, incomplete or invalid, so the caller can
-        skip the unit.
-    """
-    name = data.get("name", "")
-    if not name:
-        return None
-
-    entity = resolve_entity(data)
-    if entity is None:
-        logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
-        return None
-    entity_type, entity_name = entity
-
-    required = {
-        "provider_name": data.get("provider_name", ""),
-        "image": data.get("image_id", ""),
-        "flavor": data.get("flavor", ""),
-        "os_arch": data.get("os_arch", ""),
-        "max_runner": data.get("max_runner", ""),
-    }
-    missing = [field for field, value in required.items() if not value]
-    if missing:
-        logger.warning("Skipping scaleset %s: missing required fields %s", name, missing)
-        return None
-    try:
-        min_idle = int(data.get("min_idle_runner", "0"))
-        max_runners = int(required["max_runner"])
-    except ValueError:
-        return None
-    return ScalesetSpec(
-        name=name,
-        provider_name=required["provider_name"],
-        image=required["image"],
-        flavor=required["flavor"],
-        os_arch=required["os_arch"],
-        os_type="linux",
-        min_idle_runners=min_idle,
-        max_runners=max_runners,
-        entity_type=entity_type,
-        entity_name=entity_name,
-        labels=[label.strip() for label in data.get("labels", "").split(",") if label.strip()],
-        runner_group=data.get("runner_group", ""),
-        pre_install_scripts=_parse_pre_install_scripts(data.get("pre_install_scripts", "")),
-        template_id=template_id,
-        runner_config=RunnerConfig.from_databag(data),
-    )
-
-
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -676,10 +619,69 @@ class GarmCharm(paas_charm.go.Charm):
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
             for unit in relation.units:
-                spec = _build_scaleset_spec(relation.data[unit], template_id)
+                spec = self._build_scaleset_spec(relation.data[unit], template_id)
                 if spec is not None:
                     specs.append(spec)
         return specs
+
+    @staticmethod
+    def _build_scaleset_spec(
+        data: Mapping[str, str], template_id: int | None
+    ) -> ScalesetSpec | None:
+        """Build the scaleset spec described by one configurator unit's databag.
+
+        Args:
+            data: The relation unit databag.
+            template_id: The charmed runner template the scaleset references.
+
+        Returns:
+            The spec, or None — logging why whenever the unit named a scaleset —
+            when the databag is absent, incomplete or invalid, so the caller can
+            skip the unit.
+        """
+        name = data.get("name", "")
+        if not name:
+            return None
+
+        entity = resolve_entity(data)
+        if entity is None:
+            logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
+            return None
+        entity_type, entity_name = entity
+
+        required = {
+            "provider_name": data.get("provider_name", ""),
+            "image": data.get("image_id", ""),
+            "flavor": data.get("flavor", ""),
+            "os_arch": data.get("os_arch", ""),
+            "max_runner": data.get("max_runner", ""),
+        }
+        missing = [field for field, value in required.items() if not value]
+        if missing:
+            logger.warning("Skipping scaleset %s: missing required fields %s", name, missing)
+            return None
+        try:
+            min_idle = int(data.get("min_idle_runner", "0"))
+            max_runners = int(required["max_runner"])
+        except ValueError:
+            return None
+        return ScalesetSpec(
+            name=name,
+            provider_name=required["provider_name"],
+            image=required["image"],
+            flavor=required["flavor"],
+            os_arch=required["os_arch"],
+            os_type="linux",
+            min_idle_runners=min_idle,
+            max_runners=max_runners,
+            entity_type=entity_type,
+            entity_name=entity_name,
+            labels=[label.strip() for label in data.get("labels", "").split(",") if label.strip()],
+            runner_group=data.get("runner_group", ""),
+            pre_install_scripts=_parse_pre_install_scripts(data.get("pre_install_scripts", "")),
+            template_id=template_id,
+            runner_config=RunnerConfig.from_databag(data),
+        )
 
     def _build_desired_credentials(self) -> list[CredentialSpec]:
         """Build desired GitHub credentials from configurator relation data.

@@ -236,25 +236,6 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     return sorted(connections, key=lambda c: (c.host, c.port))
 
 
-def resolve_entity(data: Mapping[str, str]) -> tuple[str, str] | None:
-    """Resolve the GARM entity a configurator unit names from its org/repo fields.
-
-    Args:
-        data: The relation unit databag.
-
-    Returns:
-        ``("organization", org)`` or ``("repository", repo)``, or None when
-        the unit names neither an org nor a repo.
-    """
-    org = data.get("org", "")
-    if org:
-        return "organization", org
-    repo = data.get("repo", "")
-    if repo:
-        return "repository", repo
-    return None
-
-
 def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
     """Build the desired GARM org/repo entities from configurator relation data.
 
@@ -341,6 +322,25 @@ def _add_desired_entity(
         entity_name=entity_name,
         credentials_name=credentials_name,
     )
+
+
+def resolve_entity(data: Mapping[str, str]) -> tuple[str, str] | None:
+    """Resolve the GARM entity a configurator unit names from its org/repo fields.
+
+    Args:
+        data: The relation unit databag.
+
+    Returns:
+        ``("organization", org)`` or ``("repository", repo)``, or None when
+        the unit names neither an org nor a repo.
+    """
+    org = data.get("org", "")
+    if org:
+        return "organization", org
+    repo = data.get("repo", "")
+    if repo:
+        return "repository", repo
+    return None
 
 
 @dataclasses.dataclass(frozen=True)
