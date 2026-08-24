@@ -17,10 +17,12 @@ logger = logging.getLogger(__name__)
 
 # GARM only accepts runner deletion for these states. Runners in creation or
 # already being deleted are observed again on a later cleanup pass.
-_DELETABLE_RUNNER_STATES = frozenset({
-    "running",
-    "error",
-})
+_DELETABLE_RUNNER_STATES = frozenset(
+    {
+        "running",
+        "error",
+    }
+)
 
 
 class GarmCleanupError(GarmApiError):
@@ -158,12 +160,10 @@ class GarmResourceCleanup:
             else:
                 action = "inspect the runner state in GARM"
             descriptions.append(
-                f"runner {name} status={state} "
-                f"(operator action: {action}, then retry removal)"
+                f"runner {name} status={state} (operator action: {action}, then retry removal)"
             )
-        return (
-            f"scaleset {scaleset_id} has {len(instances)} blocking runner(s): "
-            + ", ".join(descriptions)
+        return f"scaleset {scaleset_id} has {len(instances)} blocking runner(s): " + ", ".join(
+            descriptions
         )
 
     def _delete_eligible_instances(self, instances: list[Any]) -> list[str]:
