@@ -635,9 +635,10 @@ class GarmCharm(paas_charm.go.Charm):
             template_id: The charmed runner template the scaleset references.
 
         Returns:
-            The spec, or None — logging why whenever the unit named a scaleset —
-            when the databag is absent, incomplete or invalid, so the caller can
-            skip the unit.
+            The spec, or None when the databag names no scaleset or is incomplete
+            or invalid, so the caller can skip the unit. Skips are logged except
+            for malformed ``min_idle_runner``/``max_runner`` values, which skip
+            silently.
         """
         name = data.get("name", "")
         if not name:
