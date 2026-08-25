@@ -189,8 +189,14 @@ def deploy_e2e_scaleset_fixture(
     Returns the unique runner label that runners will register with.
     """
     app_name = "garm-configurator"
-    run_id = os.environ.get("GITHUB_RUN_ID", uuid.uuid4().hex[:8])
-    label = f"garm-e2e-{run_id}"
+    # The scale set name caps at 10 characters: the OpenStack provider tags every
+    # runner VM with the Nova server tag "garm-pool-id=<name>-<entity uuid>",
+    # which is 50 fixed characters before the name starts, and Nova rejects tags
+    # longer than 60. The last six digits of the run id keep the label unique;
+    # the workflow's per-ref concurrency group already serialises runs on the
+    # same branch.
+    run_id = os.environ.get("GITHUB_RUN_ID", uuid.uuid4().hex)
+    label = f"e2e-{run_id[-6:]}"
     garm_app = garm_with_ingress
     creds = openstack_credentials
     repo = required_env(GITHUB_REPOSITORY_ENV_VAR)
