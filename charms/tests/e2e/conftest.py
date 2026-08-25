@@ -244,9 +244,12 @@ def deploy_e2e_scaleset_fixture(
         # fetching the install script -- dies in squid before GARM ever sees it.
         # 10.150.0.0/15 covers both that subnet and the tenant-internal
         # 10.150/16; E2E_APROXY_EXCLUDE_ADDRESSES overrides when ranges shift.
-        config_values["aproxy-exclude-addresses"] = os.environ.get(
-            "E2E_APROXY_EXCLUDE_ADDRESSES", "10.150.0.0/15"
+        # Blank means unset: the workflow exports the variable unconditionally,
+        # and an empty string would otherwise win over the default here.
+        exclude_addresses = os.environ.get("E2E_APROXY_EXCLUDE_ADDRESSES", "").strip() or (
+            "10.150.0.0/15"
         )
+        config_values["aproxy-exclude-addresses"] = exclude_addresses
 
     _deploy_configurator(
         juju,
