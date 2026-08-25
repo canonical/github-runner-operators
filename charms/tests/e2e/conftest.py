@@ -203,6 +203,9 @@ def deploy_e2e_scaleset_fixture(
 
     private_key_decoded = github_app_private_key(E2E_APP_ENV)
     runner_http_proxy = os.environ.get("E2E_RUNNER_HTTP_PROXY", "")
+    tunnel_key_b64 = os.environ.get("E2E_TUNNEL_PRIVATE_KEY", "").strip()
+    tunnel_target = os.environ.get("E2E_TUNNEL_TARGET", "").strip()
+    tunnel_user = os.environ.get("E2E_TUNNEL_USER", "").strip()
 
     # Create secrets
     password_secret = juju.add_secret(
@@ -250,6 +253,24 @@ def deploy_e2e_scaleset_fixture(
             "10.150.0.0/15"
         )
         config_values["aproxy-exclude-addresses"] = exclude_addresses
+
+    # The private-endpoint host's security group (github-runner-v1, managed by the
+    # legacy github-runner-operator charm) admits only ingress tcp/22, so the
+    # runner VM cannot reach traefik's :80 that the GARM metadata and callback
+    # URLs point at. A pre-install script opens an SSH connection back to the
+    # host on the one open port and tunnels those URLs through it. The workflow
+    # provides the ephemeral key; when it does not (local runs, other hosts with
+    # open networks), the tunnel is skipped and traffic goes direct.
+    if any((tunnel_key_b64, tunnel_target, tunnel_user)):
+        if not all((tunnel_key_b64, tunnel_target, tunnel_user)):
+            logger.warning(
+                "Incomplete E2E tunnel configuration: E2E_TUNNEL_PRIVATE_KEY, "
+                "E2E_TUNNEL_TARGET and E2E_TUNNEL_USER must all be set; skipping the tunnel"
+            )
+        else:
+            config_values["pre-install-scripts"] = _tunnel_pre_install_script(
+                target=tunnel_target, user=tunnel_user, private_key_b64=tunnel_key_b64
+            )
 
     _deploy_configurator(
         juju,
@@ -406,3 +427,89 @@ def _force_remove_instance(
             instance.get("status"),
             response.status_code,
         )
+
+
+E2E_TUNNEL_LOCAL_PORT = 18080
+
+
+def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> str:
+    """Render the pre-install script that tunnels GARM traffic back over SSH.
+
+    The runner VM cannot reach the host's :80 (the security group on the
+    private-endpoint host admits only tcp/22), yet GARM bakes its metadata and
+    callback URLs -- plain http to the host -- into the user data it hands the
+    provider. Pre-install scripts run before GARM's install wrapper, so this
+    script opens an SSH connection back to the host on the one open port, binds
+    a local forward to the host's :80, and installs an nftables redirect that
+    steers locally-generated traffic for that host into the tunnel. The URLs
+    GARM generated then work verbatim, with no controller reconfiguration.
+
+    Args:
+        target: The host serving GARM (the MetalLB/traefik address).
+        user: The user the tunnel authenticates as on that host.
+        private_key_b64: Base64-encoded private key authorised for that user.
+
+    Returns:
+        A bash script for the configurator's pre-install-scripts config.
+    """
+    return f"""#!/bin/bash
+# GARM E2E callback tunnel. Delivered as a pre-install script so it runs before
+# GARM's install wrapper, whose first action is fetching the install script
+# from the metadata URL on the host this tunnel reaches.
+log() {{ echo "[e2e-tunnel] $*"; }}
+
+TARGET='{target}'
+SSH_USER='{user}'
+LOCAL_PORT={E2E_TUNNEL_LOCAL_PORT}
+KEY_FILE=/root/.ssh/garm-e2e-tunnel
+# The nft ruleset below needs the VM's own primary address as the DNAT target,
+# resolved the same way the aproxy bootstrap does it.
+DEFAULT_IPV4=$(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \\K\\S+') \\
+    | grep -oP 'src \\K\\S+')
+
+if ! command -v ssh >/dev/null 2>&1; then
+    log "ERROR: no ssh client on the image; GARM traffic to ${{TARGET}} will fail"
+    exit 0
+fi
+
+umask 077
+mkdir -p /root/.ssh
+printf '%s' '{private_key_b64}' | base64 -d > "$KEY_FILE"
+
+# The host key is not pinned: the keypair this tunnel uses is ephemeral,
+# per CI run, and restricted to port forwarding, so a hijacked tunnel gives
+# an attacker nothing but the ability to reach the host's :80.
+for attempt in $(seq 1 30); do
+    if ssh -f -N \\
+        -o StrictHostKeyChecking=no \\
+        -o UserKnownHostsFile=/dev/null \\
+        -o GlobalKnownHostsFile=/dev/null \\
+        -o ServerAliveInterval=30 \\
+        -o ExitOnForwardFailure=yes \\
+        -o ConnectTimeout=10 \\
+        -i "$KEY_FILE" \\
+        -L "${{DEFAULT_IPV4}}:$LOCAL_PORT:$TARGET:80" \\
+        "$SSH_USER@$TARGET"; then
+        log "tunnel up on $DEFAULT_IPV4:$LOCAL_PORT after $attempt attempt(s)"
+        break
+    fi
+    if [ "$attempt" -eq 30 ]; then
+        log "ERROR: tunnel never came up; GARM traffic to $TARGET will fail"
+        exit 0
+    fi
+    sleep 5
+done
+
+# Steer locally-generated GARM traffic (metadata and callback, both plain
+# http) into the tunnel. The aproxy ruleset excludes this address, so its DNAT
+# does not claim these packets first.
+nft -f - <<NFT
+table ip garm-e2e-tunnel {{
+    chain output {{
+        type nat hook output priority -100; policy accept;
+        ip daddr $TARGET tcp dport 80 counter dnat to $DEFAULT_IPV4:$LOCAL_PORT
+    }}
+}}
+NFT
+log "redirecting $TARGET:80 to $DEFAULT_IPV4:$LOCAL_PORT"
+"""

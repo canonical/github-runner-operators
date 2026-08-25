@@ -315,6 +315,41 @@ jobs:
           sed "s/@HOST_IP@/${HOST_IP}/g" concierge-e2e.yaml.tmpl > concierge-e2e.yaml
           echo "CONCIERGE=concierge-e2e.yaml" >> "$GITHUB_ENV"
 
+      - name: Publish an SSH tunnel entry for runner VM callbacks
+        # The private-endpoint host's security group (github-runner-v1, managed by
+        # the legacy github-runner-operator charm) admits only ingress tcp/22, so
+        # the GARM runner VM cannot reach traefik on :80 -- the port its metadata
+        # and callback URLs use. The VM instead opens an SSH connection back to
+        # this host, the one port the SG allows, and forwards its GARM traffic
+        # through it. The key is ephemeral, restricted to port forwarding (no
+        # shell, no command execution), and removed again by the cleanup step.
+        run: |
+          set -euo pipefail
+
+          TUNNEL_USER=$(id -un)
+          TUNNEL_TARGET=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+')
+          KEY_DIR=$(mktemp -d)
+          ssh-keygen -q -t ed25519 -N '' \
+            -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
+            -f "${KEY_DIR}/garm-e2e-tunnel"
+
+          AUTH_KEYS="${HOME}/.ssh/authorized_keys"
+          mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
+          touch "${AUTH_KEYS}" && chmod 600 "${AUTH_KEYS}"
+          printf 'restrict,port-forward %s\n' \
+            "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
+          echo "Tunnel entry added for ${TUNNEL_USER}@${TUNNEL_TARGET} (id ${GITHUB_RUN_ID})."
+
+          KEY_B64=$(base64 -w0 "${KEY_DIR}/garm-e2e-tunnel")
+          rm -rf "${KEY_DIR}"
+          echo "::add-mask::${KEY_B64}"
+
+          {
+            echo "E2E_TUNNEL_USER=${TUNNEL_USER}"
+            echo "E2E_TUNNEL_TARGET=${TUNNEL_TARGET}"
+            echo "E2E_TUNNEL_PRIVATE_KEY=${KEY_B64}"
+          } >> "$GITHUB_ENV"
+
       - name: Run the E2E suite
         env:
           CI: "true"
@@ -356,3 +391,19 @@ jobs:
             echo "Deleting orphaned runner ${ID}"
             openstack server delete --wait "$ID" || echo "::warning::Could not delete ${ID}"
           done
+
+      - name: Remove the SSH tunnel entry
+        # Paired with "Publish an SSH tunnel entry": runs on every outcome, so a
+        # failed suite cannot leave a forwarding-only key on the host.
+        if: always()
+        run: |
+          set -euo pipefail
+
+          MARKER="garm-e2e-tunnel-${GITHUB_RUN_ID}"
+          AUTH_KEYS="${HOME}/.ssh/authorized_keys"
+          if [ -f "$AUTH_KEYS" ] && grep -q "$MARKER" "$AUTH_KEYS"; then
+            sed -i "/${MARKER}/d" "$AUTH_KEYS"
+            echo "Tunnel entry ${MARKER} removed."
+          else
+            echo "No tunnel entry to remove."
+          fi

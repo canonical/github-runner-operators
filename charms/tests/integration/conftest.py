@@ -472,7 +472,11 @@ def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
 def _credential_sentinels() -> list[str]:
     """Cleartext credential values that must never reach a log line."""
     values = [os.environ.get("OS_PASSWORD", "")]
-    for key_env in (GITHUB_APP_PRIVATE_KEY_ENV_VAR, E2E_APP_ENV.private_key):
+    for key_env in (
+        GITHUB_APP_PRIVATE_KEY_ENV_VAR,
+        E2E_APP_ENV.private_key,
+        "E2E_TUNNEL_PRIVATE_KEY",
+    ):
         encoded_key = os.environ.get(key_env, "")
         if not encoded_key:
             continue
