@@ -90,6 +90,16 @@ For **`garm-configurator`** (plain `ops`):
   yet), so imitating the nearest neighbour is not a reliable guide.
 - Integration tests live in the shared `charms/tests/integration/`.
 
+## Function ordering — the step-down rule
+
+Applies to Python and Go alike: order functions and methods by the
+["step-down" rule](https://github.com/canonical/is-charms-contributing-guide/blob/main/src/implementation/500-function-and-method-ordering.md)
+— a module or class reads top-to-bottom, from general to specific, so **a caller sits above
+its callee**, with closely related helpers grouped adjacently. The common violation is
+extracting a helper (e.g. to get under the complexity gates above) and parking it at the top
+of the module away from its caller: **DO** place each extracted helper directly below its
+first caller instead.
+
 ## 12-factor divergences from the canonical charm-engineer guidance
 
 We borrow from the canonical
