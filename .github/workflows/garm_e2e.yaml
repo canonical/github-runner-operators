@@ -351,7 +351,7 @@ jobs:
           ssh-keygen -q -t ed25519 -N '' \
             -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
             -f "${KEY_DIR}/garm-e2e-tunnel"
-          printf 'restrict,port-forward %s\n' \
+          printf 'restrict,port-forwarding %s\n' \
             "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
 
           # Prove the entry works before the suite relies on it: authenticate with
