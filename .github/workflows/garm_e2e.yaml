@@ -97,6 +97,7 @@ jobs:
           E2E_RUNNER_IMAGE_NAME: ${{ secrets.E2E_RUNNER_IMAGE_NAME }}
           E2E_OPENSTACK_FLAVOR: ${{ secrets.E2E_OPENSTACK_FLAVOR }}
           E2E_RUNNER_HTTP_PROXY: ${{ secrets.E2E_RUNNER_HTTP_PROXY }}
+          E2E_APROXY_EXCLUDE_ADDRESSES: ${{ secrets.E2E_APROXY_EXCLUDE_ADDRESSES }}
         run: |
           set -euo pipefail
 
@@ -121,7 +122,7 @@ jobs:
           # Written only when set: the fixtures fall back to their own defaults for
           # these two, and an exported empty string is not absent -- it would win
           # over the default rather than yield to it.
-          for KEY in E2E_OPENSTACK_FLAVOR E2E_RUNNER_HTTP_PROXY; do
+          for KEY in E2E_OPENSTACK_FLAVOR E2E_RUNNER_HTTP_PROXY E2E_APROXY_EXCLUDE_ADDRESSES; do
             if [ -n "${!KEY:-}" ]; then
               echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
             fi

@@ -236,6 +236,17 @@ def deploy_e2e_scaleset_fixture(
     }
     if runner_http_proxy:
         config_values["runner-http-proxy"] = runner_http_proxy
+        # The aproxy bootstrap DNATs all :80/:443 egress to aproxy, which forwards
+        # to the upstream squid -- and squid denies private destinations with a
+        # 403. The GARM metadata and callback URLs point at the MetalLB address
+        # (the CI host's own IP, observed in 10.151.128.0/24), so those must
+        # bypass the redirect or the runner bootstrap's first curl -- the one
+        # fetching the install script -- dies in squid before GARM ever sees it.
+        # 10.150.0.0/15 covers both that subnet and the tenant-internal
+        # 10.150/16; E2E_APROXY_EXCLUDE_ADDRESSES overrides when ranges shift.
+        config_values["aproxy-exclude-addresses"] = os.environ.get(
+            "E2E_APROXY_EXCLUDE_ADDRESSES", "10.150.0.0/15"
+        )
 
     _deploy_configurator(
         juju,

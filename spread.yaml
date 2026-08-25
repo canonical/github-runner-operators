@@ -43,6 +43,7 @@ environment:
   OS_NETWORK: '$(HOST: echo "${OS_NETWORK:-}")'
   E2E_RUNNER_IMAGE_NAME: '$(HOST: echo "${E2E_RUNNER_IMAGE_NAME:-}")'
   E2E_RUNNER_HTTP_PROXY: '$(HOST: echo "${E2E_RUNNER_HTTP_PROXY:-}")'
+  E2E_APROXY_EXCLUDE_ADDRESSES: '$(HOST: echo "${E2E_APROXY_EXCLUDE_ADDRESSES:-}")'
   E2E_OPENSTACK_FLAVOR: '$(HOST: echo "${E2E_OPENSTACK_FLAVOR:-}")'
 exclude:
 - .git
@@ -89,4 +90,5 @@ integration-suites:
       OS_NETWORK={{ env.get("OS_NETWORK", "") }}
       E2E_RUNNER_IMAGE_NAME={{ env.get("E2E_RUNNER_IMAGE_NAME", "") }}
       E2E_RUNNER_HTTP_PROXY={{ env.get("E2E_RUNNER_HTTP_PROXY", "") }}
+      E2E_APROXY_EXCLUDE_ADDRESSES={{ env.get("E2E_APROXY_EXCLUDE_ADDRESSES", "") }}
       E2E_OPENSTACK_FLAVOR={{ env.get("E2E_OPENSTACK_FLAVOR", "") }}
