@@ -35,6 +35,17 @@ SENSITIVE_ENV_VARS: Final[tuple[str, ...]] = (
     "GARM_PASSPHRASE",
     "GARM_PROVIDERS_JSON",
 )
+_PROVIDER_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
+    "unit_name",
+    "network",
+    "auth_url",
+    "username",
+    "password",
+    "project_name",
+    "user_domain_name",
+    "project_domain_name",
+    "region_name",
+)
 
 
 class GarmEntrypointError(Exception):
@@ -148,16 +159,7 @@ def _build_provider_files(
 ) -> tuple[list[dict[str, typing.Any]], dict[str, str]]:
     """Build GARM provider entries and their OpenStack config files."""
     env = dict(os.environ) if env is None else env
-    providers_json = env.get("GARM_PROVIDERS_JSON", "")
-    if providers_json:
-        try:
-            providers = json.loads(providers_json)
-        except json.JSONDecodeError as exc:
-            raise InvalidConfigurationError("GARM_PROVIDERS_JSON must contain valid JSON") from exc
-    else:
-        providers = []
-    if not isinstance(providers, list):
-        raise InvalidConfigurationError("GARM_PROVIDERS_JSON must contain a JSON list")
+    providers = _parse_providers(env)
     proxy_vars = sorted(
         name
         for name in (
@@ -172,52 +174,85 @@ def _build_provider_files(
     )
     entries: list[dict[str, typing.Any]] = []
     files: dict[str, str] = {}
-
-    required = (
-        "unit_name",
-        "network",
-        "auth_url",
-        "username",
-        "password",
-        "project_name",
-        "user_domain_name",
-        "project_domain_name",
-        "region_name",
-    )
     for provider in providers:
-        if not isinstance(provider, dict):
-            raise InvalidConfigurationError("Each GARM provider must be a JSON object")
-        unit_name = provider.get("unit_name")
-        if not isinstance(unit_name, str) or not unit_name or Path(unit_name).name != unit_name:
-            raise InvalidConfigurationError(f"Invalid provider unit name: {unit_name!r}")
-        missing = [name for name in required if name not in provider]
-        if missing:
-            raise InvalidConfigurationError(
-                f"GARM provider is missing required fields: {', '.join(missing)}"
-            )
-        provider_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}.toml"
-        clouds_path = GARM_PROVIDER_CONFIG_DIR / f"clouds-{unit_name}.yaml"
-        entries.append(
-            {
-                "name": unit_name,
-                "provider_type": "external",
-                "description": f"OpenStack provider ({unit_name})",
-                "external": {
-                    "config_file": str(provider_path),
-                    "provider_executable": OPENSTACK_PROVIDER_BINARY,
-                    **({"environment_variables": proxy_vars} if proxy_vars else {}),
-                },
-            }
+        entry, provider_files = _build_provider(provider, proxy_vars)
+        entries.append(entry)
+        files.update(provider_files)
+    return entries, files
+
+
+def _parse_providers(env: dict[str, str]) -> list[typing.Any]:
+    """Parse GARM_PROVIDERS_JSON into a list of provider objects.
+
+    Args:
+        env: Dictionary of environment variables.
+
+    Returns:
+        The provider objects, or an empty list when unset.
+
+    Raises:
+        InvalidConfigurationError: If the value is not valid JSON or not a list.
+    """
+    providers_json = env.get("GARM_PROVIDERS_JSON", "")
+    if not providers_json:
+        return []
+    try:
+        providers = json.loads(providers_json)
+    except json.JSONDecodeError as exc:
+        raise InvalidConfigurationError("GARM_PROVIDERS_JSON must contain valid JSON") from exc
+    if not isinstance(providers, list):
+        raise InvalidConfigurationError("GARM_PROVIDERS_JSON must contain a JSON list")
+    return providers
+
+
+def _build_provider(
+    provider: typing.Any, proxy_vars: list[str]
+) -> tuple[dict[str, typing.Any], dict[str, str]]:
+    """Build one external provider entry plus its provider TOML and clouds YAML content.
+
+    Args:
+        provider: One provider object from GARM_PROVIDERS_JSON (untrusted input).
+        proxy_vars: Proxy variable names to forward to the provider executable.
+
+    Returns:
+        The provider config entry and its two config files, keyed by path.
+
+    Raises:
+        InvalidConfigurationError: If the provider object is not a JSON object, its
+            unit name is invalid, or required fields are missing.
+    """
+    if not isinstance(provider, dict):
+        raise InvalidConfigurationError("Each GARM provider must be a JSON object")
+    unit_name = provider.get("unit_name")
+    if not isinstance(unit_name, str) or not unit_name or Path(unit_name).name != unit_name:
+        raise InvalidConfigurationError(f"Invalid provider unit name: {unit_name!r}")
+    missing = [name for name in _PROVIDER_REQUIRED_FIELDS if name not in provider]
+    if missing:
+        raise InvalidConfigurationError(
+            f"GARM provider is missing required fields: {', '.join(missing)}"
         )
-        files[str(provider_path)] = tomli_w.dumps(
+    provider_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}.toml"
+    clouds_path = GARM_PROVIDER_CONFIG_DIR / f"clouds-{unit_name}.yaml"
+    entry = {
+        "name": unit_name,
+        "provider_type": "external",
+        "description": f"OpenStack provider ({unit_name})",
+        "external": {
+            "config_file": str(provider_path),
+            "provider_executable": OPENSTACK_PROVIDER_BINARY,
+            **({"environment_variables": proxy_vars} if proxy_vars else {}),
+        },
+    }
+    files = {
+        str(provider_path): tomli_w.dumps(
             {
                 "cloud": unit_name,
                 "network_id": provider["network"],
                 "credentials": {"clouds": str(clouds_path)},
                 "use_config_drive": True,
             }
-        )
-        files[str(clouds_path)] = yaml.safe_dump(
+        ),
+        str(clouds_path): yaml.safe_dump(
             {
                 "clouds": {
                     unit_name: {
@@ -237,8 +272,9 @@ def _build_provider_files(
                 }
             },
             sort_keys=False,
-        )
-    return entries, files
+        ),
+    }
+    return entry, files
 
 
 def render_garm_config(env: dict[str, str]) -> str:

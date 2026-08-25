@@ -37,7 +37,7 @@ charms — there are four charms, not two).
 - **Go** — `go test ./...`.
 - `charmcraft pack` — build a charm (run from the charm dir; not wired into tox).
 - **Docs spellcheck** — CI runs Vale over `docs/` with `Canonical.000-US-spellcheck` at **error** level, so an unknown technical term (e.g. `deserialize`) fails the build. Add project-specific terms — regex forms like `[Dd]eserializ(e|es|ed|ing|ation)` are supported — to `docs/.custom_wordlist.txt` (the docs `Makefile` appends it to the Canonical accept vocabulary); verify with `make -C docs spellcheck` before pushing a `docs/` change.
-- Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function.
+- Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function, and — for `garm` and `garm-configurator` only — **cognitive complexity ≤ 15** per function (enforced by `flake8-cognitive-complexity` in the per-charm `complexity` env; exceptions carry `# noqa: CCR001` plus a tracking-issue reference).
 
 ## Charm conventions
 
@@ -89,6 +89,16 @@ For **`garm-configurator`** (plain `ops`):
   (`planner-operator` and `garm` yes; `garm-configurator` and `webhook-gateway-operator` not
   yet), so imitating the nearest neighbour is not a reliable guide.
 - Integration tests live in the shared `charms/tests/integration/`.
+
+## Function ordering — the step-down rule
+
+Applies to Python and Go alike: order functions and methods by the
+["step-down" rule](https://github.com/canonical/is-charms-contributing-guide/blob/main/src/implementation/500-function-and-method-ordering.md)
+— a module or class reads top-to-bottom, from general to specific, so **a caller sits above
+its callee**, with closely related helpers grouped adjacently. The common violation is
+extracting a helper (e.g. to get under the complexity gates above) and parking it at the top
+of the module away from its caller: **DO** place each extracted helper directly below its
+first caller instead.
 
 ## 12-factor divergences from the canonical charm-engineer guidance
 

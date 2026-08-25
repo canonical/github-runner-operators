@@ -191,6 +191,15 @@ Higher complexity leads to code that is harder to read, understand, test and mai
 There are exceptions where higher complexity is justified (e.g., validation, initialization),
 but those should require explicit justification using `nolint` directives.
 
+### Cognitive complexity
+
+The `garm` and `garm-configurator` charms additionally enforce a cognitive complexity limit of 15
+per function (SonarSource's default) over `src` and `tests`, via `flake8-cognitive-complexity`
+(`CCR001`) in each charm's `complexity` tox environment. Cognitive complexity penalises nesting
+and interruptions to linear flow, so it catches readability problems that the flat branch count of
+cyclomatic complexity misses. Exceptions require a `# noqa: CCR001` comment referencing a tracking
+issue that lists the function for refactoring in an upcoming PR.
+
 ### Charm development
 
 The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/).
