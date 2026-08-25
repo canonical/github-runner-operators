@@ -108,7 +108,7 @@ def _wait_for_runner_online(
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     token = _garm_login(juju, address)
     deadline = time.time() + timeout
-    instances: list[dict] = []
+    last_instances: list[dict] = []
     last_summary: list[str] | None = None
     logger.info("Waiting for a registered runner in scale set %r", scaleset_name)
 
@@ -144,6 +144,13 @@ def _wait_for_runner_online(
                     # never being created at all.
                     last_summary = summary
                     logger.info("Scale set instances: %s", summary)
+                if instances:
+                    # Keep the last non-empty observation: GARM's reaper removes
+                    # instances from the scale set when the bootstrap timeout
+                    # fires, so the final poll can be empty even though a VM
+                    # existed -- and reporting that as "never spawned" would
+                    # point the investigation at the wrong stage entirely.
+                    last_instances = instances
                 for instance in instances:
                     if instance.get("runner_status") in REGISTERED_RUNNER_STATUSES:
                         logger.info(
@@ -160,20 +167,24 @@ def _wait_for_runner_online(
     # Leave the evidence in the log before failing: the instance state says which
     # stage stalled, since GARM only reaches "registered" after spawning an
     # instance, booting its VM, and installing the runner against the callback
-    # URL. An empty list means GARM never spawned an instance at all;
-    # pending_create means the provider never picked one up; error means the
-    # provider tried and failed, with GARM's own logs -- collected next, through
-    # the sentinel redactor -- carrying the reason.
-    logger.error(
-        "Instances in scale set %s at timeout: %s",
-        scaleset_name,
-        sorted(
-            f"{i.get('name')}: status={i.get('status')} "
-            f"runner_status={i.get('runner_status')} provider_id={i.get('provider_id')!r}"
-            for i in instances
+    # URL. An empty last observation means GARM never spawned an instance at
+    # all; pending_create means the provider never picked one up; running with a
+    # pending runner_status means the VM booted but its bootstrap never called
+    # back, with GARM's own logs -- collected next, through the sentinel
+    # redactor -- carrying the reason.
+    if last_instances:
+        logger.error(
+            "Last instances observed in scale set %s (possibly reaped by GARM's "
+            "bootstrap-timeout reaper by now): %s",
+            scaleset_name,
+            sorted(
+                f"{i.get('name')}: status={i.get('status')} "
+                f"runner_status={i.get('runner_status')} provider_id={i.get('provider_id')!r}"
+                for i in last_instances
+            ),
         )
-        or "none (GARM never spawned an instance)",
-    )
+    else:
+        logger.error("No instance was ever observed in scale set %s", scaleset_name)
     _collect_debug_info(juju, garm_app)
     pytest.fail(
         f"No runner in scale set {scaleset_name!r} reached a registered state "
