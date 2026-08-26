@@ -9,5 +9,30 @@
   ],
   "vulnerabilityAlerts": {
     "enabled": true
-  }
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)tox\\.ini$/"
+      ],
+      "matchStrings": [
+        "git\\+https://github\\.com/canonical/charm-ci\\.git@(?<currentValue>[^\\s]+)"
+      ],
+      "depNameTemplate": "canonical/charm-ci",
+      "packageNameTemplate": "https://github.com/canonical/charm-ci",
+      "datasourceTemplate": "git-tags"
+    }
+  ],
+  "packageRules": [
+    {
+      "groupName": "charm-ci",
+      "description": "Keep the opcli git dependency (tox.ini) and the canonical/charm-ci reusable workflow refs (.github/workflows) in lockstep, since they must always point at the same charm-ci release.",
+      "matchPackageNames": [
+        "opcli",
+        "canonical/charm-ci",
+        "*charm-ci*"
+      ]
+    }
+  ]
 }

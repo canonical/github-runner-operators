@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: 1.26
+          go-version: 1.27
 
       - name: Ensure No Formatting Changes
         run: |
@@ -31,7 +31,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13.1
 
       - name: Run Unit and Integration Test of internal packages
         env:
