@@ -108,6 +108,7 @@ jobs:
         # $GITHUB_ENV, like every other secret in this job. It also drops a dependency
         # that would otherwise be installed over the private endpoint's egress.
         run: |
+          set -euo pipefail
           python3 - <<'SCRIPT'
           import json
           import os
