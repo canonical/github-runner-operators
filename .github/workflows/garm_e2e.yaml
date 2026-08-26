@@ -32,7 +32,9 @@ jobs:
 
       - name: Set up tmate session (self-hosted)
         if: runner.debug == 1 && runner.environment == 'self-hosted'
-        uses: canonical/action-tmate@main
+        # Pinned to a commit SHA: this job holds production credentials, and the
+        # action publishes no tags, so main is the only named ref and it moves.
+        uses: canonical/action-tmate@5f11b26528699b78dadfb61273f4c859ac7145cf # main, 2026-04-27
         with:
           detached: true
           timeout-minutes: 60
