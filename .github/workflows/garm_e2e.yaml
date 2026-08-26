@@ -361,7 +361,7 @@ jobs:
           # permitopen pins the forward to this host's :80, the only destination
           # the tunnel exists for, so the key cannot be used to reach anything
           # else while it exists.
-          printf 'restrict,port-forwarding,permitopen=%s:80 %s\n' \
+          printf 'restrict,port-forwarding,permitopen="%s:80" %s\n' \
             "${TUNNEL_TARGET}" "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
 
           # Prove the entry works before the suite relies on it: authenticate with
