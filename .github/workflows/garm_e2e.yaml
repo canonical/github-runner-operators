@@ -300,7 +300,9 @@ jobs:
       - name: Install opcli and spread
         run: |
           set -euo pipefail
-          uv tool install "opcli[cli] @ git+https://github.com/canonical/charm-ci.git@main"
+          # Pinned to the same tag tox.ini pins the opcli pytest plugin to, so the
+          # CLI that runs the suite and the plugin inside it cannot drift apart.
+          uv tool install "opcli[cli] @ git+https://github.com/canonical/charm-ci.git@v1.0.0"
           sudo snap install go --classic
           go install github.com/canonical/spread/cmd/spread@latest
           sudo ln -sf ~/go/bin/spread /usr/local/bin/spread
