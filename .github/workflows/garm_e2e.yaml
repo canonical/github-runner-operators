@@ -344,8 +344,11 @@ jobs:
           ssh-keygen -q -t ed25519 -N '' \
             -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
             -f "${KEY_DIR}/garm-e2e-tunnel"
-          printf 'restrict,port-forwarding %s\n' \
-            "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
+          # permitopen pins the forward to this host's :80, the only destination
+          # the tunnel exists for, so the key cannot be used to reach anything
+          # else while it exists.
+          printf 'restrict,port-forwarding,permitopen=%s:80 %s\n' \
+            "${TUNNEL_TARGET}" "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
 
           # Prove the entry works before the suite relies on it: authenticate with
           # the key from this host, forwarding exactly as the VM will, and pull
@@ -368,8 +371,10 @@ jobs:
               exit 1
             fi
           fi
-          # Kill the test client; the VM opens its own.
-          pkill -f "garm-e2e-tunnel-${GITHUB_RUN_ID}" || true
+          # Kill the test client; the VM opens its own. Match on the key path: it
+          # is the part of the command line unique to this run's client, where the
+          # key comment -- which the marker string only lives in -- is not.
+          pkill -f "${KEY_DIR}/garm-e2e-tunnel" || true
           echo "Tunnel entry verified for ${TUNNEL_USER}@${TUNNEL_TARGET} (id ${GITHUB_RUN_ID})."
 
           KEY_B64=$(base64 -w0 "${KEY_DIR}/garm-e2e-tunnel")

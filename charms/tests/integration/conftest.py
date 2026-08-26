@@ -487,7 +487,10 @@ def _credential_sentinels() -> list[str]:
             continue
         values.append(encoded_key)
         try:
-            values.append(base64.b64decode(encoded_key).decode())
+            # validate=True for the reason github_app_private_key states: the
+            # default decodes a non-base64 value into plausible-looking bytes,
+            # which as a sentinel over-redacts without protecting anything more.
+            values.append(base64.b64decode(encoded_key, validate=True).decode())
         except ValueError:
             pass
     return [value for value in values if value]
