@@ -10,12 +10,6 @@ name: GARM E2E
 
 on:
   workflow_dispatch:
-  # Temporary: runs this workflow from its own development branch, so it can be
-  # exercised before it exists on the default branch and can be dispatched.
-  # Removed again once it has served its purpose. A label gate would be tidier but
-  # the repository's labels are managed, and `run-e2e` was deleted from the repo.
-  pull_request:
-    types: [opened, synchronize]
 
 permissions:
   contents: read
@@ -28,9 +22,6 @@ jobs:
   # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
   # for opcli to fetch during the spread prepare.
   build:
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.head_ref == 'feat/garm-e2e-implementation-ISD-5876'
     uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v0.0.1-alpha.10
     permissions:
       contents: read
@@ -45,11 +36,6 @@ jobs:
     # runner is scarce, and starting early would only hold it idle until the artifacts
     # the spread prepare fetches actually exist.
     needs: [build]
-    # `pull_request`, never `pull_request_target`: a fork's code must not run with
-    # access to these secrets. A fork PR gets none, so it can only fail fast.
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.head_ref == 'feat/garm-e2e-implementation-ISD-5876'
     permissions:
       contents: read
       packages: read
@@ -420,6 +406,18 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
+
+          # This runs on every outcome, including failures that predate the tenant
+          # configuration: bail out cleanly rather than die on an unbound variable
+          # or a missing client and bury the real failure under cleanup noise.
+          if [ -z "${E2E_RUNNER_IMAGE_NAME:-}" ]; then
+            echo "E2E_RUNNER_IMAGE_NAME is not set; the run failed before the tenant was configured. No sweep possible."
+            exit 0
+          fi
+          if ! command -v openstack >/dev/null 2>&1; then
+            echo "openstack client is not installed; the run failed before it was needed. No sweep possible."
+            exit 0
+          fi
 
           # GARM stamps every server it creates with garm-controller-id. Matching that
           # alongside the runner image scopes the sweep to VMs this suite's GARM

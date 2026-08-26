@@ -248,9 +248,16 @@ deployment: the charm starts, the configurator delivers config, the GARM API bec
 reachable, the provider authenticates to OpenStack, a VM is created from the runner
 image, the runner registers with GitHub, and a dispatched job runs and exits clean.
 
-> **TODO:** only the workflows and the credential path exist so far. The test currently
-> asserts nothing beyond the credentials reaching pytest; the deployment and the
-> end-to-end assertions land in a follow-up.
+The workflow first builds the charms and rocks the suite deploys, then runs the suite
+through spread. The suite deploys GARM with PostgreSQL and a traefik ingress — whose
+load-balancer address is what makes GARM's callback and metadata URLs reachable from
+the tenant — waits for a runner VM to register, and dispatches
+`.github/workflows/garm_e2e_test_run.yaml` at the scale set's label; the test passes
+only if that job concludes successfully. Runner VMs that cannot reach the host's ports
+directly tunnel their callbacks back over SSH, using an ephemeral, forwarding-only key
+the workflow publishes on the host and removes in an always-run cleanup step. Runners
+left on the tenant are deleted whatever the outcome, matched on the
+`garm-controller-id` GARM stamps on every server it creates.
 
 It is triggered manually and is **not** a merge gate:
 
@@ -278,9 +285,13 @@ not register masks for these itself.
 | `OS_PROJECT_DOMAIN_NAME` | OpenStack project domain name |
 | `OS_REGION_NAME` | OpenStack region name |
 | `OS_NETWORK` | OpenStack network for runner VMs |
+| `E2E_RUNNER_IMAGE_NAME` | Name of the published runner image the VMs boot from; must exist on the tenant |
+| `E2E_OPENSTACK_FLAVOR` | Optional. OpenStack flavor for the runner VMs; the suite falls back to `m1.small` |
 | `E2E_GITHUB_APP_ID` | GitHub App ID |
 | `E2E_GITHUB_APP_INSTALLATION_ID` | Installation ID of that App on this repository |
 | `E2E_GITHUB_APP_PRIVATE_KEY` | That App's private key. Paste the PEM as issued; base64 is also accepted |
+| `E2E_RUNNER_HTTP_PROXY` | Optional. Proxy the runner VMs' egress is routed through |
+| `E2E_APROXY_EXCLUDE_ADDRESSES` | Optional. Addresses excluded from the aproxy redirect when a proxy is set; the suite falls back to `10.150.0.0/15` |
 | `E2E_VAULT_KV_PATH` | Optional. Defaults to `kv/data/garm-e2e/prodstack` |
 
 The OpenStack username and password are **not** repository secrets. They are read at run
