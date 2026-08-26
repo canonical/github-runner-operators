@@ -49,17 +49,21 @@ def test_redact_pebble_output_with_sentinel_values():
 
 def test_credential_sentinels_reads_env(monkeypatch):
     """
-    arrange: OS_PASSWORD and a base64-encoded TEST_GITHUB_APP_PRIVATE_KEY set in the environment.
+    arrange: OS_USERNAME, OS_PASSWORD and a base64-encoded TEST_GITHUB_APP_PRIVATE_KEY
+        set in the environment.
     act: Call _credential_sentinels.
-    assert: The raw password, the base64 form, and its decoded PEM form are all returned.
+    assert: The username, the raw password, the base64 form, and its decoded PEM form
+        are all returned, so the username is redacted like the password it travels with.
     """
     pem_body = "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
     encoded_key = base64.b64encode(pem_body.encode()).decode()
+    monkeypatch.setenv("OS_USERNAME", "tenant-bot")
     monkeypatch.setenv("OS_PASSWORD", "super-secret-pw")
     monkeypatch.setenv("TEST_GITHUB_APP_PRIVATE_KEY", encoded_key)
 
     sentinels = _credential_sentinels()
 
+    assert "tenant-bot" in sentinels
     assert "super-secret-pw" in sentinels
     assert encoded_key in sentinels
     assert pem_body in sentinels
@@ -67,10 +71,12 @@ def test_credential_sentinels_reads_env(monkeypatch):
 
 def test_credential_sentinels_excludes_unset_vars(monkeypatch):
     """
-    arrange: Neither OS_PASSWORD nor TEST_GITHUB_APP_PRIVATE_KEY set in the environment.
+    arrange: None of OS_USERNAME, OS_PASSWORD nor TEST_GITHUB_APP_PRIVATE_KEY set in
+        the environment.
     act: Call _credential_sentinels.
     assert: No sentinel values are returned, so unset credentials never masquerade as redaction targets.
     """
+    monkeypatch.delenv("OS_USERNAME", raising=False)
     monkeypatch.delenv("OS_PASSWORD", raising=False)
     monkeypatch.delenv("TEST_GITHUB_APP_PRIVATE_KEY", raising=False)
 

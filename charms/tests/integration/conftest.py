@@ -471,7 +471,12 @@ def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
 
 def _credential_sentinels() -> list[str]:
     """Cleartext credential values that must never reach a log line."""
-    values = [os.environ.get("OS_PASSWORD", "")]
+    # The username is Vault-sourced like the password and lands in the rendered
+    # provider config the same way, so it is redacted on value like one.
+    values = [
+        os.environ.get("OS_PASSWORD", ""),
+        os.environ.get("OS_USERNAME", ""),
+    ]
     for key_env in (
         GITHUB_APP_PRIVATE_KEY_ENV_VAR,
         E2E_APP_ENV.private_key,
