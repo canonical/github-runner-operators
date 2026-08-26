@@ -457,6 +457,7 @@ def test_busy_runner_survives_an_unreachable_forge(caplog):
         ("pending_delete", b"nova: instance not found", True),
         ("pending_force_delete", b"nova: instance not found", True),
         ("deleting", b"nova: instance not found", True),
+        ("pending_force_delete", None, True),
     ],
     ids=[
         "healthy-runner-not-forced",
@@ -465,6 +466,7 @@ def test_busy_runner_survives_an_unreachable_forge(caplog):
         "pending-delete-with-fault-forced",
         "pending-force-delete-with-fault-forced",
         "deleting-with-fault-forced",
+        "pending-force-delete-without-fault-stays-forced",
     ],
 )
 def test_force_remove_only_once_the_provider_has_refused_a_delete(
@@ -477,7 +479,9 @@ def test_force_remove_only_once_the_provider_has_refused_a_delete(
     assert: force_remove is set only once a delete has been accepted and the provider reported a
         fault carrying it out. A delete-pending status alone is also what a healthy teardown
         looks like while it runs, and forcing that would turn a retryable failure into an
-        instance leaked in the cloud; the recorded fault is what separates the two.
+        instance leaked in the cloud; the recorded fault is what separates the two. A runner
+        already parked in the forced-delete status keeps the escalation regardless, since a
+        plain delete would downgrade a force already in flight and strand the runner for good.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],

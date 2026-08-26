@@ -37,11 +37,15 @@ APROXY_SCRIPT_NAME = "00-aproxy"
 RUNNER_STATUS_ACTIVE = "active"
 JOB_STATUSES_HOLDING_RUNNER = frozenset({"queued", "in_progress"})
 
-# GARM instance statuses meaning a delete was accepted but has not completed:
-# the provider teardown is failing and being retried with a backoff. The forced
-# variant belongs here too — dropping it would downgrade an escalation already in
-# flight back to a plain delete, so a stuck instance could never clear.
+# GARM instance statuses meaning a delete was accepted but has not completed.
+# Reaching one of these is what makes a recorded provider fault mean "the teardown
+# failed" rather than "the runner never came up".
 PENDING_DELETE_STATUSES = frozenset({"pending_delete", "pending_force_delete", "deleting"})
+
+# The status GARM parks a runner in once a *forced* delete has been accepted. Sending
+# a plain delete for one of these would downgrade the escalation already in flight
+# back to a plain delete, so a stuck instance could never clear.
+FORCED_DELETE_STATUS = "pending_force_delete"
 
 # GitHub terminates a job on a self-hosted runner at 5 days — the limit that
 # applies to GARM's runners, not the 6 hours GitHub-hosted ones get. A job record
@@ -675,9 +679,19 @@ def _is_delete_stuck(instance: Instance) -> bool:
         would escalate normal in-flight deletes and turn a retryable failure into a
         leaked instance. GARM records the provider's error against the runner when a
         teardown fails, which is what separates the two.
+
+        A runner already parked in the forced-delete status is the exception: the
+        escalation has been applied to it, whether by an earlier pass or by an
+        operator, so the fault that justified it need not still be readable here.
+        Sending a plain delete for it would downgrade that escalation and leave the
+        runner stuck for good, and re-forcing leaks nothing that is not already
+        forfeit.
     """
-    if (instance.status or "").lower() not in PENDING_DELETE_STATUSES:
+    status = (instance.status or "").lower()
+    if status not in PENDING_DELETE_STATUSES:
         return False
+    if status == FORCED_DELETE_STATUS:
+        return True
     return bool(instance.provider_fault)
 
 
