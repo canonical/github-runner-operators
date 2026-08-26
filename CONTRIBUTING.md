@@ -243,10 +243,10 @@ rockcraft.skopeo copy \
 
 ### GARM E2E
 
-The GARM end-to-end test (`charms/tests/e2e/`) exercises the full chain on ProdStack:
-the charm starts, the configurator delivers config, the GARM API becomes reachable, the
-provider authenticates to OpenStack, a VM is created from the runner image, the runner
-registers with GitHub, and a dispatched job runs and exits clean.
+The GARM end-to-end test (`charms/tests/e2e/`) exercises the full chain on an OpenStack
+deployment: the charm starts, the configurator delivers config, the GARM API becomes
+reachable, the provider authenticates to OpenStack, a VM is created from the runner
+image, the runner registers with GitHub, and a dispatched job runs and exits clean.
 
 > **TODO:** only the workflows and the credential path exist so far. The test currently
 > asserts nothing beyond the credentials reaching pytest; the deployment and the
