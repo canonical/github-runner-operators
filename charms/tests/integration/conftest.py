@@ -1108,10 +1108,7 @@ def _garm_login(juju: jubilant.Juju, address: str) -> str:
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     creds = _get_admin_credentials(juju)
-
-    session = requests.Session()
-    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
-    session.mount("http://", HTTPAdapter(max_retries=retries))
+    session = _garm_api_session()
 
     class _LoginRetryable(Exception):
         pass
@@ -1167,7 +1164,7 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
         "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
         "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
     }
-    resp = requests.put(
+    resp = _garm_api_session().put(
         f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
     )
     logger.info(
@@ -1178,6 +1175,20 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
     resp.raise_for_status()
 
     return token
+
+
+def _garm_api_session() -> requests.Session:
+    """A session that retries transient GARM API failures.
+
+    GARM sits behind traefik while it is still settling, so 502/503/504 answers are
+    routine in the first moments after a deploy; retrying them keeps a transient
+    answer from failing the test that made the call. Both the login and the
+    controller setup go through this.
+    """
+    session = requests.Session()
+    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+    return session
 
 
 @pytest.fixture(scope="module", name="garm_with_debug_ssh")
