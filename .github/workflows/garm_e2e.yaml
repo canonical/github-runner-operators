@@ -304,7 +304,9 @@ jobs:
           # CLI that runs the suite and the plugin inside it cannot drift apart.
           uv tool install "opcli[cli] @ git+https://github.com/canonical/charm-ci.git@v1.0.0"
           sudo snap install go --classic
-          go install github.com/canonical/spread/cmd/spread@latest
+          # Pinned for the same reason: this job is expensive, and a moving spread
+          # could change behaviour under it without any change in this repository.
+          go install github.com/canonical/spread/cmd/spread@2026.07.12
           sudo ln -sf ~/go/bin/spread /usr/local/bin/spread
 
       - name: Point concierge at a MetalLB range on this host
@@ -443,8 +445,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Resolve the home exactly as the publish step does: $HOME can point at
+          # the actions-runner tree rather than the login account's home, and the
+          # entry was written to the latter's authorized_keys.
+          TUNNEL_USER=$(id -un)
+          HOME_DIR=$(getent passwd "${TUNNEL_USER}" | cut -d: -f6)
+          if [ -z "${HOME_DIR}" ]; then
+            echo "::error::Could not resolve the home directory of ${TUNNEL_USER}; cannot remove the tunnel entry."
+            exit 1
+          fi
+
           MARKER="garm-e2e-tunnel-${GITHUB_RUN_ID}"
-          AUTH_KEYS="${HOME}/.ssh/authorized_keys"
+          AUTH_KEYS="${HOME_DIR}/.ssh/authorized_keys"
           if [ -f "$AUTH_KEYS" ] && grep -q "$MARKER" "$AUTH_KEYS"; then
             sed -i "/${MARKER}/d" "$AUTH_KEYS"
             echo "Tunnel entry ${MARKER} removed."
