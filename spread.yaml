@@ -25,6 +25,7 @@ environment:
   OPCLI_ARTIFACTS_BUILD_YAML: '$(HOST: echo "${OPCLI_ARTIFACTS_BUILD_YAML:-}")'
   GITHUB_RUN_ID: '$(HOST: echo "${GITHUB_RUN_ID:-}")'
   GITHUB_REF_NAME: '$(HOST: echo "${GITHUB_REF_NAME:-}")'
+  GITHUB_HEAD_REF: '$(HOST: echo "${GITHUB_HEAD_REF:-}")'
   GITHUB_REPOSITORY: '$(HOST: echo "${GITHUB_REPOSITORY:-}")'
   E2E_GITHUB_APP_ID: '$(HOST: echo "${E2E_GITHUB_APP_ID:-}")'
   E2E_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${E2E_GITHUB_APP_INSTALLATION_ID:-}")'
@@ -79,6 +80,7 @@ integration-suites:
       OPCLI_ARTIFACTS_BUILD_YAML={{ env.get("OPCLI_ARTIFACTS_BUILD_YAML", "") }}
       GITHUB_RUN_ID={{ env.get("GITHUB_RUN_ID", "") }}
       GITHUB_REF_NAME={{ env.get("GITHUB_REF_NAME", "") }}
+      GITHUB_HEAD_REF={{ env.get("GITHUB_HEAD_REF", "") }}
       GITHUB_REPOSITORY={{ env.get("GITHUB_REPOSITORY", "") }}
       E2E_GITHUB_APP_ID={{ env.get("E2E_GITHUB_APP_ID", "") }}
       E2E_GITHUB_APP_INSTALLATION_ID={{ env.get("E2E_GITHUB_APP_INSTALLATION_ID", "") }}

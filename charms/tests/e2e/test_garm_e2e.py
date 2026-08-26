@@ -3,6 +3,7 @@
 """GARM end-to-end test on ProdStack."""
 
 import logging
+import os
 import time
 
 import jubilant
@@ -48,7 +49,12 @@ def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str
     """
     repo_path = required_env(GITHUB_REPOSITORY_ENV_VAR)
     label = e2e_scaleset  # Unique runner label returned by e2e_scaleset fixture
-    ref = required_env("GITHUB_REF_NAME")
+    # workflow_dispatch resolves only branches and tags, never PR refs: under
+    # the pull_request event GITHUB_REF_NAME is "N/merge", which the dispatch
+    # API answers with 422 "No ref found". The PR's head branch carries the
+    # same workflow file and is dispatchable; a workflow_dispatch run of this
+    # suite has no head ref, and GITHUB_REF_NAME is already a branch there.
+    ref = os.environ.get("GITHUB_HEAD_REF") or required_env("GITHUB_REF_NAME")
 
     # Wait for runner VM to spawn and register before dispatching
     _wait_for_runner_online(juju, garm_with_ingress, label)
