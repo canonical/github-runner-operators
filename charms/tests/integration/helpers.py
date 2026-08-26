@@ -176,7 +176,8 @@ def dispatch_workflow(
         github_client: Authenticated PyGithub instance.
         repo_path: ``org/repo`` string.
         workflow_path: Path in the repository to the workflow file.
-        ref: Git ref (branch or tag) to run the workflow on.
+        ref: Git branch to run the workflow on. The run is found again through
+            a branch-scoped listing, so a tag ref would dispatch but never resolve.
         inputs: Workflow dispatch inputs.
 
     Returns:
