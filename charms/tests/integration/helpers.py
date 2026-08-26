@@ -185,8 +185,12 @@ def dispatch_workflow(
     """
     repo = github_client.get_repo(repo_path)
     workflow = repo.get_workflow(workflow_path)
-    # Snapshot existing run IDs to disambiguate concurrent or recent runs
-    existing_run_ids = {run.id for run in workflow.get_runs(branch=ref, event="workflow_dispatch")}
+    # Snapshot existing run IDs to disambiguate concurrent or recent runs. Only the
+    # newest page is needed: the listing is newest-first and prepends, so the
+    # dispatched run can only ever appear at the top, and an unbounded walk would
+    # grow with the branch's dispatch history.
+    recent_runs = workflow.get_runs(branch=ref, event="workflow_dispatch")
+    existing_run_ids = {run.id for run in recent_runs[:30]}
     try:
         # throw=True: the default returns False on error, which would surface a
         # permissions failure as an unrelated "no new run appeared" timeout below.
@@ -197,7 +201,7 @@ def dispatch_workflow(
     # After dispatch, poll for the run ID that is not in the initial snapshot.
     for _ in range(30):
         time.sleep(2)
-        runs = workflow.get_runs(branch=ref, event="workflow_dispatch")
+        runs = workflow.get_runs(branch=ref, event="workflow_dispatch")[:30]
         for run in runs:
             if run.id not in existing_run_ids:
                 return run.id
