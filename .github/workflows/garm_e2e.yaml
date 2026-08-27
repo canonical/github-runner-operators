@@ -17,9 +17,8 @@ permissions:
 # One run at a time, repository-wide. The suite assumes it owns both the
 # private-endpoint host -- its Kubernetes cluster, the load-balancer address pinned
 # to the host's own address, the tunnel entry in authorized_keys -- and every
-# GARM-tagged instance
-# on the tenant, none of which is scoped per ref. Queueing rather than
-# cancelling: each dispatch is a deliberate request for a two-hour answer, and
+# GARM-tagged instance on the tenant, none of which is scoped per ref. Queueing
+# rather than cancelling: a dispatch is a deliberate request for an answer, and
 # cancelling interrupts the suite's own teardown, which reclaims scale sets and
 # their GitHub registrations. The always() sweep below is a backstop for
 # instances only and does not stand in for it.
@@ -53,8 +52,8 @@ jobs:
     runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
     # Longer than the suite's own kill-timeout in spread.yaml, so spread stops the run
     # first and says which task hung, rather than the job being cut from underneath it.
-    # Generous on purpose: it is not worth tuning before a real run says how long a
-    # deploy, a spawn and a dispatch actually take here.
+    # Generous on purpose: a green run takes roughly 25 minutes end to end, but that is
+    # one sample against a tenant whose spawn latency is not ours to predict.
     timeout-minutes: 130
     steps:
       - uses: actions/checkout@v7.0.1

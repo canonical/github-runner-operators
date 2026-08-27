@@ -272,8 +272,8 @@ changes to the end-to-end test can be exercised without merging them first.
 
 **Only one run happens at a time, repository-wide.** The concurrency group is global and
 does not cancel what is already running, so a second dispatch queues behind the first
-rather than displacing it — expect to wait out a run in progress, up to a couple of
-hours. Serialising is deliberate: the suite assumes it owns the private-endpoint host
+rather than displacing it — expect to wait out a run in progress, which takes roughly
+25 minutes when green. Serialising is deliberate: the suite assumes it owns the private-endpoint host
 (its Kubernetes cluster, the load-balancer address pinned to the host's own IP, the
 tunnel entry in
 `authorized_keys`) and every GARM-tagged instance on the tenant, none of which is scoped
