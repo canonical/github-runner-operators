@@ -10,7 +10,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from charm_state import RunnerConfig
-from garm_api import GarmApiError, GarmAuthenticatedClient, GarmUnauthorizedError
+from garm_api import (
+    GarmApiError,
+    GarmAuthenticatedClient,
+    GarmNotFoundError,
+    GarmUnauthorizedError,
+)
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.instance import Instance
 from garm_client.models.scale_set import ScaleSet
@@ -342,6 +347,11 @@ class ScalesetReconciler:
         try:
             self._client.delete_instance(instance_name, force_remove=force_remove)
             return
+        except GarmNotFoundError:
+            # The runner disappeared between the listing and here. That is the outcome
+            # the delete was after, so it is done, not deferred.
+            logger.info("Runner %s is already gone from GARM", instance_name)
+            return
         except GarmUnauthorizedError as exc:
             # Deleting a runner deregisters it in GitHub first, so this is GitHub
             # rejecting that call: expired or revoked app credentials, but also a 403
@@ -372,11 +382,19 @@ class ScalesetReconciler:
             self._client.delete_instance(
                 instance_name, force_remove=force_remove, bypass_gh_unauthorized=True
             )
+        except GarmNotFoundError:
+            logger.info("Runner %s is already gone from GARM", instance_name)
         except GarmApiError as exc:
             self._log_deferred_runner_delete(instance_name, exc)
 
     @staticmethod
     def _log_deferred_runner_delete(instance_name: str, exc: GarmApiError) -> None:
+        """Report a runner the next reconcile has to try again.
+
+        Args:
+            instance_name: Name of the runner that could not be removed.
+            exc: The failure to report.
+        """
         logger.warning(
             "Could not remove runner %s (will retry on next reconcile): %s", instance_name, exc
         )

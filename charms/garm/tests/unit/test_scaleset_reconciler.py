@@ -4,12 +4,18 @@
 """Unit tests for the scaleset reconciler."""
 
 import base64
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from charm_state import RunnerConfig
-from garm_api import GarmApiError, GarmConnectionError, GarmUnauthorizedError
+from garm_api import (
+    GarmApiError,
+    GarmConnectionError,
+    GarmNotFoundError,
+    GarmUnauthorizedError,
+)
 from garm_client.models.template import Template
 from runner_template import build_template_data
 from scaleset_reconciler import ScalesetReconciler, ScalesetSpec, _effective_extra_specs
@@ -720,12 +726,14 @@ def test_unnamed_runner_is_skipped():
     assert client.deleted == [42]
 
 
-def test_runner_listing_failure_defers_scaleset_delete_attempt():
+def test_runner_listing_failure_still_attempts_the_scaleset_delete():
     """
     arrange: FakeGarmClient whose list_scale_set_instances raises.
     act: Reconcile so the scaleset is orphaned.
-    assert: No runner delete is attempted and the reconcile completes, leaving the cleanup to
-        the next pass rather than aborting on an unreadable runner list.
+    assert: No runner delete is attempted, but the scaleset delete still is, and the reconcile
+        completes. An unreadable runner list says nothing about whether the scaleset owns any:
+        if it does not, the delete succeeds and the scaleset is not stranded on a failure to
+        read it; if it does, GARM rejects the delete and the next pass retries the whole thing.
     """
 
     class _ListFailsClient(FakeGarmClient):
@@ -739,7 +747,35 @@ def test_runner_listing_failure_defers_scaleset_delete_attempt():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted_instances == []
+    assert client.deleted == [42]
     assert len(client.created) == 1
+
+
+@pytest.mark.parametrize("bypass_needed", [False, True], ids=["plain", "after-bypass"])
+def test_a_runner_that_is_already_gone_is_not_reported_as_deferred(bypass_needed, caplog):
+    """
+    arrange: FakeGarmClient whose runner removal answers 404, either straight away or on the
+        bypass retry that follows an unauthorized rejection.
+    act: Reconcile so the scaleset is orphaned.
+    assert: Nothing is logged as awaiting a retry. A 404 is the outcome the delete was after,
+        so promising to try again would name a runner no later pass can act on.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+        instances={42: ["runner-1"]},
+        delete_instance_error=(
+            GarmUnauthorizedError("401 Unauthorized")
+            if bypass_needed
+            else GarmNotFoundError("404")
+        ),
+        bypass_delete_error=GarmNotFoundError("404") if bypass_needed else None,
+    )
+    with caplog.at_level(logging.WARNING):
+        _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert "will retry on next reconcile" not in caplog.text
+    assert client.deleted == [42]
 
 
 def test_unnamed_observed_scaleset_is_skipped():

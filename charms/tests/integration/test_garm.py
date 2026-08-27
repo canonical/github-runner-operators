@@ -467,7 +467,7 @@ def _get_template_body(address: str, token: str, template_id: int) -> str:
     return base64.b64decode(raw_b64).decode("utf-8") if raw_b64 else ""
 
 
-def test_charm_drains_and_deletes_an_orphaned_scaleset(
+def test_charm_disables_and_deletes_an_orphaned_scaleset(
     juju: jubilant.Juju,
     configurator_garm: str,
     configurator_with_image: str,
@@ -478,9 +478,11 @@ def test_charm_drains_and_deletes_an_orphaned_scaleset(
         desired scaleset created under a throwaway name.
     act: Rename the desired scaleset back, so the one GARM holds is no longer desired.
     assert: The charm removes the orphaned scaleset itself and creates the renamed one in its
-        place. GARM rejects the delete of a scaleset that is still enabled, and again while it
-        still owns runners, so this covers the charm's own disable-drain-delete against a live
-        GARM — the sequence the teardown helper below otherwise hand-rolls.
+        place. GARM rejects the delete of a scaleset that is still enabled, so this covers the
+        charm's own disable-then-delete against a live GARM — the half of the sequence the
+        teardown helper below otherwise hand-rolls. The drain itself is not exercised: the
+        configurator's min-idle-runner defaults to 0 and the OpenStack provider is a stand-in,
+        so the orphaned scaleset never owns a runner. That half stays unit-tested.
     """
     address = _get_garm_address(juju, configurator_garm)
     base_url = _garm_api_base_url(address)
@@ -786,7 +788,7 @@ def _delete_scalesets(base_url: str, token: str) -> None:
         # GARM 400s a scaleset delete while the scaleset is still enabled, and again while it
         # still owns runners, so disable it (idle count to zero) to trigger the drain before
         # deleting. The charm does this for itself — see
-        # test_charm_drains_and_deletes_an_orphaned_scaleset; this is only teardown, unwinding
+        # test_charm_disables_and_deletes_an_orphaned_scaleset; this is only teardown, unwinding
         # scalesets the charm is not being asked to remove.
         resp = requests.put(
             f"{base_url}/scalesets/{scaleset_id}",
