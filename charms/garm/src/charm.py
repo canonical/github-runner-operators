@@ -187,45 +187,27 @@ class GarmCharm(paas_charm.go.Charm):
         """Reconcile active GARM state and rerun database migrations."""
         self.restart(rerun_migrations=True)
 
-    def _on_config_changed(self, event: ops.EventBase) -> None:
-        """Route config changes through GARM's teardown gate."""
+    def _route_reconcile(self, event: ops.EventBase) -> None:
+        """Route an inherited framework event through GARM's teardown gate."""
         self._reconcile(event)
 
-    def _on_secret_changed(self, event: ops.EventBase) -> None:
-        """Route secret changes through GARM's teardown gate."""
-        self._reconcile(event)
+    # PaasCharm.__init__ resolves these hook names dynamically. Aliasing them keeps the
+    # teardown check before the inherited decorators without registering duplicate observers.
+    _on_config_changed = _route_reconcile
+    _on_secret_changed = _route_reconcile
+    _on_secret_storage_relation_changed = _route_reconcile
+    _on_secret_storage_relation_departed = _route_reconcile
+    _on_postgresql_database_relation_broken = _route_reconcile
+    _on_ingress_ready = _route_reconcile
+    _on_ingress_revoked = _route_reconcile
+    _on_pebble_ready = _route_reconcile
 
-    def _on_secret_storage_relation_changed(self, event: ops.RelationEvent) -> None:
-        """Route secret-storage changes through GARM's teardown gate."""
-        self._reconcile(event)
-
-    def _on_secret_storage_relation_departed(self, event: ops.HookEvent) -> None:
-        """Route secret-storage departures through GARM's teardown gate."""
-        self._reconcile(event)
-
-    def _on_postgresql_database_database_created(self, event: ops.EventBase) -> None:
-        """Route PostgreSQL database creation through GARM's teardown gate."""
+    def _route_reconcile_with_migrations(self, event: ops.EventBase) -> None:
+        """Route an inherited database event through GARM's migration gate."""
         self._reconcile_with_migrations(event)
 
-    def _on_postgresql_database_endpoints_changed(self, event: ops.EventBase) -> None:
-        """Route PostgreSQL endpoint changes through GARM's teardown gate."""
-        self._reconcile_with_migrations(event)
-
-    def _on_postgresql_database_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
-        """Route PostgreSQL relation loss through GARM's teardown gate."""
-        self._reconcile(event)
-
-    def _on_ingress_ready(self, event: ops.HookEvent) -> None:
-        """Route ingress readiness through GARM's teardown gate."""
-        self._reconcile(event)
-
-    def _on_ingress_revoked(self, event: ops.HookEvent) -> None:
-        """Route ingress revocation through GARM's teardown gate."""
-        self._reconcile(event)
-
-    def _on_pebble_ready(self, event: ops.PebbleReadyEvent) -> None:
-        """Route Pebble readiness through GARM's teardown gate."""
-        self._reconcile(event)
+    _on_postgresql_database_database_created = _route_reconcile_with_migrations
+    _on_postgresql_database_endpoints_changed = _route_reconcile_with_migrations
 
     def _on_update_status(self, event: ops.HookEvent) -> None:
         """Run the framework update-status handler only while active."""
