@@ -378,12 +378,7 @@ def test_charm_reconciles_org_and_scaleset(
     # _reconcile_runners() runs now that the controller URLs are set. max-runner=10 doubles as the
     # scaleset assertion below.
     juju.config(configurator_with_image, values={"max-runner": "10"})
-    juju.wait(
-        lambda status: jubilant.all_active(status, configurator_with_image)
-        and jubilant.all_agents_idle(status, configurator_garm),
-        timeout=3 * 60,
-        delay=10,
-    )
+    _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
 
     org = _wait_for_org(base_url, token, "test-org")
     credential = _wait_for_github_credential(base_url, token, _SYNCED_CREDENTIAL_NAME)
@@ -406,6 +401,27 @@ def test_charm_reconciles_org_and_scaleset(
     assert scaleset.get("template_id") == charmed["id"], (
         f"scaleset should reference charmed template id {charmed['id']}; "
         f"got {scaleset.get('template_id')}"
+    )
+
+
+def _wait_for_config_applied(
+    juju: jubilant.Juju, garm_app: str, configurator_app: str
+) -> None:
+    """Wait for a configurator config change to reach GARM's reconcile.
+
+    A config change triggers config_changed on the configurator, then relation_changed on
+    GARM, whose holistic reconcile applies the new desired scaleset set.
+
+    Args:
+        juju: Jubilant Juju handle.
+        garm_app: Name of the GARM application.
+        configurator_app: Name of the garm-configurator application.
+    """
+    juju.wait(
+        lambda status: jubilant.all_active(status, configurator_app)
+        and jubilant.all_agents_idle(status, garm_app),
+        timeout=3 * 60,
+        delay=10,
     )
 
 
@@ -478,37 +494,16 @@ def test_charm_drains_and_deletes_an_orphaned_scaleset(
     renamed = f"{_SCALESET_TEST_NAME}-renamed"
     try:
         juju.config(configurator_with_image, values={"name": renamed})
-        _wait_for_reconcile(juju, configurator_garm, configurator_with_image)
+        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
         _wait_for_scaleset(base_url, token, renamed)
     finally:
         # Renaming back is the act, and doubles as cleanup: every later test in this module
         # asserts against the default scaleset name.
         juju.config(configurator_with_image, values={"name": _SCALESET_TEST_NAME})
-        _wait_for_reconcile(juju, configurator_garm, configurator_with_image)
+        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
 
     _wait_for_scaleset_absent(base_url, token, renamed)
     _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
-
-
-def _wait_for_reconcile(
-    juju: jubilant.Juju, garm_app: str, configurator_app: str
-) -> None:
-    """Wait for a configurator config change to reach GARM's reconcile.
-
-    A config change triggers config_changed on the configurator, then relation_changed on
-    GARM, whose holistic reconcile applies the new desired scaleset set.
-
-    Args:
-        juju: Jubilant Juju handle.
-        garm_app: Name of the GARM application.
-        configurator_app: Name of the garm-configurator application.
-    """
-    juju.wait(
-        lambda status: jubilant.all_active(status, configurator_app)
-        and jubilant.all_agents_idle(status, garm_app),
-        timeout=3 * 60,
-        delay=10,
-    )
 
 
 @retry(
@@ -1067,12 +1062,7 @@ def test_runner_options_render_into_scaleset_template(
             "pre-job-script": "echo integration-marker",
         },
     )
-    juju.wait(
-        lambda status: jubilant.all_active(status, configurator_with_image)
-        and jubilant.all_agents_idle(status, configurator_garm),
-        timeout=3 * 60,
-        delay=10,
-    )
+    _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
 
     # One marker per template-delivered config option, proving each reaches GARM
     # via live reconcile: dockerhub-mirror (daemon.json + env var),

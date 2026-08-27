@@ -37,11 +37,13 @@ APROXY_SCRIPT_NAME = "00-aproxy"
 RUNNER_STATUS_ACTIVE = "active"
 JOB_STATUSES_HOLDING_RUNNER = frozenset({"queued", "in_progress"})
 
-# The instance statuses GARM's delete endpoint accepts. It rejects every other one
-# with a 400, so a runner GARM is still creating, or already tearing down, would be
-# refused on every pass; those are left for a later reconcile once GARM has moved
-# them on rather than retried into the same error.
-DELETABLE_STATUSES = frozenset({"running", "error", "pending_delete", "pending_force_delete"})
+# The runner statuses GARM's delete endpoint accepts. It rejects every other one with
+# a 400, so a runner GARM is still creating, or already tearing down, would be refused
+# on every pass; those are left for a later reconcile once GARM has moved them on
+# rather than retried into the same error.
+DELETABLE_RUNNER_STATUSES = frozenset(
+    {"running", "error", "pending_delete", "pending_force_delete"}
+)
 
 # GARM instance statuses meaning a delete was accepted but has not completed.
 # Reaching one of these is what makes a recorded provider fault mean "the teardown
@@ -53,7 +55,7 @@ PENDING_DELETE_STATUSES = frozenset({"pending_delete", "pending_force_delete"})
 # The status GARM parks a runner in once a *forced* delete has been accepted. Sending
 # a plain delete for one of these would downgrade the escalation already in flight
 # back to a plain delete, so a stuck instance could never clear.
-FORCED_DELETE_STATUS = "pending_force_delete"
+PENDING_FORCE_DELETE_STATUS = "pending_force_delete"
 
 # GitHub terminates a job on a self-hosted runner at 5 days — the limit that
 # applies to GARM's runners, not the 6 hours GitHub-hosted ones get. A job record
@@ -287,7 +289,7 @@ class ScalesetReconciler:
                     "Skipping runner with missing name in scaleset %s (id=%s)", name, instance.id
                 )
                 continue
-            if (instance.status or "").lower() not in DELETABLE_STATUSES:
+            if (instance.status or "").lower() not in DELETABLE_RUNNER_STATUSES:
                 # GARM would reject the delete with a 400, and keep rejecting it for as
                 # long as the runner sits in this status — one it is still creating, or
                 # one the provider is already tearing down. Both resolve on their own,
@@ -684,7 +686,7 @@ def _is_delete_stuck(instance: Instance) -> bool:
     # delete it accepts. Sending a plain delete instead would downgrade that escalation
     # and leave the runner stuck for good, and re-forcing leaks nothing that is not
     # already forfeit.
-    if status == FORCED_DELETE_STATUS:
+    if status == PENDING_FORCE_DELETE_STATUS:
         return True
     # Both halves are needed for the rest. A delete-pending status on its own is also
     # what a perfectly healthy teardown looks like while it runs, and a cloud instance

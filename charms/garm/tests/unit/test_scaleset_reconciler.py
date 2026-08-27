@@ -682,7 +682,7 @@ def test_idle_runner_is_removed(instance_kwargs):
     "status",
     ["pending_create", "creating", "deleting", "deleted", "stopped", "unknown"],
 )
-def test_runner_garm_would_refuse_to_delete_is_left_alone(status):
+def test_a_runner_garm_would_refuse_to_delete_is_left_alone(status):
     """
     arrange: FakeGarmClient with an orphaned scaleset owning a runner in a status GARM's delete
         endpoint does not accept.
