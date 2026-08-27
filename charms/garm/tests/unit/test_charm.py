@@ -1072,3 +1072,111 @@ def test_every_observed_event_reconciles(
     ctx.run(event(ctx, state), state)
 
     garm_api.auth.from_login.assert_called_once()
+
+
+# The external secret is included in State because Scenario requires the exact object for
+# secret-changed events. Teardown must not resolve it through normal charm-state construction.
+_TEARDOWN_SECRET = Secret(id="secret:externalabcdefghijkl", tracked_content={"value": "external"})
+
+
+_TEARDOWN_EVENTS = [
+    pytest.param(lambda ctx, _: ctx.on.config_changed(), id="config-changed"),
+    pytest.param(
+        lambda ctx, _: ctx.on.secret_changed(_TEARDOWN_SECRET),
+        id="secret-changed",
+    ),
+    pytest.param(lambda ctx, _: ctx.on.update_status(), id="update-status"),
+    pytest.param(
+        lambda ctx, state: ctx.on.pebble_ready(state.get_container(CONTAINER_NAME)),
+        id="pebble-ready",
+    ),
+    pytest.param(
+        lambda ctx, state: ctx.on.relation_departed(
+            _relation(state, GARM_CONFIGURATOR_RELATION_NAME), remote_unit=0
+        ),
+        id="configurator-relation-departed",
+    ),
+    pytest.param(
+        lambda ctx, state: ctx.on.relation_broken(
+            _relation(state, GARM_CONFIGURATOR_RELATION_NAME)
+        ),
+        id="configurator-relation-broken",
+    ),
+    pytest.param(
+        lambda ctx, state: ctx.on.relation_departed(
+            _relation(state, DEBUG_SSH_INTEGRATION_NAME), remote_unit=0
+        ),
+        id="debug-ssh-relation-departed",
+    ),
+    pytest.param(
+        lambda ctx, state: ctx.on.relation_broken(_relation(state, DEBUG_SSH_INTEGRATION_NAME)),
+        id="debug-ssh-relation-broken",
+    ),
+    pytest.param(
+        lambda ctx, state: ctx.on.relation_broken(_relation(state, "postgresql")),
+        id="postgresql-relation-broken",
+    ),
+]
+
+
+@pytest.mark.parametrize("event", _TEARDOWN_EVENTS)
+def test_teardown_events_skip_framework_state_and_garm_reconciliation(
+    ctx: Context, garm_api: _GarmApiMocks, event: typing.Callable
+):
+    """
+    arrange: No GARM units remain planned, and normal state seams fail if called.
+    act: Emit an event that can arrive during teardown.
+    assert: The event returns without reconstructing state or reconciling GARM.
+    """
+    state = _state(debug_ssh_related=True, planned_units=0, secrets=[_TEARDOWN_SECRET])
+
+    with (
+        patch(
+            "paas_charm.charm_state.CharmState.from_charm",
+            side_effect=AssertionError("framework charm state was reconstructed"),
+        ),
+        patch(
+            "charm_state.CharmState.from_charm",
+            side_effect=AssertionError("GARM charm state was reconstructed"),
+        ),
+        patch.object(
+            GarmCharm, "_ensure_secrets", side_effect=AssertionError("secrets were read")
+        ),
+        patch.object(
+            GarmCharm,
+            "_get_postgresql_config",
+            side_effect=AssertionError("postgresql relation was read"),
+        ),
+        patch.object(
+            GarmCharm,
+            "_get_configurator_provider_configs",
+            side_effect=AssertionError("configurator relation was read"),
+        ),
+    ):
+        out = ctx.run(event(ctx, state), state)
+
+    assert out is not None
+    garm_api.client.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+    garm_api.github.assert_not_called()
+    garm_api.entity.assert_not_called()
+    garm_api.scaleset.assert_not_called()
+
+
+def test_teardown_update_status_skips_ingress_refresh(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: The local GARM service is tearing down.
+    act: Emit update-status while ingress refresh would fail if invoked.
+    assert: The outer status guard returns before the base ingress refresh.
+    """
+    state = _state(planned_units=0)
+    with ctx(ctx.on.update_status(), state) as manager:
+        with patch.object(
+            manager.charm._ingress,
+            "_publish_auto_data",
+            side_effect=AssertionError("ingress refresh ran during teardown"),
+        ):
+            out = manager.run()
+
+    assert out is not None
+    garm_api.auth.from_login.assert_not_called()

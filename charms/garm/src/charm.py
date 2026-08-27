@@ -16,6 +16,7 @@ from collections.abc import Mapping
 import ops
 import paas_charm.go
 from paas_charm.app import WorkloadConfig
+from paas_charm.charm_state import CharmState as PaasCharmState
 from paas_charm.charm_utils import block_if_invalid_data
 
 from charm_state import (
@@ -168,10 +169,40 @@ class GarmCharm(paas_charm.go.Charm):
         self.framework.observe(self.on.update_status, self._reconcile)
         self.framework.observe(self.on.remove, self._on_remove)
 
+    def _is_tearing_down(self) -> bool:
+        """Return whether Juju plans no remaining units for the local application."""
+        return self.app.planned_units() == 0
+
+    def _reconcile(self, event: ops.EventBase) -> None:
+        """Skip normal reconciliation once local application teardown starts."""
+        if self._is_tearing_down():
+            logger.info(
+                "Skipping normal GARM reconciliation for %s during local teardown",
+                event.handle.kind,
+            )
+            return
+        self._normal_reconcile(event)
+
     @block_if_invalid_data
-    def _reconcile(self, _: ops.EventBase) -> None:
-        """Reconcile charm state."""
+    def _normal_reconcile(self, _: ops.EventBase) -> None:
+        """Reconcile active GARM charm state."""
         self.restart()
+
+    def _create_charm_state(self) -> PaasCharmState:
+        """Create framework state without reading relations during local teardown."""
+        if self._is_tearing_down():
+            return PaasCharmState(
+                framework=self._framework_name,
+                is_secret_storage_ready=False,
+            )
+        return super()._create_charm_state()
+
+    def _on_update_status(self, event: ops.HookEvent) -> None:
+        """Run the framework update-status handler only while active."""
+        if self._is_tearing_down():
+            logger.info("Skipping update-status handling during local teardown")
+            return
+        super()._on_update_status(event)
 
     def _on_remove(self, _: ops.RemoveEvent) -> None:
         """Drain GARM resources before Juju removes the application."""
@@ -287,6 +318,10 @@ class GarmCharm(paas_charm.go.Charm):
         Args:
             rerun_migrations: Passed through to the parent restart.
         """
+        if self._is_tearing_down():
+            logger.info("Skipping GARM workload restart during local teardown")
+            return
+
         self._ensure_secrets()
 
         if not self.is_ready():
