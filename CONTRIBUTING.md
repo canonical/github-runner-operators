@@ -214,8 +214,9 @@ Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/lates
 for a step-by-step guide to develop a Kubernetes charm using Go.
 
 To run the charm integration test, the charm file and rock has to be provided as input.
-You would need an LXD and MicroK8s cloud to run the tests. Ensure the `microk8s`
-controller is active in your Juju client before running the tests. An
+You would need an LXD and a Kubernetes cloud to run the tests; `concierge.yaml`
+provisions Canonical Kubernetes and LXD, and bootstraps a controller on each. Ensure
+the Kubernetes controller is active in your Juju client before running the tests. An
 example run command in the root directory is as follows:
 
 Before running `webhook-gateway-integration`, export the GitHub App credentials
@@ -232,7 +233,8 @@ export TEST_GITHUB_PATH=<github-org/github-repo>
 tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
 ```
 
-To add the rock to the MicroK8s registry, use the following command:
+To add the rock to a local registry at `localhost:32000` — MicroK8s ships one as an
+addon; on Canonical Kubernetes you supply your own — use the following command:
 
 ```shell
 rockcraft.skopeo copy \
@@ -272,7 +274,8 @@ changes to the end-to-end test can be exercised without merging them first.
 does not cancel what is already running, so a second dispatch queues behind the first
 rather than displacing it — expect to wait out a run in progress, up to a couple of
 hours. Serialising is deliberate: the suite assumes it owns the private-endpoint host
-(MicroK8s, the load-balancer address pinned to the host's own IP, the tunnel entry in
+(its Kubernetes cluster, the load-balancer address pinned to the host's own IP, the
+tunnel entry in
 `authorized_keys`) and every GARM-tagged instance on the tenant, none of which is scoped
 per run. Two runs in parallel would contend for all of it, up to deleting each other's
 runner VMs.

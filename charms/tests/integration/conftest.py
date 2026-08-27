@@ -384,18 +384,32 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
+# Canonical K8s ships containerd but exposes no `ctr` subcommand of its own, so the
+# bundled binary is addressed directly. The namespace is not optional: the kubelet
+# only sees images in k8s.io, and a pull into containerd's default namespace would
+# succeed while leaving the image invisible to the pod that needs it.
+K8S_CTR = (
+    "sudo",
+    "/snap/k8s/current/bin/ctr",
+    "--address",
+    "/run/containerd/containerd.sock",
+    "--namespace",
+    "k8s.io",
+)
+
+
 def _pre_pull_garm_image(image: str) -> None:
-    """Pre-pull the GARM ROCK image into microk8s containerd.
+    """Pre-pull the GARM ROCK image into the cluster's containerd.
 
     The GARM ROCK contains two large statically-linked Go binaries, making it
     significantly larger than other charm images. Pre-pulling into the local
     containerd cache before deploying prevents the 600s juju.wait() from
     expiring while the pod is still downloading the image.
     """
-    logger.info("Pre-pulling GARM ROCK image into microk8s containerd: %s", image)
+    logger.info("Pre-pulling GARM ROCK image into containerd: %s", image)
     try:
         result = subprocess.run(
-            ["sudo", "microk8s.ctr", "images", "pull", image],
+            [*K8S_CTR, "images", "pull", image],
             check=True,
             capture_output=True,
             text=True,
@@ -416,17 +430,18 @@ def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
     unit = f"{app_name}/0"
     logger.error("=== Debug info for failed GARM deployment: unit=%s ===", unit)
     for cmd in [
-        ["sudo", "microk8s.kubectl", "get", "pods", "-A", "-o", "wide"],
+        ["sudo", "k8s", "kubectl", "get", "pods", "-A", "-o", "wide"],
         [
             "sudo",
-            "microk8s.kubectl",
+            "k8s",
+            "kubectl",
             "describe",
             "pods",
             "-A",
             "-l",
             f"app.kubernetes.io/name={app_name}",
         ],
-        ["sudo", "microk8s.kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp"],
+        ["sudo", "k8s", "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp"],
     ]:
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -524,7 +539,7 @@ def deploy_garm_app_no_integration_fixture(
 ) -> str:
     """Deploy the GARM application WITHOUT integrations (blocked state).
 
-    - Pre-pulls the ROCK image into microk8s containerd to avoid image-pull
+    - Pre-pulls the ROCK image into the cluster's containerd to avoid image-pull
       timeouts during juju.wait() (the GARM ROCK is large: two static Go binaries).
     - Deploys the GARM charm with the provided ROCK image as the app-image resource.
     - Waits for the application to block (missing postgresql integration).

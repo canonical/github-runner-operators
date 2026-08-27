@@ -21,8 +21,9 @@ permissions:
   contents: read
 
 # One run at a time, repository-wide. The suite assumes it owns both the
-# private-endpoint host -- microk8s, the MetalLB pool pinned to the host's own
-# address, the tunnel entry in authorized_keys -- and every GARM-tagged instance
+# private-endpoint host -- its Kubernetes cluster, the load-balancer address pinned
+# to the host's own address, the tunnel entry in authorized_keys -- and every
+# GARM-tagged instance
 # on the tenant, none of which is scoped per ref. Queueing rather than
 # cancelling: each dispatch is a deliberate request for a two-hour answer, and
 # cancelling interrupts the suite's own teardown, which reclaims scale sets and
@@ -324,16 +325,17 @@ jobs:
           go install github.com/canonical/spread/cmd/spread@2026.07.12
           sudo ln -sf ~/go/bin/spread /usr/local/bin/spread
 
-      - name: Point concierge at a MetalLB range on this host
+      - name: Point concierge at a load-balancer address on this host
         run: |
           set -euo pipefail
 
-          # traefik-k8s asks for a LoadBalancer service, which microk8s cannot satisfy
-          # unaided. Pinning the pool to this host's own address is what makes GARM's
-          # callback and metadata URLs resolve to something a runner VM on the tenant
-          # can actually reach -- an in-cluster service address cannot serve them.
+          # traefik-k8s asks for a LoadBalancer Service, which nothing satisfies until
+          # Canonical K8s's load-balancer feature has an address pool. Pinning the pool
+          # to this host's own address is what makes GARM's callback and metadata URLs
+          # resolve to something a runner VM on the tenant can actually reach -- an
+          # in-cluster service address cannot serve them.
           HOST_IP=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+')
-          echo "MetalLB pool pinned to ${HOST_IP}"
+          echo "Load-balancer pool pinned to ${HOST_IP}"
           sed "s/@HOST_IP@/${HOST_IP}/g" concierge-e2e.yaml.tmpl > concierge-e2e.yaml
           echo "CONCIERGE=concierge-e2e.yaml" >> "$GITHUB_ENV"
 

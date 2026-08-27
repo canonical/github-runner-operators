@@ -79,8 +79,8 @@ def deploy_traefik_fixture(juju: jubilant.Juju) -> str:
 
     ``ingress`` is a standard charm relation interface with several providers; the charm
     requires it via the ``charms.traefik_k8s.v2.ingress`` library the go-framework
-    extension vendors. traefik-k8s is picked here as the usual provider on microk8s, not
-    because it is the only one that would satisfy the relation.
+    extension vendors. traefik-k8s is picked here as the usual provider in a
+    single-node test cluster, not because it is the only one that would satisfy it.
     """
     app_name = "traefik-k8s"
     juju.deploy(app_name, channel=TRAEFIK_CHANNEL, trust=True)
@@ -135,7 +135,7 @@ def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik:
     address = _get_garm_address(juju, garm_app)
     headers = {"Authorization": f"Bearer {_garm_login(juju, address)}"}
 
-    # traefik reports the address it serves on, which is the one MetalLB handed it. Its
+    # traefik reports the address it serves on, the one the load-balancer handed it. Its
     # unit address is the pod IP, which is not reachable from outside the cluster and so
     # is not what GARM should be advertising.
     message = juju.status().apps[traefik].app_status.message
@@ -249,7 +249,7 @@ def deploy_e2e_scaleset_fixture(
         config_values["runner-http-proxy"] = runner_http_proxy
         # The aproxy bootstrap DNATs all :80/:443 egress to aproxy, which forwards
         # to the upstream squid -- and squid denies private destinations with a
-        # 403. The GARM metadata and callback URLs point at the MetalLB address
+        # 403. The GARM metadata and callback URLs point at the load-balancer address
         # (the CI host's own IP, observed in 10.151.128.0/24), so those must
         # bypass the redirect or the runner bootstrap's first curl -- the one
         # fetching the install script -- dies in squid before GARM ever sees it.
@@ -450,7 +450,7 @@ def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> 
     GARM generated then work verbatim, with no controller reconfiguration.
 
     Args:
-        target: The host serving GARM (the MetalLB/traefik address).
+        target: The host serving GARM (the load-balancer/traefik address).
         user: The user the tunnel authenticates as on that host.
         private_key_b64: Base64-encoded private key authorised for that user.
 
