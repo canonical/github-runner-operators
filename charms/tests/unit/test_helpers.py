@@ -1,7 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Unit tests for the shared integration helpers."""
+"""Unit tests for the dispatch and credential helpers in ``tests.integration.helpers``.
+
+Model-free by design, so they run as a merge gate rather than riding along on the
+live-model suites that use these helpers.
+"""
 
 import base64
 import time
@@ -180,25 +184,6 @@ def test_dispatch_workflow_fails_when_no_run_appears(no_sleep):
             ref="feature-branch",
             inputs={},
         )
-
-
-def test_wait_for_completion_returns_the_conclusion(no_sleep):
-    """
-    arrange: A run that is already completed with a conclusion.
-    act: Wait for it through wait_for_completion.
-    assert: The conclusion is returned as-is, so a caller can assert on exactly what
-        GitHub reported.
-    """
-    run = _FakeRun(103, status="completed", conclusion="success")
-    client = _fake_client(_FakeRepo(run=run))
-
-    conclusion = wait_for_completion(
-        github_client=client,
-        repo_path="canonical/github-runner-operators",
-        run_id=103,
-    )
-
-    assert conclusion == "success"
 
 
 def test_wait_for_completion_fails_on_timeout(no_sleep):

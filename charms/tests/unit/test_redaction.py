@@ -1,6 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Unit tests for pebble output and diagnostic redaction helpers."""
+"""Unit tests for the diagnostic redaction helpers in ``tests.integration.conftest``.
+
+A redactor that stops matching fails silently -- the suites go green and the
+credential lands in the log -- so it is checked here rather than only in the
+live-model runs that depend on it.
+"""
 
 import base64
 
