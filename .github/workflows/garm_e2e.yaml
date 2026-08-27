@@ -274,7 +274,7 @@ jobs:
         # opaque provider error in the redacted logs. Resolving them here -- with
         # the same OS_* scope the provider will use, which may differ from the one
         # a local `openstack flavor list` runs under -- fails the job in minutes
-        # and prints what the tenant does offer.
+        # instead.
         run: |
           set -euo pipefail
 
@@ -284,9 +284,16 @@ jobs:
               echo "$KIND '$NAME' resolves on the tenant."
               return 0
             fi
+            # A count, never the inventory: these names are repository secrets and
+            # every other name of the same kind is of the same class, so listing
+            # them would publish to a world-readable log exactly what the job
+            # masks two steps earlier. It costs the reader nothing -- acting on
+            # this failure needs the OS_* credentials, which can list the tenant
+            # directly.
+            local COUNT
+            COUNT=$( { openstack "$KIND" list -c Name -f value 2>/dev/null || true; } | wc -l )
             echo "::error::The $KIND configured for the E2E does not resolve on this tenant. Check that the value exists in the project and region the OS_* secrets point at, and that it is shared with that project if private."
-            echo "Available ${KIND}s on this tenant (name only):"
-            openstack "$KIND" list -c Name -f value | sed 's/^/  /' || true
+            echo "The tenant exposes ${COUNT} ${KIND}(s) to this project. Run \`openstack $KIND list\` with the same OS_* credentials to see them."
             return 1
           }
 
@@ -480,3 +487,4 @@ jobs:
           else
             echo "No tunnel entry to remove."
           fi
+
