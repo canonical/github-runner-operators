@@ -20,9 +20,17 @@ on:
 permissions:
   contents: read
 
+# One run at a time, repository-wide. The suite assumes it owns both the
+# private-endpoint host -- microk8s, the MetalLB pool pinned to the host's own
+# address, the tunnel entry in authorized_keys -- and every GARM-tagged instance
+# on the tenant, none of which is scoped per ref. Queueing rather than
+# cancelling: each dispatch is a deliberate request for a two-hour answer, and
+# cancelling interrupts the suite's own teardown, which reclaims scale sets and
+# their GitHub registrations. The always() sweep below is a backstop for
+# instances only and does not stand in for it.
 concurrency:
-  group: garm-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: garm-e2e
+  cancel-in-progress: false
 
 jobs:
   # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
