@@ -186,6 +186,26 @@ def test_dispatch_workflow_fails_when_no_run_appears(no_sleep):
         )
 
 
+def test_wait_for_completion_returns_the_conclusion(no_sleep):
+    """
+    arrange: A run that is already completed with a conclusion.
+    act: Wait for it through wait_for_completion.
+    assert: The conclusion is returned. Pairs with the timeout case below: on its own,
+        that one is satisfied by an implementation that never returns at all -- a
+        deadline computed backwards, say -- because failing is what it expects.
+    """
+    run = _FakeRun(103, status="completed", conclusion="success")
+    client = _fake_client(_FakeRepo(run=run))
+
+    conclusion = wait_for_completion(
+        github_client=client,
+        repo_path="canonical/github-runner-operators",
+        run_id=103,
+    )
+
+    assert conclusion == "success"
+
+
 def test_wait_for_completion_fails_on_timeout(no_sleep):
     """
     arrange: A run that never leaves the queued state, and a zero-second timeout.
