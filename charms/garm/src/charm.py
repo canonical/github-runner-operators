@@ -16,7 +16,6 @@ from collections.abc import Mapping
 import ops
 import paas_charm.go
 from paas_charm.app import WorkloadConfig
-from paas_charm.charm_state import CharmState as PaasCharmState
 from paas_charm.charm_utils import block_if_invalid_data
 
 from charm_state import (
@@ -183,19 +182,65 @@ class GarmCharm(paas_charm.go.Charm):
             return
         self._normal_reconcile(event)
 
+    def _reconcile_with_migrations(self, event: ops.EventBase) -> None:
+        """Dispatch a database event through the teardown gate."""
+        if self._is_tearing_down():
+            logger.info(
+                "Skipping normal GARM reconciliation for %s during local teardown",
+                event.handle.kind,
+            )
+            return
+        self._normal_reconcile_with_migrations(event)
+
     @block_if_invalid_data
     def _normal_reconcile(self, _: ops.EventBase) -> None:
         """Reconcile active GARM charm state."""
         self.restart()
 
-    def _create_charm_state(self) -> PaasCharmState:
-        """Create framework state without reading relations during local teardown."""
-        if self._is_tearing_down():
-            return PaasCharmState(
-                framework=self._framework_name,
-                is_secret_storage_ready=False,
-            )
-        return super()._create_charm_state()
+    @block_if_invalid_data
+    def _normal_reconcile_with_migrations(self, _: ops.EventBase) -> None:
+        """Reconcile active GARM state and rerun database migrations."""
+        self.restart(rerun_migrations=True)
+
+    def _on_config_changed(self, event: ops.EventBase) -> None:
+        """Route config changes through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_secret_changed(self, event: ops.EventBase) -> None:
+        """Route secret changes through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_secret_storage_relation_changed(self, event: ops.RelationEvent) -> None:
+        """Route secret-storage changes through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_secret_storage_relation_departed(self, event: ops.HookEvent) -> None:
+        """Route secret-storage departures through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_postgresql_database_database_created(self, event: ops.EventBase) -> None:
+        """Route PostgreSQL database creation through GARM's teardown gate."""
+        self._reconcile_with_migrations(event)
+
+    def _on_postgresql_database_endpoints_changed(self, event: ops.EventBase) -> None:
+        """Route PostgreSQL endpoint changes through GARM's teardown gate."""
+        self._reconcile_with_migrations(event)
+
+    def _on_postgresql_database_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
+        """Route PostgreSQL relation loss through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_ingress_ready(self, event: ops.HookEvent) -> None:
+        """Route ingress readiness through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_ingress_revoked(self, event: ops.HookEvent) -> None:
+        """Route ingress revocation through GARM's teardown gate."""
+        self._reconcile(event)
+
+    def _on_pebble_ready(self, event: ops.PebbleReadyEvent) -> None:
+        """Route Pebble readiness through GARM's teardown gate."""
+        self._reconcile(event)
 
     def _on_update_status(self, event: ops.HookEvent) -> None:
         """Run the framework update-status handler only while active."""
@@ -203,6 +248,13 @@ class GarmCharm(paas_charm.go.Charm):
             logger.info("Skipping update-status handling during local teardown")
             return
         super()._on_update_status(event)
+
+    def _on_rotate_secret_key_action(self, event: ops.ActionEvent) -> None:
+        """Reject secret rotation during teardown before the base decorator runs."""
+        if self._is_tearing_down():
+            event.fail("cannot rotate the secret key during local teardown")
+            return
+        super()._on_rotate_secret_key_action(event)
 
     def _on_remove(self, _: ops.RemoveEvent) -> None:
         """Drain GARM resources before Juju removes the application."""

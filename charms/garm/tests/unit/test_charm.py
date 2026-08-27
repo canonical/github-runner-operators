@@ -1129,9 +1129,10 @@ def test_teardown_events_skip_framework_state_and_garm_reconciliation(
     state = _state(debug_ssh_related=True, planned_units=0, secrets=[_TEARDOWN_SECRET])
 
     with (
-        patch(
-            "paas_charm.charm_state.CharmState.from_charm",
-            side_effect=AssertionError("framework charm state was reconstructed"),
+        patch.object(
+            GarmCharm,
+            "_create_charm_state",
+            side_effect=AssertionError("charm state was created during teardown"),
         ),
         patch(
             "charm_state.CharmState.from_charm",
@@ -1159,6 +1160,24 @@ def test_teardown_events_skip_framework_state_and_garm_reconciliation(
     garm_api.github.assert_not_called()
     garm_api.entity.assert_not_called()
     garm_api.scaleset.assert_not_called()
+
+
+def test_teardown_handlers_skip_charm_state_creation(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: No GARM units remain planned.
+    act: Emit an inherited config-changed event while state creation is forbidden.
+    assert: The subclass observer guard returns before the framework state factory.
+    """
+    state = _state(planned_units=0)
+    with patch.object(
+        GarmCharm,
+        "_create_charm_state",
+        side_effect=AssertionError("charm state was created during teardown"),
+    ):
+        out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out is not None
+    garm_api.auth.from_login.assert_not_called()
 
 
 def test_teardown_update_status_skips_ingress_refresh(ctx: Context, garm_api: _GarmApiMocks):
