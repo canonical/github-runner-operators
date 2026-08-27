@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 GARM_API_PORT = 8080
 SCALESET_DRAIN_TIMEOUT = 10 * 60
 TRAEFIK_CHANNEL = "latest/stable"
+E2E_TUNNEL_LOCAL_PORT = 18080
 
 
 @pytest.fixture(scope="module", name="openstack_credentials")
@@ -161,9 +162,14 @@ def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik:
     )
 
 
-@pytest.fixture(scope="module", name="real_image_builder")
-def deploy_real_image_builder_fixture(juju: jubilant.Juju) -> str:
-    """Deploy any-charm as an image builder publishing a real image name."""
+@pytest.fixture(scope="module", name="image_builder_stub")
+def deploy_image_builder_stub_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any-charm as a stub image builder publishing the tenant's real image.
+
+    The same stub the integration suite deploys; what differs is the image name it
+    publishes over the relation -- one that exists on the tenant, so the provider
+    can actually boot it.
+    """
     image_name = required_env("E2E_RUNNER_IMAGE_NAME")
     return _deploy_image_builder(
         juju=juju,
@@ -179,7 +185,7 @@ def deploy_e2e_scaleset_fixture(
     garm_with_ingress: str,
     traefik: str,
     openstack_credentials: dict[str, str],
-    real_image_builder: str,
+    image_builder_stub: str,
     garm_configurator_charm_file: str,
 ) -> Iterator[str]:
     """Deploy garm-configurator with real tenant values and a unique run label.
@@ -192,9 +198,11 @@ def deploy_e2e_scaleset_fixture(
     # The scale set name caps at 10 characters: the OpenStack provider tags every
     # runner VM with the Nova server tag "garm-pool-id=<name>-<entity uuid>",
     # which is 50 fixed characters before the name starts, and Nova rejects tags
-    # longer than 60. The last six digits of the run id keep the label unique;
-    # the workflow's per-ref concurrency group already serialises runs on the
-    # same branch.
+    # longer than 60. Reported upstream at
+    # https://github.com/cloudbase/garm-provider-openstack/issues/34; until it is
+    # fixed the name has to fit. The last six digits of the run id keep the label
+    # unique across reruns, and the workflow serialises the suite repository-wide,
+    # so no two scale sets are ever live at once.
     run_id = os.environ.get("GITHUB_RUN_ID", uuid.uuid4().hex)
     label = f"e2e-{run_id[-6:]}"
     garm_app = garm_with_ingress
@@ -281,7 +289,7 @@ def deploy_e2e_scaleset_fixture(
     )
 
     # Integrate with image builder first
-    juju.integrate(app_name, real_image_builder)
+    juju.integrate(app_name, image_builder_stub)
     try:
         juju.wait(
             lambda status: jubilant.all_active(status, app_name),
@@ -427,9 +435,6 @@ def _force_remove_instance(
             instance.get("status"),
             response.status_code,
         )
-
-
-E2E_TUNNEL_LOCAL_PORT = 18080
 
 
 def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> str:
