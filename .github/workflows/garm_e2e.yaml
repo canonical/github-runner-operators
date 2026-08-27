@@ -488,3 +488,32 @@ jobs:
             echo "No tunnel entry to remove."
           fi
 
+      - name: Restore the host's SSH configuration
+        # opcli's spread backend prepares every host it allocates for password
+        # login: it rewrites PermitRootLogin and PasswordAuthentication to yes and
+        # gives root a generated password, which the run log prints in cleartext.
+        # It never undoes any of that. On a throwaway GitHub-hosted runner that is
+        # harmless, but this host sits on the private endpoint and holds the
+        # tenant credentials, so the published password stays usable for as long
+        # as the host does. Reported upstream; until a fix lands, put the host
+        # back before the job ends. Runs last so the sshd restart cannot disturb
+        # the cleanup steps above.
+        if: always()
+        run: |
+          set -euo pipefail
+
+          sudo rm -f /etc/ssh/sshd_config.d/00-spread.conf
+          # The backend edits the main file in place, so the host's original
+          # values are already gone; restore the distribution defaults, which are
+          # what this host wants -- it is only ever reached by key.
+          sudo sed -i \
+            -e 's/^[[:space:]]*PermitRootLogin[[:space:]].*/PermitRootLogin prohibit-password/' \
+            -e 's/^[[:space:]]*PasswordAuthentication[[:space:]].*/PasswordAuthentication no/' \
+            /etc/ssh/sshd_config
+          # Invalidates the credential itself, so the value in the log is useless
+          # even if some other drop-in still permits password authentication.
+          # Nothing is lost by locking: the backend's chpasswd already destroyed
+          # whatever password the account had.
+          sudo passwd -l root > /dev/null
+          sudo systemctl restart ssh
+          echo "Root password locked and password authentication disabled again."
