@@ -130,42 +130,26 @@ class GarmCharm(paas_charm.go.Charm):
             args: Passed through to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(self.on.install, self._reconcile)
-        self.framework.observe(self.on.leader_elected, self._reconcile)
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_departed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
-            self._reconcile,
-        )
+        for event in (
+            self.on.install,
+            self.on.leader_elected,
+            self.on.update_status,
+        ):
+            self.framework.observe(event, self._reconcile)
+
+        for relation_events in (
+            self.on[GARM_CONFIGURATOR_RELATION_NAME],
+            self.on[DEBUG_SSH_INTEGRATION_NAME],
+        ):
+            for event in (
+                relation_events.relation_joined,
+                relation_events.relation_changed,
+                relation_events.relation_departed,
+                relation_events.relation_broken,
+            ):
+                self.framework.observe(event, self._reconcile)
+
         self.framework.observe(self.on.get_credentials_action, self._on_get_credentials_action)
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_changed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_departed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
-            self._reconcile,
-        )
-        self.framework.observe(self.on.update_status, self._reconcile)
         self.framework.observe(self.on.remove, self._on_remove)
 
     def _is_tearing_down(self) -> bool:
