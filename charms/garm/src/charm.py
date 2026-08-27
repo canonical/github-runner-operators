@@ -27,7 +27,7 @@ from charm_state import (
     resolve_entity,
 )
 from entity_reconciler import EntityReconciler
-from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
+from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
@@ -130,6 +130,10 @@ class GarmCharm(paas_charm.go.Charm):
             args: Passed through to CharmBase.
         """
         super().__init__(*args)
+        # Multiple observers can deliver the same hook (notably update-status). Claim one
+        # teardown attempt per hook process; a new hook instance re-observes GARM state so
+        # a killed process can safely retry.
+        self._teardown_claimed = False
         for event in (
             self.on.install,
             self.on.leader_elected,
@@ -150,7 +154,9 @@ class GarmCharm(paas_charm.go.Charm):
                 self.framework.observe(event, self._reconcile)
 
         self.framework.observe(self.on.get_credentials_action, self._on_get_credentials_action)
-        self.framework.observe(self.on.remove, self._on_remove)
+        self.framework.observe(self.on["postgresql"].relation_departed, self._teardown)
+        self.framework.observe(self.on.stop, self._teardown)
+        self.framework.observe(self.on.remove, self._teardown)
 
     def _is_tearing_down(self) -> bool:
         """Return whether Juju plans no remaining units for the local application."""
@@ -169,13 +175,6 @@ class GarmCharm(paas_charm.go.Charm):
             self._teardown(event)
             return
         self._normal_reconcile_with_migrations(event)
-
-    def _teardown(self, event: ops.EventBase) -> None:
-        """Handle a local teardown event without normal reconciliation."""
-        logger.info(
-            "Skipping normal GARM reconciliation for %s during local teardown",
-            event.handle.kind,
-        )
 
     @block_if_invalid_data
     def _normal_reconcile(self, _: ops.EventBase) -> None:
@@ -212,7 +211,7 @@ class GarmCharm(paas_charm.go.Charm):
     def _on_update_status(self, event: ops.HookEvent) -> None:
         """Run the framework update-status handler only while active."""
         if self._is_tearing_down():
-            logger.info("Skipping update-status handling during local teardown")
+            self._teardown(event)
             return
         super()._on_update_status(event)
 
@@ -223,79 +222,114 @@ class GarmCharm(paas_charm.go.Charm):
             return
         super()._on_rotate_secret_key_action(event)
 
-    def _on_remove(self, _: ops.RemoveEvent) -> None:
-        """Drain GARM resources before Juju removes the application."""
-        if not self.unit.is_leader():
-            logger.info("Skipping GARM removal cleanup on a non-leader unit")
-            return
-        if self.app.planned_units() > 0:
-            logger.info(
-                "Skipping GARM removal cleanup while the application still has planned units"
-            )
-            return
+    def _teardown_failure(
+        self,
+        message: str,
+        *,
+        strict: bool,
+        cause: BaseException | None = None,
+    ) -> None:
+        """Raise an early cleanup error or record an unconfirmed late attempt."""
+        if strict:
+            logger.error(message)
+            if cause is None:
+                raise GarmCleanupError(message)
+            raise GarmCleanupError(message) from cause
+        logger.warning("Late GARM teardown is unconfirmed: %s", message)
 
-        initialization_client = GarmApiClient(GARM_LOCAL_API_BASE_URL)
+    def _teardown_credentials(self, *, strict: bool) -> tuple[str, str] | None:
+        """Return local admin credentials without consulting any relation."""
         try:
-            if not initialization_client.is_initialized():
-                logger.info(
-                    "GARM has not completed first-run; no resources require removal cleanup"
-                )
-                return
-        except GarmConnectionError as exc:
-            if self._get_postgresql_config() is None:
-                logger.info(
-                    "PostgreSQL is not configured and GARM is unreachable; "
-                    "GARM cannot have been initialized, so no cleanup is required"
-                )
-                return
-            message = (
-                f"Cannot determine whether GARM was initialized: {exc}. "
-                "Operator action: restore GARM/API availability, then retry "
-                "Juju application removal."
-            )
-            logger.error(message)
-            raise GarmCleanupError(message) from exc
-        except GarmApiError as exc:
-            message = (
-                f"Cannot determine whether GARM was initialized: {exc}. "
-                "Operator action: restore GARM/API availability, then retry "
-                "Juju application removal."
-            )
-            logger.error(message)
-            raise GarmCleanupError(message) from exc
-
-        admin_creds = self._get_admin_credentials()
-        if not admin_creds:
-            message = (
-                "GARM admin credentials are unavailable; refusing removal. "
+            admin_creds = self._get_admin_credentials()
+        except (ops.ModelError, ops.SecretNotFoundError) as exc:
+            self._teardown_failure(
+                "GARM admin credentials are unavailable; teardown cannot be confirmed. "
                 "Operator action: restore the labelled admin credentials secret, "
-                "then retry Juju application removal."
+                "then retry teardown.",
+                strict=strict,
+                cause=exc,
             )
-            logger.error(message)
-            raise GarmCleanupError(message)
+            return None
+        if not admin_creds:
+            self._teardown_failure(
+                "GARM admin credentials are unavailable; teardown cannot be confirmed. "
+                "Operator action: restore the labelled admin credentials secret, "
+                "then retry teardown.",
+                strict=strict,
+            )
+            return None
 
         username = admin_creds.get("username")
         password = admin_creds.get("password")
         if not username or not password:
-            message = (
-                "GARM admin credentials are incomplete; refusing removal. "
+            self._teardown_failure(
+                "GARM admin credentials are incomplete; teardown cannot be confirmed. "
                 "Operator action: restore username and password in the labelled "
-                "admin credentials secret, then retry Juju application removal."
+                "admin credentials secret, then retry teardown.",
+                strict=strict,
             )
-            logger.error(message)
-            raise GarmCleanupError(message)
+            return None
+        return username, password
 
-        base_url = GARM_LOCAL_API_BASE_URL
+    def _teardown(self, event: ops.EventBase) -> None:
+        """Idempotently drain GARM resources for a local teardown event.
+
+        The operation intentionally re-observes GARM's current API state on every hook.
+        ``GarmResourceCleanup`` disables resources before deleting them, polls asynchronous
+        runner removal, and treats already-missing resources as success, so repeated calls
+        remain safe after retries or a hook process restart. No relation-backed data is read.
+        """
+        if not self.unit.is_leader():
+            logger.info("Skipping GARM teardown on a non-leader unit")
+            return
+        if not self._is_tearing_down():
+            logger.info("Skipping GARM teardown while the application still has planned units")
+            return
+        if self._teardown_claimed:
+            logger.info("GARM teardown already claimed in this hook process")
+            return
+        self._teardown_claimed = True
+
+        strict = isinstance(event, ops.RelationDepartedEvent)
+        logger.info("Handling GARM teardown for %s", event.handle.kind)
         try:
-            auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
-            GarmResourceCleanup(auth_client).run()
+            initialized = GarmApiClient(GARM_LOCAL_API_BASE_URL).is_initialized()
         except GarmApiError as exc:
-            logger.error(
-                "GARM removal cleanup failed: %s. Operator action: resolve the "
-                "reported GARM/API/runner issue, then retry Juju application removal.",
-                exc,
+            self._teardown_failure(
+                f"Cannot determine whether GARM was initialized: {exc}. "
+                "Operator action: restore GARM/API availability, then retry teardown.",
+                strict=strict,
+                cause=exc,
             )
-            raise
+            return
+
+        if not initialized:
+            logger.info("GARM has not completed first-run; teardown is already complete")
+            return
+
+        credentials = self._teardown_credentials(strict=strict)
+        if credentials is None:
+            return
+        username, password = credentials
+
+        try:
+            auth_client = GarmAuthenticatedClient.from_login(
+                GARM_LOCAL_API_BASE_URL, username, password
+            )
+            GarmResourceCleanup(auth_client).run()
+        except GarmCleanupError as exc:
+            self._teardown_failure(
+                f"GARM teardown did not complete: {exc}",
+                strict=strict,
+                cause=exc,
+            )
+        except GarmApiError as exc:
+            self._teardown_failure(
+                f"GARM teardown failed: {exc}. "
+                "Operator action: restore GARM/API/runner availability, then retry teardown.",
+                strict=strict,
+                cause=exc,
+            )
 
     def _on_get_credentials_action(self, event: ops.ActionEvent) -> None:
         """Return the GARM admin credentials to the operator.
