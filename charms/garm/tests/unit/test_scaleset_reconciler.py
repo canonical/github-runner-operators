@@ -4,7 +4,6 @@
 """Unit tests for the scaleset reconciler."""
 
 import base64
-import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -379,93 +378,49 @@ def test_delete_orphaned_scaleset():
     assert client.deleted == [42]
 
 
-def test_unauthorized_disable_failure_does_not_block_removal():
+@pytest.mark.parametrize(
+    "error",
+    [GarmApiError("500 Server error"), GarmUnauthorizedError("401 Unauthorized")],
+    ids=["server-error", "unauthorized"],
+)
+def test_disable_failure_defers_the_whole_cleanup(error):
     """
-    arrange: FakeGarmClient whose update_scaleset (the disable-before-delete call) fails as
-        unauthorized, for an orphaned scaleset that still owns a runner.
+    arrange: FakeGarmClient whose update_scaleset (the disable-before-delete call) fails, for an
+        orphaned scaleset that still owns a runner.
     act: Reconcile so the scaleset is orphaned.
-    assert: The runner and the scaleset are still removed. Disabling goes through the forge, so
-        expired credentials fail it — the very case runner removal is built to escalate past,
-        and GARM cannot launch replacements while the forge is unreachable either. Treating it
-        as a precondition would strand the scaleset forever.
+    assert: Neither the runner nor the scaleset is deleted. GARM rejects the delete of a
+        scaleset that is still enabled, so the delete could only 400; and removing the runners
+        of a scaleset that is still sized up would just have GARM launch replacements, churning
+        instances on every pass instead of draining. Both wait for the next reconcile.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
         instances={42: ["runner-1"]},
-        update_scaleset_error=GarmUnauthorizedError("401 Unauthorized"),
-    )
-    _reconcile(client, [_spec(name="new-scaleset")])
-
-    assert client.deleted_instances == [("runner-1", False, False)]
-    assert client.deleted == [42]
-
-
-def test_garm_side_disable_failure_leaves_runners_in_place():
-    """
-    arrange: FakeGarmClient whose update_scaleset fails with a GARM-side error, for an orphaned
-        scaleset that still owns a runner.
-    act: Reconcile so the scaleset is orphaned.
-    assert: The runner is left alone, since the scaleset is still enabled and sized up and GARM
-        would simply launch a replacement — churning instances on every pass instead of
-        draining. The scaleset delete is still attempted, so an already-empty scaleset is not
-        stranded by a failing disable.
-    """
-    client = FakeGarmClient(
-        providers=["openstack-demo"],
-        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
-        instances={42: ["runner-1"]},
-        update_scaleset_error=GarmApiError("500 Server error"),
+        update_scaleset_error=error,
     )
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted_instances == []
-    assert client.deleted == [42]
-
-
-def test_busy_runner_survives_an_unreachable_forge(caplog):
-    """
-    arrange: FakeGarmClient whose disable fails as unauthorized, for an orphaned scaleset owning
-        a runner that last reported running a job.
-    act: Reconcile so the scaleset is orphaned.
-    assert: The runner is not deleted and the stall is reported. GARM learns what a runner is
-        doing from the forge, so with the forge unreachable that runner reads as busy on every
-        pass — but its job reports to GitHub with its own registration token, not GARM's
-        credential, so it may still be working and deleting it would fail a live job. The
-        warning names the scaleset and the remedy instead of stalling silently.
-    """
-    client = FakeGarmClient(
-        providers=["openstack-demo"],
-        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
-        instances={42: [{"name": "runner-1", "runner_status": "active"}]},
-        update_scaleset_error=GarmUnauthorizedError("401 Unauthorized"),
-    )
-    with caplog.at_level(logging.WARNING):
-        _reconcile(client, [_spec(name="new-scaleset")])
-
-    assert client.deleted_instances == []
-    assert "Cannot drain scaleset stale-scaleset" in caplog.text
-    assert "credentials" in caplog.text
+    assert client.deleted == []
 
 
 @pytest.mark.parametrize(
     "status, provider_fault, expected_force",
     [
         ("running", None, False),
+        ("error", None, False),
         ("pending_delete", None, False),
-        ("deleting", None, False),
         ("pending_delete", b"nova: instance not found", True),
         ("pending_force_delete", b"nova: instance not found", True),
-        ("deleting", b"nova: instance not found", True),
         ("pending_force_delete", None, True),
     ],
     ids=[
         "healthy-runner-not-forced",
+        "errored-runner-not-forced",
         "pending-delete-in-flight-not-forced",
-        "deleting-in-flight-not-forced",
         "pending-delete-with-fault-forced",
         "pending-force-delete-with-fault-forced",
-        "deleting-with-fault-forced",
         "pending-force-delete-without-fault-stays-forced",
     ],
 )
@@ -721,6 +676,30 @@ def test_idle_runner_is_removed(instance_kwargs):
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted_instances == [("runner-1", False, False)]
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["pending_create", "creating", "deleting", "deleted", "stopped", "unknown"],
+)
+def test_runner_garm_would_refuse_to_delete_is_left_alone(status):
+    """
+    arrange: FakeGarmClient with an orphaned scaleset owning a runner in a status GARM's delete
+        endpoint does not accept.
+    act: Reconcile so the scaleset is orphaned.
+    assert: No delete is issued for it. GARM only accepts a delete for a runner that is running,
+        errored or already delete-pending, so asking for one here would 400 on every pass for as
+        long as the runner sat in that status; the ones GARM is still creating or already tearing
+        down resolve on their own and are picked up by a later reconcile instead.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+        instances={42: [{"name": "runner-1", "status": status}]},
+    )
+    _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted_instances == []
 
 
 def test_unnamed_runner_is_skipped():

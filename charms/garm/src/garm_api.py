@@ -71,9 +71,17 @@ class GarmEntityNotFoundError(GarmApiError):
 class GarmUnauthorizedError(GarmApiError):
     """Raised when GARM answers a request with 401 Unauthorized.
 
-    GARM's error handler returns 401 only for an unauthorized error, so this
-    distinguishes expired forge credentials from a transport failure or a generic
-    500, neither of which may be treated as an authorization problem.
+    GARM returns 401 only for an unauthorized error, so this separates an
+    authorization-shaped rejection from a transport failure or a generic 500, neither
+    of which may be treated as one. It does not say *whose* authorization failed, and
+    is wider than "expired GitHub credentials" in two ways worth knowing before acting
+    on it:
+
+    * GARM's own JWT middleware and its admin-only check answer 401 too, so an expired
+      charm token looks the same as a rejected GitHub call.
+    * When it is GitHub, GARM's scaleset client maps **401 and 403 alike** onto its
+      unauthorized error, so a 403 that is not an authorization problem at all — a
+      secondary rate limit, or SSO enforcement on the org — arrives here as well.
     """
 
 
@@ -914,7 +922,9 @@ class GarmAuthenticatedClient(GarmApiClient):
             Updated ScaleSet model object.
 
         Raises:
-            GarmUnauthorizedError: If GARM answers 401 (expired forge credentials).
+            GarmUnauthorizedError: If GARM answers 401. GARM only calls GitHub from this
+                endpoint when the name, runner group or update setting changes, so for
+                any other field this is GARM's own authorization rejecting the charm.
             GarmApiError: On any other API error.
         """
         with self._api_client() as client:
@@ -1012,10 +1022,11 @@ def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
     Raises:
         GarmNotFoundError: If the resource is already gone (404), so callers can
             treat a cleanup as done rather than failed.
-        GarmUnauthorizedError: If GARM answers 401. GARM returns it only for an
-            unauthorized forge error, so it marks expired credentials specifically
-            rather than a transport failure or a generic 500 — the distinction the
-            runner-removal escalation relies on before it will bypass the forge.
+        GarmUnauthorizedError: If GARM answers 401, which marks an authorization
+            rejection rather than a transport failure or a generic 500 — the
+            distinction the runner-removal escalation relies on before it will bypass
+            GitHub. See the class docstring for what that status does and does not
+            pin down.
         GarmApiError: On any other API error.
     """
     match exc.status:
