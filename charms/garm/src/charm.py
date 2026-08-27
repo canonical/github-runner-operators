@@ -157,24 +157,25 @@ class GarmCharm(paas_charm.go.Charm):
         return self.app.planned_units() == 0
 
     def _reconcile(self, event: ops.EventBase) -> None:
-        """Skip normal reconciliation once local application teardown starts."""
+        """Reconcile GARM, or handle local teardown before normal state construction."""
         if self._is_tearing_down():
-            logger.info(
-                "Skipping normal GARM reconciliation for %s during local teardown",
-                event.handle.kind,
-            )
+            self._teardown(event)
             return
         self._normal_reconcile(event)
 
     def _reconcile_with_migrations(self, event: ops.EventBase) -> None:
-        """Dispatch a database event through the teardown gate."""
+        """Reconcile a database event, preserving the teardown gate."""
         if self._is_tearing_down():
-            logger.info(
-                "Skipping normal GARM reconciliation for %s during local teardown",
-                event.handle.kind,
-            )
+            self._teardown(event)
             return
         self._normal_reconcile_with_migrations(event)
+
+    def _teardown(self, event: ops.EventBase) -> None:
+        """Handle a local teardown event without normal reconciliation."""
+        logger.info(
+            "Skipping normal GARM reconciliation for %s during local teardown",
+            event.handle.kind,
+        )
 
     @block_if_invalid_data
     def _normal_reconcile(self, _: ops.EventBase) -> None:
