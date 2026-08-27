@@ -268,6 +268,15 @@ gh workflow run garm_e2e.yaml --ref <feature-branch>
 `--ref` selects which branch's version of both the workflow and the test code runs, so
 changes to the end-to-end test can be exercised without merging them first.
 
+**Only one run happens at a time, repository-wide.** The concurrency group is global and
+does not cancel what is already running, so a second dispatch queues behind the first
+rather than displacing it — expect to wait out a run in progress, up to a couple of
+hours. Serialising is deliberate: the suite assumes it owns the private-endpoint host
+(MicroK8s, the load-balancer address pinned to the host's own IP, the tunnel entry in
+`authorized_keys`) and every GARM-tagged instance on the tenant, none of which is scoped
+per run. Two runs in parallel would contend for all of it, up to deleting each other's
+runner VMs.
+
 #### Required secrets
 
 Infrastructure details are secrets, not variables — endpoints, project and network names
