@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 import base64
-import datetime
 import json
 import os
 import time
@@ -231,10 +230,8 @@ def wait_for_completion(
         The run conclusion string (e.g. ``"success"``, ``"failure"``) or None.
     """
     repo = github_client.get_repo(repo_path)
-    deadline = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
-        seconds=timeout
-    )
-    while datetime.datetime.now(datetime.timezone.utc) < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         run = repo.get_workflow_run(run_id)
         if run.status == "completed":
             return run.conclusion
