@@ -1,0 +1,29 @@
+juju:
+  channel: 3.6/stable
+  model-defaults:
+    test-mode: "true"
+    automatically-retry-hooks: "false"
+
+providers:
+  lxd:
+    enable: true
+  k8s:
+    channel: 1.34-classic/stable
+    enable: true
+    bootstrap: true
+    features:
+      local-storage:
+        enabled: "true"
+      # traefik-k8s asks for a LoadBalancer Service, which nothing satisfies until
+      # this feature supplies an address pool. Pinning the pool to the host's own
+      # address is what makes GARM's callback and metadata URLs reachable from a
+      # runner VM on the tenant; an in-cluster service address cannot serve them.
+      # L2 mode is what announces the address on the wire. The workflow fills in
+      # the host address before invoking concierge.
+      load-balancer:
+        cidrs: "@HOST_IP@/32"
+        l2-mode: "true"
+
+host:
+  snaps:
+    rockcraft:

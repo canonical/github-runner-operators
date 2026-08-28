@@ -7,16 +7,18 @@ juju:
 providers:
   lxd:
     enable: true
-  microk8s:
-    channel: 1.34-strict
+  k8s:
+    channel: 1.34-classic/stable
     enable: true
     bootstrap: true
-    addons:
-      - hostpath-storage
-      - dns
-      - rbac
+    # Canonical K8s turns on network, DNS and RBAC at bootstrap, so only storage
+    # has to be asked for. Concierge applies each key with `k8s set` and then runs
+    # `k8s enable <feature>`; values are passed through verbatim, so they are
+    # quoted to stay strings.
+    features:
+      local-storage:
+        enabled: "true"
 
 host:
   snaps:
     rockcraft:
-

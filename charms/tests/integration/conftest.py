@@ -1,7 +1,9 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+import base64
 import json
 import logging
+import os
 import secrets
 import string
 import subprocess
@@ -24,7 +26,14 @@ from tenacity import (
 )
 from urllib3.util.retry import Retry
 
-from tests.integration.helpers import GITHUB_PATH_ENV_VAR, create_github_app_client, required_env, TEST_RSA_PRIVATE_KEY
+from tests.integration.helpers import (
+    E2E_APP_ENV,
+    GITHUB_APP_PRIVATE_KEY_ENV_VAR,
+    GITHUB_PATH_ENV_VAR,
+    create_github_app_client,
+    required_env,
+    TEST_RSA_PRIVATE_KEY,
+)
 
 GARM_API_PORT = 8080
 GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
@@ -33,17 +42,31 @@ PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pe
 logger = logging.getLogger(__name__)
 
 
-def _redact_pebble_output(output: str) -> str:
-    """Remove environment mappings before logging structured Pebble output."""
+def _redact_sentinels(text: str, sentinel_values: list[str] | None = None) -> str:
+    """Replace cleartext credential values with a redaction marker."""
+    if not sentinel_values:
+        return text
+    for val in sentinel_values:
+        if val:
+            text = text.replace(val, "[REDACTED]")
+    return text
+
+
+def _redact_pebble_output(output: str, sentinel_values: list[str] | None = None) -> str:
+    """Remove environment mappings and redact sensitive values before logging output."""
+    res = _redact_sentinels(output, sentinel_values)
+
     try:
-        parsed = yaml.safe_load(output)
+        parsed = yaml.safe_load(res)
     except yaml.YAMLError:
-        return output
+        return res
 
     def redact(value: Any) -> Any:
         if isinstance(value, dict):
             return {
-                key: "[REDACTED]" if key == "environment" else redact(item)
+                key: "[REDACTED]"
+                if key == "environment"
+                else redact(item)
                 for key, item in value.items()
             }
         if isinstance(value, list):
@@ -52,7 +75,7 @@ def _redact_pebble_output(output: str) -> str:
 
     if isinstance(parsed, (dict, list)):
         return yaml.safe_dump(redact(parsed), sort_keys=False)
-    return output
+    return res
 
 
 @pytest.fixture(scope="module")
@@ -361,18 +384,32 @@ def deploy_any_charm_github_runner_app_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
+# Canonical K8s ships containerd but exposes no `ctr` subcommand of its own, so the
+# bundled binary is addressed directly. The namespace is not optional: the kubelet
+# only sees images in k8s.io, and a pull into containerd's default namespace would
+# succeed while leaving the image invisible to the pod that needs it.
+K8S_CTR = (
+    "sudo",
+    "/snap/k8s/current/bin/ctr",
+    "--address",
+    "/run/containerd/containerd.sock",
+    "--namespace",
+    "k8s.io",
+)
+
+
 def _pre_pull_garm_image(image: str) -> None:
-    """Pre-pull the GARM ROCK image into microk8s containerd.
+    """Pre-pull the GARM ROCK image into the cluster's containerd.
 
     The GARM ROCK contains two large statically-linked Go binaries, making it
     significantly larger than other charm images. Pre-pulling into the local
     containerd cache before deploying prevents the 600s juju.wait() from
     expiring while the pod is still downloading the image.
     """
-    logger.info("Pre-pulling GARM ROCK image into microk8s containerd: %s", image)
+    logger.info("Pre-pulling GARM ROCK image into containerd: %s", image)
     try:
         result = subprocess.run(
-            ["sudo", "microk8s.ctr", "images", "pull", image],
+            [*K8S_CTR, "images", "pull", image],
             check=True,
             capture_output=True,
             text=True,
@@ -389,24 +426,33 @@ def _pre_pull_garm_image(image: str) -> None:
 
 def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
     """Collect k8s, Juju, and Pebble debug information after a deployment failure."""
+    sentinel_values = _credential_sentinels()
     unit = f"{app_name}/0"
     logger.error("=== Debug info for failed GARM deployment: unit=%s ===", unit)
     for cmd in [
-        ["sudo", "microk8s.kubectl", "get", "pods", "-A", "-o", "wide"],
+        ["sudo", "k8s", "kubectl", "get", "pods", "-A", "-o", "wide"],
         [
             "sudo",
-            "microk8s.kubectl",
+            "k8s",
+            "kubectl",
             "describe",
             "pods",
             "-A",
             "-l",
             f"app.kubernetes.io/name={app_name}",
         ],
-        ["sudo", "microk8s.kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp"],
+        ["sudo", "k8s", "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp"],
     ]:
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            logger.error("$ %s\n%s%s", " ".join(cmd), out.stdout, out.stderr)
+            # describe pod renders the container spec, so this output can carry the
+            # workload's environment: redact it like the Juju and Pebble output below.
+            logger.error(
+                "$ %s\n%s%s",
+                " ".join(cmd),
+                _redact_sentinels(out.stdout, sentinel_values),
+                _redact_sentinels(out.stderr, sentinel_values),
+            )
         except Exception as exc:
             logger.error("Failed to run %s: %s", cmd, exc)
 
@@ -416,7 +462,7 @@ def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
         ("debug-log", "--replay", f"--include={unit}"),
     ):
         try:
-            output = juju.cli(*args)
+            output = _redact_sentinels(juju.cli(*args), sentinel_values)
             logger.error("$ juju %s\n%s", " ".join(args), output)
         except Exception:
             logger.exception("Failed to collect: juju %s", " ".join(args))
@@ -431,11 +477,38 @@ def _collect_debug_info(juju: jubilant.Juju, app_name: str) -> None:
                 "$ juju exec --unit %s -- %s\n%s%s",
                 unit,
                 command,
-                _redact_pebble_output(result.stdout),
-                _redact_pebble_output(result.stderr),
+                _redact_pebble_output(result.stdout, sentinel_values=sentinel_values),
+                _redact_pebble_output(result.stderr, sentinel_values=sentinel_values),
             )
         except Exception:
             logger.exception("Failed to collect workload command: %s", command)
+
+
+def _credential_sentinels() -> list[str]:
+    """Cleartext credential values that must never reach a log line."""
+    # The username is Vault-sourced like the password and lands in the rendered
+    # provider config the same way, so it is redacted on value like one.
+    values = [
+        os.environ.get("OS_PASSWORD", ""),
+        os.environ.get("OS_USERNAME", ""),
+    ]
+    for key_env in (
+        GITHUB_APP_PRIVATE_KEY_ENV_VAR,
+        E2E_APP_ENV.private_key,
+        "E2E_TUNNEL_PRIVATE_KEY",
+    ):
+        encoded_key = os.environ.get(key_env, "")
+        if not encoded_key:
+            continue
+        values.append(encoded_key)
+        try:
+            # validate=True for the reason github_app_private_key states: the
+            # default decodes a non-base64 value into plausible-looking bytes,
+            # which as a sentinel over-redacts without protecting anything more.
+            values.append(base64.b64decode(encoded_key, validate=True).decode())
+        except ValueError:
+            pass
+    return [value for value in values if value]
 
 
 def _assert_garm_unit_healthy(juju: jubilant.Juju, app_name: str) -> None:
@@ -466,7 +539,7 @@ def deploy_garm_app_no_integration_fixture(
 ) -> str:
     """Deploy the GARM application WITHOUT integrations (blocked state).
 
-    - Pre-pulls the ROCK image into microk8s containerd to avoid image-pull
+    - Pre-pulls the ROCK image into the cluster's containerd to avoid image-pull
       timeouts during juju.wait() (the GARM ROCK is large: two static Go binaries).
     - Deploys the GARM charm with the provided ROCK image as the app-image resource.
     - Waits for the application to block (missing postgresql integration).
@@ -499,7 +572,6 @@ def deploy_garm_app_no_integration_fixture(
             delay=10,
         )
     except TimeoutError:
-        logger.error("GARM app '%s' did not reach blocked status within 600s", app_name)
         _collect_debug_info(juju, app_name)
         raise
 
@@ -556,7 +628,6 @@ def integrate_garm_with_postgresql_fixture(
             delay=10,
         )
     except TimeoutError:
-        logger.error("GARM app '%s' did not reach active status within 600s", app_name)
         _collect_debug_info(juju, app_name)
         raise
 
@@ -564,21 +635,16 @@ def integrate_garm_with_postgresql_fixture(
     return app_name
 
 
-@pytest.fixture(scope="module", name="any_charm_image_builder_app")
-def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
-    """Deploy any-charm as a fake image builder providing github_runner_image_v0.
-
-    On relation joined, the fake builder immediately writes a synthetic image UUID
-    to its unit relation data, allowing the configurator to transition to Active.
-    """
-    app_name = "fake-image-builder"
-
+def _deploy_image_builder(
+    juju: jubilant.Juju, app_name: str, image_id: str, tags: str = "x64,noble"
+) -> str:
+    """Deploy any-charm as an image builder providing github_runner_image_v0."""
     any_charm_src_overwrite = {
-        "any_charm.py": textwrap.dedent("""\
+        "any_charm.py": textwrap.dedent(f"""\
             from any_charm_base import AnyCharmBase
 
-            FAKE_IMAGE_ID = "fake-openstack-image-uuid"
-            FAKE_IMAGE_TAGS = "x64,noble"
+            IMAGE_ID = {json.dumps(image_id)}
+            IMAGE_TAGS = {json.dumps(tags)}
 
             class AnyCharm(AnyCharmBase):
                 def __init__(self, *args, **kwargs):
@@ -589,8 +655,8 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
                     )
 
                 def _on_image_relation_joined(self, event):
-                    event.relation.data[self.unit]["id"] = FAKE_IMAGE_ID
-                    event.relation.data[self.unit]["tags"] = FAKE_IMAGE_TAGS
+                    event.relation.data[self.unit]["id"] = IMAGE_ID
+                    event.relation.data[self.unit]["tags"] = IMAGE_TAGS
             """),
     }
     juju.deploy(
@@ -605,6 +671,44 @@ def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
         delay=10,
     )
     return app_name
+
+
+def _deploy_configurator(
+    juju: jubilant.Juju,
+    charm_file: str,
+    app_name: str,
+    config: dict[str, Any],
+    secret_uris: list[str] | None = None,
+) -> str:
+    """Deploy garm-configurator, grant required secrets, and configure it."""
+    juju.deploy(charm=charm_file, app=app_name)
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, app_name),
+        timeout=6 * 60,
+        delay=10,
+    )
+
+    if secret_uris:
+        for secret_uri in secret_uris:
+            juju.grant_secret(secret_uri, app_name)
+
+    juju.config(app_name, values=config)
+    return app_name
+
+
+@pytest.fixture(scope="module", name="any_charm_image_builder_app")
+def deploy_any_charm_image_builder_app_fixture(juju: jubilant.Juju) -> str:
+    """Deploy any-charm as a fake image builder providing github_runner_image_v0.
+
+    On relation joined, the fake builder immediately writes a synthetic image UUID
+    to its unit relation data, allowing the configurator to transition to Active.
+    """
+    return _deploy_image_builder(
+        juju=juju,
+        app_name="fake-image-builder",
+        image_id="fake-openstack-image-uuid",
+        tags="x64,noble",
+    )
 
 
 @pytest.fixture(scope="module", name="any_charm_debug_ssh_app")
@@ -674,37 +778,32 @@ def deploy_configurator_with_image_fixture(
         content={"value": TEST_RSA_PRIVATE_KEY},
     )
 
-    juju.deploy(charm=garm_configurator_charm_file, app=app_name)
-    juju.wait(
-        lambda status: jubilant.all_blocked(status, app_name),
-        timeout=6 * 60,
-        delay=10,
-    )
+    config_values = {
+        "openstack-auth-url": "https://keystone.example.com:5000/v3",
+        "openstack-username": "admin",
+        "openstack-password": password_secret,
+        "openstack-project-name": "test-project",
+        "openstack-user-domain-name": "Default",
+        "openstack-project-domain-name": "Default",
+        "openstack-region-name": "RegionOne",
+        "openstack-network": "external-net",
+        "github-app-id": "12345",
+        "github-app-installation-id": "67890",
+        "github-app-private-key": private_key_secret,
+        "name": "test-scaleset",
+        "flavor": "m1.large",
+        "os-arch": "amd64",
+        "min-idle-runner": "0",
+        "max-runner": "5",
+        "org": "test-org",
+    }
 
-    juju.grant_secret(password_secret, app_name)
-    juju.grant_secret(private_key_secret, app_name)
-
-    juju.config(
+    _deploy_configurator(
+        juju,
+        garm_configurator_charm_file,
         app_name,
-        values={
-            "openstack-auth-url": "https://keystone.example.com:5000/v3",
-            "openstack-username": "admin",
-            "openstack-password": password_secret,
-            "openstack-project-name": "test-project",
-            "openstack-user-domain-name": "Default",
-            "openstack-project-domain-name": "Default",
-            "openstack-region-name": "RegionOne",
-            "openstack-network": "external-net",
-            "github-app-id": "12345",
-            "github-app-installation-id": "67890",
-            "github-app-private-key": private_key_secret,
-            "name": "test-scaleset",
-            "flavor": "m1.large",
-            "os-arch": "amd64",
-            "min-idle-runner": "0",
-            "max-runner": "5",
-            "org": "test-org",
-        },
+        config_values,
+        secret_uris=[password_secret, private_key_secret],
     )
 
     juju.integrate(app_name, any_charm_image_builder_app)
@@ -1005,13 +1104,12 @@ def _get_admin_credentials(juju: jubilant.Juju) -> dict[str, str]:
     return content
 
 
-def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
+def _garm_login(juju: jubilant.Juju, address: str) -> str:
     """Log in to GARM with charm-managed credentials and return an admin JWT.
 
     The charm creates the admin user automatically via _maybe_first_run().
     This function reads credentials from the garm-admin-credentials Juju secret,
-    logs in to obtain a JWT, and configures required controller URLs so GARM will
-    serve operational API endpoints.
+    and logs in to obtain a JWT.
 
     Retries with backoff to allow GARM time to finish starting and the charm's
     first-run initialization to complete.
@@ -1025,10 +1123,7 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
     """
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
     creds = _get_admin_credentials(juju)
-
-    session = requests.Session()
-    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
-    session.mount("http://", HTTPAdapter(max_retries=retries))
+    session = _garm_api_session()
 
     class _LoginRetryable(Exception):
         pass
@@ -1047,18 +1142,34 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
             json={"username": creds["username"], "password": creds["password"]},
             timeout=30,
         )
-        logger.info(
-            "login response: status=%d body=%s", resp.status_code, resp.text[:500]
-        )
         if resp.status_code != 200:
+            # Only the failure body is safe to log: a 200 carries the admin JWT.
+            logger.info(
+                "login response: status=%d body=%s", resp.status_code, resp.text[:200]
+            )
             raise _LoginRetryable(
                 f"Unexpected login status {resp.status_code}: {resp.text[:200]}"
             )
+        logger.info("login response: status=%d", resp.status_code)
         token = resp.json().get("token", "")
         assert token, "Expected non-empty JWT token from login"
         return token
 
-    token = _do_login()
+    return _do_login()
+
+
+def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
+    """Log in to GARM and configure required controller URLs for standalone integration tests.
+
+    Args:
+        juju: Jubilant Juju handle (used to read admin credentials from Juju secret).
+        address: GARM unit IP address.
+
+    Returns:
+        JWT token string for authenticated API calls.
+    """
+    token = _garm_login(juju, address)
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
 
     # Configure controller URLs — GARM requires metadata_url and callback_url
     # before it will serve operational endpoints (returns 409 otherwise)
@@ -1068,7 +1179,7 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
         "callback_url": f"http://{address}:{GARM_API_PORT}/api/v1/callbacks",
         "webhook_url": f"http://{address}:{GARM_API_PORT}/webhooks",
     }
-    resp = session.put(
+    resp = _garm_api_session().put(
         f"{base_url}/controller", json=controller_payload, headers=headers, timeout=30
     )
     logger.info(
@@ -1079,6 +1190,20 @@ def _garm_first_run(juju: jubilant.Juju, address: str) -> str:
     resp.raise_for_status()
 
     return token
+
+
+def _garm_api_session() -> requests.Session:
+    """A session that retries transient GARM API failures.
+
+    GARM sits behind traefik while it is still settling, so 502/503/504 answers are
+    routine in the first moments after a deploy; retrying them keeps a transient
+    answer from failing the test that made the call. Both the login and the
+    controller setup go through this.
+    """
+    session = requests.Session()
+    retries = Retry(total=10, backoff_factor=2, status_forcelist=[502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+    return session
 
 
 @pytest.fixture(scope="module", name="garm_with_debug_ssh")

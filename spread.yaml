@@ -11,13 +11,44 @@ backends:
           cpu: 4
           memory: 8
           disk: 20
+  e2e-test:
+    type: integration-test
+    systems:
+      - ubuntu-24.04-e2e:
+          runner: [self-hosted-linux-amd64-noble-private-endpoint-medium]
+          cpu: 4
+          memory: 8
+          disk: 40
 environment:
   CONCIERGE: '$(HOST: echo "${CONCIERGE:-concierge.yaml}")'
   OPCLI_GIT_REF: '$(HOST: echo "${OPCLI_GIT_REF:-main}")'
+  OPCLI_ARTIFACTS_BUILD_YAML: '$(HOST: echo "${OPCLI_ARTIFACTS_BUILD_YAML:-}")'
+  GITHUB_RUN_ID: '$(HOST: echo "${GITHUB_RUN_ID:-}")'
+  GITHUB_REF_NAME: '$(HOST: echo "${GITHUB_REF_NAME:-}")'
+  GITHUB_HEAD_REF: '$(HOST: echo "${GITHUB_HEAD_REF:-}")'
+  GITHUB_REPOSITORY: '$(HOST: echo "${GITHUB_REPOSITORY:-}")'
+  E2E_GITHUB_APP_ID: '$(HOST: echo "${E2E_GITHUB_APP_ID:-}")'
+  E2E_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${E2E_GITHUB_APP_INSTALLATION_ID:-}")'
+  E2E_GITHUB_APP_PRIVATE_KEY: '$(HOST: echo "${E2E_GITHUB_APP_PRIVATE_KEY:-}")'
   TEST_GITHUB_APP_ID: '$(HOST: echo "${TEST_GITHUB_APP_ID:-}")'
   TEST_GITHUB_APP_INSTALLATION_ID: '$(HOST: echo "${TEST_GITHUB_APP_INSTALLATION_ID:-}")'
   TEST_GITHUB_APP_PRIVATE_KEY: '$(HOST: echo "${TEST_GITHUB_APP_PRIVATE_KEY:-}")'
   TEST_GITHUB_PATH: '$(HOST: echo "${TEST_GITHUB_PATH:-}")'
+  OS_AUTH_URL: '$(HOST: echo "${OS_AUTH_URL:-}")'
+  OS_USERNAME: '$(HOST: echo "${OS_USERNAME:-}")'
+  OS_PASSWORD: '$(HOST: echo "${OS_PASSWORD:-}")'
+  OS_PROJECT_NAME: '$(HOST: echo "${OS_PROJECT_NAME:-}")'
+  OS_USER_DOMAIN_NAME: '$(HOST: echo "${OS_USER_DOMAIN_NAME:-}")'
+  OS_PROJECT_DOMAIN_NAME: '$(HOST: echo "${OS_PROJECT_DOMAIN_NAME:-}")'
+  OS_REGION_NAME: '$(HOST: echo "${OS_REGION_NAME:-}")'
+  OS_NETWORK: '$(HOST: echo "${OS_NETWORK:-}")'
+  E2E_RUNNER_IMAGE_NAME: '$(HOST: echo "${E2E_RUNNER_IMAGE_NAME:-}")'
+  E2E_RUNNER_HTTP_PROXY: '$(HOST: echo "${E2E_RUNNER_HTTP_PROXY:-}")'
+  E2E_APROXY_EXCLUDE_ADDRESSES: '$(HOST: echo "${E2E_APROXY_EXCLUDE_ADDRESSES:-}")'
+  E2E_TUNNEL_USER: '$(HOST: echo "${E2E_TUNNEL_USER:-}")'
+  E2E_TUNNEL_TARGET: '$(HOST: echo "${E2E_TUNNEL_TARGET:-}")'
+  E2E_TUNNEL_PRIVATE_KEY: '$(HOST: echo "${E2E_TUNNEL_PRIVATE_KEY:-}")'
+  E2E_OPENSTACK_FLAVOR: '$(HOST: echo "${E2E_OPENSTACK_FLAVOR:-}")'
 exclude:
 - .git
 - .tox
@@ -32,7 +63,40 @@ integration-suites:
     environment:
       TOX_ENV: charms-integration
     pytest-environment-template: |
+      OPCLI_ARTIFACTS_BUILD_YAML={{ env.get("OPCLI_ARTIFACTS_BUILD_YAML", "") }}
       TEST_GITHUB_APP_ID={{ env.get("TEST_GITHUB_APP_ID", "") }}
       TEST_GITHUB_APP_INSTALLATION_ID={{ env.get("TEST_GITHUB_APP_INSTALLATION_ID", "") }}
       TEST_GITHUB_APP_PRIVATE_KEY={{ env.get("TEST_GITHUB_APP_PRIVATE_KEY", "") }}
       TEST_GITHUB_PATH={{ env.get("TEST_GITHUB_PATH", "") }}
+  charms/tests/e2e/:
+    summary: GARM end-to-end test on ProdStack
+    kill-timeout: 120m
+    working-dir: ./
+    backends:
+    - e2e-test
+    environment:
+      TOX_ENV: garm-e2e
+    pytest-environment-template: |
+      OPCLI_ARTIFACTS_BUILD_YAML={{ env.get("OPCLI_ARTIFACTS_BUILD_YAML", "") }}
+      GITHUB_RUN_ID={{ env.get("GITHUB_RUN_ID", "") }}
+      GITHUB_REF_NAME={{ env.get("GITHUB_REF_NAME", "") }}
+      GITHUB_HEAD_REF={{ env.get("GITHUB_HEAD_REF", "") }}
+      GITHUB_REPOSITORY={{ env.get("GITHUB_REPOSITORY", "") }}
+      E2E_GITHUB_APP_ID={{ env.get("E2E_GITHUB_APP_ID", "") }}
+      E2E_GITHUB_APP_INSTALLATION_ID={{ env.get("E2E_GITHUB_APP_INSTALLATION_ID", "") }}
+      E2E_GITHUB_APP_PRIVATE_KEY={{ env.get("E2E_GITHUB_APP_PRIVATE_KEY", "") }}
+      OS_AUTH_URL={{ env.get("OS_AUTH_URL", "") }}
+      OS_USERNAME={{ env.get("OS_USERNAME", "") }}
+      OS_PASSWORD={{ env.get("OS_PASSWORD", "") }}
+      OS_PROJECT_NAME={{ env.get("OS_PROJECT_NAME", "") }}
+      OS_USER_DOMAIN_NAME={{ env.get("OS_USER_DOMAIN_NAME", "") }}
+      OS_PROJECT_DOMAIN_NAME={{ env.get("OS_PROJECT_DOMAIN_NAME", "") }}
+      OS_REGION_NAME={{ env.get("OS_REGION_NAME", "") }}
+      OS_NETWORK={{ env.get("OS_NETWORK", "") }}
+      E2E_RUNNER_IMAGE_NAME={{ env.get("E2E_RUNNER_IMAGE_NAME", "") }}
+      E2E_RUNNER_HTTP_PROXY={{ env.get("E2E_RUNNER_HTTP_PROXY", "") }}
+      E2E_APROXY_EXCLUDE_ADDRESSES={{ env.get("E2E_APROXY_EXCLUDE_ADDRESSES", "") }}
+      E2E_TUNNEL_USER={{ env.get("E2E_TUNNEL_USER", "") }}
+      E2E_TUNNEL_TARGET={{ env.get("E2E_TUNNEL_TARGET", "") }}
+      E2E_TUNNEL_PRIVATE_KEY={{ env.get("E2E_TUNNEL_PRIVATE_KEY", "") }}
+      E2E_OPENSTACK_FLAVOR={{ env.get("E2E_OPENSTACK_FLAVOR", "") }}
