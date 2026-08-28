@@ -1,0 +1,216 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# GARM end-to-end test workflow.
+#
+# Manual trigger only, and deliberately not a merge gate. Dispatch it with
+# --ref <branch> to run a feature branch's version.
+
+name: GARM E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: GARM E2E test
+    runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Set up tmate session (self-hosted)
+        if: runner.debug == 1 && runner.environment == 'self-hosted'
+        # Pinned to a commit SHA: this job holds production credentials, and the
+        # action publishes no tags, so main is the only named ref and it moves.
+        uses: canonical/action-tmate@5f11b26528699b78dadfb61273f4c859ac7145cf # main, 2026-04-27
+        with:
+          detached: true
+          timeout-minutes: 60
+
+      # These are all secrets, so the runner masks them in the log without an
+      # explicit ::add-mask::. The E2E_GITHUB_APP_* trio is a GitHub App of its
+      # own, separate from the TEST_GITHUB_APP_* one the integration suite uses:
+      # this one has to manage runner scale sets, which that one must not.
+      - name: Load tenant and GitHub App configuration
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_NETWORK: ${{ secrets.OS_NETWORK }}
+          E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
+          E2E_GITHUB_APP_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_APP_INSTALLATION_ID }}
+          E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.E2E_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
+                     E2E_GITHUB_APP_PRIVATE_KEY; do
+            if [ -z "${!KEY:-}" ]; then
+              echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
+              exit 1
+            fi
+          done
+
+          # Everything but the key is single-line already.
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID; do
+            echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+          done
+
+          # The key travels through two channels that take one KEY=value per line —
+          # this file, and later opcli's pytest-environment-template, which rejects a
+          # line without an '='. Normalising here rather than requiring a pre-encoded
+          # secret keeps the encoding out of everyone's setup instructions. An
+          # already-encoded value passes through, so both forms work.
+          case "$E2E_GITHUB_APP_PRIVATE_KEY" in
+            *-----BEGIN*)
+              KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | base64 -w0)
+              ;;
+            *)
+              # Already encoded: strip whitespace, since `base64` wraps at 76 columns
+              # unless told otherwise and a wrapped blob would break the env file.
+              KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | tr -d '[:space:]')
+              ;;
+          esac
+          # The encoded form is a different string from the secret, so the runner does
+          # not mask it on its own.
+          echo "::add-mask::$KEY_B64"
+          echo "E2E_GITHUB_APP_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
+
+          # openstackclient needs this stated explicitly for a v3 auth URL.
+          echo "OS_IDENTITY_API_VERSION=3" >> "$GITHUB_ENV"
+
+      - name: Fetch tenant credentials from Vault
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_APPROLE_ROLE_ID: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
+          VAULT_APPROLE_SECRET_ID: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
+          VAULT_KV_PATH: ${{ secrets.E2E_VAULT_KV_PATH || 'kv/data/garm-e2e/prodstack' }}
+        # Python rather than curl and jq: the Vault response body never becomes a
+        # temporary file, so only the two values it yields are handed on — through
+        # $GITHUB_ENV, like every other secret in this job. It also drops a dependency
+        # that would otherwise be installed over the private endpoint's egress.
+        run: |
+          set -euo pipefail
+          python3 - <<'SCRIPT'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def require(name):
+              value = os.environ.get(name)
+              if not value:
+                  fail(f"Missing repository secret: {name} (Settings > Secrets > Actions).")
+              return value
+
+
+          def call(url, token=None, payload=None):
+              request = urllib.request.Request(
+                  url, data=json.dumps(payload).encode() if payload else None
+              )
+              request.add_header("Content-Type", "application/json")
+              if token:
+                  request.add_header("X-Vault-Token", token)
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as exc:
+                  # Vault reports what is misconfigured in the body; a bare status code
+                  # would leave this step unable to say why it failed. Only the errors
+                  # key is surfaced, never the whole body, which on a success would be
+                  # the credentials themselves.
+                  try:
+                      errors = json.load(exc).get("errors", [])
+                  except (ValueError, AttributeError):
+                      errors = []
+                  fail(f"Vault request failed with HTTP {exc.code}: {errors}")
+              except urllib.error.URLError as exc:
+                  fail(f"Vault at {addr} is unreachable: {exc.reason}")
+
+
+          addr = require("VAULT_ADDR").rstrip("/")
+          # Normalising makes this a different string from the secret whenever
+          # VAULT_ADDR carries a trailing slash, and masking matches literal
+          # substrings, so the runner would not mask the derived form.
+          print(f"::add-mask::{addr}")
+          kv_path = require("VAULT_KV_PATH").strip("/")
+
+          login = call(
+              f"{addr}/v1/auth/approle/login",
+              payload={
+                  "role_id": require("VAULT_APPROLE_ROLE_ID"),
+                  "secret_id": require("VAULT_APPROLE_SECRET_ID"),
+              },
+          )
+          token = login.get("auth", {}).get("client_token")
+          if not token:
+              fail("Vault AppRole login returned no client token.")
+          print(f"::add-mask::{token}")
+
+          # KV v2 nests the fields under data.data; KV v1 puts them directly in data.
+          # Accept either, so the mount version does not have to be known up front.
+          body = call(f"{addr}/v1/{kv_path}", token=token).get("data", {})
+          secret = body.get("data", body)
+
+          # The Vault secret is keyed on the plain names; openstackclient and the
+          # tests read them as OS_*.
+          fields = (("username", "OS_USERNAME"), ("password", "OS_PASSWORD"))
+
+          # Checked before anything is written, so a half-populated environment cannot
+          # reach a later step. Nothing about the secret is reported: what it contains,
+          # down to the names of its fields, is not for a CI log.
+          if not all(secret.get(field) for field, _ in fields):
+              fail(
+                  "The Vault secret does not provide both a 'username' and a "
+                  "'password' field. Check it manually at the path configured in "
+                  "E2E_VAULT_KV_PATH."
+              )
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for field, variable in fields:
+                  # Mask before writing: everything downstream may echo the env file.
+                  print(f"::add-mask::{secret[field]}")
+                  env_file.write(f"{variable}={secret[field]}\n")
+
+          print("Tenant credentials fetched and masked.")
+          SCRIPT
+
+      - name: Assert the credentials authenticate against the tenant
+        run: |
+          set -euo pipefail
+
+          uv tool install python-openstackclient
+
+          TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
+          echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
+
+      - name: Run the E2E suite
+        run: |
+          set -euo pipefail
+          uv tool install tox --with tox-uv
+          tox -e garm-e2e
