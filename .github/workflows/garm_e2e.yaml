@@ -30,7 +30,7 @@ jobs:
   # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
   # for opcli to fetch during the spread prepare.
   build:
-    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v0.0.1-alpha.10
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.1
     permissions:
       contents: read
       packages: write
