@@ -8,13 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
-## 2026-08-19
-
-- Add a tutorial for deploying GARM. It walks through a first GARM deployment on Canonical Kubernetes with PostgreSQL and the `garm-configurator`, ending with a runner scale set registered on a GitHub repository. OpenStack is represented by placeholder configuration and a stand-in image provider so the tutorial runs without a cloud, and a closing section states what changes for a deployment that boots runners.
-
 ## 2026-08-31
 
 - Document the charm release pipeline from `latest/edge` through `latest/candidate` to `latest/stable`, including the Renovate-gated production pin and the manual hotfix and rollback paths.
+
+## 2026-08-19
+
+- Add a tutorial for deploying GARM. It walks through a first GARM deployment on Canonical Kubernetes with PostgreSQL and the `garm-configurator`, ending with a runner scale set registered on a GitHub repository. OpenStack is represented by placeholder configuration and a stand-in image provider so the tutorial runs without a cloud, and a closing section states what changes for a deployment that boots runners.
 
 ## 2026-07-13
 
