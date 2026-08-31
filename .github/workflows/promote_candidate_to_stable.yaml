@@ -207,11 +207,14 @@ jobs:
 
           trap on_error ERR
 
-          echo "## Released to stable" >> "$GITHUB_STEP_SUMMARY"
-
           charmcraft release garm --revision="$GARM_REVISION" --channel=latest/stable
-          echo "- garm: revision ${GARM_REVISION} -> latest/stable" >> "$GITHUB_STEP_SUMMARY"
           released=1
 
           charmcraft release garm-configurator --revision="$GARM_CONFIGURATOR_REVISION" --channel=latest/stable
-          echo "- garm-configurator: revision ${GARM_CONFIGURATOR_REVISION} -> latest/stable" >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "## Released to stable"
+            echo
+            echo "- garm: revision ${GARM_REVISION} -> latest/stable"
+            echo "- garm-configurator: revision ${GARM_CONFIGURATOR_REVISION} -> latest/stable"
+          } >> "$GITHUB_STEP_SUMMARY"
