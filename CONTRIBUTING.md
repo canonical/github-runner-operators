@@ -214,8 +214,9 @@ Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/lates
 for a step-by-step guide to develop a Kubernetes charm using Go.
 
 To run the charm integration test, the charm file and rock has to be provided as input.
-You would need an LXD and MicroK8s cloud to run the tests. Ensure the `microk8s`
-controller is active in your Juju client before running the tests. An
+You would need an LXD and a Kubernetes cloud to run the tests; `concierge.yaml`
+provisions Canonical Kubernetes and LXD, and bootstraps a controller on each. Ensure
+the Kubernetes controller is active in your Juju client before running the tests. An
 example run command in the root directory is as follows:
 
 Before running `webhook-gateway-integration`, export the GitHub App credentials
@@ -232,7 +233,8 @@ export TEST_GITHUB_PATH=<github-org/github-repo>
 tox -e webhook-gateway-integration --  --charm-file ./github-runner-webhook-gateway_amd64.charm --webhook-gateway-image localhost:32000/webhook-gateway:0.1
 ```
 
-To add the rock to the MicroK8s registry, use the following command:
+To add the rock to a local registry at `localhost:32000` — MicroK8s ships one as an
+addon; on Canonical Kubernetes you supply your own — use the following command:
 
 ```shell
 rockcraft.skopeo copy \
@@ -240,3 +242,96 @@ rockcraft.skopeo copy \
   oci-archive:webhook-gateway_0.1_amd64.rock \
   docker://localhost:32000/webhook-gateway:0.1
 ```
+
+### GARM E2E
+
+The GARM end-to-end test (`charms/tests/e2e/`) exercises the full chain on an OpenStack
+deployment: the charm starts, the configurator delivers config, the GARM API becomes
+reachable, the provider authenticates to OpenStack, a VM is created from the runner
+image, the runner registers with GitHub, and a dispatched job runs and exits clean.
+
+The workflow first builds the charms and rocks the suite deploys, then runs the suite
+through spread. The suite deploys GARM with PostgreSQL and a traefik ingress — whose
+load-balancer address is what makes GARM's callback and metadata URLs reachable from
+the tenant — waits for a runner VM to register, and dispatches
+`.github/workflows/garm_e2e_test_run.yaml` at the scale set's label; the test passes
+only if that job concludes successfully. Runner VMs that cannot reach the host's ports
+directly tunnel their callbacks back over SSH, using an ephemeral, forwarding-only key
+the workflow publishes on the host and removes in an always-run cleanup step. Runners
+left on the tenant are deleted whatever the outcome, matched on the
+`garm-controller-id` GARM stamps on every server it creates.
+
+It is triggered manually and is **not** a merge gate:
+
+```shell
+gh workflow run garm_e2e.yaml --ref <feature-branch>
+```
+
+`--ref` selects which branch's version of both the workflow and the test code runs, so
+changes to the end-to-end test can be exercised without merging them first.
+
+**Only one run happens at a time, repository-wide.** The concurrency group is global and
+does not cancel what is already running, so a second dispatch queues behind the first
+rather than displacing it — expect to wait out a run in progress, which takes roughly
+25 minutes when green. Serialising is deliberate: the suite assumes it owns the private-endpoint host
+(its Kubernetes cluster, the load-balancer address pinned to the host's own IP, the
+tunnel entry in
+`authorized_keys`) and every GARM-tagged instance on the tenant, none of which is scoped
+per run. Two runs in parallel would contend for all of it, up to deleting each other's
+runner VMs.
+
+#### Required secrets
+
+Infrastructure details are secrets, not variables — endpoints, project and network names
+included. The runner masks secret values in the log automatically, so the workflow does
+not register masks for these itself.
+
+| Name | Description |
+| --- | --- |
+| `VAULT_ADDR` | Vault server address |
+| `VAULT_APPROLE_ROLE_ID` | Vault AppRole role ID |
+| `VAULT_APPROLE_SECRET_ID` | Vault AppRole secret ID |
+| `OS_AUTH_URL` | Keystone endpoint, e.g. `https://keystone.example.com:5000/v3` |
+| `OS_PROJECT_NAME` | OpenStack project/tenant name |
+| `OS_USER_DOMAIN_NAME` | OpenStack user domain name |
+| `OS_PROJECT_DOMAIN_NAME` | OpenStack project domain name |
+| `OS_REGION_NAME` | OpenStack region name |
+| `OS_NETWORK` | OpenStack network for runner VMs |
+| `E2E_RUNNER_IMAGE_NAME` | Name of the published runner image the VMs boot from; must exist on the tenant |
+| `E2E_OPENSTACK_FLAVOR` | Optional. OpenStack flavor for the runner VMs; the suite falls back to `m1.small` |
+| `E2E_GITHUB_APP_ID` | GitHub App ID |
+| `E2E_GITHUB_APP_INSTALLATION_ID` | Installation ID of that App on this repository |
+| `E2E_GITHUB_APP_PRIVATE_KEY` | That App's private key. Paste the PEM as issued; base64 is also accepted |
+| `E2E_RUNNER_HTTP_PROXY` | Optional. Proxy the runner VMs' egress is routed through |
+| `E2E_APROXY_EXCLUDE_ADDRESSES` | Optional. Addresses excluded from the aproxy redirect when a proxy is set; the suite falls back to `10.150.0.0/15` |
+| `E2E_VAULT_KV_PATH` | Optional. Defaults to `kv/data/garm-e2e/prodstack` |
+
+The OpenStack username and password are **not** repository secrets. They are read at run
+time from the Vault KV v2 secret above, which must hold `username` and `password`.
+
+The `E2E_GITHUB_APP_*` trio is a GitHub App of its own, distinct from the
+`TEST_GITHUB_APP_*` one the integration suite uses. The end-to-end test registers and
+tears down a runner scale set on this repository, so its App needs `Administration:
+read & write` here, which the integration App has no reason to hold.
+
+Paste the private key into `E2E_GITHUB_APP_PRIVATE_KEY` exactly as GitHub issues it —
+the PEM, newlines and all. The workflow reduces it to a single line before it enters the
+two `KEY=value` channels that carry it to pytest, neither of which can hold a multi-line
+value. A value that is already base64-encoded is accepted unchanged, so an existing
+encoded key does not need re-entering.
+
+#### Credential hygiene
+
+The test authenticates against a production tenant, so the run logs are part of the
+contract:
+
+- Values read from Vault are `::add-mask::`ed in the same step that reads them, before any
+  later step runs. Masking registered with the runner scrubs every subsequent log line,
+  including output from code we do not control; a secret read inside the test process gets
+  none of that. Repository secrets are masked by the runner already.
+- They reach later steps through `$GITHUB_ENV` and pytest through tox's `pass_env` — never
+  through command line arguments, which would expose them in `ps` and in pytest's header.
+- Steps handling credentials use `set -euo pipefail` and never `set -x`.
+- Assertions report the *name* of a missing setting, never its value, and use
+  `pytest.fail` rather than `assert` so that assertion rewriting cannot introspect
+  `os.environ` into the failure output.

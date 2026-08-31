@@ -8,7 +8,7 @@ on:
 
 jobs:
   integration-test:
-    uses: canonical/charm-ci/.github/workflows/integration-test.yml@0eef5b8cbef3ee74907850f790cab64bcf0499e5 # v1.0.0
+    uses: canonical/charm-ci/.github/workflows/integration-test.yml@58ae6614a3b143d4e57eff0fd1770e97d8c30fab # v1.0.1
     secrets: inherit
     permissions:
       contents: read
@@ -16,6 +16,10 @@ jobs:
       actions: read
     with:
       working-directory: .
+      # Restrict the matrix to the integration backend. The filter defaults to empty,
+      # which would include every backend in spread.yaml — and so run the ProdStack
+      # e2e suite on every pull request.
+      spread-jobs-include: 'integration-test-ci:*'
       test-secret-1-name: TEST_GITHUB_APP_ID
       test-secret-2-name: TEST_GITHUB_APP_INSTALLATION_ID
       test-secret-3-name: TEST_GITHUB_APP_PRIVATE_KEY

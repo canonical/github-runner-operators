@@ -1,0 +1,514 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# GARM end-to-end test workflow.
+#
+# Manual trigger only, and deliberately not a merge gate. Dispatch it with
+# --ref <branch> to run a feature branch's version.
+
+name: GARM E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, repository-wide. The suite assumes it owns both the
+# private-endpoint host -- its Kubernetes cluster, the load-balancer address pinned
+# to the host's own address, the tunnel entry in authorized_keys -- and every
+# GARM-tagged instance on the tenant, none of which is scoped per ref. Queueing
+# rather than cancelling: a dispatch is a deliberate request for an answer, and
+# cancelling interrupts the suite's own teardown, which reclaims scale sets and
+# their GitHub registrations. The always() sweep below is a backstop for
+# instances only and does not stand in for it.
+concurrency:
+  group: garm-e2e
+  cancel-in-progress: false
+
+jobs:
+  # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
+  # for opcli to fetch during the spread prepare.
+  build:
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.1
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    with:
+      working-directory: .
+
+  e2e:
+    name: GARM E2E test
+    # Waits for the build rather than provisioning alongside it: the private-endpoint
+    # runner is scarce, and starting early would only hold it idle until the artifacts
+    # the spread prepare fetches actually exist.
+    needs: [build]
+    permissions:
+      contents: read
+      packages: read
+      # opcli fetches the build job's artifacts from this workflow run.
+      actions: read
+    runs-on: self-hosted-linux-amd64-noble-private-endpoint-medium
+    # Longer than the suite's own kill-timeout in spread.yaml, so spread stops the run
+    # first and says which task hung, rather than the job being cut from underneath it.
+    # Generous on purpose: a green run takes roughly 25 minutes end to end, but that is
+    # one sample against a tenant whose spawn latency is not ours to predict.
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Set up tmate session (self-hosted)
+        if: runner.debug == 1 && runner.environment == 'self-hosted'
+        # Pinned to a commit SHA: this job holds production credentials, and the
+        # action publishes no tags, so main is the only named ref and it moves.
+        uses: canonical/action-tmate@5f11b26528699b78dadfb61273f4c859ac7145cf # main, 2026-04-27
+        with:
+          detached: true
+          timeout-minutes: 60
+
+      # These are all secrets, so the runner masks them in the log without an
+      # explicit ::add-mask::. The E2E_GITHUB_APP_* trio is a GitHub App of its
+      # own, separate from the TEST_GITHUB_APP_* one the integration suite uses:
+      # this one has to manage runner scale sets, which that one must not.
+      - name: Load tenant and GitHub App configuration
+        env:
+          OS_AUTH_URL: ${{ secrets.OS_AUTH_URL }}
+          OS_PROJECT_NAME: ${{ secrets.OS_PROJECT_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ secrets.OS_USER_DOMAIN_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ secrets.OS_PROJECT_DOMAIN_NAME }}
+          OS_REGION_NAME: ${{ secrets.OS_REGION_NAME }}
+          OS_NETWORK: ${{ secrets.OS_NETWORK }}
+          E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
+          E2E_GITHUB_APP_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_APP_INSTALLATION_ID }}
+          E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.E2E_GITHUB_APP_PRIVATE_KEY }}
+          E2E_RUNNER_IMAGE_NAME: ${{ secrets.E2E_RUNNER_IMAGE_NAME }}
+          E2E_OPENSTACK_FLAVOR: ${{ secrets.E2E_OPENSTACK_FLAVOR }}
+          E2E_RUNNER_HTTP_PROXY: ${{ secrets.E2E_RUNNER_HTTP_PROXY }}
+          E2E_APROXY_EXCLUDE_ADDRESSES: ${{ secrets.E2E_APROXY_EXCLUDE_ADDRESSES }}
+        run: |
+          set -euo pipefail
+
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
+                     E2E_GITHUB_APP_PRIVATE_KEY E2E_RUNNER_IMAGE_NAME; do
+            if [ -z "${!KEY:-}" ]; then
+              echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
+              exit 1
+            fi
+          done
+
+          # Everything but the key is single-line already.
+          for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
+                     OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
+                     E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
+                     E2E_RUNNER_IMAGE_NAME; do
+            echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+          done
+
+          # Written only when set: the fixtures fall back to their own defaults for
+          # these two, and an exported empty string is not absent -- it would win
+          # over the default rather than yield to it.
+          for KEY in E2E_OPENSTACK_FLAVOR E2E_RUNNER_HTTP_PROXY E2E_APROXY_EXCLUDE_ADDRESSES; do
+            if [ -n "${!KEY:-}" ]; then
+              echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
+            fi
+          done
+
+          # The key travels through two channels that take one KEY=value per line —
+          # this file, and later opcli's pytest-environment-template, which rejects a
+          # line without an '='. Normalising here rather than requiring a pre-encoded
+          # secret keeps the encoding out of everyone's setup instructions. An
+          # already-encoded value passes through, so both forms work.
+          case "$E2E_GITHUB_APP_PRIVATE_KEY" in
+            *-----BEGIN*)
+              KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | base64 -w0)
+              ;;
+            *)
+              # Already encoded: strip whitespace, since `base64` wraps at 76 columns
+              # unless told otherwise and a wrapped blob would break the env file.
+              KEY_B64=$(printf '%s' "$E2E_GITHUB_APP_PRIVATE_KEY" | tr -d '[:space:]')
+              ;;
+          esac
+          # The encoded form is a different string from the secret, so the runner does
+          # not mask it on its own.
+          echo "::add-mask::$KEY_B64"
+          echo "E2E_GITHUB_APP_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
+
+          # openstackclient needs this stated explicitly for a v3 auth URL.
+          echo "OS_IDENTITY_API_VERSION=3" >> "$GITHUB_ENV"
+
+      - name: Fetch tenant credentials from Vault
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_APPROLE_ROLE_ID: ${{ secrets.VAULT_APPROLE_ROLE_ID }}
+          VAULT_APPROLE_SECRET_ID: ${{ secrets.VAULT_APPROLE_SECRET_ID }}
+          VAULT_KV_PATH: ${{ secrets.E2E_VAULT_KV_PATH || 'kv/data/garm-e2e/prodstack' }}
+        # Python rather than curl and jq: the Vault response body never becomes a
+        # temporary file, so only the two values it yields are handed on — through
+        # $GITHUB_ENV, like every other secret in this job. It also drops a dependency
+        # that would otherwise be installed over the private endpoint's egress.
+        run: |
+          set -euo pipefail
+          python3 - <<'SCRIPT'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def require(name):
+              value = os.environ.get(name)
+              if not value:
+                  fail(f"Missing repository secret: {name} (Settings > Secrets > Actions).")
+              return value
+
+
+          def call(url, token=None, payload=None):
+              request = urllib.request.Request(
+                  url, data=json.dumps(payload).encode() if payload else None
+              )
+              request.add_header("Content-Type", "application/json")
+              if token:
+                  request.add_header("X-Vault-Token", token)
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as exc:
+                  # Vault reports what is misconfigured in the body; a bare status code
+                  # would leave this step unable to say why it failed. Only the errors
+                  # key is surfaced, never the whole body, which on a success would be
+                  # the credentials themselves.
+                  try:
+                      errors = json.load(exc).get("errors", [])
+                  except (ValueError, AttributeError):
+                      errors = []
+                  fail(f"Vault request failed with HTTP {exc.code}: {errors}")
+              except urllib.error.URLError as exc:
+                  fail(f"Vault at {addr} is unreachable: {exc.reason}")
+
+
+          addr = require("VAULT_ADDR").rstrip("/")
+          # Normalising makes this a different string from the secret whenever
+          # VAULT_ADDR carries a trailing slash, and masking matches literal
+          # substrings, so the runner would not mask the derived form.
+          print(f"::add-mask::{addr}")
+          kv_path = require("VAULT_KV_PATH").strip("/")
+
+          login = call(
+              f"{addr}/v1/auth/approle/login",
+              payload={
+                  "role_id": require("VAULT_APPROLE_ROLE_ID"),
+                  "secret_id": require("VAULT_APPROLE_SECRET_ID"),
+              },
+          )
+          token = login.get("auth", {}).get("client_token")
+          if not token:
+              fail("Vault AppRole login returned no client token.")
+          print(f"::add-mask::{token}")
+
+          # KV v2 nests the fields under data.data; KV v1 puts them directly in data.
+          # Accept either, so the mount version does not have to be known up front.
+          body = call(f"{addr}/v1/{kv_path}", token=token).get("data", {})
+          secret = body.get("data", body)
+
+          # The Vault secret is keyed on the plain names; openstackclient and the
+          # tests read them as OS_*.
+          fields = (("username", "OS_USERNAME"), ("password", "OS_PASSWORD"))
+
+          # Checked before anything is written, so a half-populated environment cannot
+          # reach a later step. Nothing about the secret is reported: what it contains,
+          # down to the names of its fields, is not for a CI log.
+          if not all(secret.get(field) for field, _ in fields):
+              fail(
+                  "The Vault secret does not provide both a 'username' and a "
+                  "'password' field. Check it manually at the path configured in "
+                  "E2E_VAULT_KV_PATH."
+              )
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              for field, variable in fields:
+                  # Mask before writing: everything downstream may echo the env file.
+                  print(f"::add-mask::{secret[field]}")
+                  env_file.write(f"{variable}={secret[field]}\n")
+
+          print("Tenant credentials fetched and masked.")
+          SCRIPT
+
+      - name: Assert the credentials authenticate against the tenant
+        run: |
+          set -euo pipefail
+
+          uv tool install python-openstackclient
+          # uv installs into ~/.local/bin, which later steps do not inherit; the
+          # cleanup step needs the client too.
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          TOKEN_EXPIRES=$(openstack token issue -f value -c expires)
+          echo "OpenStack token issued (expires: ${TOKEN_EXPIRES}). Tenant reachable."
+
+      - name: Assert the tenant provides the image, flavor and network
+        # The provider resolves these only at instance creation, deep into the run:
+        # a miss there costs the whole build and deploy before surfacing as an
+        # opaque provider error in the redacted logs. Resolving them here -- with
+        # the same OS_* scope the provider will use, which may differ from the one
+        # a local `openstack flavor list` runs under -- fails the job in minutes
+        # instead.
+        run: |
+          set -euo pipefail
+
+          check() {
+            local KIND="$1" NAME="$2"
+            if openstack "$KIND" show "$NAME" > /dev/null 2>&1; then
+              echo "$KIND '$NAME' resolves on the tenant."
+              return 0
+            fi
+            # A count, never the inventory: these names are repository secrets and
+            # every other name of the same kind is of the same class, so listing
+            # them would publish to a world-readable log exactly what the job
+            # masks two steps earlier. It costs the reader nothing -- acting on
+            # this failure needs the OS_* credentials, which can list the tenant
+            # directly.
+            local COUNT
+            COUNT=$( { openstack "$KIND" list -c Name -f value 2>/dev/null || true; } | wc -l )
+            echo "::error::The $KIND configured for the E2E does not resolve on this tenant. Check that the value exists in the project and region the OS_* secrets point at, and that it is shared with that project if private."
+            echo "The tenant exposes ${COUNT} ${KIND}(s) to this project. Run \`openstack $KIND list\` with the same OS_* credentials to see them."
+            return 1
+          }
+
+          check image "$E2E_RUNNER_IMAGE_NAME"
+          # Optional: unset means the suite falls back to its own default flavor.
+          if [ -n "${E2E_OPENSTACK_FLAVOR:-}" ]; then
+            check flavor "$E2E_OPENSTACK_FLAVOR"
+          fi
+          check network "$OS_NETWORK"
+
+      - name: Install opcli and spread
+        run: |
+          set -euo pipefail
+          # Pinned to the same tag tox.ini pins the opcli pytest plugin to, so the
+          # CLI that runs the suite and the plugin inside it cannot drift apart.
+          uv tool install "opcli[cli] @ git+https://github.com/canonical/charm-ci.git@v1.0.0"
+          sudo snap install go --classic
+          # Pinned for the same reason: this job is expensive, and a moving spread
+          # could change behaviour under it without any change in this repository.
+          go install github.com/canonical/spread/cmd/spread@2026.07.12
+          sudo ln -sf ~/go/bin/spread /usr/local/bin/spread
+
+      - name: Point concierge at a load-balancer address on this host
+        run: |
+          set -euo pipefail
+
+          # traefik-k8s asks for a LoadBalancer Service, which nothing satisfies until
+          # Canonical K8s's load-balancer feature has an address pool. Pinning the pool
+          # to this host's own address is what makes GARM's callback and metadata URLs
+          # resolve to something a runner VM on the tenant can actually reach -- an
+          # in-cluster service address cannot serve them.
+          HOST_IP=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+')
+          echo "Load-balancer pool pinned to ${HOST_IP}"
+          sed "s/@HOST_IP@/${HOST_IP}/g" concierge-e2e.yaml.tmpl > concierge-e2e.yaml
+          echo "CONCIERGE=concierge-e2e.yaml" >> "$GITHUB_ENV"
+
+      - name: Publish an SSH tunnel entry for runner VM callbacks
+        # The private-endpoint host's security group (github-runner-v1, managed by
+        # the legacy github-runner-operator charm) admits only ingress tcp/22, so
+        # the GARM runner VM cannot reach traefik on :80 -- the port its metadata
+        # and callback URLs use. The VM instead opens an SSH connection back to
+        # this host, the one port the SG allows, and forwards its GARM traffic
+        # through it. The key is ephemeral, restricted to port forwarding (no
+        # shell, no command execution), and removed again by the cleanup step.
+        run: |
+          set -euo pipefail
+
+          TUNNEL_USER=$(id -un)
+          TUNNEL_TARGET=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+')
+
+          # The Actions runner's steps may run as a different user than the
+          # service account that owns the runner install (HOME can point at the
+          # actions-runner dir). Authenticate as the account whose authorized_keys
+          # this step actually owns: resolve the home from the password database
+          # rather than $HOME, and verify the account is allowed to log in.
+          HOME_DIR=$(getent passwd "${TUNNEL_USER}" | cut -d: -f6)
+          if [ -z "${HOME_DIR}" ]; then
+            echo "::error::Could not resolve the home directory of ${TUNNEL_USER}."
+            exit 1
+          fi
+
+          AUTH_KEYS="${HOME_DIR}/.ssh/authorized_keys"
+          mkdir -p "${HOME_DIR}/.ssh"
+          chmod 700 "${HOME_DIR}/.ssh"
+          touch "${AUTH_KEYS}"
+          chmod 600 "${AUTH_KEYS}"
+          chown "${TUNNEL_USER}:" "${HOME_DIR}/.ssh" "${AUTH_KEYS}"
+
+          KEY_DIR=$(mktemp -d)
+          ssh-keygen -q -t ed25519 -N '' \
+            -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
+            -f "${KEY_DIR}/garm-e2e-tunnel"
+          # permitopen pins the forward to this host's :80, the only destination
+          # the tunnel exists for, so the key cannot be used to reach anything
+          # else while it exists.
+          printf 'restrict,port-forwarding,permitopen="%s:80" %s\n' \
+            "${TUNNEL_TARGET}" "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
+
+          # Prove the entry works before the suite relies on it: authenticate with
+          # the key from this host, forwarding exactly as the VM will, and pull
+          # traefik's plain-404 through the forward. -f -N backgrounds the client
+          # once the listener is up, which is also what the VM's script does.
+          ssh -f -N \
+            -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null \
+            -o IdentitiesOnly=yes -i "${KEY_DIR}/garm-e2e-tunnel" \
+            -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
+            -o ConnectTimeout=10 \
+            -L 127.0.0.1:18080:"${TUNNEL_TARGET}":80 \
+            "${TUNNEL_USER}@${TUNNEL_TARGET}"
+          if ! curl -s --max-time 10 -o /dev/null http://127.0.0.1:18080/; then
+            # A non-timeout answer (404/502 from traefik) is success: the auth and
+            # the forward both worked. Only a connection failure indicts the key.
+            if ! nc -z 127.0.0.1 18080; then
+              echo "::error::The tunnel key for ${TUNNEL_USER}@${TUNNEL_TARGET} does not authenticate or forward. Check sshd_config (PubkeyAuthentication, AllowUsers/AllowGroups) and the account's shell."
+              sed -i "/garm-e2e-tunnel-${GITHUB_RUN_ID}/d" "${AUTH_KEYS}"
+              exit 1
+            fi
+          fi
+          # Kill the test client; the VM opens its own. Match on the key path: it
+          # is the part of the command line unique to this run's client, where the
+          # key comment -- which the marker string only lives in -- is not.
+          pkill -f "${KEY_DIR}/garm-e2e-tunnel" || true
+          echo "Tunnel entry verified for ${TUNNEL_USER}@${TUNNEL_TARGET} (id ${GITHUB_RUN_ID})."
+
+          KEY_B64=$(base64 -w0 "${KEY_DIR}/garm-e2e-tunnel")
+          rm -rf "${KEY_DIR}"
+          echo "::add-mask::${KEY_B64}"
+
+          {
+            echo "E2E_TUNNEL_USER=${TUNNEL_USER}"
+            echo "E2E_TUNNEL_TARGET=${TUNNEL_TARGET}"
+            echo "E2E_TUNNEL_PRIVATE_KEY=${KEY_B64}"
+          } >> "$GITHUB_ENV"
+
+      - name: Run the E2E suite
+        env:
+          CI: "true"
+          # Spread reads this from the host environment and the prepare script uses it
+          # to download the build job's artifacts. Actions does not export it on its own.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Ask opcli for the selector rather than writing it out here, so a rename in
+          # spread.yaml cannot leave this step silently selecting nothing.
+          SELECTOR=$(opcli spread jobs --include 'e2e-test-ci:*' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["include"][0]["selector"])')
+          echo "Running ${SELECTOR}"
+          opcli spread run -- -vv "${SELECTOR}"
+
+      # Deliberately no juju debug-log or status dump here: both replay charm output
+      # that carries the rendered GARM config, and so the tenant password. The suite
+      # collects its own diagnostics through the sentinel redactor instead, and a
+      # re-run with debug logging drops into the tmate session above.
+      - name: Delete runners left behind on the tenant
+        if: always()
+        run: |
+          set -euo pipefail
+
+          # This runs on every outcome, including failures that predate the tenant
+          # configuration: bail out cleanly rather than die on an unbound variable
+          # or a missing client and bury the real failure under cleanup noise.
+          if [ -z "${E2E_RUNNER_IMAGE_NAME:-}" ]; then
+            echo "E2E_RUNNER_IMAGE_NAME is not set; the run failed before the tenant was configured. No sweep possible."
+            exit 0
+          fi
+          if ! command -v openstack >/dev/null 2>&1; then
+            echo "openstack client is not installed; the run failed before it was needed. No sweep possible."
+            exit 0
+          fi
+
+          # GARM stamps every server it creates with garm-controller-id. Matching that
+          # alongside the runner image scopes the sweep to VMs this suite's GARM
+          # created, so a failure that skips the suite's own teardown cannot leave them
+          # running and billing.
+          ORPHANS=$(openstack server list --long --image "$E2E_RUNNER_IMAGE_NAME" -f json \
+            | python3 -c "import json,sys; print('\n'.join(s['ID'] for s in json.load(sys.stdin) if 'garm-controller-id' in (s.get('Properties') or {})))")
+
+          if [ -z "$ORPHANS" ]; then
+            echo "No runners left on the tenant."
+            exit 0
+          fi
+
+          echo "$ORPHANS" | while read -r ID; do
+            echo "Deleting orphaned runner ${ID}"
+            openstack server delete --wait "$ID" || echo "::warning::Could not delete ${ID}"
+          done
+
+      - name: Remove the SSH tunnel entry
+        # Paired with "Publish an SSH tunnel entry": runs on every outcome, so a
+        # failed suite cannot leave a forwarding-only key on the host.
+        if: always()
+        run: |
+          set -euo pipefail
+
+          # Resolve the home exactly as the publish step does: $HOME can point at
+          # the actions-runner tree rather than the login account's home, and the
+          # entry was written to the latter's authorized_keys.
+          TUNNEL_USER=$(id -un)
+          HOME_DIR=$(getent passwd "${TUNNEL_USER}" | cut -d: -f6)
+          if [ -z "${HOME_DIR}" ]; then
+            echo "::error::Could not resolve the home directory of ${TUNNEL_USER}; cannot remove the tunnel entry."
+            exit 1
+          fi
+
+          MARKER="garm-e2e-tunnel-${GITHUB_RUN_ID}"
+          AUTH_KEYS="${HOME_DIR}/.ssh/authorized_keys"
+          if [ -f "$AUTH_KEYS" ] && grep -q "$MARKER" "$AUTH_KEYS"; then
+            sed -i "/${MARKER}/d" "$AUTH_KEYS"
+            echo "Tunnel entry ${MARKER} removed."
+          else
+            echo "No tunnel entry to remove."
+          fi
+
+      - name: Restore the host's SSH configuration
+        # opcli's spread backend prepares every host it allocates for password
+        # login: it rewrites PermitRootLogin and PasswordAuthentication to yes and
+        # gives root a generated password, which the run log prints in cleartext.
+        # It never undoes any of that. On a throwaway GitHub-hosted runner that is
+        # harmless, but this host sits on the private endpoint and holds the
+        # tenant credentials, so the published password stays usable for as long
+        # as the host does. Reported upstream; until a fix lands, put the host
+        # back before the job ends. Runs last so the sshd restart cannot disturb
+        # the cleanup steps above.
+        if: always()
+        run: |
+          set -euo pipefail
+
+          sudo rm -f /etc/ssh/sshd_config.d/00-spread.conf
+          # The backend edits the main file in place, so the host's original
+          # values are already gone; restore the distribution defaults, which are
+          # what this host wants -- it is only ever reached by key.
+          sudo sed -i \
+            -e 's/^[[:space:]]*PermitRootLogin[[:space:]].*/PermitRootLogin prohibit-password/' \
+            -e 's/^[[:space:]]*PasswordAuthentication[[:space:]].*/PasswordAuthentication no/' \
+            /etc/ssh/sshd_config
+          # Invalidates the credential itself, so the value in the log is useless
+          # even if some other drop-in still permits password authentication.
+          # Nothing is lost by locking: the backend's chpasswd already destroyed
+          # whatever password the account had.
+          sudo passwd -l root > /dev/null
+          sudo systemctl restart ssh
+          echo "Root password locked and password authentication disabled again."
