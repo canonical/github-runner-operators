@@ -16,6 +16,12 @@ permissions:
 env:
   SOAK_DAYS: 7
 
+# A dispatch while the scheduled run is parked at the approval gate would otherwise
+# leave two runs able to release the same revisions.
+concurrency:
+  group: promote-candidate-to-stable
+  cancel-in-progress: false
+
 jobs:
   check:
     name: Check promotion eligibility
@@ -200,6 +206,8 @@ jobs:
           }
 
           trap on_error ERR
+
+          echo "## Released to stable" >> "$GITHUB_STEP_SUMMARY"
 
           charmcraft release garm --revision="$GARM_REVISION" --channel=latest/stable
           echo "- garm: revision ${GARM_REVISION} -> latest/stable" >> "$GITHUB_STEP_SUMMARY"
