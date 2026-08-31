@@ -596,7 +596,7 @@ def test_a_job_only_protects_its_runner_while_it_could_still_be_running(age, exp
     assert: The job protects its runner only while it is recent enough to describe a live job.
         The bound is the five days GitHub allows a job on a self-hosted runner, not the six
         hours a GitHub-hosted one gets, so a long but legitimate job keeps its runner. GARM only
-        reconciles stale queued jobs against the forge, so past that ceiling a dropped
+        reconciles stale queued jobs against GitHub, so past that ceiling a dropped
         completion webhook would otherwise pin the runner as busy forever and strand the
         scaleset — the very failure this cleanup exists to fix.
     """

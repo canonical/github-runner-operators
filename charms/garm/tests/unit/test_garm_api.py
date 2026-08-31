@@ -443,7 +443,7 @@ def test_delete_instance_raises_unauthorized_on_401():
     """
     arrange: GarmAuthenticatedClient with InstancesApi raising ApiException(401).
     act: Call delete_instance("runner-1").
-    assert: GarmUnauthorizedError is raised, so the caller can tell expired forge credentials
+    assert: GarmUnauthorizedError is raised, so the caller can tell expired GitHub credentials
         apart from a transient failure before escalating to the GitHub bypass.
     """
     client = GarmAuthenticatedClient(BASE_URL, "token")
