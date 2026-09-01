@@ -170,6 +170,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          # charmcraft reports a missing credential as an authentication failure, which
+          # reads like an expired token; on a nightly run nobody watches, say plainly
+          # that the secret is absent.
+          if [ -z "${CHARMCRAFT_AUTH}" ]; then
+            {
+              echo "## Promotion failed"
+              echo
+              echo "The \`CHARMHUB_TOKEN\` secret is empty or unset, so the tested revisions"
+              echo "could not be released. Refresh it with \`charmcraft login --export\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
           released=()
           # Not set -e alone: a failure after the first release leaves the two charms
           # on different revisions in candidate, which needs saying out loud rather
