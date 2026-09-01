@@ -157,6 +157,10 @@ jobs:
   promote:
     name: Release to candidate
     needs: [check, e2e]
+    # A manual dispatch can pick any ref, and this job is the irreversible half of the
+    # workflow. Gating it on main leaves the run dispatchable from a branch to exercise
+    # the check and end-to-end jobs, without that dry run reaching Charmhub.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Install charmcraft
