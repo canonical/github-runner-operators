@@ -62,9 +62,10 @@ jobs:
           def revision(charm, risk):
               """Return the highest revision released to *risk*, or None if there is none.
 
-              The channel map holds one entry per base, and an unreleased channel is
-              absent rather than empty, so this filters to the single base the repo
-              builds and treats "not found" as "nothing released".
+              The channel map holds one entry per channel and base, and an unreleased
+              channel is absent rather than empty, so this narrows to the latest track
+              on amd64, takes the highest revision left, and treats "no entry" as
+              "nothing released".
               """
               with urllib.request.urlopen(API.format(charm), timeout=30) as response:
                   channel_map = json.load(response)["channel-map"]
