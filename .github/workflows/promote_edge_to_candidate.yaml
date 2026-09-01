@@ -30,9 +30,10 @@ permissions:
 
 # Deliberately not the garm-e2e group used by the suite this workflow calls:
 # holding that group here would leave the called workflow queueing behind its own
-# caller. This only stops two promotion runs overlapping.
+# caller. This only stops two promotion runs on the same ref overlapping; keying on
+# the ref keeps a branch dry run from delaying the nightly promotion on main.
 concurrency:
-  group: promote-edge-to-candidate
+  group: promote-edge-to-candidate-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
