@@ -130,48 +130,98 @@ class GarmCharm(paas_charm.go.Charm):
             args: Passed through to CharmBase.
         """
         super().__init__(*args)
-        self.framework.observe(self.on.install, self._reconcile)
-        self.framework.observe(self.on.leader_elected, self._reconcile)
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_departed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
-            self._reconcile,
-        )
+        for event in (
+            self.on.install,
+            self.on.leader_elected,
+            self.on.update_status,
+        ):
+            self.framework.observe(event, self._reconcile)
+
+        for relation_events in (
+            self.on[GARM_CONFIGURATOR_RELATION_NAME],
+            self.on[DEBUG_SSH_INTEGRATION_NAME],
+        ):
+            for event in (
+                relation_events.relation_joined,
+                relation_events.relation_changed,
+                relation_events.relation_departed,
+                relation_events.relation_broken,
+            ):
+                self.framework.observe(event, self._reconcile)
+
         self.framework.observe(self.on.get_credentials_action, self._on_get_credentials_action)
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_changed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_departed,
-            self._reconcile,
-        )
-        self.framework.observe(
-            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
-            self._reconcile,
-        )
-        self.framework.observe(self.on.update_status, self._reconcile)
         self.framework.observe(self.on.remove, self._on_remove)
 
+    def _is_tearing_down(self) -> bool:
+        """Return whether Juju plans no remaining units for the local application."""
+        return self.app.planned_units() == 0
+
+    def _reconcile(self, event: ops.EventBase) -> None:
+        """Reconcile GARM, or handle local teardown before normal state construction."""
+        if self._is_tearing_down():
+            self._teardown(event)
+            return
+        self._normal_reconcile(event)
+
+    def _reconcile_with_migrations(self, event: ops.EventBase) -> None:
+        """Reconcile a database event, preserving the teardown gate."""
+        if self._is_tearing_down():
+            self._teardown(event)
+            return
+        self._normal_reconcile_with_migrations(event)
+
+    def _teardown(self, event: ops.EventBase) -> None:
+        """Handle a local teardown event without normal reconciliation."""
+        logger.info(
+            "Skipping normal GARM reconciliation for %s during local teardown",
+            event.handle.kind,
+        )
+
     @block_if_invalid_data
-    def _reconcile(self, _: ops.EventBase) -> None:
-        """Reconcile charm state."""
+    def _normal_reconcile(self, _: ops.EventBase) -> None:
+        """Reconcile active GARM charm state."""
         self.restart()
+
+    @block_if_invalid_data
+    def _normal_reconcile_with_migrations(self, _: ops.EventBase) -> None:
+        """Reconcile active GARM state and rerun database migrations."""
+        self.restart(rerun_migrations=True)
+
+    def _route_reconcile(self, event: ops.EventBase) -> None:
+        """Route an inherited framework event through GARM's teardown gate."""
+        self._reconcile(event)
+
+    # PaasCharm.__init__ resolves these hook names dynamically. Aliasing them keeps the
+    # teardown check before the inherited decorators without registering duplicate observers.
+    _on_config_changed = _route_reconcile
+    _on_secret_changed = _route_reconcile
+    _on_secret_storage_relation_changed = _route_reconcile
+    _on_secret_storage_relation_departed = _route_reconcile
+    _on_postgresql_database_relation_broken = _route_reconcile
+    _on_ingress_ready = _route_reconcile
+    _on_ingress_revoked = _route_reconcile
+    _on_pebble_ready = _route_reconcile
+
+    def _route_reconcile_with_migrations(self, event: ops.EventBase) -> None:
+        """Route an inherited database event through GARM's migration gate."""
+        self._reconcile_with_migrations(event)
+
+    _on_postgresql_database_database_created = _route_reconcile_with_migrations
+    _on_postgresql_database_endpoints_changed = _route_reconcile_with_migrations
+
+    def _on_update_status(self, event: ops.HookEvent) -> None:
+        """Run the framework update-status handler only while active."""
+        if self._is_tearing_down():
+            logger.info("Skipping update-status handling during local teardown")
+            return
+        super()._on_update_status(event)
+
+    def _on_rotate_secret_key_action(self, event: ops.ActionEvent) -> None:
+        """Reject secret rotation during teardown before the base decorator runs."""
+        if self._is_tearing_down():
+            event.fail("cannot rotate the secret key during local teardown")
+            return
+        super()._on_rotate_secret_key_action(event)
 
     def _on_remove(self, _: ops.RemoveEvent) -> None:
         """Drain GARM resources before Juju removes the application."""
@@ -287,6 +337,10 @@ class GarmCharm(paas_charm.go.Charm):
         Args:
             rerun_migrations: Passed through to the parent restart.
         """
+        if self._is_tearing_down():
+            logger.info("Skipping GARM workload restart during local teardown")
+            return
+
         self._ensure_secrets()
 
         if not self.is_ready():
