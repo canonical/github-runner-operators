@@ -53,7 +53,7 @@ jobs:
           FORCE: ${{ inputs.force }}
         run: |
           set -euo pipefail
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
           import json
           import os
           import urllib.request
@@ -137,9 +137,14 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
               handle.write("\n".join(summary) + "\n")
 
-          print(f"should_run={'true' if should_run else 'false'}")
-          print(f"garm_revision={edge_revisions['garm'] or ''}")
-          print(f"garm_configurator_revision={edge_revisions['garm-configurator'] or ''}")
+          # Written by name rather than to stdout, so a print added while debugging
+          # cannot land in the output file and fail the step as a malformed line.
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"should_run={'true' if should_run else 'false'}\n")
+              handle.write(f"garm_revision={edge_revisions['garm'] or ''}\n")
+              handle.write(
+                  f"garm_configurator_revision={edge_revisions['garm-configurator'] or ''}\n"
+              )
           PY
 
   e2e:
