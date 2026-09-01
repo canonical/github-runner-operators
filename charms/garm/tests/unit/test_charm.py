@@ -508,9 +508,7 @@ def test_remove_runs_garm_cleanup_before_charm_termination(ctx: Context, garm_ap
     assert: Cleanup runs with the authenticated client before removal completes.
     """
     with patch("charm.GarmResourceCleanup") as cleanup_cls:
-        out = ctx.run(
-            ctx.on.remove(), _state(secrets=_owned_secrets(), planned_units=0)
-        )
+        out = ctx.run(ctx.on.remove(), _state(secrets=_owned_secrets(), planned_units=0))
 
     cleanup_cls.assert_called_once_with(garm_api.auth_client)
     cleanup_cls.return_value.run.assert_called_once_with()

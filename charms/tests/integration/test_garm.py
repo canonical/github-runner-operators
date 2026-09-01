@@ -378,12 +378,7 @@ def test_charm_reconciles_org_and_scaleset(
     # _reconcile_runners() runs now that the controller URLs are set. max-runner=10 doubles as the
     # scaleset assertion below.
     juju.config(configurator_with_image, values={"max-runner": "10"})
-    juju.wait(
-        lambda status: jubilant.all_active(status, configurator_with_image)
-        and jubilant.all_agents_idle(status, configurator_garm),
-        timeout=3 * 60,
-        delay=10,
-    )
+    _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
 
     org = _wait_for_org(base_url, token, "test-org")
     credential = _wait_for_github_credential(base_url, token, _SYNCED_CREDENTIAL_NAME)
@@ -406,6 +401,27 @@ def test_charm_reconciles_org_and_scaleset(
     assert scaleset.get("template_id") == charmed["id"], (
         f"scaleset should reference charmed template id {charmed['id']}; "
         f"got {scaleset.get('template_id')}"
+    )
+
+
+def _wait_for_config_applied(
+    juju: jubilant.Juju, garm_app: str, configurator_app: str
+) -> None:
+    """Wait for a configurator config change to reach GARM's reconcile.
+
+    A config change triggers config_changed on the configurator, then relation_changed on
+    GARM, whose holistic reconcile applies the new desired scaleset set.
+
+    Args:
+        juju: Jubilant Juju handle.
+        garm_app: Name of the GARM application.
+        configurator_app: Name of the garm-configurator application.
+    """
+    juju.wait(
+        lambda status: jubilant.all_active(status, configurator_app)
+        and jubilant.all_agents_idle(status, garm_app),
+        timeout=3 * 60,
+        delay=10,
     )
 
 
@@ -449,6 +465,70 @@ def _get_template_body(address: str, token: str, template_id: int) -> str:
     resp.raise_for_status()
     raw_b64 = resp.json().get("data") or ""
     return base64.b64decode(raw_b64).decode("utf-8") if raw_b64 else ""
+
+
+def test_charm_disables_and_deletes_an_orphaned_scaleset(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+    fake_github_api_url: str,
+):
+    """
+    arrange: GARM and garm-configurator are integrated against the GitHub double, with the
+        desired scaleset created under a throwaway name.
+    act: Rename the desired scaleset back, so the one GARM holds is no longer desired.
+    assert: The charm removes the orphaned scaleset itself and creates the renamed one in its
+        place. GARM rejects the delete of a scaleset that is still enabled, so this covers the
+        charm's own disable-then-delete against a live GARM — the half of the sequence the
+        teardown helper below otherwise hand-rolls. The drain itself is not exercised: the
+        configurator's min-idle-runner defaults to 0 and the OpenStack provider is a stand-in,
+        so the orphaned scaleset never owns a runner. That half stays unit-tested.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+    # Same arrange as the reconcile test above: unwind the charm-synced chain so github.com can
+    # be repointed at the mock, and restore the system templates scaleset creation needs.
+    _detach_synced_credential(base_url, token)
+    _point_github_endpoint_at_mock(base_url, token, fake_github_api_url)
+    _restore_system_templates(base_url, token)
+
+    renamed = f"{_SCALESET_TEST_NAME}-renamed"
+    try:
+        juju.config(configurator_with_image, values={"name": renamed})
+        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+        _wait_for_scaleset(base_url, token, renamed)
+    finally:
+        # Renaming back is the act, and doubles as cleanup: every later test in this module
+        # asserts against the default scaleset name.
+        juju.config(configurator_with_image, values={"name": _SCALESET_TEST_NAME})
+        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+
+    _wait_for_scaleset_absent(base_url, token, renamed)
+    _wait_for_scaleset(base_url, token, _SCALESET_TEST_NAME)
+
+
+@retry(
+    retry=retry_if_exception_type(
+        (AssertionError, requests.exceptions.RequestException)
+    ),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(30),
+    reraise=True,
+)
+def _wait_for_scaleset_absent(base_url: str, token: str, name: str) -> None:
+    """Wait until a named scaleset is gone from GARM.
+
+    Args:
+        base_url: GARM API base URL.
+        token: JWT token for authentication.
+        name: Name of the scaleset that should disappear.
+    """
+    scalesets = _list_scalesets(base_url, token)
+    assert _find_scaleset(scalesets, name) is None, (
+        f"Expected scaleset {name!r} to be deleted by the charm; "
+        f"still present among {[scaleset.get('name') for scaleset in scalesets]}"
+    )
 
 
 def test_garm_charmed_template_created_on_debug_ssh(
@@ -705,8 +785,11 @@ def _delete_scalesets(base_url: str, token: str) -> None:
         scaleset_id = scaleset.get("id")
         if scaleset_id is None:
             continue
-        # GARM 400s a scaleset delete while the scaleset is still enabled or draining runners, so
-        # disable it (idle count to zero) to trigger the drain before deleting.
+        # GARM 400s a scaleset delete while the scaleset is still enabled, and again while it
+        # still owns runners, so disable it (idle count to zero) to trigger the drain before
+        # deleting. The charm does this for itself — see
+        # test_charm_disables_and_deletes_an_orphaned_scaleset; this is only teardown, unwinding
+        # scalesets the charm is not being asked to remove.
         resp = requests.put(
             f"{base_url}/scalesets/{scaleset_id}",
             json={"enabled": False, "min_idle_runners": 0},
@@ -981,12 +1064,7 @@ def test_runner_options_render_into_scaleset_template(
             "pre-job-script": "echo integration-marker",
         },
     )
-    juju.wait(
-        lambda status: jubilant.all_active(status, configurator_with_image)
-        and jubilant.all_agents_idle(status, configurator_garm),
-        timeout=3 * 60,
-        delay=10,
-    )
+    _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
 
     # One marker per template-delivered config option, proving each reaches GARM
     # via live reconcile: dockerhub-mirror (daemon.json + env var),

@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-08-24
+
+- `garm`: remove a scaleset's runners before deleting the scaleset. GARM rejects deleting a scaleset that still owns runners, so removing every `garm-configurator` relation left the orphaned scalesets — and the runners they own — behind. The charm now disables an orphaned scaleset and removes its runners before deleting it, retrying on the next reconcile whatever it could not remove this time. A runner that is executing a workflow job is left to finish and cleaned up on a later pass, so the removal never fails a running job. If GitHub rejects a runner's removal as unauthorized (for example, expired credentials), the charm retries with GARM's GitHub Unauthorized bypass, which can leave the runner registered in GitHub, where it must be removed manually.
+
 ## 2026-08-19
 
 - Add a tutorial for deploying GARM. It walks through a first GARM deployment on Canonical Kubernetes with PostgreSQL and the `garm-configurator`, ending with a runner scale set registered on a GitHub repository. OpenStack is represented by placeholder configuration and a stand-in image provider so the tutorial runs without a cloud, and a closing section states what changes for a deployment that boots runners.
