@@ -20,25 +20,33 @@ on:
         description: "Charmhub channel to deploy the charms from, e.g. latest/edge. Empty builds them."
         required: false
         type: string
+        default: ""
       garm-revision:
         description: "Published garm revision to test. Requires charm-channel."
         required: false
         type: string
+        default: ""
       garm-configurator-revision:
         description: "Published garm-configurator revision to test. Requires charm-channel."
         required: false
         type: string
+        default: ""
   workflow_call:
     inputs:
+      # Defaulted explicitly: an omitted workflow_call input with no default is null,
+      # which would fail the `== ''` build guard and skip the build on the default path.
       charm-channel:
         required: false
         type: string
+        default: ""
       garm-revision:
         required: false
         type: string
+        default: ""
       garm-configurator-revision:
         required: false
         type: string
+        default: ""
 
 permissions:
   contents: read
