@@ -84,6 +84,7 @@ jobs:
           edge_revisions = {}
           ahead = False
           missing = []
+          behind = []
 
           for charm in CHARMS:
               edge = revision(charm, "edge")
@@ -91,6 +92,8 @@ jobs:
               edge_revisions[charm] = edge
               if edge is None:
                   missing.append(charm)
+              if edge is not None and candidate is not None and edge < candidate:
+                  behind.append(charm)
               is_ahead = edge is not None and (candidate is None or edge > candidate)
               ahead = ahead or is_ahead
               summary.append(
@@ -98,13 +101,23 @@ jobs:
                   f"{'yes' if is_ahead else 'no'} |"
               )
 
-          should_run = (ahead or force) and not missing
+          # A candidate revision higher than edge can only come from a manual release, so
+          # promoting on top of it would silently roll production back. Force does not
+          # override this: re-releasing an older revision is a rollback, not a promotion.
+          should_run = (ahead or force) and not missing and not behind
 
           if missing:
               summary.append("")
               summary.append(
                   f"Nothing released to edge for {', '.join(missing)}; there is nothing "
                   "to promote."
+              )
+          elif behind:
+              summary.append("")
+              summary.append(
+                  f"Candidate is ahead of edge for {', '.join(behind)}, so promoting would "
+                  "downgrade candidate. Release the newer revision to edge first, or roll "
+                  "candidate back manually with `charmcraft release`. Skipping."
               )
           elif force and not ahead:
               summary.append("")
