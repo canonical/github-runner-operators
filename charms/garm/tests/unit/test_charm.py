@@ -34,6 +34,7 @@ import garm_template
 from charm import GARM_ADMIN_CREDENTIALS_LABEL, GARM_PORT, GARM_SECRETS_LABEL, GarmCharm
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, GARM_CONFIGURATOR_RELATION_NAME
 from garm_api import GarmConnectionError
+from resource_cleanup import GarmCleanupError
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
     MANAGED_CREDENTIAL_DESCRIPTION,
@@ -552,58 +553,59 @@ def test_remove_unit_skips_global_cleanup_while_application_remains(
     garm_api.auth.from_login.assert_not_called()
 
 
-def test_remove_blocks_when_garm_initialization_state_is_unknown(
+def test_remove_tolerates_unknown_garm_initialization_state(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
     arrange: The unauthenticated GARM initialization probe cannot reach the API.
     act: Emit application removal.
-    assert: Removal remains blocked because resources cannot be proven absent.
+    assert: Late teardown logs an unconfirmed result and lets Juju finish removal.
     """
     garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
         "connection refused"
     )
 
-    with pytest.raises(UncaughtCharmError, match="Cannot determine whether GARM was initialized"):
-        ctx.run(ctx.on.remove(), _state(planned_units=0))
+    ctx.run(ctx.on.remove(), _state(planned_units=0))
 
     garm_api.auth.from_login.assert_not_called()
-    assert "restore GARM/API availability" in caplog.text
+    assert "Late GARM teardown is unconfirmed" in caplog.text
 
 
-def test_remove_allows_unreachable_garm_without_postgresql_setup(
+def test_remove_allows_unreachable_garm_without_reading_postgresql(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
     arrange: PostgreSQL is not configured and GARM's API is unreachable.
     act: Emit application removal.
-    assert: Removal succeeds because GARM could not have been initialized without PostgreSQL.
+    assert: Late teardown succeeds without consulting the PostgreSQL relation.
     """
     garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
         "connection refused"
     )
 
-    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+    with patch.object(
+        GarmCharm,
+        "_get_postgresql_config",
+        side_effect=AssertionError("postgresql relation was read"),
+    ):
         ctx.run(ctx.on.remove(), _state(planned_units=0, postgresql_data={}))
 
-    cleanup_cls.assert_not_called()
     garm_api.auth.from_login.assert_not_called()
-    assert "PostgreSQL is not configured" in caplog.text
+    assert "Late GARM teardown is unconfirmed" in caplog.text
 
 
-def test_remove_refuses_without_admin_credentials(
+def test_remove_tolerates_missing_admin_credentials(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
-    arrange: A charm without GARM admin credentials.
+    arrange: A late removal hook cannot read the GARM admin credentials.
     act: Emit the application remove event.
-    assert: Removal fails and no authenticated client is created.
+    assert: Removal completes while recording that teardown is unconfirmed.
     """
-    with pytest.raises(UncaughtCharmError, match="credentials are unavailable"):
-        ctx.run(ctx.on.remove(), _state(planned_units=0))
+    ctx.run(ctx.on.remove(), _state(planned_units=0))
 
     garm_api.auth.from_login.assert_not_called()
-    assert "Operator action: restore the labelled admin credentials secret" in caplog.text
+    assert "Late GARM teardown is unconfirmed" in caplog.text
 
 
 def test_unpopulated_configurator_relation_does_not_prune(
@@ -640,6 +642,168 @@ def test_missing_configurator_relation_refreshes_stale_app_status(
 
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
     assert out.app_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+
+
+def test_remove_event_is_bound_to_the_teardown_orchestrator(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: The remove event is emitted for a local GARM teardown.
+    act: Observe which charm method receives the event.
+    assert: The remove observer uses the shared teardown orchestrator.
+    """
+    state = _state(secrets=_owned_secrets(), planned_units=0)
+    with ctx(ctx.on.remove(), state) as manager:
+        with patch.object(manager.charm, "_teardown", wraps=manager.charm._teardown) as teardown:
+            manager.run()
+
+    teardown.assert_called_once()
+    garm_api.auth.from_login.assert_called_once()
+
+
+def test_update_status_teardown_is_single_flight(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: Both GARM and paas-charm observe update-status during local teardown.
+    act: Emit update-status.
+    assert: The shared teardown orchestrator performs one cleanup pass in the hook.
+    """
+    state = _state(planned_units=0, secrets=_owned_secrets())
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(ctx.on.update_status(), state)
+
+    cleanup_cls.assert_called_once_with(garm_api.auth_client)
+    cleanup_cls.return_value.run.assert_called_once_with()
+
+
+def test_late_teardown_failure_is_single_flight(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: GARM is unavailable during update-status teardown.
+    act: Both update-status observers invoke the teardown path.
+    assert: One failed late attempt is enough for this hook process; a later hook can retry.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+
+    ctx.run(ctx.on.update_status(), _state(planned_units=0))
+
+    assert garm_api.client.return_value.is_initialized.call_count == 1
+
+
+def test_postgresql_departure_does_not_teardown_a_planned_application(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: PostgreSQL departs while another GARM unit remains planned.
+    act: Emit the relation-departed event.
+    assert: The teardown coordinator preserves the application and does not drain GARM.
+    """
+    state = _state(planned_units=1, secrets=_owned_secrets())
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(
+            ctx.on.relation_departed(_relation(state, "postgresql"), remote_unit=0),
+            state,
+        )
+
+    cleanup_cls.assert_not_called()
+    garm_api.auth.from_login.assert_not_called()
+
+
+def test_postgresql_departure_uses_the_teardown_orchestrator(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: PostgreSQL departs while the local GARM application is tearing down.
+    act: Emit the pre-break PostgreSQL relation event.
+    assert: The direct relation observer uses the shared GARM teardown operation.
+    """
+    state = _state(planned_units=0, secrets=_owned_secrets())
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(
+            ctx.on.relation_departed(_relation(state, "postgresql"), remote_unit=0),
+            state,
+        )
+
+    cleanup_cls.assert_called_once_with(garm_api.auth_client)
+    cleanup_cls.return_value.run.assert_called_once_with()
+
+
+def test_early_postgresql_teardown_wraps_api_failure(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: PostgreSQL is departing and the GARM API cannot be reached.
+    act: Emit the pre-break PostgreSQL relation event.
+    assert: Strict teardown fails with the domain cleanup error so Juju can retry.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+    state = _state(planned_units=0)
+
+    with pytest.raises(UncaughtCharmError) as exc_info:
+        ctx.run(ctx.on.relation_departed(_relation(state, "postgresql"), remote_unit=0), state)
+
+    assert isinstance(exc_info.value.__cause__, GarmCleanupError)
+
+
+def test_relation_teardown_uses_the_same_idempotent_orchestrator(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A configurator relation departs after no GARM units remain planned.
+    act: Emit the relation-departed event.
+    assert: The shared teardown path runs the existing GARM cleanup operation.
+    """
+    state = _state(planned_units=0, secrets=_owned_secrets())
+    with patch("charm.GarmResourceCleanup") as cleanup_cls:
+        ctx.run(
+            ctx.on.relation_departed(
+                _relation(state, GARM_CONFIGURATOR_RELATION_NAME), remote_unit=0
+            ),
+            state,
+        )
+
+    cleanup_cls.assert_called_once_with(garm_api.auth_client)
+    cleanup_cls.return_value.run.assert_called_once_with()
+
+
+def test_late_teardown_tolerates_missing_admin_secret(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: GARM is initialized but the admin secret cannot be read after teardown starts.
+    act: Emit application removal.
+    assert: Teardown completes without relation fallback or an uncaught secret error.
+    """
+    garm_api.client.return_value.is_initialized.return_value = True
+    with patch.object(
+        GarmCharm,
+        "_get_admin_credentials",
+        side_effect=ops.ModelError("secret unavailable"),
+    ):
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    garm_api.auth.from_login.assert_not_called()
+    assert "Late GARM teardown is unconfirmed" in caplog.text
+
+
+def test_late_teardown_does_not_read_postgresql_when_garm_is_unavailable(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: GARM is unavailable during a late remove hook and PostgreSQL data is forbidden.
+    act: Emit application removal.
+    assert: The teardown orchestrator returns without consulting relation data.
+    """
+    garm_api.client.return_value.is_initialized.side_effect = GarmConnectionError(
+        "connection refused"
+    )
+
+    with patch.object(
+        GarmCharm,
+        "_get_postgresql_config",
+        side_effect=AssertionError("postgresql relation was read"),
+    ):
+        ctx.run(ctx.on.remove(), _state(planned_units=0))
+
+    garm_api.auth.from_login.assert_not_called()
 
 
 # --- First-run initialisation -------------------------------------------------------------
@@ -1128,31 +1292,33 @@ def test_teardown_events_skip_framework_state_and_garm_reconciliation(
     """
     state = _state(debug_ssh_related=True, planned_units=0, secrets=[_TEARDOWN_SECRET])
 
-    with (
-        patch.object(
-            GarmCharm,
-            "_create_charm_state",
-            side_effect=AssertionError("charm state was created during teardown"),
-        ),
-        patch(
-            "charm_state.CharmState.from_charm",
-            side_effect=AssertionError("GARM charm state was reconstructed"),
-        ),
-        patch.object(
-            GarmCharm, "_ensure_secrets", side_effect=AssertionError("secrets were read")
-        ),
-        patch.object(
-            GarmCharm,
-            "_get_postgresql_config",
-            side_effect=AssertionError("postgresql relation was read"),
-        ),
-        patch.object(
-            GarmCharm,
-            "_get_configurator_provider_configs",
-            side_effect=AssertionError("configurator relation was read"),
-        ),
-    ):
-        out = ctx.run(event(ctx, state), state)
+    with ctx(event(ctx, state), state) as manager:
+        with (
+            patch.object(manager.charm, "_teardown", return_value=None),
+            patch.object(
+                GarmCharm,
+                "_create_charm_state",
+                side_effect=AssertionError("charm state was created during teardown"),
+            ),
+            patch(
+                "charm_state.CharmState.from_charm",
+                side_effect=AssertionError("GARM charm state was reconstructed"),
+            ),
+            patch.object(
+                GarmCharm, "_ensure_secrets", side_effect=AssertionError("secrets were read")
+            ),
+            patch.object(
+                GarmCharm,
+                "_get_postgresql_config",
+                side_effect=AssertionError("postgresql relation was read"),
+            ),
+            patch.object(
+                GarmCharm,
+                "_get_configurator_provider_configs",
+                side_effect=AssertionError("configurator relation was read"),
+            ),
+        ):
+            out = manager.run()
 
     assert out is not None
     garm_api.client.assert_not_called()
