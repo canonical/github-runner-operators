@@ -85,9 +85,10 @@ jobs:
     # runner is scarce, and starting early would only hold it idle until the artifacts
     # the spread prepare fetches actually exist.
     needs: [build]
-    # always() so the Charmhub path still runs with the build job skipped, while a
-    # genuine build failure still stops the suite.
-    if: always() && needs.build.result != 'failure' && needs.build.result != 'cancelled'
+    # !cancelled() rather than always() so the Charmhub path still runs with the build
+    # job skipped, while a genuine build failure -- or a cancellation of the run itself
+    # while this job is still queued for the private-endpoint runner -- stops the suite.
+    if: ${{ !cancelled() && needs.build.result != 'failure' && needs.build.result != 'cancelled' }}
     permissions:
       contents: read
       packages: read
