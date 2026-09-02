@@ -174,7 +174,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install charmcraft
-        run: sudo snap install charmcraft --classic
+        # Pinned to a major track rather than latest: this job holds CHARMHUB_TOKEN and
+        # runs unattended at midnight, so a new charmcraft major must not arrive on its
+        # own. The track still carries patches; bump it deliberately.
+        run: sudo snap install charmcraft --classic --channel=4.x/stable
 
       - name: Release the tested revisions to candidate
         env:
