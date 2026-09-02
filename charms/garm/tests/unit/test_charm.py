@@ -30,6 +30,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
+import charm as charm_module
 import garm_template
 from charm import GARM_ADMIN_CREDENTIALS_LABEL, GARM_PORT, GARM_SECRETS_LABEL, GarmCharm
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, GARM_CONFIGURATOR_RELATION_NAME
@@ -178,9 +179,12 @@ def _state(
     leader: bool = True,
     can_connect: bool = True,
     postgresql_data: dict | None = None,
+    postgresql_local_unit_data: dict | None = None,
     configurator_related: bool = True,
     configurator_units_data: dict[int, dict] | None = None,
     debug_ssh_related: bool = False,
+    secret_storage_peers_data: dict[int, dict] | None = None,
+    ingress_data: dict | None = None,
     secrets: typing.Sequence[Secret] = (),
     unit_status: ops.StatusBase | None = None,
     app_status: ops.StatusBase | None = None,
@@ -192,16 +196,31 @@ def _state(
     connection data, and whose single configurator unit publishes a full OpenStack provider
     and scaleset spec — the state in which restart() runs end to end.
     """
+    postgresql_relation = Relation(
+        endpoint="postgresql",
+        remote_app_name="postgresql",
+        remote_app_data=_POSTGRESQL_DATA if postgresql_data is None else postgresql_data,
+    )
+    if postgresql_local_unit_data is not None:
+        postgresql_relation = dataclasses.replace(
+            postgresql_relation, local_unit_data=postgresql_local_unit_data
+        )
     relations: list[Relation | PeerRelation] = [
-        Relation(
-            endpoint="postgresql",
-            remote_app_name="postgresql",
-            remote_app_data=_POSTGRESQL_DATA if postgresql_data is None else postgresql_data,
-        ),
+        postgresql_relation,
         PeerRelation(
-            endpoint="secret-storage", local_app_data={_SECRET_STORAGE_KEY: "peer-secret-key"}
+            endpoint="secret-storage",
+            local_app_data={_SECRET_STORAGE_KEY: "peer-secret-key"},
+            peers_data={} if secret_storage_peers_data is None else secret_storage_peers_data,
         ),
     ]
+    if ingress_data is not None:
+        relations.append(
+            Relation(
+                endpoint="ingress",
+                remote_app_name="traefik",
+                remote_app_data=ingress_data,
+            )
+        )
     if configurator_related:
         relations.append(
             Relation(
@@ -1013,15 +1032,54 @@ def test_controller_urls_derive_from_the_ingress_url(
 # --- Event wiring -------------------------------------------------------------------------
 
 
+@dataclasses.dataclass(frozen=True)
+class _EventCase:
+    """A Scenario event and the state needed to emit it."""
+
+    emit: typing.Callable[[Context, State], object]
+    state_factory: typing.Callable[[], State]
+
+
+def _event_case(
+    emit: typing.Callable[[Context, State], object],
+    state_factory: typing.Callable[[], State] = _state,
+) -> _EventCase:
+    """Build an event case with a default ready state."""
+    return _EventCase(emit=emit, state_factory=state_factory)
+
+
 def _relation(state: State, endpoint: str) -> Relation:
     """Return the state's relation on the given endpoint."""
     return next(relation for relation in state.relations if relation.endpoint == endpoint)  # type: ignore[return-value]
 
 
+def _ready_state() -> State:
+    """Return a ready state with both GARM relation types present."""
+    return _state(debug_ssh_related=True)
+
+
+def _postgresql_relation_changed(ctx: Context, state: State) -> object:
+    """Emit the raw relation event that produces a database custom event."""
+    return ctx.on.relation_changed(_relation(state, "postgresql"))
+
+
+def _postgresql_endpoints_changed_state() -> State:
+    """Return a state whose PostgreSQL endpoint differs from the previous snapshot."""
+    previous_data = {**_POSTGRESQL_DATA, "endpoints": "10.0.0.4:5432"}
+    return _state(
+        debug_ssh_related=True,
+        postgresql_local_unit_data={"data": json.dumps(previous_data)},
+    )
+
+
 _OBSERVED_EVENTS = [
-    pytest.param(lambda ctx, _: ctx.on.install(), id="install"),
-    pytest.param(lambda ctx, _: ctx.on.leader_elected(), id="leader-elected"),
-    pytest.param(lambda ctx, _: ctx.on.update_status(), id="update-status"),
+    pytest.param(_event_case(lambda ctx, _: ctx.on.install(), _ready_state), id="install"),
+    pytest.param(
+        _event_case(lambda ctx, _: ctx.on.leader_elected(), _ready_state), id="leader-elected"
+    ),
+    pytest.param(
+        _event_case(lambda ctx, _: ctx.on.update_status(), _ready_state), id="update-status"
+    ),
 ]
 for _endpoint, _id in (
     (GARM_CONFIGURATOR_RELATION_NAME, "configurator"),
@@ -1029,35 +1087,60 @@ for _endpoint, _id in (
 ):
     _OBSERVED_EVENTS += [
         pytest.param(
-            lambda ctx, state, endpoint=_endpoint: ctx.on.relation_joined(
-                _relation(state, endpoint)
+            _event_case(
+                lambda ctx, state, endpoint=_endpoint: ctx.on.relation_joined(
+                    _relation(state, endpoint)
+                ),
+                _ready_state,
             ),
             id=f"{_id}-relation-joined",
         ),
         pytest.param(
-            lambda ctx, state, endpoint=_endpoint: ctx.on.relation_changed(
-                _relation(state, endpoint)
+            _event_case(
+                lambda ctx, state, endpoint=_endpoint: ctx.on.relation_changed(
+                    _relation(state, endpoint)
+                ),
+                _ready_state,
             ),
             id=f"{_id}-relation-changed",
         ),
         pytest.param(
-            lambda ctx, state, endpoint=_endpoint: ctx.on.relation_departed(
-                _relation(state, endpoint), remote_unit=0
+            _event_case(
+                lambda ctx, state, endpoint=_endpoint: ctx.on.relation_departed(
+                    _relation(state, endpoint), remote_unit=0
+                ),
+                _ready_state,
             ),
             id=f"{_id}-relation-departed",
         ),
         pytest.param(
-            lambda ctx, state, endpoint=_endpoint: ctx.on.relation_broken(
-                _relation(state, endpoint)
+            _event_case(
+                lambda ctx, state, endpoint=_endpoint: ctx.on.relation_broken(
+                    _relation(state, endpoint)
+                ),
+                _ready_state,
             ),
             id=f"{_id}-relation-broken",
         ),
     ]
 
 
-@pytest.mark.parametrize("event", _OBSERVED_EVENTS)
+_MIGRATION_EVENTS = [
+    pytest.param(
+        _event_case(_postgresql_relation_changed, _ready_state),
+        id="postgresql-database-created",
+    ),
+    pytest.param(
+        _event_case(_postgresql_relation_changed, _postgresql_endpoints_changed_state),
+        id="postgresql-endpoints-changed",
+    ),
+]
+_OBSERVED_EVENTS += _MIGRATION_EVENTS
+
+
+@pytest.mark.parametrize("event_case", _OBSERVED_EVENTS)
 def test_every_observed_event_reconciles(
-    ctx: Context, garm_api: _GarmApiMocks, event: typing.Callable
+    ctx: Context, garm_api: _GarmApiMocks, event_case: _EventCase
 ):
     """
     arrange: A ready charm related to garm-configurator and debug-ssh.
@@ -1065,11 +1148,26 @@ def test_every_observed_event_reconciles(
     assert: Every one drives a full reconcile. The charm holds no per-event delta logic, so an
         observer that is missed leaves GARM unsynced until the next hook happens to fire.
     """
-    state = _state(debug_ssh_related=True)
+    state = event_case.state_factory()
 
-    ctx.run(event(ctx, state), state)
+    ctx.run(event_case.emit(ctx, state), state)
 
     garm_api.auth.from_login.assert_called_once()
+
+
+@pytest.mark.parametrize("event_case", _MIGRATION_EVENTS)
+def test_database_events_reconcile_with_migrations(ctx: Context, event_case: _EventCase):
+    """
+    arrange: An active charm receives a PostgreSQL database lifecycle event.
+    act: Run database-created or endpoints-changed.
+    assert: The active route calls restart with migrations enabled.
+    """
+    state = event_case.state_factory()
+
+    with patch.object(GarmCharm, "restart") as restart:
+        ctx.run(event_case.emit(ctx, state), state)
+
+    restart.assert_called_once_with(rerun_migrations=True)
 
 
 # The external secret is included in State because Scenario requires the exact object for
@@ -1077,56 +1175,154 @@ def test_every_observed_event_reconciles(
 _TEARDOWN_SECRET = Secret(id="secret:externalabcdefghijkl", tracked_content={"value": "external"})
 
 
+def _teardown_state() -> State:
+    """Return a state for events that explicitly enter the teardown fallthrough."""
+    return _state(debug_ssh_related=True, planned_units=0, secrets=[_TEARDOWN_SECRET])
+
+
+def _teardown_endpoints_changed_state() -> State:
+    """Return a teardown state that emits PostgreSQL endpoints-changed."""
+    state = _postgresql_endpoints_changed_state()
+    return dataclasses.replace(state, planned_units=0, secrets=[_TEARDOWN_SECRET])
+
+
 _TEARDOWN_EVENTS = [
-    pytest.param(lambda ctx, _: ctx.on.config_changed(), id="config-changed"),
     pytest.param(
-        lambda ctx, _: ctx.on.secret_changed(_TEARDOWN_SECRET),
+        _event_case(lambda ctx, _: ctx.on.config_changed(), _teardown_state), id="config-changed"
+    ),
+    pytest.param(
+        _event_case(
+            lambda ctx, _: ctx.on.secret_changed(_TEARDOWN_SECRET),
+            _teardown_state,
+        ),
         id="secret-changed",
     ),
-    pytest.param(lambda ctx, _: ctx.on.update_status(), id="update-status"),
     pytest.param(
-        lambda ctx, state: ctx.on.pebble_ready(state.get_container(CONTAINER_NAME)),
+        _event_case(lambda ctx, _: ctx.on.update_status(), _teardown_state), id="update-status"
+    ),
+    pytest.param(
+        _event_case(
+            lambda ctx, state: ctx.on.pebble_ready(state.get_container(CONTAINER_NAME)),
+            _teardown_state,
+        ),
         id="pebble-ready",
     ),
     pytest.param(
-        lambda ctx, state: ctx.on.relation_departed(
-            _relation(state, GARM_CONFIGURATOR_RELATION_NAME), remote_unit=0
+        _event_case(
+            lambda ctx, state: ctx.on.relation_departed(
+                _relation(state, GARM_CONFIGURATOR_RELATION_NAME), remote_unit=0
+            ),
+            _teardown_state,
         ),
         id="configurator-relation-departed",
     ),
     pytest.param(
-        lambda ctx, state: ctx.on.relation_broken(
-            _relation(state, GARM_CONFIGURATOR_RELATION_NAME)
+        _event_case(
+            lambda ctx, state: ctx.on.relation_broken(
+                _relation(state, GARM_CONFIGURATOR_RELATION_NAME)
+            ),
+            _teardown_state,
         ),
         id="configurator-relation-broken",
     ),
     pytest.param(
-        lambda ctx, state: ctx.on.relation_departed(
-            _relation(state, DEBUG_SSH_INTEGRATION_NAME), remote_unit=0
+        _event_case(
+            lambda ctx, state: ctx.on.relation_departed(
+                _relation(state, DEBUG_SSH_INTEGRATION_NAME), remote_unit=0
+            ),
+            _teardown_state,
         ),
         id="debug-ssh-relation-departed",
     ),
     pytest.param(
-        lambda ctx, state: ctx.on.relation_broken(_relation(state, DEBUG_SSH_INTEGRATION_NAME)),
+        _event_case(
+            lambda ctx, state: ctx.on.relation_broken(
+                _relation(state, DEBUG_SSH_INTEGRATION_NAME)
+            ),
+            _teardown_state,
+        ),
         id="debug-ssh-relation-broken",
     ),
     pytest.param(
-        lambda ctx, state: ctx.on.relation_broken(_relation(state, "postgresql")),
+        _event_case(
+            lambda ctx, state: ctx.on.relation_broken(_relation(state, "postgresql")),
+            _teardown_state,
+        ),
         id="postgresql-relation-broken",
+    ),
+    pytest.param(
+        _event_case(_postgresql_relation_changed, _teardown_state),
+        id="postgresql-database-created",
+    ),
+    pytest.param(
+        _event_case(_postgresql_relation_changed, _teardown_endpoints_changed_state),
+        id="postgresql-endpoints-changed",
     ),
 ]
 
 
-@pytest.mark.parametrize("event", _TEARDOWN_EVENTS)
-def test_teardown_events_skip_framework_state_and_garm_reconciliation(
-    ctx: Context, garm_api: _GarmApiMocks, event: typing.Callable
-):
-    """
-    arrange: No GARM units remain planned, and normal state seams fail if called.
-    act: Emit an event that can arrive during teardown.
-    assert: The event returns without reconstructing state or reconciling GARM.
-    """
-    state = _state(debug_ssh_related=True, planned_units=0, secrets=[_TEARDOWN_SECRET])
+# These callbacks still need to be intercepted before paas-charm reconstructs state, but they
+# have no cleanup-specific behavior in this change. Keep them separate from the explicit teardown
+# cases so adding a guard does not accidentally expand the cleanup fallthrough.
+_INHERITED_GUARDED_EVENTS = [
+    pytest.param(
+        _event_case(
+            lambda ctx, state: ctx.on.relation_changed(_relation(state, "secret-storage")),
+            lambda: _state(
+                debug_ssh_related=True,
+                planned_units=0,
+                secrets=[_TEARDOWN_SECRET],
+                secret_storage_peers_data={1: {}},
+            ),
+        ),
+        id="secret-storage-relation-changed",
+    ),
+    pytest.param(
+        _event_case(
+            lambda ctx, state: ctx.on.relation_departed(
+                _relation(state, "secret-storage"), remote_unit=1
+            ),
+            lambda: _state(
+                debug_ssh_related=True,
+                planned_units=0,
+                secrets=[_TEARDOWN_SECRET],
+                secret_storage_peers_data={1: {}},
+            ),
+        ),
+        id="secret-storage-relation-departed",
+    ),
+    pytest.param(
+        _event_case(
+            lambda ctx, state: ctx.on.relation_changed(_relation(state, "ingress")),
+            lambda: _state(
+                debug_ssh_related=True,
+                planned_units=0,
+                secrets=[_TEARDOWN_SECRET],
+                ingress_data={"ingress": json.dumps({"url": "https://garm.example"})},
+            ),
+        ),
+        id="ingress-ready",
+    ),
+    pytest.param(
+        _event_case(
+            lambda ctx, state: ctx.on.relation_broken(_relation(state, "ingress")),
+            lambda: _state(
+                debug_ssh_related=True,
+                planned_units=0,
+                secrets=[_TEARDOWN_SECRET],
+                ingress_data={"ingress": json.dumps({"url": "https://garm.example"})},
+            ),
+        ),
+        id="ingress-revoked",
+    ),
+]
+
+
+def _assert_teardown_event_is_gated(
+    ctx: Context, garm_api: _GarmApiMocks, event_case: _EventCase
+) -> None:
+    """Assert that one event cannot enter normal state or GARM reconciliation."""
+    state = event_case.state_factory()
 
     with (
         patch.object(
@@ -1151,15 +1347,41 @@ def test_teardown_events_skip_framework_state_and_garm_reconciliation(
             "_get_configurator_provider_configs",
             side_effect=AssertionError("configurator relation was read"),
         ),
+        patch.object(GarmCharm, "_teardown", autospec=True) as teardown,
     ):
-        out = ctx.run(event(ctx, state), state)
+        out = ctx.run(event_case.emit(ctx, state), state)
 
     assert out is not None
+    teardown.assert_called_once()
     garm_api.client.assert_not_called()
     garm_api.auth.from_login.assert_not_called()
     garm_api.github.assert_not_called()
     garm_api.entity.assert_not_called()
     garm_api.scaleset.assert_not_called()
+
+
+@pytest.mark.parametrize("event_case", _TEARDOWN_EVENTS)
+def test_teardown_events_skip_framework_state_and_garm_reconciliation(
+    ctx: Context, garm_api: _GarmApiMocks, event_case: _EventCase
+):
+    """
+    arrange: No GARM units remain planned, and an explicit teardown event is emitted.
+    act: Emit the event.
+    assert: The event returns without reconstructing state or reconciling GARM.
+    """
+    _assert_teardown_event_is_gated(ctx, garm_api, event_case)
+
+
+@pytest.mark.parametrize("event_case", _INHERITED_GUARDED_EVENTS)
+def test_inherited_events_skip_normal_reconciliation_during_teardown(
+    ctx: Context, garm_api: _GarmApiMocks, event_case: _EventCase
+):
+    """
+    arrange: No GARM units remain planned, and an inherited callback needs interception.
+    act: Emit the callback's underlying event.
+    assert: The pre-decorator guard returns without normal state construction or reconciliation.
+    """
+    _assert_teardown_event_is_gated(ctx, garm_api, event_case)
 
 
 def test_teardown_handlers_skip_charm_state_creation(ctx: Context, garm_api: _GarmApiMocks):
@@ -1180,6 +1402,31 @@ def test_teardown_handlers_skip_charm_state_creation(ctx: Context, garm_api: _Ga
     garm_api.auth.from_login.assert_not_called()
 
 
+def test_paas_charm_hook_contract_matches_pinned_base():
+    """
+    arrange: The installed paas-charm base exposes the supported 1.12.x hook names.
+    act: Validate the lifecycle hook contract.
+    assert: The compatibility check accepts the pinned base API.
+    """
+    charm_module._validate_paas_charm_hook_contract()
+
+
+def test_paas_charm_hook_contract_fails_loudly_when_base_changes(monkeypatch):
+    """
+    arrange: The base class no longer exposes the expected lifecycle hooks.
+    act: Validate the lifecycle hook contract.
+    assert: Validation fails before the base can register observers.
+    """
+
+    class IncompatibleBase:
+        pass
+
+    monkeypatch.setattr(charm_module.paas_charm.go, "Charm", IncompatibleBase)
+
+    with pytest.raises(RuntimeError, match="_on_config_changed"):
+        charm_module._validate_paas_charm_hook_contract()
+
+
 def test_teardown_update_status_skips_ingress_refresh(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: The local GARM service is tearing down.
@@ -1196,4 +1443,31 @@ def test_teardown_update_status_skips_ingress_refresh(ctx: Context, garm_api: _G
             out = manager.run()
 
     assert out is not None
+    garm_api.auth.from_login.assert_not_called()
+
+
+def test_rotate_secret_key_fails_before_state_creation_during_teardown(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: No GARM units remain planned and normal state construction is forbidden.
+    act: Run the rotate-secret-key action.
+    assert: The action fails before state construction, secret reset, or restart.
+    """
+    state = _state(planned_units=0)
+    with (
+        patch.object(
+            GarmCharm,
+            "_create_charm_state",
+            side_effect=AssertionError("charm state was created during teardown"),
+        ),
+        patch.object(GarmCharm, "restart") as restart,
+    ):
+        with ctx(ctx.on.action("rotate-secret-key"), state) as manager:
+            with patch.object(manager.charm._secret_storage, "reset_secret_key") as reset_secret:
+                with pytest.raises(ActionFailed, match="local teardown"):
+                    manager.run()
+
+    reset_secret.assert_not_called()
+    restart.assert_not_called()
     garm_api.auth.from_login.assert_not_called()
