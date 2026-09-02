@@ -3,13 +3,51 @@
 #
 # GARM end-to-end test workflow.
 #
-# Manual trigger only, and deliberately not a merge gate. Dispatch it with
-# --ref <branch> to run a feature branch's version.
+# Manual trigger, or called by the promotion pipeline. Deliberately not a merge gate.
+# Dispatch it with --ref <branch> to run a feature branch's version.
+#
+# With no inputs the suite deploys charms built from the checked-out ref. Given a
+# channel and revisions it deploys those published revisions from Charmhub instead,
+# which is how the promotion pipeline tests exactly the artifact it is about to
+# promote rather than a rebuild of the same source.
 
 name: GARM E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      charm-channel:
+        description: "Charmhub channel to deploy the charms from, e.g. latest/edge. Empty builds them."
+        required: false
+        type: string
+        default: ""
+      garm-revision:
+        description: "Published garm revision to test. Requires charm-channel."
+        required: false
+        type: string
+        default: ""
+      garm-configurator-revision:
+        description: "Published garm-configurator revision to test. Requires charm-channel."
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      # Defaulted explicitly: an omitted workflow_call input with no default is null,
+      # which no `== ''` comparison below would match, skipping the build on the
+      # default build-from-ref path.
+      charm-channel:
+        required: false
+        type: string
+        default: ""
+      garm-revision:
+        required: false
+        type: string
+        default: ""
+      garm-configurator-revision:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -28,8 +66,11 @@ concurrency:
 
 jobs:
   # Builds the rocks and charms the suite deploys, and publishes artifacts.build.yaml
-  # for opcli to fetch during the spread prepare.
+  # for opcli to fetch during the spread prepare. Skipped only when every charm the
+  # suite deploys comes from Charmhub: the deployment source is decided per charm by
+  # its revision input, so a run pinning just one of them still builds the other.
   build:
+    if: inputs.garm-revision == '' || inputs.garm-configurator-revision == ''
     uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.1
     permissions:
       contents: read
@@ -44,6 +85,10 @@ jobs:
     # runner is scarce, and starting early would only hold it idle until the artifacts
     # the spread prepare fetches actually exist.
     needs: [build]
+    # !cancelled() rather than always() so the Charmhub path still runs with the build
+    # job skipped, while a genuine build failure -- or a cancellation of the run itself
+    # while this job is still queued for the private-endpoint runner -- stops the suite.
+    if: ${{ !cancelled() && needs.build.result != 'failure' && needs.build.result != 'cancelled' }}
     permissions:
       contents: read
       packages: read
@@ -409,6 +454,14 @@ jobs:
           # Spread reads this from the host environment and the prepare script uses it
           # to download the build job's artifacts. Actions does not export it on its own.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # opcli's spread prepare fetches build artifacts whenever GITHUB_RUN_ID is
+          # set, and would wait out its timeout for a build job that never ran. Blanked
+          # only for this step, and only when the build was skipped, since the tunnel
+          # steps key their authorized_keys marker off the real run id.
+          GITHUB_RUN_ID: ${{ (inputs.garm-revision == '' || inputs.garm-configurator-revision == '') && github.run_id || '' }}
+          E2E_CHARM_CHANNEL: ${{ inputs.charm-channel }}
+          E2E_GARM_REVISION: ${{ inputs.garm-revision }}
+          E2E_GARM_CONFIGURATOR_REVISION: ${{ inputs.garm-configurator-revision }}
         run: |
           set -euo pipefail
 

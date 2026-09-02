@@ -38,6 +38,8 @@ from tests.integration.helpers import (
 GARM_API_PORT = 8080
 GARM_ADMIN_CREDENTIALS_LABEL = "garm-admin-credentials"
 PEBBLE_PREFIX = "PEBBLE_SOCKET=/charm/containers/app/pebble.socket /charm/bin/pebble"
+# Set by the promotion pipeline to deploy published charms instead of building them.
+CHARM_CHANNEL_ENV_VAR = "E2E_CHARM_CHANNEL"
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +93,67 @@ def juju() -> Iterator[jubilant.Juju]:
 
 
 @pytest.fixture(name="garm_charm_file", scope="module")
-def garm_charm_file_fixture(charm_paths) -> str:
-    """Return the path to the built GARM charm file."""
-    return charm_paths["garm"].path
+def garm_charm_file_fixture(request: pytest.FixtureRequest) -> str:
+    """Return the GARM charm to deploy: its Charmhub name, or the built charm file."""
+    return charm_under_test(request, "garm")
+
+
+def charm_under_test(request: pytest.FixtureRequest, charm_name: str) -> str:
+    """Return what to pass to ``juju deploy`` as the charm for *charm_name*.
+
+    With a Charmhub revision requested this is the charm's Charmhub name, deployed
+    alongside the kwargs from :func:`charm_deploy_kwargs`; otherwise it is the path
+    to the locally built charm file.
+    """
+    if charmhub_revision(charm_name) is None:
+        # Resolved lazily: charm_paths comes from opcli and raises without an
+        # artifacts.build.yaml, which a Charmhub-only run never produces.
+        return str(request.getfixturevalue("charm_paths")[charm_name].path)
+    return charm_name
+
+
+def charmhub_revision(charm_name: str) -> int | None:
+    """Return the published revision to test for *charm_name*, or None to build it.
+
+    Set by the promotion pipeline so that the end-to-end suite exercises exactly the
+    revision it is about to promote, rather than a rebuild of the same source.
+    """
+    env_var = f"E2E_{charm_name.replace('-', '_').upper()}_REVISION"
+    revision = os.environ.get(env_var, "").strip()
+    if not revision:
+        return None
+    if not os.environ.get(CHARM_CHANNEL_ENV_VAR, "").strip():
+        raise ValueError(f"{env_var} is set but {CHARM_CHANNEL_ENV_VAR} is not")
+    try:
+        return int(revision)
+    except ValueError as exc:
+        raise ValueError(f"{env_var} must be an integer, got {revision!r}") from exc
+
+
+def charm_deploy_kwargs(
+    charm_name: str, resources: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Return the ``juju deploy`` kwargs selecting where *charm_name* comes from.
+
+    Resources are dropped for a Charmhub deployment: the OCI images of a published
+    revision are published with it, and passing a locally built image would deploy a
+    different artifact than the one under test.
+    """
+    revision = charmhub_revision(charm_name)
+    if revision is not None:
+        return {
+            "channel": os.environ[CHARM_CHANNEL_ENV_VAR].strip(),
+            "revision": revision,
+        }
+    return {"resources": resources} if resources else {}
 
 
 @pytest.fixture(name="garm_app_image", scope="module")
-def garm_app_image_fixture(charm_resource_images) -> str:
-    """Return the GARM OCI image reference for the app-image resource."""
-    image = charm_resource_images["garm"]["app-image"]
+def garm_app_image_fixture(request: pytest.FixtureRequest) -> str:
+    """Return the GARM OCI image reference, or empty when deploying from Charmhub."""
+    if charmhub_revision("garm") is not None:
+        return ""
+    image = str(request.getfixturevalue("charm_resource_images")["garm"]["app-image"])
     logger.info("GARM app image: %s", image)
     return image
 
@@ -129,9 +183,9 @@ def webhook_gateway_app_image_fixture(charm_resource_images) -> str:
 
 
 @pytest.fixture(name="garm_configurator_charm_file", scope="module")
-def garm_configurator_charm_file_fixture(charm_paths) -> str:
-    """Return the path to the built garm-configurator charm file."""
-    return charm_paths["garm-configurator"].path
+def garm_configurator_charm_file_fixture(request: pytest.FixtureRequest) -> str:
+    """Return the garm-configurator charm to deploy: Charmhub name or built file."""
+    return charm_under_test(request, "garm-configurator")
 
 
 def _generate_admin_token() -> str:
@@ -561,7 +615,7 @@ def deploy_garm_app_no_integration_fixture(
     juju.deploy(
         charm=garm_charm_file,
         app=app_name,
-        resources={"app-image": garm_app_image},
+        **charm_deploy_kwargs("garm", {"app-image": garm_app_image}),
     )
 
     logger.info("Waiting for GARM app '%s' to block (missing postgresql)", app_name)
@@ -592,7 +646,7 @@ def deploy_garm_app_for_removal_fixture(
     juju.deploy(
         charm=garm_charm_file,
         app=app_name,
-        resources={"app-image": garm_app_image},
+        **charm_deploy_kwargs("garm", {"app-image": garm_app_image}),
     )
     juju.wait(
         lambda status: jubilant.all_blocked(status, app_name),
@@ -681,7 +735,7 @@ def _deploy_configurator(
     secret_uris: list[str] | None = None,
 ) -> str:
     """Deploy garm-configurator, grant required secrets, and configure it."""
-    juju.deploy(charm=charm_file, app=app_name)
+    juju.deploy(charm=charm_file, app=app_name, **charm_deploy_kwargs("garm-configurator"))
     juju.wait(
         lambda status: jubilant.all_blocked(status, app_name),
         timeout=6 * 60,
@@ -748,11 +802,6 @@ def deploy_any_charm_debug_ssh_app_fixture(juju: jubilant.Juju) -> str:
     )
     return app_name
 
-
-@pytest.fixture(scope="module", name="garm_configurator_charm_file")
-def garm_configurator_charm_file_fixture(charm_paths) -> str:
-    """Return the path to the built garm-configurator charm file."""
-    return charm_paths["garm-configurator"].path
 
 @pytest.fixture(scope="module", name="configurator_with_image")
 def deploy_configurator_with_image_fixture(

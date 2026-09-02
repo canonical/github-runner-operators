@@ -203,7 +203,10 @@ def deploy_e2e_scaleset_fixture(
     # fixed the name has to fit. The last six digits of the run id keep the label
     # unique across reruns, and the workflow serialises the suite repository-wide,
     # so no two scale sets are ever live at once.
-    run_id = os.environ.get("GITHUB_RUN_ID", uuid.uuid4().hex)
+    # The promotion pipeline blanks GITHUB_RUN_ID to stop opcli's spread prepare
+    # waiting on build artifacts it never produces, so an empty value has to fall
+    # back to a random suffix too, not just an unset one.
+    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
     label = f"e2e-{run_id[-6:]}"
     garm_app = garm_with_ingress
     creds = openstack_credentials
