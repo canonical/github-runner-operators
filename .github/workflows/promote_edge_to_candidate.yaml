@@ -1,0 +1,234 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# Daily edge -> candidate promotion.
+#
+# Every push to main publishes the charms to latest/edge. This runs the GARM
+# end-to-end suite against the published edge revisions and, when it passes,
+# releases those same revisions to latest/candidate, which is what production
+# pins to.
+#
+# garm and garm-configurator are promoted as a pair: the configurator delivers
+# GARM's scale-set configuration, so a revision of one is only ever validated
+# against the revision of the other it was tested with.
+
+name: Promote edge to candidate
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: >-
+          Run even when edge and candidate hold the same revision. Does not
+          promote a revision older than the one in candidate.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Deliberately not the garm-e2e group used by the suite this workflow calls:
+# holding that group here would leave the called workflow queueing behind its own
+# caller. This only stops two promotion runs on the same ref overlapping; keying on
+# the ref keeps a branch dry run from delaying the nightly promotion on main.
+concurrency:
+  group: promote-edge-to-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check whether edge is ahead of candidate
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.compare.outputs.should_run }}
+      garm_revision: ${{ steps.compare.outputs.garm_revision }}
+      garm_configurator_revision: ${{ steps.compare.outputs.garm_configurator_revision }}
+    steps:
+      - name: Compare the edge and candidate revisions
+        id: compare
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          CHARMS = ("garm", "garm-configurator")
+          API = "https://api.charmhub.io/v2/charms/info/{}?fields=channel-map"
+
+
+          def revision(charm, risk):
+              """Return the highest revision released to *risk*, or None if there is none.
+
+              The channel map holds one entry per channel and base, and an unreleased
+              channel is absent rather than empty, so this narrows to the latest track
+              on amd64, takes the highest revision left, and treats "no entry" as
+              "nothing released".
+              """
+              with urllib.request.urlopen(API.format(charm), timeout=30) as response:
+                  channel_map = json.load(response)["channel-map"]
+              revisions = [
+                  entry["revision"]["revision"]
+                  for entry in channel_map
+                  if entry["channel"]["risk"] == risk
+                  and entry["channel"]["track"] == "latest"
+                  and entry["channel"]["base"]["architecture"] == "amd64"
+              ]
+              return max(revisions) if revisions else None
+
+
+          force = os.environ.get("FORCE", "false") == "true"
+          summary = ["| Charm | Edge | Candidate | Ahead |", "| --- | --- | --- | --- |"]
+          edge_revisions = {}
+          ahead = False
+          missing = []
+          behind = []
+
+          for charm in CHARMS:
+              edge = revision(charm, "edge")
+              candidate = revision(charm, "candidate")
+              edge_revisions[charm] = edge
+              if edge is None:
+                  missing.append(charm)
+              if edge is not None and candidate is not None and edge < candidate:
+                  behind.append(charm)
+              is_ahead = edge is not None and (candidate is None or edge > candidate)
+              ahead = ahead or is_ahead
+              summary.append(
+                  f"| {charm} | {edge or 'none'} | {candidate or 'none'} | "
+                  f"{'yes' if is_ahead else 'no'} |"
+              )
+
+          # A candidate revision higher than edge can only come from a manual release, so
+          # promoting on top of it would silently roll production back. Force does not
+          # override this: re-releasing an older revision is a rollback, not a promotion.
+          should_run = (ahead or force) and not missing and not behind
+
+          if missing:
+              summary.append("")
+              summary.append(
+                  f"Nothing released to edge for {', '.join(missing)}; there is nothing "
+                  "to promote."
+              )
+          elif behind:
+              summary.append("")
+              summary.append(
+                  f"Candidate is ahead of edge for {', '.join(behind)}, so promoting would "
+                  "downgrade candidate. Release the newer revision to edge first, or roll "
+                  "candidate back manually with `charmcraft release`. Skipping."
+              )
+          elif force and not ahead:
+              summary.append("")
+              summary.append(
+                  "Edge and candidate hold the same revision, but the run was forced."
+              )
+          elif not ahead:
+              summary.append("")
+              summary.append(
+                  "Edge is not ahead of candidate for either charm, so the end-to-end "
+                  "suite would only re-test what candidate already holds. Skipping."
+              )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write("\n".join(summary) + "\n")
+
+          # Written by name rather than to stdout, so a print added while debugging
+          # cannot land in the output file and fail the step as a malformed line.
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"should_run={'true' if should_run else 'false'}\n")
+              handle.write(f"garm_revision={edge_revisions['garm'] or ''}\n")
+              handle.write(
+                  f"garm_configurator_revision={edge_revisions['garm-configurator'] or ''}\n"
+              )
+          PY
+
+  e2e:
+    name: End-to-end test
+    needs: [check]
+    if: needs.check.outputs.should_run == 'true'
+    uses: ./.github/workflows/garm_e2e.yaml
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    with:
+      charm-channel: latest/edge
+      garm-revision: ${{ needs.check.outputs.garm_revision }}
+      garm-configurator-revision: ${{ needs.check.outputs.garm_configurator_revision }}
+    # The suite needs the tenant, Vault and GitHub App credentials, none of which
+    # are passed to a called workflow unless they are inherited.
+    secrets: inherit
+
+  promote:
+    name: Release to candidate
+    needs: [check, e2e]
+    # A manual dispatch can pick any ref, and this job is the irreversible half of the
+    # workflow. Gating it on main leaves the run dispatchable from a branch to exercise
+    # the check and end-to-end jobs, without that dry run reaching Charmhub.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install charmcraft
+        # Pinned to a major track rather than latest: this job holds CHARMHUB_TOKEN and
+        # runs unattended at midnight, so a new charmcraft major must not arrive on its
+        # own. The track still carries patches; bump it deliberately.
+        run: sudo snap install charmcraft --classic --channel=4.x/stable
+
+      - name: Release the tested revisions to candidate
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          GARM_REVISION: ${{ needs.check.outputs.garm_revision }}
+          GARM_CONFIGURATOR_REVISION: ${{ needs.check.outputs.garm_configurator_revision }}
+        run: |
+          set -euo pipefail
+
+          # charmcraft reports a missing credential as an authentication failure, which
+          # reads like an expired token; on a nightly run nobody watches, say plainly
+          # that the secret is absent.
+          if [ -z "${CHARMCRAFT_AUTH}" ]; then
+            {
+              echo "## Promotion failed"
+              echo
+              echo "The \`CHARMHUB_TOKEN\` secret is empty or unset, so the tested revisions"
+              echo "could not be released. Refresh it with \`charmcraft login --export\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          released=()
+          # Not set -e alone: a failure after the first release leaves the two charms
+          # on different revisions in candidate, which needs saying out loud rather
+          # than being read out of a stack trace.
+          release() {
+            local charm="$1" revision="$2"
+            if ! charmcraft release "${charm}" --revision="${revision}" --channel=latest/candidate; then
+              {
+                echo "## Promotion failed"
+                echo
+                echo "Failed to release ${charm} revision ${revision} to candidate."
+                if [ ${#released[@]} -gt 0 ]; then
+                  echo
+                  echo "Already released: ${released[*]}. The candidate channel now holds"
+                  echo "mismatched revisions of garm and garm-configurator and needs a"
+                  echo "manual \`charmcraft release\` to line them up again."
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            released+=("${charm} r${revision}")
+          }
+
+          release garm "${GARM_REVISION}"
+          release garm-configurator "${GARM_CONFIGURATOR_REVISION}"
+
+          {
+            echo "## Released to candidate"
+            echo
+            echo "- garm revision ${GARM_REVISION}"
+            echo "- garm-configurator revision ${GARM_CONFIGURATOR_REVISION}"
+          } >> "$GITHUB_STEP_SUMMARY"
