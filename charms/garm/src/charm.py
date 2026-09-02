@@ -120,6 +120,36 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     return {}
 
 
+_PAAS_CHARM_HOOKS: typing.Final[tuple[str, ...]] = (
+    "_on_config_changed",
+    "_on_rotate_secret_key_action",
+    "_on_secret_changed",
+    "_on_secret_storage_relation_changed",
+    "_on_secret_storage_relation_departed",
+    "_on_postgresql_database_database_created",
+    "_on_postgresql_database_endpoints_changed",
+    "_on_postgresql_database_relation_broken",
+    "_on_ingress_ready",
+    "_on_ingress_revoked",
+    "_on_pebble_ready",
+    "_on_update_status",
+)
+
+
+def _validate_paas_charm_hook_contract() -> None:
+    """Fail loudly if the pinned paas-charm lifecycle hooks have changed."""
+    base_classes = paas_charm.go.Charm.__mro__
+    missing = [
+        hook
+        for hook in _PAAS_CHARM_HOOKS
+        if not any(hook in base_class.__dict__ for base_class in base_classes)
+    ]
+    if missing:
+        raise RuntimeError(
+            "Unsupported paas-charm lifecycle API; missing expected hooks: " + ", ".join(missing)
+        )
+
+
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -129,6 +159,7 @@ class GarmCharm(paas_charm.go.Charm):
         Args:
             args: Passed through to CharmBase.
         """
+        _validate_paas_charm_hook_contract()
         super().__init__(*args)
         for event in (
             self.on.install,
@@ -191,8 +222,9 @@ class GarmCharm(paas_charm.go.Charm):
         """Route an inherited framework event through GARM's teardown gate."""
         self._reconcile(event)
 
-    # PaasCharm.__init__ resolves these hook names dynamically. Aliasing them keeps the
-    # teardown check before the inherited decorators without registering duplicate observers.
+    # PaasCharm.__init__ resolves these hook names dynamically. These aliases keep the
+    # teardown check before block_if_invalid_data without registering duplicate observers.
+    # The compatibility check above makes this adapter fail loudly when the base API changes.
     _on_config_changed = _route_reconcile
     _on_secret_changed = _route_reconcile
     _on_secret_storage_relation_changed = _route_reconcile
