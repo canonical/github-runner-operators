@@ -454,16 +454,24 @@ jobs:
           # Spread reads this from the host environment and the prepare script uses it
           # to download the build job's artifacts. Actions does not export it on its own.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # opcli's spread prepare fetches build artifacts whenever GITHUB_RUN_ID is
-          # set, and would wait out its timeout for a build job that never ran. Blanked
-          # only for this step, and only when the build was skipped, since the tunnel
-          # steps key their authorized_keys marker off the real run id.
-          GITHUB_RUN_ID: ${{ (inputs.garm-revision == '' || inputs.garm-configurator-revision == '') && github.run_id || '' }}
+          # Whether the build job ran, and so whether there are artifacts to wait for.
+          # Carried as a variable of its own because GITHUB_RUN_ID cannot be set here;
+          # see the unset below.
+          BUILD_ARTIFACTS_EXPECTED: ${{ (inputs.garm-revision == '' || inputs.garm-configurator-revision == '') && 'true' || 'false' }}
           E2E_CHARM_CHANNEL: ${{ inputs.charm-channel }}
           E2E_GARM_REVISION: ${{ inputs.garm-revision }}
           E2E_GARM_CONFIGURATOR_REVISION: ${{ inputs.garm-configurator-revision }}
         run: |
           set -euo pipefail
+
+          # opcli's spread prepare fetches build artifacts whenever GITHUB_RUN_ID is set,
+          # and would wait out its timeout for a build job that never ran. Actions reserves
+          # the GITHUB_* names and re-injects its own value over anything the `env:` above
+          # sets, so this has to be unset in the shell to take effect. Scoped to this step,
+          # so the tunnel steps keep keying their authorized_keys marker off the real id.
+          if [ "${BUILD_ARTIFACTS_EXPECTED}" = "false" ]; then
+            unset GITHUB_RUN_ID
+          fi
 
           # Ask opcli for the selector rather than writing it out here, so a rename in
           # spread.yaml cannot leave this step silently selecting nothing.
