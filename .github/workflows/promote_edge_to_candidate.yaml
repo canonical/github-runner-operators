@@ -211,6 +211,7 @@ jobs:
 
           expected_revision = int(os.environ["GARM_REVISION"])
           status = json.load(os.fdopen(3))
+          matched_revision = False
           for track in status:
               if track["track"] != "latest":
                   continue
@@ -224,12 +225,20 @@ jobs:
                           or int(release["revision"]) != expected_revision
                       ):
                           continue
+                      matched_revision = True
                       for resource in release.get("resources") or []:
                           if resource["name"] == "app-image":
                               print(resource["revision"])
                               raise SystemExit
 
-          raise SystemExit("No app-image resource is attached to garm latest/edge")
+          if not matched_revision:
+              raise SystemExit(
+                  f"No garm latest/edge release matches revision {expected_revision}"
+              )
+          raise SystemExit(
+              f"No app-image resource is attached to garm latest/edge revision "
+              f"{expected_revision}"
+          )
           PY
           ); then
             {
