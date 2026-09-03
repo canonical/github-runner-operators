@@ -205,12 +205,11 @@ jobs:
           fi
 
           GARM_APP_IMAGE_REVISION=$(
-            charmcraft status garm --format=json --quiet |
-              python3 - <<'PY'
+            python3 - 3< <(charmcraft status garm --format=json --quiet) <<'PY'
           import json
-          import sys
+          import os
 
-          status = json.load(sys.stdin)
+          status = json.load(os.fdopen(3))
           for track in status:
               if track["track"] != "latest":
                   continue
