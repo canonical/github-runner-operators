@@ -204,13 +204,44 @@ jobs:
             exit 1
           fi
 
+          GARM_APP_IMAGE_REVISION=$(
+            charmcraft status garm --format=json --quiet |
+              python3 -c '
+          import json
+          import sys
+
+          status = json.load(sys.stdin)
+          for track in status:
+              if track["track"] != "latest":
+                  continue
+              for mapping in track["mappings"]:
+                  base = mapping["base"] or {}
+                  if base.get("architecture") != "amd64":
+                      continue
+                  for release in mapping["releases"]:
+                      if release["channel"] != "edge":
+                          continue
+                      for resource in release.get("resources") or []:
+                          if resource["name"] == "app-image":
+                              print(resource["revision"])
+                              raise SystemExit
+
+          raise SystemExit("No app-image resource is attached to garm latest/edge")
+          '
+          )
+
           released=()
           # Not set -e alone: a failure after the first release leaves the two charms
           # on different revisions in candidate, which needs saying out loud rather
           # than being read out of a stack trace.
           release() {
-            local charm="$1" revision="$2"
-            if ! charmcraft release "${charm}" --revision="${revision}" --channel=latest/candidate; then
+            local charm="$1" revision="$2" resource_revision="${3:-}"
+            local resource_args=()
+            if [ -n "${resource_revision}" ]; then
+              resource_args=(--resource="app-image:${resource_revision}")
+            fi
+            if ! charmcraft release "${charm}" --revision="${revision}" \
+              --channel=latest/candidate "${resource_args[@]}"; then
               {
                 echo "## Promotion failed"
                 echo
@@ -227,7 +258,7 @@ jobs:
             released+=("${charm} r${revision}")
           }
 
-          release garm "${GARM_REVISION}"
+          release garm "${GARM_REVISION}" "${GARM_APP_IMAGE_REVISION}"
           release garm-configurator "${GARM_CONFIGURATOR_REVISION}"
 
           {
