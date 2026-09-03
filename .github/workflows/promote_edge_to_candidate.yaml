@@ -204,7 +204,7 @@ jobs:
             exit 1
           fi
 
-          GARM_APP_IMAGE_REVISION=$(
+          if ! GARM_APP_IMAGE_REVISION=$(
             python3 - 3< <(charmcraft status garm --format=json --quiet) <<'PY'
           import json
           import os
@@ -227,7 +227,14 @@ jobs:
 
           raise SystemExit("No app-image resource is attached to garm latest/edge")
           PY
-          )
+          ); then
+            {
+              echo "## Promotion failed"
+              echo
+              echo "Could not resolve the app-image resource revision from garm latest/edge."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
           released=()
           # Not set -e alone: a failure after the first release leaves the two charms
