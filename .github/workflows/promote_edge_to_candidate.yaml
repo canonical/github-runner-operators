@@ -154,7 +154,11 @@ jobs:
     uses: ./.github/workflows/garm_e2e.yaml
     permissions:
       contents: read
-      packages: read
+      # The called workflow's build job needs packages: write to publish the rocks, and
+      # a called job cannot hold more than its caller grants. GitHub checks that when it
+      # creates the run, before any `if`, so granting less fails the whole run at startup
+      # even on the promotion path, where pinned revisions skip that build job.
+      packages: write
       actions: read
     with:
       charm-channel: latest/edge

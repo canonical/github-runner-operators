@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from github import GithubException
+from github.PaginatedList import PaginatedListBase
 
 from tests.integration.helpers import (
     INTEGRATION_APP_ENV,
@@ -41,13 +42,33 @@ class _FakeWorkflow:
         self._dispatch_creates_run = dispatch_creates_run
         self.dispatches: list[dict[str, Any]] = []
 
-    def get_runs(self, *, branch: str, event: str) -> list[_FakeRun]:
-        return list(self._runs)
+    def get_runs(self, *, branch: str, event: str) -> "_FakeRunListing":
+        return _FakeRunListing(list(self._runs))
 
     def create_dispatch(self, *, ref: str, inputs: dict[str, Any], throw: bool = True) -> None:
         self.dispatches.append({"ref": ref, "inputs": inputs})
         if self._dispatch_creates_run:
             self._runs.insert(0, _FakeRun(self._next_id))
+
+
+class _FakeRunListing(PaginatedListBase):
+    """Stands in for the paginated listing get_runs returns.
+
+    A plain list would not do: PyGithub serves listings lazily, and it is that laziness
+    -- not the ids -- that the helper has to be careful with.
+    """
+
+    def __init__(self, runs: list[_FakeRun]):
+        super().__init__()
+        self._runs = runs
+        self._fetched = False
+
+    def _couldGrow(self) -> bool:
+        return not self._fetched
+
+    def _fetchNextPage(self) -> list[_FakeRun]:
+        self._fetched = True
+        return self._runs
 
 
 class _FakeRepo:
@@ -139,6 +160,28 @@ def test_dispatch_workflow_returns_the_new_run_id(no_sleep):
     assert workflow.dispatches == [
         {"ref": "feature-branch", "inputs": {"runner-label": "e2e-123456"}}
     ]
+
+
+def test_dispatch_workflow_returns_the_new_run_id_on_a_branch_with_no_history(no_sleep):
+    """
+    arrange: A workflow whose listing for this branch is empty, as it is the first time
+        the branch is dispatched on.
+    act: Dispatch through dispatch_workflow.
+    assert: The new run's id is returned, so a first dispatch on a fresh branch works --
+        taking a snapshot of an empty listing must not fail.
+    """
+    workflow = _FakeWorkflow(existing_ids=[])
+    client = _fake_client(_FakeRepo(workflow=workflow))
+
+    run_id = dispatch_workflow(
+        github_client=client,
+        repo_path="canonical/github-runner-operators",
+        workflow_path=".github/workflows/e2e.yaml",
+        ref="brand-new-branch",
+        inputs={"runner-label": "e2e-123456"},
+    )
+
+    assert run_id == 1
 
 
 def test_dispatch_workflow_fails_when_the_dispatch_is_rejected(no_sleep):
