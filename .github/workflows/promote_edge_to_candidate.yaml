@@ -206,7 +206,7 @@ jobs:
 
           GARM_APP_IMAGE_REVISION=$(
             charmcraft status garm --format=json --quiet |
-              python3 -c '
+              python3 - <<'PY'
           import json
           import sys
 
@@ -227,7 +227,7 @@ jobs:
                               raise SystemExit
 
           raise SystemExit("No app-image resource is attached to garm latest/edge")
-          '
+          PY
           )
 
           released=()
