@@ -465,6 +465,10 @@ jobs:
           set -euo pipefail
 
           if [ "${BUILD_ARTIFACTS_EXPECTED}" = "false" ]; then
+            # Both of these say the same thing to opcli -- "this run built nothing locally,
+            # test against Charmhub" -- which it has no supported way to express. Drop them
+            # for a real opt-out: https://github.com/canonical/charm-ci/issues/142
+
             # opcli's spread prepare fetches build artifacts whenever GITHUB_RUN_ID is set,
             # and would wait out its timeout for a build job that never ran. Actions reserves
             # the GITHUB_* names and re-injects its own value over anything the `env:` above
