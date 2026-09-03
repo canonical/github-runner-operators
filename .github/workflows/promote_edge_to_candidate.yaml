@@ -209,6 +209,7 @@ jobs:
           import json
           import os
 
+          expected_revision = int(os.environ["GARM_REVISION"])
           status = json.load(os.fdopen(3))
           for track in status:
               if track["track"] != "latest":
@@ -218,7 +219,10 @@ jobs:
                   if base.get("architecture") != "amd64":
                       continue
                   for release in mapping["releases"]:
-                      if release["channel"] != "edge":
+                      if (
+                          release["channel"] != "edge"
+                          or int(release["revision"]) != expected_revision
+                      ):
                           continue
                       for resource in release.get("resources") or []:
                           if resource["name"] == "app-image":
