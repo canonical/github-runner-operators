@@ -204,13 +204,43 @@ jobs:
             exit 1
           fi
 
+          # Captured through command substitution rather than redirected to a file:
+          # charmcraft fails with an internal "Bad file descriptor" error when its stdout
+          # is a plain file. Run on its own rather than feeding python directly, so a
+          # Charmhub failure is reported as itself: the previous process substitution
+          # dropped charmcraft's exit status altogether, and a pipe would only have
+          # failed on python's parse error, which describes the empty input rather than
+          # the auth or network failure that caused it. `--quiet` is deliberately absent:
+          # it suppresses the JSON payload while still exiting 0, which is what made this
+          # step fail with empty input.
+          if ! GARM_STATUS=$(charmcraft status garm --format=json); then
+            {
+              echo "## Promotion failed"
+              echo
+              echo "\`charmcraft status garm\` failed, so the app-image resource revision"
+              echo "attached to the tested revision could not be read from Charmhub."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
           if ! GARM_APP_IMAGE_REVISION=$(
-            python3 - 3< <(charmcraft status garm --format=json --quiet) <<'PY'
+            python3 - 3<<<"${GARM_STATUS}" \
+              2> "${RUNNER_TEMP}/lookup-error.txt" <<'PY'
           import json
           import os
 
+          # `charmcraft status --format=json` reports a release channel by its full name,
+          # `<track>/<risk>`, so matching on the bare risk would silently never hit. A
+          # branch release carries a third segment and is deliberately not a match.
+          EDGE_CHANNEL = "latest/edge"
+
           expected_revision = int(os.environ["GARM_REVISION"])
           status = json.load(os.fdopen(3))
+
+          # An unpublished charm is reported as `{}` rather than an empty list.
+          if not isinstance(status, list):
+              raise SystemExit("Charmhub reports nothing released for garm")
+
           matched_revision = False
           for track in status:
               if track["track"] != "latest":
@@ -220,8 +250,11 @@ jobs:
                   if base.get("architecture") != "amd64":
                       continue
                   for release in mapping["releases"]:
+                      # A channel that is closed, or merely tracking the one below it,
+                      # is listed with a null revision rather than being left out.
                       if (
-                          release["channel"] != "edge"
+                          release["channel"] != EDGE_CHANNEL
+                          or release["revision"] is None
                           or int(release["revision"]) != expected_revision
                       ):
                           continue
@@ -233,18 +266,26 @@ jobs:
 
           if not matched_revision:
               raise SystemExit(
-                  f"No garm latest/edge release matches revision {expected_revision}"
+                  f"No {EDGE_CHANNEL} amd64 release of garm is at revision "
+                  f"{expected_revision}"
               )
           raise SystemExit(
-              f"No app-image resource is attached to garm latest/edge revision "
+              f"No app-image resource is attached to garm {EDGE_CHANNEL} revision "
               f"{expected_revision}"
           )
           PY
           ); then
+            # Captured rather than left on stderr so the reason reaches the summary, and
+            # replayed here so it still shows up next to the failing command in the log.
+            cat "${RUNNER_TEMP}/lookup-error.txt" >&2
             {
               echo "## Promotion failed"
               echo
-              echo "Could not resolve the app-image resource revision from garm latest/edge."
+              echo "Could not resolve the app-image resource revision from garm latest/edge:"
+              echo
+              echo '```'
+              cat "${RUNNER_TEMP}/lookup-error.txt"
+              echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -283,6 +324,6 @@ jobs:
           {
             echo "## Released to candidate"
             echo
-            echo "- garm revision ${GARM_REVISION}"
+            echo "- garm revision ${GARM_REVISION} with app-image ${GARM_APP_IMAGE_REVISION}"
             echo "- garm-configurator revision ${GARM_CONFIGURATOR_REVISION}"
           } >> "$GITHUB_STEP_SUMMARY"
