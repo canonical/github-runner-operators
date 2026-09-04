@@ -118,20 +118,20 @@ def test_garm_version(
 ):
     """
     arrange: The GARM charm is deployed and active.
-    act: Run `garm -version` inside the workload container.
+    act: Run `garm --version` inside the workload container.
     assert: The command exits successfully and prints a version string.
     """
     unit = f"{garm_app}/0"
-    logger.info("Running garm -version in unit %s", unit)
-    result = _pebble_exec(juju, unit, f"{GARM_BINARY} -version")
+    logger.info("Running garm --version in unit %s", unit)
+    result = _pebble_exec(juju, unit, f"{GARM_BINARY} --version")
 
     version_output = result.stdout.strip()
     logger.info("GARM version: %s", version_output)
-    assert version_output, "Expected non-empty version output from garm -version"
+    assert version_output, "Expected non-empty version output from garm --version"
     # TODO: Once garm-rockcraft.yaml switches from source-commit to source-tag (>= v0.2.2),
     # tighten this assertion to require version_output.startswith("v").
     # Currently the ROCK is built from a shallow clone of a pinned commit, so git describe
-    # falls back to an abbreviated SHA (e.g. "47811d0") instead of a semver tag.
+    # falls back to an abbreviated SHA (e.g. "e03045f") instead of a semver tag.
     is_semver = version_output.startswith("v") or "." in version_output
     is_commit_sha = all(c in "0123456789abcdef" for c in version_output)
     assert is_semver or is_commit_sha, (

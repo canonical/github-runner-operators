@@ -11,6 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-09-04
 
 - `garm`: bump the pinned GARM commit to pick up a fix for the scale set pseudo pool ID. GARM previously tagged OpenStack instances with a pool ID built from the scale set name, so a name over 10 characters produced a `garm-pool-id` server tag exceeding Nova's 60-character limit, failing every instance creation ([cloudbase/garm-provider-openstack#34](https://github.com/cloudbase/garm-provider-openstack/issues/34)). GARM now derives a fixed-length UUID for the pool ID instead, so scale set name length no longer affects the tag.
+- `garm`: fix GARM failing to start after the above bump. The pinned GARM commit range also crosses a CLI rewrite from Go's `flag` package to `cobra`, which requires the double-dash `--config` spelling; the entrypoint's `-config` invocation used to work under `flag` but is now silently misparsed as an unrecognized command by `cobra`, crash-looping the workload. The entrypoint now execs GARM with `--config`.
 
 ## 2026-08-24
 
