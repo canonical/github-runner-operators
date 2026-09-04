@@ -26,14 +26,6 @@ on:
         required: false
         default: false
         type: boolean
-      dry_run:
-        description: >-
-          Resolve the revisions and print the release commands without releasing
-          anything, and skip the end-to-end suite. Forced on for any ref other
-          than main, so a branch can only ever dry run.
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -158,10 +150,7 @@ jobs:
   e2e:
     name: End-to-end test
     needs: [check]
-    # A dry run exercises the release step, not the charms, so it skips the half-hour
-    # suite and the OpenStack tenant it needs rather than paying for both to reach a
-    # step that releases nothing.
-    if: needs.check.outputs.should_run == 'true' && !inputs.dry_run
+    if: needs.check.outputs.should_run == 'true'
     uses: ./.github/workflows/garm_e2e.yaml
     permissions:
       contents: read
@@ -182,23 +171,11 @@ jobs:
   promote:
     name: Release to candidate
     needs: [check, e2e]
-    # `needs` alone would skip this whenever the suite is skipped, which is the normal
-    # shape of a dry run, so the dependency is spelled out instead: a real promotion
-    # still demands a passing suite, while a dry run only needs the revisions the check
-    # job resolved. `!cancelled()` rather than `always()` keeps a cancelled run from
-    # carrying on into the release.
-    if: >-
-      !cancelled()
-      && needs.check.outputs.should_run == 'true'
-      && (needs.e2e.result == 'success' || inputs.dry_run)
-      && (github.ref == 'refs/heads/main' || inputs.dry_run)
+    # A manual dispatch can pick any ref, and this job is the irreversible half of the
+    # workflow. Gating it on main leaves the run dispatchable from a branch to exercise
+    # the check and end-to-end jobs, without that dry run reaching Charmhub.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    env:
-      # A manual dispatch can pick any ref, and this job is the irreversible half of the
-      # workflow. Deciding this here rather than trusting the input means a branch is
-      # held to a dry run whatever it was dispatched with, so the only way to reach
-      # Charmhub is main with the input off.
-      DRY_RUN: ${{ github.ref != 'refs/heads/main' || inputs.dry_run == true }}
     steps:
       - name: Install charmcraft
         # Pinned to a major track rather than latest: this job holds CHARMHUB_TOKEN and
@@ -320,12 +297,6 @@ jobs:
             if [ -n "${resource_revision}" ]; then
               resource_args=(--resource="app-image:${resource_revision}")
             fi
-            if [ "${DRY_RUN}" = "true" ]; then
-              echo "charmcraft release ${charm} --revision=${revision}" \
-                "--channel=latest/candidate ${resource_args[*]}"
-              released+=("${charm} r${revision}")
-              return
-            fi
             if ! charmcraft release "${charm}" --revision="${revision}" \
               --channel=latest/candidate "${resource_args[@]}"; then
               {
@@ -347,14 +318,8 @@ jobs:
           release garm "${GARM_REVISION}" "${GARM_APP_IMAGE_REVISION}"
           release garm-configurator "${GARM_CONFIGURATOR_REVISION}"
 
-          if [ "${DRY_RUN}" = "true" ]; then
-            heading="Dry run: nothing released"
-          else
-            heading="Released to candidate"
-          fi
-
           {
-            echo "## ${heading}"
+            echo "## Released to candidate"
             echo
             echo "- garm revision ${GARM_REVISION} with app-image ${GARM_APP_IMAGE_REVISION}"
             echo "- garm-configurator revision ${GARM_CONFIGURATOR_REVISION}"
