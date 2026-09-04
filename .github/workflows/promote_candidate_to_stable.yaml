@@ -65,6 +65,8 @@ jobs:
                   fail(f"Charmhub request for {charm_name} failed with HTTP {exc.code}.")
               except urllib.error.URLError as exc:
                   fail(f"Charmhub request for {charm_name} failed: {exc.reason}.")
+              except json.JSONDecodeError as exc:
+                  fail(f"Charmhub response for {charm_name} was not valid JSON: {exc}.")
               return payload.get("channel-map", [])
 
 
@@ -209,7 +211,9 @@ jobs:
           if [ -z "$CHARMCRAFT_AUTH" ]; then
             echo "::error::CHARMHUB_STABLE_TOKEN is not set on the charmhub-stable environment." \
                  "Refusing to release without it, since an empty secret would otherwise be" \
-                 "indistinguishable from a missing/misconfigured approval gate."
+                 "indistinguishable from a missing/misconfigured approval gate. The secret" \
+                 "must hold exported credentials from 'charmcraft login --export', not a" \
+                 "raw API token, matching the repo's existing CHARMHUB_TOKEN convention."
             exit 1
           fi
 
