@@ -133,7 +133,7 @@ jobs:
                   {
                       "charm": charm_name,
                       "candidate_revision": "n/a" if candidate_revision is None else str(candidate_revision),
-                      "stable_revision": str(stable_revision),
+                      "stable_revision": "n/a" if stable is None else str(stable_revision),
                       "candidate_age": candidate_age,
                       "remaining_soak": remaining_soak,
                       "eligible": "yes" if charm_eligible else "no",
@@ -180,14 +180,24 @@ jobs:
 
       - name: Release both charms atomically
         env:
-          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          # A dedicated environment-scoped secret, not the repo-level CHARMHUB_TOKEN used
+          # by the edge publish workflow: that secret exists independently of the
+          # charmhub-stable environment, so reusing it here would let this job release to
+          # stable with valid credentials even if the environment was never created and
+          # the approval gate silently failed to pause the run.
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_STABLE_TOKEN }}
           GARM_REVISION: ${{ needs.check.outputs.garm_revision }}
           GARM_CONFIGURATOR_REVISION: ${{ needs.check.outputs.garm_configurator_revision }}
         run: |
           set -euo pipefail
 
-          # The environment is the human approval gate; if it does not exist, GitHub
-          # treats this as plain metadata and the release job will not pause.
+          if [ -z "$CHARMCRAFT_AUTH" ]; then
+            echo "::error::CHARMHUB_STABLE_TOKEN is not set on the charmhub-stable environment." \
+                 "Refusing to release without it, since an empty secret would otherwise be" \
+                 "indistinguishable from a missing/misconfigured approval gate."
+            exit 1
+          fi
+
           released=0
 
           on_error() {
