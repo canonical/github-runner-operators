@@ -110,6 +110,8 @@ jobs:
 
               candidate_revision = candidate.get("revision", {}).get("revision") if candidate else None
               stable_revision = stable.get("revision", {}).get("revision") if stable else 0
+              if stable is not None and stable_revision is None:
+                  fail(f"Charmhub's stable entry for {charm_name} is missing a revision number.")
 
               if candidate is None:
                   charm_eligible = False
