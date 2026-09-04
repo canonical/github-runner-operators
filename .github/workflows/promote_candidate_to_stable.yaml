@@ -1,0 +1,249 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# Weekly promotion workflow for moving the GARM charms from candidate to stable.
+
+name: Promote candidate charms to stable
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOAK_DAYS: 7
+
+# A dispatch while the scheduled run is parked at the approval gate would otherwise
+# leave two runs able to release the same revisions.
+concurrency:
+  group: promote-candidate-to-stable
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check promotion eligibility
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.check.outputs.eligible }}
+      garm_revision: ${{ steps.check.outputs.garm_revision }}
+      garm_configurator_revision: ${{ steps.check.outputs.garm_configurator_revision }}
+    steps:
+      - name: Check Charmhub candidate soak
+        id: check
+        run: |
+          set -euo pipefail
+
+          python3 - <<'SCRIPT'
+          import datetime
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+
+          CHARM_NAMES = ("garm", "garm-configurator")
+          SOAK_DAYS = float(os.environ["SOAK_DAYS"])
+          NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def fetch_channel_map(charm_name):
+              url = f"https://api.charmhub.io/v2/charms/info/{charm_name}?fields=channel-map"
+              request = urllib.request.Request(url)
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      payload = json.load(response)
+              except urllib.error.HTTPError as exc:
+                  fail(f"Charmhub request for {charm_name} failed with HTTP {exc.code}.")
+              except urllib.error.URLError as exc:
+                  fail(f"Charmhub request for {charm_name} failed: {exc.reason}.")
+              except json.JSONDecodeError as exc:
+                  fail(f"Charmhub response for {charm_name} was not valid JSON: {exc}.")
+              return payload.get("channel-map", [])
+
+
+          def best_entry(channel_map, risk):
+              entries = []
+              for entry in channel_map:
+                  channel = entry.get("channel", {})
+                  base = channel.get("base", {})
+                  if (
+                      channel.get("track") == "latest"
+                      and base.get("architecture") == "amd64"
+                      and channel.get("risk") == risk
+                  ):
+                      entries.append(entry)
+              if not entries:
+                  return None
+              return max(entries, key=lambda entry: entry.get("revision", {}).get("revision", 0))
+
+
+          def age_days(released_at):
+              # fromisoformat() rejects a trailing "Z"; Charmhub returns RFC3339 timestamps,
+              # which allow it, so normalize before parsing rather than let an unexpected
+              # format crash with a bare traceback instead of a clear ::error::.
+              try:
+                  released = datetime.datetime.fromisoformat(released_at.replace("Z", "+00:00"))
+              except ValueError:
+                  fail(f"Could not parse release timestamp {released_at!r} returned by Charmhub.")
+              if released.tzinfo is None:
+                  fail(f"Release timestamp {released_at!r} from Charmhub has no timezone.")
+              delta = NOW - released.astimezone(datetime.timezone.utc)
+              return delta.total_seconds() / 86400.0
+
+
+          rows = []
+          eligible = True
+          outputs = {}
+          held_back = []
+
+          for charm_name in CHARM_NAMES:
+              channel_map = fetch_channel_map(charm_name)
+              candidate = best_entry(channel_map, "candidate")
+              stable = best_entry(channel_map, "stable")
+
+              candidate_revision = candidate.get("revision", {}).get("revision") if candidate else None
+              stable_revision = stable.get("revision", {}).get("revision") if stable else 0
+              if stable is not None and stable_revision is None:
+                  fail(f"Charmhub's stable entry for {charm_name} is missing a revision number.")
+
+              if candidate is None:
+                  charm_eligible = False
+                  candidate_age = "n/a"
+                  remaining_soak = "n/a"
+                  held_back.append(f"{charm_name}: no candidate release is available to promote.")
+              else:
+                  if candidate_revision is None:
+                      fail(f"Charmhub's candidate entry for {charm_name} is missing a revision number.")
+                  released_at = candidate.get("channel", {}).get("released-at")
+                  if released_at is None:
+                      fail(f"Charmhub's candidate entry for {charm_name} is missing a release timestamp.")
+                  candidate_age_value = age_days(released_at)
+                  candidate_age = f"{candidate_age_value:.1f}"
+                  soak_remaining = max(0.0, SOAK_DAYS - candidate_age_value)
+                  remaining_soak = f"{soak_remaining:.1f}"
+                  charm_eligible = (
+                      candidate_age_value >= SOAK_DAYS
+                      and candidate_revision != stable_revision
+                  )
+                  if not charm_eligible:
+                      if candidate_revision == stable_revision:
+                          held_back.append(
+                              f"{charm_name}: candidate revision {candidate_revision} is already in stable."
+                          )
+                      else:
+                          held_back.append(
+                              f"{charm_name}: candidate revision {candidate_revision} is only {candidate_age_value:.1f} days old; "
+                              f"{soak_remaining:.1f} days of soak remain."
+                          )
+
+              outputs[f"{charm_name.replace('-', '_')}_revision"] = "" if candidate_revision is None else str(candidate_revision)
+              rows.append(
+                  {
+                      "charm": charm_name,
+                      "candidate_revision": "n/a" if candidate_revision is None else str(candidate_revision),
+                      "stable_revision": "n/a" if stable is None else str(stable_revision),
+                      "candidate_age": candidate_age,
+                      "remaining_soak": remaining_soak,
+                      "eligible": "yes" if charm_eligible else "no",
+                  }
+              )
+              eligible = eligible and charm_eligible
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output_file:
+              output_file.write(f"eligible={'true' if eligible else 'false'}\n")
+              for key, value in outputs.items():
+                  output_file.write(f"{key}={value}\n")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary_file:
+              summary_file.write("## Promotion check\n\n")
+              summary_file.write(
+                  "| Charm | Candidate revision | Current stable revision | Candidate age (days) | Remaining soak (days) | Eligible |\n"
+              )
+              summary_file.write("| --- | --- | --- | --- | --- | --- |\n")
+              for row in rows:
+                  summary_file.write(
+                      f"| {row['charm']} | {row['candidate_revision']} | {row['stable_revision']} | "
+                      f"{row['candidate_age']} | {row['remaining_soak']} | {row['eligible']} |\n"
+                  )
+              summary_file.write("\n")
+              summary_file.write(f"Promotion eligible: {'true' if eligible else 'false'}\n")
+              if held_back:
+                  summary_file.write("\n### Held back\n\n")
+                  for item in held_back:
+                      summary_file.write(f"- {item}\n")
+              else:
+                  summary_file.write("\nBoth charms cleared the soak window and their candidate revisions differ from stable.\n")
+
+          SCRIPT
+
+  release:
+    name: Release to stable
+    needs: [check]
+    if: needs.check.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    environment: charmhub-stable
+    steps:
+      - name: Install Charmcraft
+        run: sudo snap install charmcraft --classic
+
+      - name: Release both charms atomically
+        env:
+          # A dedicated environment-scoped secret, not the repo-level CHARMHUB_TOKEN used
+          # by the edge publish workflow: that secret exists independently of the
+          # charmhub-stable environment, so reusing it here would let this job release to
+          # stable with valid credentials even if the environment was never created and
+          # the approval gate silently failed to pause the run.
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_STABLE_TOKEN }}
+          GARM_REVISION: ${{ needs.check.outputs.garm_revision }}
+          GARM_CONFIGURATOR_REVISION: ${{ needs.check.outputs.garm_configurator_revision }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$CHARMCRAFT_AUTH" ]; then
+            echo "::error::CHARMHUB_STABLE_TOKEN is not set on the charmhub-stable environment." \
+                 "Refusing to release without it, since an empty secret would otherwise be" \
+                 "indistinguishable from a missing/misconfigured approval gate. The secret" \
+                 "must hold exported credentials from 'charmcraft login --export', not a" \
+                 "raw API token, matching the repo's existing CHARMHUB_TOKEN convention."
+            exit 1
+          fi
+
+          released=0
+
+          on_error() {
+            status=$?
+            {
+              echo ""
+              echo "## Release failed"
+              echo ""
+              if [ "$released" -eq 1 ]; then
+                echo "The stable channels are now inconsistent and need manual repair."
+              else
+                echo "No charms were released, so stable remains consistent."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          }
+
+          trap on_error ERR
+
+          charmcraft release garm --revision="$GARM_REVISION" --channel=latest/stable
+          released=1
+
+          charmcraft release garm-configurator --revision="$GARM_CONFIGURATOR_REVISION" --channel=latest/stable
+
+          {
+            echo "## Released to stable"
+            echo
+            echo "- garm: revision ${GARM_REVISION} -> latest/stable"
+            echo "- garm-configurator: revision ${GARM_CONFIGURATOR_REVISION} -> latest/stable"
+          } >> "$GITHUB_STEP_SUMMARY"
