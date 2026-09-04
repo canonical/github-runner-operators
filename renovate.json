@@ -33,6 +33,15 @@
         "canonical/charm-ci",
         "*charm-ci*"
       ]
+    },
+    {
+      "groupName": "opentelemetry-go",
+      "description": "Bump the otel core/exporter modules together with the contrib bridges/instrumentation that compile against their API (e.g. otelslog against otel/log), since Renovate otherwise groups them separately by source repo and a skewed bridge version fails the build.",
+      "matchPackageNames": [
+        "go.opentelemetry.io/otel",
+        "go.opentelemetry.io/otel/**",
+        "go.opentelemetry.io/contrib/**"
+      ]
     }
   ]
 }
