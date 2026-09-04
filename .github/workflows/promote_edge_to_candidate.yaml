@@ -206,13 +206,13 @@ jobs:
 
           # Captured through command substitution rather than redirected to a file:
           # charmcraft fails with an internal "Bad file descriptor" error when its stdout
-          # is a plain file. Kept as its own step, rather than feeding python directly,
-          # so a Charmhub failure is reported as itself: the previous process
-          # substitution dropped charmcraft's exit status altogether, and a pipe would
-          # only have failed the step on python's parse error, which describes the empty
-          # input rather than the auth or network failure that caused it. `--quiet` is
-          # deliberately absent: it suppresses the JSON payload while still exiting 0,
-          # which is what made this step fail with empty input.
+          # is a plain file. Run on its own rather than feeding python directly, so a
+          # Charmhub failure is reported as itself: the previous process substitution
+          # dropped charmcraft's exit status altogether, and a pipe would only have
+          # failed on python's parse error, which describes the empty input rather than
+          # the auth or network failure that caused it. `--quiet` is deliberately absent:
+          # it suppresses the JSON payload while still exiting 0, which is what made this
+          # step fail with empty input.
           if ! GARM_STATUS=$(charmcraft status garm --format=json); then
             {
               echo "## Promotion failed"
