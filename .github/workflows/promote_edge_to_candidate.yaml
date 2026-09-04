@@ -26,6 +26,14 @@ on:
         required: false
         default: false
         type: boolean
+      dry_run:
+        description: >-
+          Resolve the revisions and print the release commands without releasing
+          anything, and skip the end-to-end suite. Forced on for any ref other
+          than main, so a branch can only ever dry run.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -150,7 +158,10 @@ jobs:
   e2e:
     name: End-to-end test
     needs: [check]
-    if: needs.check.outputs.should_run == 'true'
+    # A dry run exercises the release step, not the charms, so it skips the half-hour
+    # suite and the OpenStack tenant it needs rather than paying for both to reach a
+    # step that releases nothing.
+    if: needs.check.outputs.should_run == 'true' && !inputs.dry_run
     uses: ./.github/workflows/garm_e2e.yaml
     permissions:
       contents: read
@@ -171,11 +182,23 @@ jobs:
   promote:
     name: Release to candidate
     needs: [check, e2e]
-    # A manual dispatch can pick any ref, and this job is the irreversible half of the
-    # workflow. Gating it on main leaves the run dispatchable from a branch to exercise
-    # the check and end-to-end jobs, without that dry run reaching Charmhub.
-    if: github.ref == 'refs/heads/main'
+    # `needs` alone would skip this whenever the suite is skipped, which is the normal
+    # shape of a dry run, so the dependency is spelled out instead: a real promotion
+    # still demands a passing suite, while a dry run only needs the revisions the check
+    # job resolved. `!cancelled()` rather than `always()` keeps a cancelled run from
+    # carrying on into the release.
+    if: >-
+      !cancelled()
+      && needs.check.outputs.should_run == 'true'
+      && (needs.e2e.result == 'success' || inputs.dry_run)
+      && (github.ref == 'refs/heads/main' || inputs.dry_run)
     runs-on: ubuntu-latest
+    env:
+      # A manual dispatch can pick any ref, and this job is the irreversible half of the
+      # workflow. Deciding this here rather than trusting the input means a branch is
+      # held to a dry run whatever it was dispatched with, so the only way to reach
+      # Charmhub is main with the input off.
+      DRY_RUN: ${{ github.ref != 'refs/heads/main' || inputs.dry_run == true }}
     steps:
       - name: Install charmcraft
         # Pinned to a major track rather than latest: this job holds CHARMHUB_TOKEN and
@@ -204,13 +227,40 @@ jobs:
             exit 1
           fi
 
+          # Captured through command substitution rather than redirected to a file:
+          # charmcraft fails with an internal "Bad file descriptor" error when its stdout
+          # is a plain file. Not a pipe into python either, since a pipe would discard
+          # charmcraft's exit status and report an auth or network failure as a parse
+          # error. `--quiet` is deliberately absent: it suppresses the JSON payload while
+          # still exiting 0, which is what made this step fail with empty input.
+          if ! GARM_STATUS=$(charmcraft status garm --format=json); then
+            {
+              echo "## Promotion failed"
+              echo
+              echo "\`charmcraft status garm\` failed, so the app-image resource revision"
+              echo "attached to the tested revision could not be read from Charmhub."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
           if ! GARM_APP_IMAGE_REVISION=$(
-            python3 - 3< <(charmcraft status garm --format=json --quiet) <<'PY'
+            python3 - 3<<<"${GARM_STATUS}" \
+              2> "${RUNNER_TEMP}/lookup-error.txt" <<'PY'
           import json
           import os
 
+          # `charmcraft status --format=json` reports a release channel by its full name,
+          # `<track>/<risk>`, so matching on the bare risk would silently never hit. A
+          # branch release carries a third segment and is deliberately not a match.
+          EDGE_CHANNEL = "latest/edge"
+
           expected_revision = int(os.environ["GARM_REVISION"])
           status = json.load(os.fdopen(3))
+
+          # An unpublished charm is reported as `{}` rather than an empty list.
+          if not isinstance(status, list):
+              raise SystemExit("Charmhub reports nothing released for garm")
+
           matched_revision = False
           for track in status:
               if track["track"] != "latest":
@@ -220,8 +270,11 @@ jobs:
                   if base.get("architecture") != "amd64":
                       continue
                   for release in mapping["releases"]:
+                      # A channel that is closed, or merely tracking the one below it,
+                      # is listed with a null revision rather than being left out.
                       if (
-                          release["channel"] != "edge"
+                          release["channel"] != EDGE_CHANNEL
+                          or release["revision"] is None
                           or int(release["revision"]) != expected_revision
                       ):
                           continue
@@ -233,18 +286,26 @@ jobs:
 
           if not matched_revision:
               raise SystemExit(
-                  f"No garm latest/edge release matches revision {expected_revision}"
+                  f"No {EDGE_CHANNEL} amd64 release of garm is at revision "
+                  f"{expected_revision}"
               )
           raise SystemExit(
-              f"No app-image resource is attached to garm latest/edge revision "
+              f"No app-image resource is attached to garm {EDGE_CHANNEL} revision "
               f"{expected_revision}"
           )
           PY
           ); then
+            # Captured rather than left on stderr so the reason reaches the summary, and
+            # replayed here so it still shows up next to the failing command in the log.
+            cat "${RUNNER_TEMP}/lookup-error.txt" >&2
             {
               echo "## Promotion failed"
               echo
-              echo "Could not resolve the app-image resource revision from garm latest/edge."
+              echo "Could not resolve the app-image resource revision from garm latest/edge:"
+              echo
+              echo '```'
+              cat "${RUNNER_TEMP}/lookup-error.txt"
+              echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -258,6 +319,12 @@ jobs:
             local resource_args=()
             if [ -n "${resource_revision}" ]; then
               resource_args=(--resource="app-image:${resource_revision}")
+            fi
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "charmcraft release ${charm} --revision=${revision}" \
+                "--channel=latest/candidate ${resource_args[*]}"
+              released+=("${charm} r${revision}")
+              return
             fi
             if ! charmcraft release "${charm}" --revision="${revision}" \
               --channel=latest/candidate "${resource_args[@]}"; then
@@ -280,9 +347,15 @@ jobs:
           release garm "${GARM_REVISION}" "${GARM_APP_IMAGE_REVISION}"
           release garm-configurator "${GARM_CONFIGURATOR_REVISION}"
 
+          if [ "${DRY_RUN}" = "true" ]; then
+            heading="Dry run: nothing released"
+          else
+            heading="Released to candidate"
+          fi
+
           {
-            echo "## Released to candidate"
+            echo "## ${heading}"
             echo
-            echo "- garm revision ${GARM_REVISION}"
+            echo "- garm revision ${GARM_REVISION} with app-image ${GARM_APP_IMAGE_REVISION}"
             echo "- garm-configurator revision ${GARM_CONFIGURATOR_REVISION}"
           } >> "$GITHUB_STEP_SUMMARY"
