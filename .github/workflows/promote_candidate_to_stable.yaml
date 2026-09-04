@@ -117,7 +117,12 @@ jobs:
                   remaining_soak = "n/a"
                   held_back.append(f"{charm_name}: no candidate release is available to promote.")
               else:
-                  candidate_age_value = age_days(candidate["channel"]["released-at"])
+                  if candidate_revision is None:
+                      fail(f"Charmhub's candidate entry for {charm_name} is missing a revision number.")
+                  released_at = candidate.get("channel", {}).get("released-at")
+                  if released_at is None:
+                      fail(f"Charmhub's candidate entry for {charm_name} is missing a release timestamp.")
+                  candidate_age_value = age_days(released_at)
                   candidate_age = f"{candidate_age_value:.1f}"
                   soak_remaining = max(0.0, SOAK_DAYS - candidate_age_value)
                   remaining_soak = f"{soak_remaining:.1f}"
