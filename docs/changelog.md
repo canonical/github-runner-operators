@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-09-04
+
+- `garm`: bump the pinned GARM commit to pick up a fix for the scale set pseudo pool ID. GARM previously tagged OpenStack instances with a pool ID built from the scale set name, so a name over 10 characters produced a `garm-pool-id` server tag exceeding Nova's 60-character limit, failing every instance creation ([cloudbase/garm-provider-openstack#34](https://github.com/cloudbase/garm-provider-openstack/issues/34)). GARM now derives a fixed-length UUID for the pool ID instead, so scale set name length no longer affects the tag.
+
 ## 2026-08-24
 
 - `garm`: remove a scaleset's runners before deleting the scaleset. GARM rejects deleting a scaleset that still owns runners, so removing every `garm-configurator` relation left the orphaned scalesets — and the runners they own — behind. The charm now disables an orphaned scaleset and removes its runners before deleting it, retrying on the next reconcile whatever it could not remove this time. A runner that is executing a workflow job is left to finish and cleaned up on a later pass, so the removal never fails a running job. If GitHub rejects a runner's removal as unauthorized (for example, expired credentials), the charm retries with GARM's GitHub Unauthorized bypass, which can leave the runner registered in GitHub, where it must be removed manually.
