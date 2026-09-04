@@ -136,7 +136,7 @@ def test_main_writes_config_and_execs(mock_chmod, mock_execvp, monkeypatch, tmp_
     assert config_path.exists()
     mock_chmod.assert_called_once_with(config_path, 0o600)
     mock_execvp.assert_called_once_with(
-        "/usr/local/bin/garm", ["garm", "-config", str(config_path)]
+        "/usr/local/bin/garm", ["garm", "--config", str(config_path)]
     )
 
 
@@ -169,7 +169,7 @@ def test_main_scrubs_sensitive_env_before_exec(mock_chmod, mock_execvp, monkeypa
 
     mock_chmod.assert_called_once_with(config_path, 0o600)
     mock_execvp.assert_called_once_with(
-        "/usr/local/bin/garm", ["garm", "-config", str(config_path)]
+        "/usr/local/bin/garm", ["garm", "--config", str(config_path)]
     )
 
 
@@ -228,7 +228,7 @@ def test_main_rewrites_config_and_execs(mock_execvp, monkeypatch, tmp_path):
         garm_entrypoint.main()
 
     mock_execvp.assert_called_once_with(
-        "/usr/local/bin/garm", ["garm", "-config", str(config_path)]
+        "/usr/local/bin/garm", ["garm", "--config", str(config_path)]
     )
 
 
