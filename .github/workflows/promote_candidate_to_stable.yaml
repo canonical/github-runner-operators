@@ -85,7 +85,15 @@ jobs:
 
 
           def age_days(released_at):
-              released = datetime.datetime.fromisoformat(released_at)
+              # fromisoformat() rejects a trailing "Z"; Charmhub returns RFC3339 timestamps,
+              # which allow it, so normalize before parsing rather than let an unexpected
+              # format crash with a bare traceback instead of a clear ::error::.
+              try:
+                  released = datetime.datetime.fromisoformat(released_at.replace("Z", "+00:00"))
+              except ValueError:
+                  fail(f"Could not parse release timestamp {released_at!r} returned by Charmhub.")
+              if released.tzinfo is None:
+                  fail(f"Release timestamp {released_at!r} from Charmhub has no timezone.")
               delta = NOW - released.astimezone(datetime.timezone.utc)
               return delta.total_seconds() / 86400.0
 
