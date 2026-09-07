@@ -128,60 +128,6 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     return {}
 
 
-def _scaleset_replacement_phase(entries: list[ScalesetProgress]) -> str:
-    """Describe where one scaleset's replacement has got to.
-
-    Args:
-        entries: Every generation of one scaleset still being replaced. A label change
-            during an earlier drain leaves several predecessors handing over to the same
-            replacement; to the operator that is one changeover, so they collapse into
-            one phase — the least advanced, with the runner counts summed.
-
-    Returns:
-        The phase, in the operator's terms. The runner count is only reported once
-        the labels have been handed over, since before that nothing is draining yet;
-        with the count at zero the scaleset has drained and GARM has yet to accept
-        its deletion, which is a distinct thing to be waiting on.
-    """
-    handovers = {entry.handover for entry in entries}
-    if Handover.PENDING in handovers:
-        return _PHASE_CREATING
-    if Handover.FAILED in handovers:
-        return _PHASE_RETIRING
-    runners = sum(entry.remaining_runners for entry in entries)
-    if not runners:
-        return _PHASE_AWAITING_DELETION
-    return f"draining {runners} runner{'' if runners == 1 else 's'}"
-
-
-def _scaleset_replacement_status(replacing: list[ScalesetProgress]) -> str:
-    """Summarise in-progress scaleset replacements for the unit status.
-
-    Args:
-        replacing: Scaleset replacements still in flight, one entry per generation
-            being replaced.
-
-    Returns:
-        A status message naming at most two scalesets, so it stays readable when
-        several are replaced at once. Each is named by the logical name the operator
-        configured — the live names carry a label hash the operator never chose — and
-        the live names are logged in full by the reconciler. A scaleset draining two
-        generations at once is named once, so it cannot push the others out of the
-        message with a repeated line.
-    """
-    by_scaleset: dict[str, list[ScalesetProgress]] = {}
-    for progress in replacing:
-        by_scaleset.setdefault(progress.logical_name, []).append(progress)
-    shown = [
-        f"{logical_name} -> {entries[0].replacement_name} ({_scaleset_replacement_phase(entries)})"
-        for logical_name, entries in list(by_scaleset.items())[:_MAX_DRAINING_IN_STATUS]
-    ]
-    remainder = len(by_scaleset) - len(shown)
-    if remainder > 0:
-        shown.append(f"+{remainder} more")
-    return f"Replacing scaleset {', '.join(shown)}"
-
-
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -892,6 +838,60 @@ class GarmCharm(paas_charm.go.Charm):
             callback_url=f"{base}/api/v1/callbacks",
             webhook_url=f"{base}/webhooks",
         )
+
+
+def _scaleset_replacement_status(replacing: list[ScalesetProgress]) -> str:
+    """Summarise in-progress scaleset replacements for the unit status.
+
+    Args:
+        replacing: Scaleset replacements still in flight, one entry per generation
+            being replaced.
+
+    Returns:
+        A status message naming at most two scalesets, so it stays readable when
+        several are replaced at once. Each is named by the logical name the operator
+        configured — the live names carry a label hash the operator never chose — and
+        the live names are logged in full by the reconciler. A scaleset draining two
+        generations at once is named once, so it cannot push the others out of the
+        message with a repeated line.
+    """
+    by_scaleset: dict[str, list[ScalesetProgress]] = {}
+    for progress in replacing:
+        by_scaleset.setdefault(progress.logical_name, []).append(progress)
+    shown = [
+        f"{logical_name} -> {entries[0].replacement_name} ({_scaleset_replacement_phase(entries)})"
+        for logical_name, entries in list(by_scaleset.items())[:_MAX_DRAINING_IN_STATUS]
+    ]
+    remainder = len(by_scaleset) - len(shown)
+    if remainder > 0:
+        shown.append(f"+{remainder} more")
+    return f"Replacing scaleset {', '.join(shown)}"
+
+
+def _scaleset_replacement_phase(entries: list[ScalesetProgress]) -> str:
+    """Describe where one scaleset's replacement has got to.
+
+    Args:
+        entries: Every generation of one scaleset still being replaced. A label change
+            during an earlier drain leaves several predecessors handing over to the same
+            replacement; to the operator that is one changeover, so they collapse into
+            one phase — the least advanced, with the runner counts summed.
+
+    Returns:
+        The phase, in the operator's terms. The runner count is only reported once
+        the labels have been handed over, since before that nothing is draining yet;
+        with the count at zero the scaleset has drained and GARM has yet to accept
+        its deletion, which is a distinct thing to be waiting on.
+    """
+    handovers = {entry.handover for entry in entries}
+    if Handover.PENDING in handovers:
+        return _PHASE_CREATING
+    if Handover.FAILED in handovers:
+        return _PHASE_RETIRING
+    runners = sum(entry.remaining_runners for entry in entries)
+    if not runners:
+        return _PHASE_AWAITING_DELETION
+    return f"draining {runners} runner{'' if runners == 1 else 's'}"
 
 
 if __name__ == "__main__":
