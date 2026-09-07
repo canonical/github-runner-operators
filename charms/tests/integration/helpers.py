@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 import base64
+import itertools
 import json
 import os
 import time
@@ -25,6 +26,9 @@ E2E_GITHUB_APP_PRIVATE_KEY_ENV_VAR = "E2E_GITHUB_APP_PRIVATE_KEY"
 # from, so the scaleset entity, the dispatch target and the workflow file agree by
 # construction and no separate path setting can drift out of sync with them.
 GITHUB_REPOSITORY_ENV_VAR = "GITHUB_REPOSITORY"
+
+# How far down a newest-first run listing to look for the dispatched run.
+_RUN_PAGE = 30
 
 
 @dataclass(frozen=True)
@@ -187,9 +191,11 @@ def dispatch_workflow(
     # Snapshot existing run IDs to disambiguate concurrent or recent runs. Only the
     # newest page is needed: the listing is newest-first and prepends, so the
     # dispatched run can only ever appear at the top, and an unbounded walk would
-    # grow with the branch's dispatch history.
+    # grow with the branch's dispatch history. islice rather than a [:30] slice --
+    # PyGithub's slice indexes the listing directly and raises IndexError when it
+    # holds fewer runs than that, which a branch dispatched on for the first time does.
     recent_runs = workflow.get_runs(branch=ref, event="workflow_dispatch")
-    existing_run_ids = {run.id for run in recent_runs[:30]}
+    existing_run_ids = {run.id for run in itertools.islice(recent_runs, _RUN_PAGE)}
     try:
         # throw=True: the default returns False on error, which would surface a
         # permissions failure as an unrelated "no new run appeared" timeout below.
@@ -200,8 +206,8 @@ def dispatch_workflow(
     # After dispatch, poll for the run ID that is not in the initial snapshot.
     for _ in range(30):
         time.sleep(2)
-        runs = workflow.get_runs(branch=ref, event="workflow_dispatch")[:30]
-        for run in runs:
+        runs = workflow.get_runs(branch=ref, event="workflow_dispatch")
+        for run in itertools.islice(runs, _RUN_PAGE):
             if run.id not in existing_run_ids:
                 return run.id
 

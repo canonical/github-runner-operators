@@ -341,7 +341,10 @@ def main() -> None:
             "Starting GARM process: command=/usr/local/bin/garm config_path=%s",
             GARM_CONFIG_PATH,
         )
-        os.execvp("/usr/local/bin/garm", ["garm", "-config", str(GARM_CONFIG_PATH)])
+        # GARM's CLI moved to cobra (upstream PR #782), which requires GNU-style
+        # double-dash long flags; "-config" now silently misparses instead of
+        # being read as an alias for "--config".
+        os.execvp("/usr/local/bin/garm", ["garm", "--config", str(GARM_CONFIG_PATH)])
     except (GarmEntrypointError, OSError):
         logger.exception("Failed to prepare GARM configuration")
         sys.exit(1)

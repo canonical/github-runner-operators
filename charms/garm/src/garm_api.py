@@ -68,6 +68,23 @@ class GarmEntityNotFoundError(GarmApiError):
     """Raised when a required GARM entity (org/repo/provider) cannot be found."""
 
 
+class GarmUnauthorizedError(GarmApiError):
+    """Raised when GARM answers a request with 401 Unauthorized.
+
+    GARM returns 401 only for an unauthorized error, so this separates an
+    authorization-shaped rejection from a transport failure or a generic 500, neither
+    of which may be treated as one. It does not say *whose* authorization failed, and
+    is wider than "expired GitHub credentials" in two ways worth knowing before acting
+    on it:
+
+    * GARM's own JWT middleware and its admin-only check answer 401 too, so an expired
+      charm token looks the same as a rejected GitHub call.
+    * When it is GitHub, GARM's scaleset client maps **401 and 403 alike** onto its
+      unauthorized error, so a 403 that is not an authorization problem at all — a
+      secondary rate limit, or SSO enforcement on the org — arrives here as well.
+    """
+
+
 class GarmApiClient:
     """HTTP client for the GARM REST API.
 
@@ -905,7 +922,10 @@ class GarmAuthenticatedClient(GarmApiClient):
             Updated ScaleSet model object.
 
         Raises:
-            GarmApiError: On API error.
+            GarmUnauthorizedError: If GARM answers 401. GARM only calls GitHub from this
+                endpoint when the name, runner group or update setting changes, so for
+                any other field this is GARM's own authorization rejecting the charm.
+            GarmApiError: On any other API error.
         """
         with self._api_client() as client:
             try:
@@ -993,6 +1013,27 @@ class GarmAuthenticatedClient(GarmApiClient):
 
 
 def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
-    """Raise a resource-specific wrapper error while preserving 404 semantics."""
-    error_type = GarmNotFoundError if exc.status == 404 else GarmApiError
+    """Raise a resource-specific wrapper error, preserving 404 and 401 semantics.
+
+    Args:
+        message: Human-readable description of the failed call.
+        exc: The generated client's exception, whose status selects the wrapper.
+
+    Raises:
+        GarmNotFoundError: If the resource is already gone (404), so callers can
+            treat a cleanup as done rather than failed.
+        GarmUnauthorizedError: If GARM answers 401, which marks an authorization
+            rejection rather than a transport failure or a generic 500 — the
+            distinction the runner-removal escalation relies on before it will bypass
+            GitHub. See the class docstring for what that status does and does not
+            pin down.
+        GarmApiError: On any other API error.
+    """
+    match exc.status:
+        case 404:
+            error_type: type[GarmApiError] = GarmNotFoundError
+        case 401:
+            error_type = GarmUnauthorizedError
+        case _:
+            error_type = GarmApiError
     raise error_type(message) from exc
