@@ -29,7 +29,9 @@ jobs:
     outputs:
       eligible: ${{ steps.check.outputs.eligible }}
       garm_revision: ${{ steps.check.outputs.garm_revision }}
+      garm_promote: ${{ steps.check.outputs.garm_promote }}
       garm_configurator_revision: ${{ steps.check.outputs.garm_configurator_revision }}
+      garm_configurator_promote: ${{ steps.check.outputs.garm_configurator_promote }}
     steps:
       - name: Check Charmhub candidate soak
         id: check
@@ -101,7 +103,16 @@ jobs:
 
 
           rows = []
-          eligible = True
+          # A charm with nothing pending (no candidate, or candidate already promoted)
+          # must not block its sibling: most weeks only one charm gets a version bump,
+          # and the other sitting in steady state isn't a coupling risk. Atomicity only
+          # applies when both charms have a pending candidate to promote, in which case
+          # a not-yet-soaked candidate on either side still holds back both, since the
+          # two are validated together as a pair, not independently (no isolated
+          # garm-configurator e2e coverage exists to justify releasing a combination
+          # that was never actually soaked together).
+          any_pending = False
+          all_pending_soaked = True
           outputs = {}
           held_back = []
 
@@ -115,37 +126,39 @@ jobs:
               if stable is not None and stable_revision is None:
                   fail(f"Charmhub's stable entry for {charm_name} is missing a revision number.")
 
+              should_promote = False
+              candidate_age = "n/a"
+              remaining_soak = "n/a"
+
               if candidate is None:
-                  charm_eligible = False
-                  candidate_age = "n/a"
-                  remaining_soak = "n/a"
                   held_back.append(f"{charm_name}: no candidate release is available to promote.")
               else:
                   if candidate_revision is None:
                       fail(f"Charmhub's candidate entry for {charm_name} is missing a revision number.")
-                  released_at = candidate.get("channel", {}).get("released-at")
-                  if released_at is None:
-                      fail(f"Charmhub's candidate entry for {charm_name} is missing a release timestamp.")
-                  candidate_age_value = age_days(released_at)
-                  candidate_age = f"{candidate_age_value:.1f}"
-                  soak_remaining = max(0.0, SOAK_DAYS - candidate_age_value)
-                  remaining_soak = f"{soak_remaining:.1f}"
-                  charm_eligible = (
-                      candidate_age_value >= SOAK_DAYS
-                      and candidate_revision != stable_revision
-                  )
-                  if not charm_eligible:
-                      if candidate_revision == stable_revision:
-                          held_back.append(
-                              f"{charm_name}: candidate revision {candidate_revision} is already in stable."
-                          )
-                      else:
+                  if candidate_revision == stable_revision:
+                      held_back.append(
+                          f"{charm_name}: candidate revision {candidate_revision} is already in stable."
+                      )
+                  else:
+                      any_pending = True
+                      released_at = candidate.get("channel", {}).get("released-at")
+                      if released_at is None:
+                          fail(f"Charmhub's candidate entry for {charm_name} is missing a release timestamp.")
+                      candidate_age_value = age_days(released_at)
+                      candidate_age = f"{candidate_age_value:.1f}"
+                      soak_remaining = max(0.0, SOAK_DAYS - candidate_age_value)
+                      remaining_soak = f"{soak_remaining:.1f}"
+                      should_promote = candidate_age_value >= SOAK_DAYS
+                      if not should_promote:
+                          all_pending_soaked = False
                           held_back.append(
                               f"{charm_name}: candidate revision {candidate_revision} is only {candidate_age_value:.1f} days old; "
                               f"{soak_remaining:.1f} days of soak remain."
                           )
 
-              outputs[f"{charm_name.replace('-', '_')}_revision"] = "" if candidate_revision is None else str(candidate_revision)
+              output_key = charm_name.replace("-", "_")
+              outputs[f"{output_key}_revision"] = str(candidate_revision) if should_promote else ""
+              outputs[f"{output_key}_promote"] = "true" if should_promote else "false"
               rows.append(
                   {
                       "charm": charm_name,
@@ -153,10 +166,15 @@ jobs:
                       "stable_revision": "n/a" if stable is None else str(stable_revision),
                       "candidate_age": candidate_age,
                       "remaining_soak": remaining_soak,
-                      "eligible": "yes" if charm_eligible else "no",
+                      "eligible": "yes" if should_promote else "no",
                   }
               )
-              eligible = eligible and charm_eligible
+
+          # Only run the release job when there's a pending candidate to promote and
+          # nothing pending is still holding back: "nothing pending anywhere" (an
+          # off week) is deliberately not eligible either, since there'd be nothing
+          # to release.
+          eligible = any_pending and all_pending_soaked
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output_file:
               output_file.write(f"eligible={'true' if eligible else 'false'}\n")
@@ -181,7 +199,7 @@ jobs:
                   for item in held_back:
                       summary_file.write(f"- {item}\n")
               else:
-                  summary_file.write("\nBoth charms cleared the soak window and their candidate revisions differ from stable.\n")
+                  summary_file.write("\nAll pending candidate revisions cleared the soak window.\n")
 
           SCRIPT
 
@@ -228,11 +246,13 @@ jobs:
       - name: Install Charmcraft
         run: sudo snap install charmcraft --classic
 
-      - name: Release both charms atomically
+      - name: Release eligible charms
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
           GARM_REVISION: ${{ needs.check.outputs.garm_revision }}
+          GARM_PROMOTE: ${{ needs.check.outputs.garm_promote }}
           GARM_CONFIGURATOR_REVISION: ${{ needs.check.outputs.garm_configurator_revision }}
+          GARM_CONFIGURATOR_PROMOTE: ${{ needs.check.outputs.garm_configurator_promote }}
         run: |
           set -euo pipefail
 
@@ -243,7 +263,7 @@ jobs:
             exit 1
           fi
 
-          released=0
+          released_charms=()
 
           on_error() {
             status=$?
@@ -251,7 +271,7 @@ jobs:
               echo ""
               echo "## Release failed"
               echo ""
-              if [ "$released" -eq 1 ]; then
+              if [ "${#released_charms[@]}" -gt 0 ]; then
                 echo "The stable channels are now inconsistent and need manual repair."
               else
                 echo "No charms were released, so stable remains consistent."
@@ -262,14 +282,22 @@ jobs:
 
           trap on_error ERR
 
-          charmcraft release garm --revision="$GARM_REVISION" --channel=latest/stable
-          released=1
+          # Only charms with a soaked pending candidate are released; a charm with
+          # nothing pending this cycle is left untouched rather than re-released.
+          if [ "$GARM_PROMOTE" = "true" ]; then
+            charmcraft release garm --revision="$GARM_REVISION" --channel=latest/stable
+            released_charms+=("garm: revision ${GARM_REVISION} -> latest/stable")
+          fi
 
-          charmcraft release garm-configurator --revision="$GARM_CONFIGURATOR_REVISION" --channel=latest/stable
+          if [ "$GARM_CONFIGURATOR_PROMOTE" = "true" ]; then
+            charmcraft release garm-configurator --revision="$GARM_CONFIGURATOR_REVISION" --channel=latest/stable
+            released_charms+=("garm-configurator: revision ${GARM_CONFIGURATOR_REVISION} -> latest/stable")
+          fi
 
           {
             echo "## Released to stable"
             echo
-            echo "- garm: revision ${GARM_REVISION} -> latest/stable"
-            echo "- garm-configurator: revision ${GARM_CONFIGURATOR_REVISION} -> latest/stable"
+            for line in "${released_charms[@]}"; do
+              echo "- ${line}"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
