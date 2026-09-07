@@ -90,3 +90,5 @@ aproxy
 [Ss]erializ(e|es|ed|ing|ation)
 tmate
 [Rr]eplan(s|ned|ning)?
+URI(s)?
+teardown

@@ -23,6 +23,7 @@ jobs:
             charms:
               - 'charms/**'
               - 'internal/**'
+              - 'tox.ini'
               - '.github/workflows/charms_lint_and_unit.yaml'
 
   charm-tests:
@@ -54,3 +55,25 @@ jobs:
       - name: Run lint, complexity, static, unit, coverage
         working-directory: ${{ matrix.charm }}
         run: tox -c tox.toml
+
+  shared-test-support:
+    name: Shared test support unit tests
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.charms == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Run unit tests for charms/tests/
+        run: tox -e charms-tests-unit

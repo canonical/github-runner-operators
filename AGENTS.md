@@ -8,7 +8,7 @@ guidance in `.github/instructions/` and the human-facing `CONTRIBUTING.md`.
 
 | Path | Contents |
 | --- | --- |
-| `charms/` | Four Juju charms (see below) plus shared integration tests in `charms/tests/integration/`. |
+| `charms/` | Four Juju charms (see below) plus shared integration tests in `charms/tests/integration/`, the GARM end-to-end test in `charms/tests/e2e/`, and model-free tests of that shared test-support code in `charms/tests/unit/`. |
 | `cmd/` | Go application entry points: `planner`, `webhook-gateway`. |
 | `internal/` | Shared Go packages (`database`, `github`, `planner`, `queue`, `server`, `telemetry`, `webhook`, …) — the application logic the paas charms package and deploy. |
 | `*-rockcraft.yaml`, `build-*-rock.sh` (repo root) | Rock/image build definitions and their build scripts. |
@@ -33,11 +33,13 @@ charms — there are four charms, not two).
 
 - **Per-charm Python checks** — from the charm directory, `tox -c tox.toml` (envs `fmt`, `lint`, `complexity`, `static`, `unit`, `coverage-report`; ruff, codespell, pyright, pytest+coverage). CI runs these per charm via `tox -c tox.toml`.
 - **Integration tests** (root `tox.ini`) — `tox -e <charm>-integration` (`garm`, `webhook-gateway`, `planner`, `garm-configurator`) or `tox -e charms-integration` for all. Requires a live Juju model (jubilant + pytest-operator).
+- **GARM end-to-end test** (root `tox.ini`) — `tox -e garm-e2e`. Runs against a real OpenStack tenant from `garm_e2e.yaml`, is manually dispatched, one run at a time repository-wide, and is **not** a merge gate. See `CONTRIBUTING.md` §"GARM E2E".
+- **Shared test-support unit tests** (root `tox.ini`) — `tox -e charms-tests-unit`. Model-free tests for the helpers under `charms/tests/` (dispatch/credential helpers, the diagnostic redactor). A merge gate, unlike the suites that consume those helpers.
 - **`actions/` Python** — `tox -e actions-lint`, `tox -e actions-static`, `tox -e actions-unit`.
 - **Go** — `go test ./...`.
 - `charmcraft pack` — build a charm (run from the charm dir; not wired into tox).
 - **Docs spellcheck** — CI runs Vale over `docs/` with `Canonical.000-US-spellcheck` at **error** level, so an unknown technical term (e.g. `deserialize`) fails the build. Add project-specific terms — regex forms like `[Dd]eserializ(e|es|ed|ing|ation)` are supported — to `docs/.custom_wordlist.txt` (the docs `Makefile` appends it to the Canonical accept vocabulary); verify with `make -C docs spellcheck` before pushing a `docs/` change.
-- Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function.
+- Gates from `CONTRIBUTING.md`: **≥ 85% coverage** on internal packages, **cyclomatic complexity < 10** per function, and — for `garm` and `garm-configurator` only — **cognitive complexity ≤ 15** per function (enforced by `flake8-cognitive-complexity` in the per-charm `complexity` env; exceptions carry `# noqa: CCR001` plus a tracking-issue reference).
 
 ## Charm conventions
 
@@ -88,7 +90,21 @@ For **`garm-configurator`** (plain `ops`):
 - **DO** fix a missing AAA docstring on any test you move or edit. It's followed unevenly
   (`planner-operator` and `garm` yes; `garm-configurator` and `webhook-gateway-operator` not
   yet), so imitating the nearest neighbour is not a reliable guide.
-- Integration tests live in the shared `charms/tests/integration/`.
+- Integration tests live in the shared `charms/tests/integration/`; the GARM end-to-end test lives in `charms/tests/e2e/`, kept separate so it stays out of the PR test matrix.
+- **DO** put a model-free test of shared test-support code in `charms/tests/unit/`, not
+  beside the suite it supports: `charms-integration` collects the whole
+  `charms/tests/integration/` directory, so a unit test parked there only ever runs on a
+  live-model job.
+
+## Function ordering — the step-down rule
+
+Applies to Python and Go alike: order functions and methods by the
+["step-down" rule](https://github.com/canonical/is-charms-contributing-guide/blob/main/src/implementation/500-function-and-method-ordering.md)
+— a module or class reads top-to-bottom, from general to specific, so **a caller sits above
+its callee**, with closely related helpers grouped adjacently. The common violation is
+extracting a helper (e.g. to get under the complexity gates above) and parking it at the top
+of the module away from its caller: **DO** place each extracted helper directly below its
+first caller instead.
 
 ## 12-factor divergences from the canonical charm-engineer guidance
 

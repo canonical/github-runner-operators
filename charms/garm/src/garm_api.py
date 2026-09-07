@@ -6,6 +6,7 @@
 import base64
 import logging
 import time
+from typing import NoReturn
 
 import urllib3
 import urllib3.exceptions
@@ -55,12 +56,33 @@ class GarmApiError(Exception):
     """Raised when a GARM API call fails unexpectedly."""
 
 
+class GarmNotFoundError(GarmApiError):
+    """Raised when a requested GARM resource no longer exists."""
+
+
 class GarmConnectionError(GarmApiError):
     """Raised when a network-level connection to GARM fails (port closed, refused)."""
 
 
 class GarmEntityNotFoundError(GarmApiError):
     """Raised when a required GARM entity (org/repo/provider) cannot be found."""
+
+
+class GarmUnauthorizedError(GarmApiError):
+    """Raised when GARM answers a request with 401 Unauthorized.
+
+    GARM returns 401 only for an unauthorized error, so this separates an
+    authorization-shaped rejection from a transport failure or a generic 500, neither
+    of which may be treated as one. It does not say *whose* authorization failed, and
+    is wider than "expired GitHub credentials" in two ways worth knowing before acting
+    on it:
+
+    * GARM's own JWT middleware and its admin-only check answer 401 too, so an expired
+      charm token looks the same as a rejected GitHub call.
+    * When it is GitHub, GARM's scaleset client maps **401 and 403 alike** onto its
+      unauthorized error, so a 403 that is not an authorization problem at all — a
+      secondary rate limit, or SSO enforcement on the org — arrives here as well.
+    """
 
 
 class GarmApiClient:
@@ -531,18 +553,8 @@ class GarmAuthenticatedClient(GarmApiClient):
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
-    def list_scaleset_instances(self, scaleset_id: int) -> list[Instance]:
-        """List the runner instances currently backing a scaleset.
-
-        Args:
-            scaleset_id: GARM scaleset id.
-
-        Returns:
-            List of Instance model objects, empty when the scaleset has no runners.
-
-        Raises:
-            GarmApiError: On API error.
-        """
+    def list_scale_set_instances(self, scaleset_id: int) -> list[Instance]:
+        """List runner instances belonging to a scaleset."""
         with self._api_client() as client:
             try:
                 return (
@@ -553,10 +565,34 @@ class GarmAuthenticatedClient(GarmApiClient):
                     or []
                 )
             except ApiException as exc:
-                raise GarmApiError(
+                _raise_resource_api_error(
                     f"Failed to list instances for scaleset {scaleset_id} "
-                    f"({exc.status}): {exc.body}"
-                ) from exc
+                    f"({exc.status}): {exc.body}",
+                    exc,
+                )
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def delete_instance(
+        self,
+        instance_name: str,
+        *,
+        force_remove: bool = False,
+        bypass_gh_unauthorized: bool = False,
+    ) -> None:
+        """Request deletion of a GARM runner instance."""
+        with self._api_client() as client:
+            try:
+                InstancesApi(api_client=client).delete_instance(
+                    instance_name=instance_name,
+                    force_remove=force_remove,
+                    bypass_gh_unauthorized=bypass_gh_unauthorized,
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                _raise_resource_api_error(
+                    f"Failed to delete runner {instance_name} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -886,7 +922,10 @@ class GarmAuthenticatedClient(GarmApiClient):
             Updated ScaleSet model object.
 
         Raises:
-            GarmApiError: On API error.
+            GarmUnauthorizedError: If GARM answers 401. GARM only calls GitHub from this
+                endpoint when the name, runner group or update setting changes, so for
+                any other field this is GARM's own authorization rejecting the charm.
+            GarmApiError: On any other API error.
         """
         with self._api_client() as client:
             try:
@@ -896,9 +935,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_resource_api_error(
+                    f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -966,8 +1005,35 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_resource_api_error(
+                    f"Failed to delete scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+
+def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
+    """Raise a resource-specific wrapper error, preserving 404 and 401 semantics.
+
+    Args:
+        message: Human-readable description of the failed call.
+        exc: The generated client's exception, whose status selects the wrapper.
+
+    Raises:
+        GarmNotFoundError: If the resource is already gone (404), so callers can
+            treat a cleanup as done rather than failed.
+        GarmUnauthorizedError: If GARM answers 401, which marks an authorization
+            rejection rather than a transport failure or a generic 500 — the
+            distinction the runner-removal escalation relies on before it will bypass
+            GitHub. See the class docstring for what that status does and does not
+            pin down.
+        GarmApiError: On any other API error.
+    """
+    match exc.status:
+        case 404:
+            error_type: type[GarmApiError] = GarmNotFoundError
+        case 401:
+            error_type = GarmUnauthorizedError
+        case _:
+            error_type = GarmApiError
+    raise error_type(message) from exc

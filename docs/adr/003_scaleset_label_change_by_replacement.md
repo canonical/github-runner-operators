@@ -62,6 +62,9 @@ Blocking the hook until the drain completes was rejected: the drain can exceed s
 Live names carry a hash suffix, so `garm-cli scaleset list` reports `my-scaleset-1a2b3c4d`.
 The configured name remains the operator-facing identity and is what the unit status reports.
 Names are capped at 64 characters; a longer configured name is truncated and suffixed with a digest of its full value, so names sharing a prefix resolve to distinct scale sets.
+The cap is the charm's own conservative bound on the System label GitHub registers the scale set under: GARM validates only that the name is non-empty.
+It could not have been this generous before the GARM bump recorded in the changelog for 2026-09-04 — GARM built the OpenStack `garm-pool-id` instance tag from the scale set name, so a name over 10 characters overran Nova's 60-character tag limit and failed every instance creation.
+GARM now derives that tag from a fixed-length UUID, so the name no longer feeds it.
 
 A changeover spans three reconciles, so at the default update-status interval a label change with no in-flight jobs completes in approximately 15 minutes.
 The unit stays active throughout, carrying the phase as its status message.
