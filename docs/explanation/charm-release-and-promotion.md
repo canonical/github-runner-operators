@@ -67,9 +67,11 @@ next Terraform bump would ship.
 
 Production does not follow candidate automatically. Instead, the internal
 GitOps Terraform repository pins production to a specific candidate revision.
-Renovate opens a revision-bump pull request when a newer candidate is available.
-A human must approve and merge that pull request, then apply the Terraform
-change. That approval is the production gate.
+Renovate opens a revision-bump pull request when a newer candidate is available,
+covering both charms in one pull request so the pair stays together. Renovate is
+deliberately configured not to merge that pull request on its own. A human must
+approve and merge it, then apply the Terraform change. That approval is the
+production gate.
 
 Once a candidate revision has soaked for seven days, the weekly
 `promote_candidate_to_stable.yaml` workflow promotes it to `latest/stable`.
@@ -98,11 +100,14 @@ That limitation is intentional in the current design, so the approval step is
 the place where a human closes the gap between candidate publication and
 production promotion.
 
-## One-time repository setup
+## The `charmhub-stable` environment
 
-The `charmhub-stable` GitHub Environment must exist with required reviewers,
-and `CHARMHUB_TOKEN` must be scoped to it so the weekly promotion workflow can
-authenticate to Charmhub. Both are already configured in this repository.
+The stable gate needs one piece of repository configuration: a GitHub
+Environment named `charmhub-stable` with required reviewers. It already exists.
+The environment carries no secrets of its own — the weekly workflow
+authenticates to Charmhub with the repository-level `CHARMHUB_TOKEN` secret, the
+same one the other release workflows use. The environment is there for the
+approval, not for the credentials.
 
 A missing environment would not fail an approval on its own — GitHub treats
 `environment:` pointing at nothing as a no-op and runs the job straight through.
