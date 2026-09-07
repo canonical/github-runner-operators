@@ -14,7 +14,7 @@ import (
 	"github.com/canonical/github-runner-operators/internal/database"
 	gh "github.com/canonical/github-runner-operators/internal/github"
 	"github.com/canonical/github-runner-operators/internal/queue"
-	"github.com/google/go-github/v89/github"
+	"github.com/google/go-github/v91/github"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
