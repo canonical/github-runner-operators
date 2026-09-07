@@ -43,8 +43,27 @@ When edge is ahead, the workflow runs the GARM end-to-end test from
 workflow releases the new revision to `latest/candidate`.
 
 Only two charms move through this automated edge-to-candidate promotion:
-`garm` and `garm-configurator`. They always move together, and the workflow
-releases them atomically so production never sees a mixed pair.
+`garm` and `garm-configurator`. They always move together, because the
+configurator supplies GARM's scale-set configuration: a revision of one is only
+ever validated against the revision of the other it was tested with, and the
+end-to-end test exercises the pair.
+
+Charmhub has no way to release two charms in one transaction, so the workflow
+releases them one after the other — `garm`, with the `app-image` resource
+revision that was attached to the tested edge revision, then
+`garm-configurator`. If the second release fails, the first has already
+happened: `latest/candidate` then holds a mismatched pair. The workflow says so
+in its run summary, naming what it already released, because the repair is
+manual. Either release the missing charm's tested revision to candidate:
+
+```bash
+charmcraft release garm-configurator --revision=<n> --channel=latest/candidate
+```
+
+or put the charm that did get released back to the revision candidate held
+before the run, following {ref}`rollbacks` below. Do not leave the pair
+mismatched: production pins candidate, so an untested combination is what the
+next Terraform bump would ship.
 
 Production does not follow candidate automatically. Instead, the internal
 GitOps Terraform repository pins production to a specific candidate revision.
@@ -81,29 +100,61 @@ production promotion.
 
 ## One-time repository setup
 
-Create a GitHub Environment named `charmhub-stable` in the repository settings
-and configure it with required reviewers.
+The `charmhub-stable` GitHub Environment must exist with required reviewers,
+and `CHARMHUB_TOKEN` must be scoped to it so the weekly promotion workflow can
+authenticate to Charmhub. Both are already configured in this repository.
 
-Also scope `CHARMHUB_TOKEN` to that environment so the weekly promotion
-workflow can authenticate to Charmhub.
-
-If the environment does not exist, GitHub treats the approval as a no-op rather
-than failing the workflow. That means the stable gate silently disappears until
-the environment is created, so make sure the environment exists before you rely
-on it.
+A missing environment would not fail an approval on its own — GitHub treats
+`environment:` pointing at nothing as a no-op and runs the job straight through.
+The weekly workflow therefore checks first: its `verify-environment` job queries
+the environment and fails the run if it is absent or has no required-reviewers
+rule. The stable gate cannot silently disappear; an environment without
+required reviewers stops the release instead of waving it through.
 
 ## Hotfixes
 
-For a hotfix, build the charm from the fix pull request and release it manually
-to candidate:
+Building a charm locally does not create a Charmhub revision — `charmcraft
+release` only moves a revision that already exists. So a hotfix is upload, then
+release.
+
+Pack the charm from the fix pull request, then upload it. The upload prints the
+revision number to release:
 
 ```bash
-charmcraft release <charm> --revision=<n> --channel=latest/candidate
+charmcraft upload <charm>.charm
 ```
 
-Then take the same revision to production through the normal Terraform pin in
+For `garm`, the charm is packaged with an `app-image` OCI resource, and a
+release that does not name a resource revision is rejected. Either reuse the
+resource revision already attached to the revision you are replacing, which
+`charmcraft status garm` reports alongside each release, or upload a new image
+and use the revision that returns:
+
+```bash
+charmcraft upload-resource garm app-image --image=<image-digest>
+```
+
+Then release the charm revision to candidate, passing the resource revision for
+`garm` exactly as the daily workflow does:
+
+```bash
+charmcraft release garm --revision=<n> --channel=latest/candidate \
+  --resource=app-image:<r>
+charmcraft release garm-configurator --revision=<n> --channel=latest/candidate
+```
+
+Release both charms if the fix changes the pair, so candidate does not end up
+holding a combination that was never tested together.
+
+Then take the same revisions to production through the normal Terraform pin in
 the internal GitOps repository. The hotfix still follows the production gate;
 only the candidate release is done by hand.
+
+For the full set of upload and release options, see the Charmcraft guides on
+[managing revisions](https://documentation.ubuntu.com/charmcraft/en/stable/howto/manage-revisions/)
+and the [`release` command](https://documentation.ubuntu.com/charmcraft/latest/reference/commands/release/).
+
+(rollbacks)=
 
 ## Rollbacks
 
@@ -134,6 +185,18 @@ The rollback sequence therefore becomes:
 2. Roll back the production Terraform pin.
 3. Run `juju resolved` on any units in error.
 4. Apply the Terraform change.
+5. Release the older revisions back to candidate, both charms together:
 
-When the older revision should stay on candidate again, re-enable the daily
-workflow after you are satisfied that the rollback has settled.
+   ```bash
+   charmcraft release garm --revision=<n> --channel=latest/candidate \
+     --resource=app-image:<r>
+   charmcraft release garm-configurator --revision=<n> --channel=latest/candidate
+   ```
+
+Leave the daily workflow disabled until promoting the current edge revision is
+acceptable. Waiting for the rollback to "settle" does not change what the
+workflow does: it compares revision numbers, and edge is still ahead of the
+revision you rolled candidate back to, so the first successful run after you
+re-enable it promotes that newer revision again. Re-enable it once the fix for
+whatever caused the rollback has reached edge — or once you are content for the
+revision you rolled back from to return to candidate.
