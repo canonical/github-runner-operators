@@ -40,7 +40,7 @@ description = "Run unit tests"
 deps = [
   "pytest",
   "coverage[toml]",
-  "ops-scenario==8.8.1",
+  "ops-scenario==8.8.2",
   "tomli; python_version < '3.11'",
   "-r requirements.txt",
 ]
