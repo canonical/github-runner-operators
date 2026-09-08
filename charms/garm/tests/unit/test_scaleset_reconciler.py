@@ -1755,6 +1755,32 @@ def test_label_revert_re_adopts_the_draining_scaleset():
     assert params.enabled is True
 
 
+def test_a_replacement_enabled_this_pass_does_not_retire_its_predecessor_yet():
+    """
+    arrange: A label revert onto a disabled predecessor, so this pass re-enables the
+        scaleset that is about to take over.
+    act: Reconcile.
+    assert: The other generation is left enabled and reported as a pending hand-over,
+        not retired. GARM restarts a listener asynchronously, so a scaleset enabled in
+        this same pass has no GitHub message session yet; retiring the generation still
+        serving the shared labels would leave them unserved until it comes up. The wait
+        costs one reconcile and is the point of reading the pre-pass snapshot — see
+        `replacement_seen_enabled`.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[
+            _generation(_LABELS_OLD, id=1, enabled=False),
+            _generation(_LABELS_NEW, id=2),
+        ],
+    )
+
+    progress = _reconcile(client, [_spec(labels=_LABELS_OLD)])
+
+    assert [scaleset_id for scaleset_id, _ in client.updated] == [1]
+    assert progress == [ScalesetProgress("my-scaleset", _NEW_NAME, _OLD_NAME, 0, Handover.PENDING)]
+
+
 def test_two_label_changes_retire_both_older_generations():
     """
     arrange: Three generations live: two superseded ones and the current one.

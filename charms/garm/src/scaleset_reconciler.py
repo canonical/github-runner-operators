@@ -399,16 +399,25 @@ class ScalesetReconciler:
         Returns:
             One entry per replaced generation not yet gone.
         """
-        # Close the old session only once the replacement exists: disabling any
-        # earlier leaves the labels unserved if the charm dies in between.
-        replacement_live = active_name in observed and observed[active_name].enabled is True
+        # Read from `observed`, the snapshot taken before this pass's own create and
+        # update: the name is "seen enabled", not "is enabled now", and the difference
+        # is deliberate. A replacement this pass has just enabled is not yet serving —
+        # GARM restarts the listener asynchronously, so its GitHub message session may
+        # not exist for a while yet — and closing the predecessor's session before then
+        # leaves the labels they share unserved. Requiring an earlier pass to have seen
+        # it enabled buys GARM that interval, and covers the charm dying in between.
+        # The cost is one extra reconcile before a retirement that could have started
+        # this pass, which is the safe direction to be wrong in.
+        replacement_seen_enabled = (
+            active_name in observed and observed[active_name].enabled is True
+        )
 
         progress: list[ScalesetProgress] = []
         for name in family:
             old = observed.get(name)
             if name == active_name or old is None:
                 continue
-            if not replacement_live:
+            if not replacement_seen_enabled:
                 progress.append(
                     ScalesetProgress(spec.name, name, active_name, 0, Handover.PENDING)
                 )
