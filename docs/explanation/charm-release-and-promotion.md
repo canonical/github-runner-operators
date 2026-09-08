@@ -24,8 +24,7 @@ flowchart TD
   EDGE --> DAILY[Daily edge-to-candidate workflow]
   DAILY -->|edge ahead of candidate| E2E[GARM end-to-end test]
   E2E -->|pass| CAND[Release garm and garm-configurator to latest/candidate]
-  CAND --> RENOVATE[Renovate updates the production Terraform pin]
-  RENOVATE --> PROD[Human approves and applies the production pin]
+  CAND --> PROD[Human approves the production promotion]
   PROD --> WEEKLY[Weekly candidate-to-stable workflow]
   WEEKLY -->|7-day soak, approved| STABLE[Release latest/candidate to latest/stable]
 ```
@@ -63,15 +62,12 @@ charmcraft release garm-configurator --revision=<n> --channel=latest/candidate
 or put the charm that did get released back to the revision candidate held
 before the run, following {ref}`rollbacks` below. Do not leave the pair
 mismatched: production pins candidate, so an untested combination is what the
-next Terraform bump would ship.
+next production promotion would ship.
 
-Production does not follow candidate automatically. Instead, the internal
-GitOps Terraform repository pins production to a specific candidate revision.
-Renovate opens a revision-bump pull request when a newer candidate is available,
-covering both charms in one pull request so the pair stays together. Renovate is
-deliberately configured not to merge that pull request on its own. A human must
-approve and merge it, then apply the Terraform change. That approval is the
-production gate.
+Production does not follow candidate automatically. Instead, production is
+pinned to a specific candidate revision, and moving that pin to a newer
+candidate revision requires a human to review and approve the change. That
+approval is the production gate.
 
 Once a candidate revision has soaked for seven days, the weekly
 `promote_candidate_to_stable.yaml` workflow promotes it to `latest/stable`.
@@ -80,12 +76,11 @@ reviewers so a human approves the stable release at the end of the soak window.
 
 ## Human review gates
 
-### Renovate pull request gate
+### Production promotion gate
 
 This gate decides whether a candidate revision should move into production.
 The reviewer checks that the revision is the one they want to run in the live
-environment, then merges the revision-bump pull request and applies the
-Terraform change.
+environment before approving the change that moves the production pin.
 
 ### `charmhub-stable` environment gate
 
@@ -151,9 +146,9 @@ charmcraft release garm-configurator --revision=<n> --channel=latest/candidate
 Release both charms if the fix changes the pair, so candidate does not end up
 holding a combination that was never tested together.
 
-Then take the same revisions to production through the normal Terraform pin in
-the internal GitOps repository. The hotfix still follows the production gate;
-only the candidate release is done by hand.
+Then take the same revisions to production through the normal production
+promotion process. The hotfix still follows the production gate; only the
+candidate release is done by hand.
 
 For the full set of upload and release options, see the Charmcraft guides on
 [managing revisions](https://documentation.ubuntu.com/charmcraft/en/stable/howto/manage-revisions/)
@@ -171,8 +166,8 @@ First, clear any Juju units in error:
 juju resolved <application>/<unit>
 ```
 
-Then revert the production Terraform pin to the earlier revision and apply the
-change.
+Then revert the production pin to the earlier revision through the normal
+production promotion process.
 
 The candidate channel is not rolled back automatically. If you need candidate
 to point at an older revision, you must update it separately.
@@ -187,10 +182,9 @@ rollback.
 The rollback sequence therefore becomes:
 
 1. Disable the daily edge-to-candidate workflow.
-2. Roll back the production Terraform pin.
+2. Roll back the production pin.
 3. Run `juju resolved` on any units in error.
-4. Apply the Terraform change.
-5. Release the older revisions back to candidate, both charms together:
+4. Release the older revisions back to candidate, both charms together:
 
    ```bash
    charmcraft release garm --revision=<n> --channel=latest/candidate \
