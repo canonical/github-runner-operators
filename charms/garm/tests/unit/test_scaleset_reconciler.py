@@ -333,7 +333,7 @@ def _existing_scaleset(**overrides):
     """
     base = dict(
         # The name the default `_spec()` targets, so a default pairing exercises the
-        # current generation rather than the legacy-adoption path.
+        # current generation rather than the pre-hash unsuffixed shape.
         name=target_scaleset_name("my-scaleset", []),
         id=1,
         image="ubuntu-22.04",
@@ -1498,22 +1498,27 @@ def test_create_uses_label_hashed_name():
     assert params.labels == sorted(_LABELS_OLD)
 
 
-def test_legacy_unsuffixed_scaleset_adopted_when_labels_match():
+def test_pre_hash_unsuffixed_scaleset_is_replaced_not_adopted():
     """
-    arrange: A scaleset carrying the pre-hash un-suffixed name, with the desired labels.
+    arrange: A scaleset carrying the pre-hash un-suffixed name, with the desired labels
+        already applied — the shape a scaleset created before label-hashed naming has.
     act: Reconcile the matching spec.
-    assert: It is adopted in place — upgrading the charm must not churn scalesets that
-        are already serving the right labels.
+    assert: A label-hashed replacement is created and the un-suffixed scaleset is deleted
+        as an orphan, both in the same pass: only a hash-suffixed name is ever recognised
+        as a generation, so there is no adoption path and no separate upgrade step for an
+        operator to run.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],
-        scalesets=[_existing_scaleset(name="my-scaleset", tags=sorted(_LABELS_OLD))],
+        scalesets=[_existing_scaleset(name="my-scaleset", id=1, tags=sorted(_LABELS_OLD))],
     )
 
     progress = _reconcile(client, [_spec(labels=_LABELS_OLD)])
 
-    assert client.created == []
-    assert client.deleted == []
+    assert len(client.created) == 1
+    _, _, params = client.created[0]
+    assert params.name == _OLD_NAME
+    assert client.deleted == [1]
     assert progress == []
 
 

@@ -256,21 +256,16 @@ class ScalesetReconciler:
 
         Returns:
             Per logical name, every live generation it owns plus its target name
-            (which may not exist yet). A live name that is another spec's own or
-            target name is never claimed, so ``foo`` can't swallow a separate
-            scaleset that happens to be named ``foo-1a2b3c4d``.
+            (which may not exist yet). The hash suffix makes a generation's live
+            name unambiguous, so ``foo``'s family can't swallow a separate scaleset
+            that happens to be named ``foo-1a2b3c4d``: only ``foo-1a2b3c4d``'s own
+            generations match the pattern ``_family_pattern`` builds from it.
         """
-        targets = {spec.name: target_scaleset_name(spec.name, spec.labels) for spec in desired}
-        reserved = set(targets) | set(targets.values())
         families: dict[str, list[str]] = {}
         for spec in desired:
-            others = reserved - {spec.name, targets[spec.name]}
-            family = [
-                name
-                for name in observed
-                if name not in others and _is_family_member(name, spec.name)
-            ]
-            families[spec.name] = sorted({*family, targets[spec.name]})
+            target = target_scaleset_name(spec.name, spec.labels)
+            family = [name for name in observed if _is_family_member(name, spec.name)]
+            families[spec.name] = sorted({*family, target})
         return families
 
     def _load_templates(
@@ -319,7 +314,7 @@ class ScalesetReconciler:
         Returns:
             One entry per replaced generation of this spec still draining.
         """
-        active_name = _resolve_active_name(spec, observed)
+        active_name = target_scaleset_name(spec.name, spec.labels)
         try:
             create_params = self._to_create_params(spec, active_name)
         except Exception as exc:
@@ -1108,39 +1103,14 @@ def _is_family_member(observed_name: str, logical_name: str) -> bool:
         logical_name: The configured scaleset name.
 
     Returns:
-        True for a hash-suffixed generation, and for the bare *logical_name* itself —
-        scalesets created before label-hashed naming carry the un-suffixed name.
+        True for a hash-suffixed generation of *logical_name*.
     """
-    if observed_name == logical_name:
-        return True
     return bool(_family_pattern(logical_name).match(observed_name))
 
 
 def _family_pattern(logical_name: str) -> re.Pattern[str]:
     """Return the regex matching every generation of *logical_name*."""
     return re.compile(rf"^{re.escape(_name_base(logical_name))}-[0-9a-f]{{{LABEL_HASH_LENGTH}}}$")
-
-
-def _resolve_active_name(spec: ScalesetSpec, observed: dict[str, ScaleSet]) -> str:
-    """Return the live name of the generation that should serve *spec*.
-
-    Args:
-        spec: The desired scaleset.
-        observed: Observed scalesets keyed by name.
-
-    Returns:
-        The label-hashed target name, except when that name does not exist yet and a
-        legacy un-suffixed scaleset already carries exactly the desired labels — that
-        one is adopted in place, so upgrading the charm doesn't recreate scalesets
-        that are already correct.
-    """
-    target = target_scaleset_name(spec.name, spec.labels)
-    if target in observed:
-        return target
-    legacy = observed.get(spec.name)
-    if legacy is not None and _observed_labels(legacy) == sorted(spec.labels):
-        return spec.name
-    return target
 
 
 def _observed_labels(scaleset: ScaleSet) -> list[str]:
