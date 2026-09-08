@@ -17,7 +17,7 @@ import (
 
 	"github.com/canonical/github-runner-operators/internal/database"
 	"github.com/canonical/github-runner-operators/internal/telemetry"
-	"github.com/google/go-github/v89/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
