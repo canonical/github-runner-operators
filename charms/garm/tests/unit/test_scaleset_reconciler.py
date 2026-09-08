@@ -192,6 +192,11 @@ class FakeGarmClient:
         self.updated.append((scaleset_id, params))
 
     def delete_scaleset(self, scaleset_id):
+        # GARM rejects the delete while it still lists any instance, not only an
+        # active one, so the reconciler has to clear them first rather than retry
+        # the delete itself into a stuck instance.
+        if self._instances.get(scaleset_id):
+            raise GarmApiError("scale set still has instances")
         self.deleted.append(scaleset_id)
 
     def list_scale_set_instances(self, scaleset_id):
@@ -1891,14 +1896,15 @@ def test_failed_delete_keeps_the_replacement_reported_as_unfinished():
     assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 0)]
 
 
-def test_drain_past_the_deadline_stops_waiting_on_the_runner_count():
+def test_drain_past_the_deadline_removes_the_remaining_runner_directly():
     """
     arrange: The old generation was disabled longer ago than any job can run, and still
-        reports a runner (one stuck in a provider-side failure GARM never reaped).
+        reports a runner (one GARM's own scale-down reaper never cleared).
     act: Reconcile.
-    assert: The delete is attempted anyway, so a permanently faulted instance cannot pin
-        a dead scaleset on GitHub forever; GARM itself rejects the call while runners are
-        genuinely active, so no in-flight job is cut short.
+    assert: The runner is handed a normal delete rather than the scaleset delete being
+        retried directly — GARM rejects a scale set delete while it still lists any
+        instance, not only an active one, so retrying the delete alone could never clear
+        a stuck one. The scaleset stays reported as in flight until removal completes.
     """
     long_ago = datetime.now(timezone.utc) - DRAIN_DEADLINE * 2
     client = FakeGarmClient(
@@ -1912,8 +1918,62 @@ def test_drain_past_the_deadline_stops_waiting_on_the_runner_count():
 
     progress = _reconcile(client, [_spec(labels=_LABELS_NEW)])
 
+    assert client.deleted_instances == [("runner-0", False, False)]
+    assert client.deleted == []
+    assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 1)]
+
+
+def test_drain_past_the_deadline_deletes_the_scaleset_once_removal_completes():
+    """
+    arrange: The old generation was disabled longer ago than any job can run, and GARM
+        has finished tearing down its last runner (asynchronously, after an earlier
+        reconcile's removal request), so it now lists no instances.
+    act: Reconcile.
+    assert: The scaleset and its template are deleted — GARM accepts the delete once it
+        lists no instances, closing the cleanup/retry sequence the deadline started.
+    """
+    long_ago = datetime.now(timezone.utc) - DRAIN_DEADLINE * 2
+    client = _TemplateTrackingClient(
+        providers=["openstack-demo"],
+        scalesets=[
+            _generation(_LABELS_OLD, id=1, enabled=False, updated_at=long_ago, template_id=2),
+            _generation(_LABELS_NEW, id=2),
+        ],
+        templates=[_SYSTEM_TEMPLATE, _FakeTemplate(f"github_linux-{_OLD_NAME}", tid=2, data=b"x")],
+        instances={1: []},
+    )
+
+    progress = _reconcile(client, [_spec(labels=_LABELS_NEW)])
+
     assert client.deleted == [1]
+    assert client.deleted_templates == [2]
     assert progress == []
+
+
+def test_drain_past_the_deadline_still_leaves_a_running_job_alone():
+    """
+    arrange: The old generation was disabled longer ago than any job can run, but still
+        reports a runner GARM's job-status stream marks as running one.
+    act: Reconcile.
+    assert: Direct removal past the deadline reuses the same job protection as the
+        orphan sweep, so a genuinely running job is not cut short just because the
+        scaleset around it has been draining a long time.
+    """
+    long_ago = datetime.now(timezone.utc) - DRAIN_DEADLINE * 2
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[
+            _generation(_LABELS_OLD, id=1, enabled=False, updated_at=long_ago),
+            _generation(_LABELS_NEW, id=2),
+        ],
+        instances={1: [{"name": "runner-1", "runner_status": "active"}]},
+    )
+
+    progress = _reconcile(client, [_spec(labels=_LABELS_NEW)])
+
+    assert client.deleted_instances == []
+    assert client.deleted == []
+    assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 1)]
 
 
 def test_drain_within_the_deadline_still_waits_for_the_runners():
@@ -1940,22 +2000,23 @@ def test_drain_within_the_deadline_still_waits_for_the_runners():
 
 
 @pytest.mark.parametrize(
-    "updated_at",
+    "updated_at, expect_removal_attempted",
     [
-        None,
+        (None, False),
         # Naive, and far enough back that no timezone offset can bring it inside the
         # deadline — the point is that it is read as a timestamp at all, not crashed on.
-        datetime.now() - timedelta(days=30),
+        (datetime.now() - timedelta(days=30), True),
     ],
     ids=["no-timestamp", "naive-timestamp"],
 )
-def test_drain_deadline_handles_an_unusable_timestamp(updated_at):
+def test_drain_deadline_handles_an_unusable_timestamp(updated_at, expect_removal_attempted):
     """
     arrange: The old generation is draining and GARM reports no update timestamp, or a
         naive one (no timezone).
     act: Reconcile.
     assert: Neither crashes: a missing timestamp keeps waiting rather than reading as an
-        expired deadline, and a naive one is read as UTC.
+        expired deadline, and a naive one is read as UTC and, once past the deadline,
+        drives the same direct runner removal as a normal expired deadline.
     """
     client = FakeGarmClient(
         providers=["openstack-demo"],
@@ -1969,7 +2030,8 @@ def test_drain_deadline_handles_an_unusable_timestamp(updated_at):
 
     _reconcile(client, [_spec(labels=_LABELS_NEW)])
 
-    assert client.deleted == ([] if updated_at is None else [1])
+    assert client.deleted == []
+    assert bool(client.deleted_instances) is expect_removal_attempted
 
 
 def test_a_failing_spec_does_not_wedge_the_others():

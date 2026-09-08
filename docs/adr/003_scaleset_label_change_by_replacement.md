@@ -14,7 +14,7 @@ The GARM charm applies a label change by creating a replacement scale set and dr
 ## Context
 
 `UpdateScaleSetParams` exposes no labels field.
-A drain lasts as long as its longest in-flight job, up to GitHub's six-hour limit, exceeding any hook's execution budget.
+A drain lasts as long as its longest in-flight job. These are self-hosted runners, so the limit is GitHub's five-day self-hosted job cap, not the six hours a GitHub-hosted runner gets — either way exceeding any hook's execution budget.
 
 ## Decision
 
@@ -42,7 +42,7 @@ The design depends on five behaviors, verified against the GitHub API and the GA
 
 One behavior is not established by either source.
 Deleting the message session stops GARM receiving job assignments; whether GitHub stops assigning jobs to a scale set that still exists with the same labels in the same runner group is undocumented, and the GARM source cannot answer it.
-If GitHub does continue to assign, a job routed to the predecessor after the disable is not delivered, because GARM does not reopen the session to resume from `last_message_id`; the job waits until the predecessor is deleted, bounded by the seven-hour drain deadline below.
+If GitHub does continue to assign, a job routed to the predecessor after the disable is not delivered, because GARM does not reopen the session to resume from `last_message_id`; the job waits until the predecessor is deleted, bounded by the drain deadline below.
 Both generations carry the shared labels for the whole drain, so this would not be a rare case.
 Confirming it requires an observed run rather than a source reference.
 
@@ -55,7 +55,7 @@ A digest also maps a reverted label set back onto the name that generation alrea
 
 Recording the changeover in peer relation data or on disk was rejected: it establishes a second source of truth alongside GARM and requires its own cleanup.
 
-Blocking the hook until the drain completes was rejected: the drain can exceed six hours.
+Blocking the hook until the drain completes was rejected: the drain can exceed five days.
 
 ## Consequences
 
@@ -76,8 +76,9 @@ Operators should size the quota for twice the configured idle count.
 
 Each generation owns a runner template named after its live scale set, so a draining predecessor retains the template its runners were built from.
 
-An instance GARM does not remove would block deletion indefinitely, so after seven hours the charm stops gating on its runner count and attempts deletion on each reconcile.
-GARM rejects that request while the scale set has active runners, which bounds the effect.
+GARM rejects a scale set delete while it still lists any instance, not only an active one, so an instance GARM's own reaper never clears would block deletion indefinitely.
+Past the drain deadline the charm stops waiting on that reaper and removes what remains directly — the same guarded cleanup the orphan sweep uses: a plain delete for anything removable, escalating to forced removal only once GARM itself is stuck carrying one out, and leaving a genuinely running job's runner alone.
+The scale set is deleted once none remain.
 
 The 32-bit digest can collide, leaving a scale set whose labels do not match its spec.
 The charm logs both label sets and applies the remaining fields, rather than blocking updates to image, flavor, and runner counts while the mismatch persists.

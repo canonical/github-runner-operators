@@ -84,9 +84,14 @@ LABEL_HASH_LENGTH = 8
 # GitHub's own limit on the System label GARM registers the scale set under.
 MAX_SCALESET_NAME_LENGTH = 64
 
-# Past GitHub's 6h job cap a remaining runner is stuck, not busy: stop gating on the
-# count and retry the delete, which GARM rejects while runners are active.
-DRAIN_DEADLINE = timedelta(hours=7)
+# Past this, a runner a retired scaleset still reports cannot be doing a legitimate
+# job: these are self-hosted runners, bound by MAX_JOB_RUNTIME, not the six-hour cap
+# GitHub enforces on the runners it hosts itself. The margin absorbs reconcile
+# cadence rather than trying to catch the instant MAX_JOB_RUNTIME is crossed. Past
+# the deadline the charm stops waiting on GARM's own scale-down reaper and removes
+# what remains directly — which still leaves a genuinely running job's runner alone,
+# though past MAX_JOB_RUNTIME none legitimately can be one.
+DRAIN_DEADLINE = MAX_JOB_RUNTIME + timedelta(hours=1)
 
 
 class Handover(enum.Enum):
@@ -426,7 +431,8 @@ class ScalesetReconciler:
             nothing left to report.
 
         Raises:
-            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners``.
+            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners`` and
+                ``_remove_runners``.
         """
         # Truthy, not `is not False`: GARM tags Enabled `omitempty`, so a disabled
         # scaleset comes back with no `enabled` key at all and the client reads None.
@@ -440,15 +446,27 @@ class ScalesetReconciler:
         remaining = self._remaining_runners(old)
         if remaining and not _drain_deadline_passed(old):
             return ScalesetProgress(spec.name, name, active_name, remaining)
-        if remaining:
+        if remaining and old.id is not None:
+            # GARM's own scale-down reaper has had long enough to clear idle runners
+            # on its own; GARM rejects the scaleset delete below while any instance —
+            # not only an active one — is still listed, so whatever is left needs the
+            # same guarded cleanup the orphan sweep uses: a plain delete for anything
+            # removable, escalating to forced removal only once GARM itself is stuck
+            # carrying one out, and still leaving a genuinely running job's runner
+            # alone, though past MAX_JOB_RUNTIME none legitimately can be one.
             logger.warning(
                 "Scaleset %s still reports %d runner(s) after %s of draining;"
-                " attempting deletion anyway. GARM rejects the delete while runners"
-                " are genuinely active, so no in-flight job is cut short.",
+                " removing them directly rather than continuing to wait for GARM's"
+                " own reaper.",
                 name,
                 remaining,
                 DRAIN_DEADLINE,
             )
+            if not self._remove_runners(old.id, name):
+                # Removal is asynchronous, so whatever is still listed makes this
+                # pass's delete a certain 400; wait for the next reconcile to see it
+                # cleared.
+                return ScalesetProgress(spec.name, name, active_name, remaining)
         if not self._delete_drained(old, templates):
             # Keep reporting it: a scaleset GARM refused to delete is still on
             # GitHub, so the replacement has not actually converged yet.
@@ -736,7 +754,7 @@ class ScalesetReconciler:
         instance_name = instance.name or ""
         force_remove = _is_delete_stuck(instance)
         logger.info(
-            "Removing runner %s from orphaned scaleset %s (force=%s)",
+            "Removing runner %s from scaleset %s pending deletion (force=%s)",
             instance_name,
             scaleset_name,
             force_remove,
