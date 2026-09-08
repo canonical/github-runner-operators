@@ -18,7 +18,7 @@ the two production decisions with a human reviewer:
 - whether a candidate revision has truly soaked in production long enough to
   become stable.
 
-```{mermaid}
+```mermaid
 flowchart TD
   PUSH[Push to main] --> EDGE[Publish all charms to latest/edge]
   EDGE --> DAILY[Daily edge-to-candidate workflow]
