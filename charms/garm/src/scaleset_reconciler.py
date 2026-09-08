@@ -480,7 +480,7 @@ class ScalesetReconciler:
                 remaining,
                 DRAIN_DEADLINE,
             )
-            if not self._remove_runners(old.id, name):
+            if not self._remove_runners(old.id, name, past_deadline=True):
                 # Removal is asynchronous, so whatever is still listed makes this
                 # pass's delete a certain 400; wait for the next reconcile to see it
                 # cleared.
@@ -636,7 +636,9 @@ class ScalesetReconciler:
         # GARM rejects the delete while the scaleset still owns runners (and, above,
         # while it is enabled), so the runners have to go first; anything left behind
         # is retried on the next pass.
-        if not self._remove_runners(scaleset.id, name):
+        if not self._remove_runners(
+            scaleset.id, name, past_deadline=_drain_deadline_passed(scaleset)
+        ):
             # Runner removal is asynchronous: GARM only unlists a runner once the
             # provider has finished tearing it down. So anything still listed — a
             # delete issued just above and still in flight, a runner left mid-job, or
@@ -691,12 +693,15 @@ class ScalesetReconciler:
             )
             return False
 
-    def _remove_runners(self, scaleset_id: int, name: str) -> bool:
+    def _remove_runners(self, scaleset_id: int, name: str, *, past_deadline: bool) -> bool:
         """Remove every runner belonging to a scaleset being deleted.
 
         Args:
             scaleset_id: Id of the scaleset being deleted.
             name: Name of the scaleset being deleted, for logging.
+            past_deadline: Whether the scaleset has been draining longer than any job
+                can last, which turns a runner GARM will not accept a delete for from
+                something to wait out into something to report.
 
         Returns:
             Whether the scaleset owns no runners, so GARM will accept its delete.
@@ -730,13 +735,7 @@ class ScalesetReconciler:
                 # one the provider is already tearing down. Both resolve on their own,
                 # so wait for GARM to move the runner on rather than retry into the
                 # same error every pass.
-                logger.info(
-                    "Leaving runner %s of scaleset %s in place: GARM does not accept a delete"
-                    " in status %s (will retry on the next reconcile)",
-                    instance.name,
-                    name,
-                    instance.status,
-                )
+                self._log_undeletable_runner(instance, name, past_deadline)
                 continue
             if _is_running_job(instance):
                 # Deleting the runner here would fail the workflow job running on
@@ -754,6 +753,41 @@ class ScalesetReconciler:
         # Every runner listed here still counts against the scaleset's delete, including
         # the ones just handed to GARM: their records outlive this call.
         return not instances
+
+    @staticmethod
+    def _log_undeletable_runner(instance: Instance, name: str, past_deadline: bool) -> None:
+        """Report a runner GARM will not accept a delete for, loudly once it is overdue.
+
+        Args:
+            instance: The runner GARM would reject a delete for.
+            name: Name of the owning scaleset, for logging.
+            past_deadline: Whether the scaleset is past ``DRAIN_DEADLINE``.
+        """
+        if not past_deadline:
+            logger.info(
+                "Leaving runner %s of scaleset %s in place: GARM does not accept a delete"
+                " in status %s (will retry on the next reconcile)",
+                instance.name,
+                name,
+                instance.status,
+            )
+            return
+        # The charm has no way out of this on its own: GARM validates the runner's status
+        # before it looks at force_remove, so a forced delete is refused for exactly the
+        # same statuses as a plain one. Retrying is all that is left, and it is what the
+        # caller does — but past the deadline this has stopped being a status that
+        # resolves on its own, so say so at a level that gets noticed rather than logging
+        # the same untrue "will retry" line forever.
+        logger.error(
+            "Runner %s of scaleset %s has been in status %s for more than %s, and GARM"
+            " rejects a delete in that status whether or not it is forced. The scaleset"
+            " cannot be deleted while the runner is listed, so it will stay behind until"
+            " GARM moves the runner on or an operator clears it by hand.",
+            instance.name,
+            name,
+            instance.status,
+            DRAIN_DEADLINE,
+        )
 
     def _delete_runner(self, instance: Instance, scaleset_name: str) -> None:
         """Delete one runner, escalating past a stuck provider or an unauthorized GitHub.

@@ -92,5 +92,9 @@ GARM rejects a scale set delete while it still lists any instance, not only an a
 Past the drain deadline the charm stops waiting on that reaper and removes what remains directly — the same guarded cleanup the orphan sweep uses: a plain delete for anything removable, escalating to forced removal only once GARM itself is stuck carrying one out, and leaving a genuinely running job's runner alone.
 The scale set is deleted once none remain.
 
+A runner GARM will not accept a delete for at all is the one case the charm cannot resolve.
+`DeleteRunner` validates the runner's status before it reads `forceDelete`, so a forced delete is refused for exactly the statuses a plain one is, and the scale set cannot be deleted while the runner is listed.
+Past the drain deadline the charm reports that runner at error level and keeps retrying, rather than logging a "will retry" line that has stopped being true: only GARM moving the runner on, or an operator clearing it, ends that state.
+
 The 32-bit digest can collide, leaving a scale set whose labels do not match its spec.
 The charm logs both label sets and applies the remaining fields, rather than blocking updates to image, flavor, and runner counts while the mismatch persists.

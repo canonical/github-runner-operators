@@ -929,6 +929,52 @@ def test_a_runner_garm_would_refuse_to_delete_is_left_alone(status):
 
 
 @pytest.mark.parametrize(
+    "disabled_ago, expected_level",
+    [
+        (DRAIN_DEADLINE / 2, logging.INFO),
+        (DRAIN_DEADLINE * 2, logging.ERROR),
+    ],
+    ids=["within-deadline", "past-deadline"],
+)
+def test_a_runner_garm_will_not_delete_is_reported_once_it_is_overdue(
+    disabled_ago, expected_level, caplog
+):
+    """
+    arrange: An orphaned scaleset owning a runner in a status GARM's delete endpoint
+        rejects, disabled either recently or longer ago than any job can last.
+    act: Reconcile so the scaleset is orphaned.
+    assert: Still no delete is issued either way — GARM checks the status before it looks
+        at force_remove, so there is nothing the charm can escalate to — but past the
+        deadline the runner is reported at error level. The status has stopped being one
+        that resolves on its own, and the scaleset cannot be deleted while it is listed,
+        so this needs an operator rather than another quiet retry.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[
+            # Already disabled by an earlier pass, which is what `updated_at` dates
+            # from: GARM skips the write when an update changes nothing, so the
+            # repeated disable in `_delete_orphaned` does not push the clock forward.
+            _existing_scaleset(
+                name="stale-scaleset",
+                id=42,
+                enabled=False,
+                updated_at=datetime.now(timezone.utc) - disabled_ago,
+            )
+        ],
+        instances={42: [{"name": "runner-1", "status": "creating"}]},
+    )
+
+    with caplog.at_level(logging.INFO, logger="scaleset_reconciler"):
+        _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted_instances == []
+    assert client.deleted == []
+    stuck = [r for r in caplog.records if "runner-1" in r.getMessage()]
+    assert [r.levelno for r in stuck] == [expected_level], stuck
+
+
+@pytest.mark.parametrize(
     "instance_kwargs",
     [
         {"runner_status": "active"},
