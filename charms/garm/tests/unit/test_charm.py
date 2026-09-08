@@ -810,6 +810,7 @@ def test_status_returns_to_active_once_the_replacement_is_complete(
 
     assert out.unit_status == ops.ActiveStatus()
 
+
 def test_remove_event_is_bound_to_the_teardown_orchestrator(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: The remove event is emitted for a local GARM teardown.
