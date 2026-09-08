@@ -145,7 +145,7 @@ _PAAS_CHARM_HOOKS: typing.Final[tuple[str, ...]] = (
 
 
 def _validate_paas_charm_hook_contract() -> None:
-    """Fail loudly if the pinned paas-charm lifecycle hooks have changed."""
+    """Fail before startup if a paas-charm hook alias would stop guarding teardown."""
     base_classes = paas_charm.go.Charm.__mro__
     missing = [
         hook
@@ -173,20 +173,16 @@ class GarmCharm(paas_charm.go.Charm):
             self.on.install,
             self.on.leader_elected,
             self.on.update_status,
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_joined,
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_changed,
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_departed,
+            self.on[GARM_CONFIGURATOR_RELATION_NAME].relation_broken,
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_joined,
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_changed,
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_departed,
+            self.on[DEBUG_SSH_INTEGRATION_NAME].relation_broken,
         ):
             self.framework.observe(event, self._reconcile)
-
-        for relation_events in (
-            self.on[GARM_CONFIGURATOR_RELATION_NAME],
-            self.on[DEBUG_SSH_INTEGRATION_NAME],
-        ):
-            for event in (
-                relation_events.relation_joined,
-                relation_events.relation_changed,
-                relation_events.relation_departed,
-                relation_events.relation_broken,
-            ):
-                self.framework.observe(event, self._reconcile)
 
         self.framework.observe(self.on.get_credentials_action, self._on_get_credentials_action)
         self.framework.observe(self.on.remove, self._on_remove)
@@ -230,9 +226,13 @@ class GarmCharm(paas_charm.go.Charm):
         """Route an inherited framework event through GARM's teardown gate."""
         self._reconcile(event)
 
-    # PaasCharm.__init__ resolves these hook names dynamically. These aliases keep the
-    # teardown check before block_if_invalid_data without registering duplicate observers.
-    # The compatibility check above makes this adapter fail loudly when the base API changes.
+    def _route_reconcile_with_migrations(self, event: ops.EventBase) -> None:
+        """Route an inherited database event through GARM's migration gate."""
+        self._reconcile_with_migrations(event)
+
+    # PaasCharm.__init__ resolves these hook names dynamically. Keep all aliases together so
+    # the teardown adapters remain visible as one compatibility boundary. The contract check
+    # above makes this adapter fail loudly when the base API changes.
     _on_config_changed = _route_reconcile
     _on_secret_changed = _route_reconcile
     _on_secret_storage_relation_changed = _route_reconcile
@@ -241,11 +241,6 @@ class GarmCharm(paas_charm.go.Charm):
     _on_ingress_ready = _route_reconcile
     _on_ingress_revoked = _route_reconcile
     _on_pebble_ready = _route_reconcile
-
-    def _route_reconcile_with_migrations(self, event: ops.EventBase) -> None:
-        """Route an inherited database event through GARM's migration gate."""
-        self._reconcile_with_migrations(event)
-
     _on_postgresql_database_database_created = _route_reconcile_with_migrations
     _on_postgresql_database_endpoints_changed = _route_reconcile_with_migrations
 
