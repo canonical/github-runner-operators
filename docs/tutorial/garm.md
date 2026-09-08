@@ -279,9 +279,15 @@ GARM reports `GARM sync failed` instead, its GitHub credentials were rejected �
 
 ## Verify the scale set
 
-Open your repository on GitHub and go to **Settings > Actions > Runners**. `tutorial-scaleset` is
-listed there as a runner scale set. GARM created it through the GitHub Actions API using your
-GitHub App.
+Open your repository on GitHub and go to **Settings > Actions > Runners**. A runner scale set
+named `tutorial-scaleset-fe30030e` is listed there. GARM created it through the GitHub Actions API
+using your GitHub App.
+
+The `-fe30030e` suffix is a hash of the configured labels, which the charm appends so that a later
+label change can be applied by replacing the scale set rather than editing it — GitHub fixes a
+scale set's labels at creation. `tutorial-scaleset` stays the name you configure and the name the
+charm reports in its unit status; only the live name carries the suffix, and it changes whenever
+the labels do.
 
 You can also ask GARM directly. Retrieve its admin credentials:
 
@@ -305,7 +311,7 @@ This command should return:
 :output-only:
 
 {
-  "name": "tutorial-scaleset",
+  "name": "tutorial-scaleset-fe30030e",
   "repo_name": "your-user/your-repo",
   "max_runners": 1,
   "image": "00000000-0000-0000-0000-000000000000"
@@ -320,8 +326,11 @@ Congratulations! You have a working GARM deployment with a scale set registered 
 ## What changes with a real OpenStack cloud
 
 At this point every part of the deployment is real except the runners. GARM registers the scale set
-under its own name and under the configured labels, so a workflow job that sets either
-`runs-on: tutorial-scaleset` or `runs-on: tutorial` is assigned to it. GARM picks the job up over
+under its own name and under the configured labels, so a workflow job that sets
+`runs-on: tutorial` is assigned to it. Route jobs by a configured label rather than by the scale
+set name: the live name carries the label hash described above and changes on every label change,
+so `runs-on: tutorial-scaleset` matches nothing and `runs-on: tutorial-scaleset-fe30030e` would
+stop matching the next time the labels change. GARM picks the job up over
 its connection to GitHub and asks OpenStack for a runner, which fails against the placeholder
 credentials — `juju debug-log --include garm/0` shows the failure. Three things stand between this
 deployment and one that runs jobs:

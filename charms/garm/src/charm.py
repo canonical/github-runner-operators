@@ -626,7 +626,11 @@ class GarmCharm(paas_charm.go.Charm):
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
-            for unit in relation.units:
+            # Sorted, because `relation.units` is a set: the reconciler's dedupe is
+            # first-wins, so an unstable order lets the winning spec flip between hooks.
+            # A flip now changes the target scaleset name, which would create a
+            # replacement and retire the live one on every flip.
+            for unit in sorted(relation.units, key=lambda unit: unit.name):
                 spec = self._build_scaleset_spec(relation.data[unit], template_id)
                 if spec is not None:
                     specs.append(spec)
@@ -706,7 +710,9 @@ class GarmCharm(paas_charm.go.Charm):
         """
         credentials: dict[tuple[int, int], CredentialSpec] = {}
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
-            for unit in relation.units:
+            # Sorted for the same reason as `_build_desired_scalesets`: the dedupe
+            # below is first-wins over an unordered set.
+            for unit in sorted(relation.units, key=lambda unit: unit.name):
                 self._add_unit_credential(credentials, relation.data[unit], unit.name)
         return list(credentials.values())
 

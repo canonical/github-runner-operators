@@ -167,9 +167,17 @@ class ScalesetReconciler:
 
         A spec that fails against the GARM API does not abort the pass: the
         remaining specs and the orphan sweep still run, and the first failure is
-        re-raised at the end so the charm still reports the sync as failed. A
-        connection error is not contained that way — GARM is down, so retrying
-        every remaining spec would only stall the hook.
+        re-raised at the end so the charm still reports the sync as failed.
+
+        Two failures are not contained that way, because neither is specific to the
+        spec that hit it and both make the rest of the pass harmful rather than
+        merely useless. A connection error means GARM is down, so retrying every
+        remaining spec would only stall the hook. An unauthorized error means a
+        credential the whole pass depends on was rejected, so every remaining spec
+        would be rejected too — and letting the pass reach the orphan sweep would
+        have it read each runner's 401 as grounds for the GitHub-unauthorized
+        bypass, deleting runners from GARM while leaving them registered in GitHub
+        for an operator to clean up by hand.
 
         Args:
             desired: The full desired set of scalesets.
@@ -179,7 +187,8 @@ class ScalesetReconciler:
 
         Raises:
             GarmApiError: If any spec failed to reconcile, re-raised once the rest
-                of the pass has completed.
+                of the pass has completed — or immediately, without running the rest,
+                for a connection or unauthorized failure.
         """
         desired = self._dedupe(desired)
         providers = {provider.name for provider in self._client.list_providers()}
@@ -207,7 +216,7 @@ class ScalesetReconciler:
                         spec, providers, observed, templates, families.get(spec.name, [])
                     )
                 )
-            except GarmConnectionError:
+            except (GarmConnectionError, GarmUnauthorizedError):
                 raise
             except GarmApiError as exc:
                 logger.warning("Failed to reconcile scaleset %s: %s", spec.name, exc)

@@ -66,9 +66,21 @@ The cap is the charm's own conservative bound on the System label GitHub registe
 It could not have been this generous before the GARM bump recorded in the changelog for 2026-09-04 — GARM built the OpenStack `garm-pool-id` instance tag from the scale set name, so a name over 10 characters overran Nova's 60-character tag limit and failed every instance creation.
 GARM now derives that tag from a fixed-length UUID, so the name no longer feeds it.
 
+Moving the live name is a breaking change for workflows that route by it.
+GARM registers the scale set name as a GitHub `System` label alongside the configured ones, so a job with `runs-on: <configured name>` was assigned to it before this change and is not after: the label is now `<configured name>-<label hash>`, and it changes again on every label change.
+There is no stable name-derived label to route by, so jobs must use a configured label instead.
+The tutorial documented `runs-on: tutorial-scaleset` and is updated accordingly.
+Adding the configured name to the label set would restore it, at the cost of a label the operator did not ask for; it was left out rather than decided implicitly here.
+
 A changeover spans three reconciles, so at the default update-status interval a label change with no in-flight jobs completes in approximately 15 minutes.
 The unit stays active throughout, carrying the phase as its status message.
 Maintenance was rejected: the service is fully functional for the whole drain, and a drain reaching the deadline below would otherwise block `juju wait-for` and integration tests on hours of healthy background convergence.
+
+The blue/green sequence covers label changes, not the first upgrade onto this scheme.
+A scale set created before it carries the un-suffixed name, which is not a generation of anything, so the first reconcile creates the replacement and hands the predecessor to the orphan sweep in the same pass — disabling it, removing its runners, and deleting it once GARM reports none left.
+The predecessor's listener session therefore closes before the replacement is confirmed live, which is the queue gap the design otherwise avoids, and `reconcile` reports no changeover so the unit stays plainly active throughout.
+A runner mid-job is still left alone and removed on a later pass, so no in-flight job is cut short.
+Adopting the un-suffixed scale set in place was implemented and then removed: it was the only place the live name depended on observed GARM state rather than being a pure function of the spec, and the deployment it protected is edge-only.
 
 Both generations carry the full `min_idle_runners` until the predecessor is deleted, so the idle runner count doubles for the duration of the drain.
 Against a fixed OpenStack quota the replacement may be unable to spawn runners at all, which stalls the changeover it is meant to complete.

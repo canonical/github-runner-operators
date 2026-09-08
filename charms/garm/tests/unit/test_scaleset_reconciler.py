@@ -487,6 +487,35 @@ def test_a_connection_error_during_the_orphan_sweep_is_not_reported_as_converged
         _reconcile(client, [_spec(name="new-scaleset")])
 
 
+def test_an_unauthorized_spec_aborts_before_the_orphan_sweep():
+    """
+    arrange: An orphaned scaleset owning a runner, and a GARM whose scaleset create is
+        rejected as unauthorized — the shape of expired GitHub credentials, which every
+        call in the pass depends on.
+    act: Reconcile a different desired scaleset.
+    assert: The error propagates immediately and the sweep never runs. Contained, it
+        would reach the sweep, where each runner's own 401 reads as grounds for the
+        GitHub-unauthorized bypass — deleting runners from GARM while leaving them
+        registered in GitHub for an operator to remove by hand.
+    """
+
+    class _UnauthorizedClient(FakeGarmClient):
+        def create_org_scaleset(self, org_id, params):
+            raise GarmUnauthorizedError("401 Unauthorized")
+
+    client = _UnauthorizedClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(name="stale-scaleset", id=42)],
+        instances={42: ["runner-1"]},
+    )
+
+    with pytest.raises(GarmUnauthorizedError):
+        _reconcile(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted_instances == []
+    assert client.deleted == []
+
+
 @pytest.mark.parametrize(
     "error",
     [GarmApiError("500 Server error"), GarmUnauthorizedError("401 Unauthorized")],
