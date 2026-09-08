@@ -29,16 +29,13 @@ In your own code, to use this library to connect and interact with garm-client,
 you can run the following:
 
 ```python
-
 import garm_client
 from garm_client.rest import ApiException
 from pprint import pprint
 
 # Defining the host is optional and defaults to /api/v1
 # See configuration.py for a list of all supported configuration parameters.
-configuration = garm_client.Configuration(
-    host = "/api/v1"
-)
+configuration = garm_client.Configuration(host="/api/v1")
 
 # The client must configure the authentication and authorization parameters
 # in accordance with the API server security policy.
@@ -46,7 +43,7 @@ configuration = garm_client.Configuration(
 # satisfies your auth use case.
 
 # Configure API key authorization: Bearer
-configuration.api_key['Bearer'] = os.environ["API_KEY"]
+configuration.api_key["Bearer"] = os.environ["API_KEY"]
 
 # Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
 # configuration.api_key_prefix['Bearer'] = 'Bearer'
@@ -64,7 +61,6 @@ with garm_client.ApiClient(configuration) as api_client:
         pprint(api_response)
     except ApiException as e:
         print("Exception when calling ControllerApi->force_tools_sync: %s\n" % e)
-
 ```
 
 ## Documentation for API Endpoints
