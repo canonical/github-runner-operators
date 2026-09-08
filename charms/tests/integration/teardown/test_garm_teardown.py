@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -15,6 +16,11 @@ import requests
 from tests.e2e.conftest import GARM_API_PORT, _garm_login, _get_garm_address
 
 logger = logging.getLogger(__name__)
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("OS_AUTH_URL"),
+    reason="requires the ProdStack E2E environment",
+)
 
 
 def _wait_for_provider_running_instance(
