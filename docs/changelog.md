@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-09-08
 
-- Document the charm release pipeline from `latest/edge` through `latest/candidate` to `latest/stable`, including the production gate on the production pin. The manual hotfix and rollback paths are covered in a separate how-to guide.
+- Document the charm release pipeline from `latest/edge` through `latest/candidate` to `latest/stable`, including the production gate on the production pin.
 
 ## 2026-09-04
 
