@@ -1,49 +1,58 @@
 # Charms
 
-This product is composed of two primary charms. The sections below describe each charm, its role,
-and the integrations it expects in a typical deployment.
+This page describes the GARM and GARM configurator charms. The relevant information for a minimal deployment is provided here.
 
-## GitHub runner webhook gateway charm
+## GARM charm
 
-Purpose
+The GARM charm deploys and manages the [GARM](https://github.com/cloudbase/garm) service for managing GitHub self-hosted
+runners.
 
-- Receives GitHub webhooks and validates the `X-Hub-Signature-256` HMAC signature.
-- Forwards workflow job events and GitHub request metadata to an AMQP-compatible message broker.
+### Actions
 
-Required integrations
+There is no mandatory action for GARM charm to function.
 
-- AMQP message broker: the charm requires a `rabbitmq` relation to push webhook events.
+See [Actions for GARM charm](https://charmhub.io/garm/actions).
 
-Optional integrations
+### Configurations
 
-- Tracing: the charm supports optional `tracing` relation to export OpenTelemetry traces.
+The credentials to access GitHub API are required for GARM charm to function. The GARM charm currently supports only 
+GitHub App authentication. See `app-secret-key` and `app-secret-key-id` configurations for more details.
 
-Configuration
+See [Configurations for GARM charm](https://charmhub.io/garm/configurations).
 
-- `webhook-secret`: required to validate GitHub webhook signatures.
+### Integrations
 
-## GitHub runner planner charm
+The GARM charm must be integrated with a PostgreSQL charm, and at least one GARM configurator charm.
+The PostgreSQL charm is for storing runner and job states, while GARM configurator charms provider the configuration for
+a single set GitHub self-hosted runners.
 
-Purpose
+The GARM charm supports integration with COS (Canonical Observability Stack). See [observe your charm with COS lite](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/).
 
-- Provides a REST API for job and flavor management.
-- Consumes workflow job events from the AMQP broker and persists state in PostgreSQL.
-- Issues and reconciles auth tokens and flavor definitions for runner integrations.
+See [Integrations for GARM charm](https://charmhub.io/garm/integrations).
 
-Required integrations
+## GARM configurator charm
 
-- AMQP message broker: the charm requires a `rabbitmq` relation to consume webhook events.
-- PostgreSQL: the charm requires a `postgresql` relation to store job and flavor data.
+The GARM configurator charm is for provider a set of configurations of GitHub runner scaleset to the GARM charm. Multiple GARM configurator charms can be integrated to a single GARM charm. With each instance of GARM configurator charm representing a single GitHub runner scaleset in GARM.
 
-Optional integrations
+Currently, the GARM charm and GARM configurator charm only support the [GARM OpenStack provider](https://github.com/cloudbase/garm-provider-openstack).
 
-- Tracing: the charm can export OpenTelemetry traces when connected to a tracing charm.
+### Actions
 
-Provided integrations
+The GARM configurator charm has no actions.
 
-- Planner relation: the charm provides the `planner` relation endpoint (interface `github_runner_planner_v0`) so the GitHub runner charm can
-  retrieve auth tokens and desired flavor state.
+### Configurations
 
-Configuration
+The GARM configurator charm has all the relevant configuration for the GARM scaleset. The `architecture` configuration to specify the CPU architecture of the runner is mandatory. The OpenStack credentials are required for the GARM OpenStack provider to function. See `openstack-auth-url`, `openstack-password`, `openstack-project-domain-name`, `openstack-project-name`, `openstack-user-domain-name`, `openstack-user-name`.
 
-- `admin-token`: required to create or delete general auth tokens.
+While the rest of the configurations are optional or have reasonable defaults. It is recommended to review all the configurations for this charm.
+
+See [Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations).
+
+### Integrations
+
+The GARM configurator charm needs to be integrated with a GARM charm and a 
+[GitHub image builder charm](https://charmhub.io/github-runner-image-builder).
+The GARM charm manages the GitHub self-hosted runners according to the configuration on the GARM configurator charm.
+The GitHub image builder charm is for building images for the GitHub self-hosted runners.
+
+See [Integrations for GARM configurator charm](https://charmhub.io/garm-configurator/integrations).
