@@ -208,6 +208,43 @@ In order to build the `charm-name` rock, use the
 
 The respective charm code is in the `charms/charm-name` directory.
 
+Charmcraft 4.5 adds experimental support for packing a charm from a monorepo. This repository
+does not enable that mode yet: the four charms currently build from files inside their own
+directories, and none consumes a parent or sibling charm asset.
+
+When a shared parent or sibling asset is needed, do not add the monorepo recipe directly to the
+three `go-framework` charms. The current `go-framework` extension rejects a custom `parts.charm`
+entry, while the monorepo recipe requires overriding that part's `source` and `source-subdir`.
+Here `<charm-directory>` means the directory name, not the Charmhub name (for example,
+`planner-operator`). First update Charmcraft so the extension supports that narrow override, and
+add the setting to
+`canonical/charm-ci` (or use a pinned supported fork) so the reusable build workflow exports
+`CHARMCRAFT_EXPERIMENTAL_MONOREPO=1`. The current workflow does not expose that setting, and
+environment variables from this caller are not inherited by the called workflow. The change must
+cover both current build paths: `.github/workflows/charms_integration.yaml`, whose reusable
+integration workflow builds the PR artifacts, and `.github/workflows/garm_e2e.yaml`, which calls
+the reusable artifact build directly. Both callers must pass or enable the new input. Then use
+the following configuration and command for each affected charm:
+
+```yaml
+parts:
+  charm:
+    source: ../..
+    source-subdir: charms/<charm-directory>
+```
+
+```shell
+cd charms/<charm-directory>
+CHARMCRAFT_EXPERIMENTAL_MONOREPO=1 charmcraft pack
+```
+
+`garm-configurator` already has an explicit `parts.charm`, so it is technically compatible
+with the part-level recipe, but it should not be enabled selectively without a real shared-asset
+use case. Keep all four artifact paths in `artifacts.yaml` unchanged. Keep the generated
+`go-framework` part fields intact. Do not materialize the full extension output in this repository
+unless an upstream extension fix is unavailable and the generated configuration is checked for
+drift. Until those upstream pieces land, do not run or add the monorepo flag for this repository.
+
 Integration tests for the charm are in the `charms/tests/integration` directory.
 
 Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)

@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-09-09
+
+- Document the Charmcraft 4.5 monorepo support boundary. The charms remain on their existing
+  self-contained build layout because the current `go-framework` extension does not yet accept
+  the `parts.charm` override required by the monorepo recipe; no build behavior changes in this
+  repository.
+
 ## 2026-09-04
 
 - `garm`: bump the pinned GARM commit to pick up a fix for the scale set pseudo pool ID. GARM previously tagged OpenStack instances with a pool ID built from the scale set name, so a name over 10 characters produced a `garm-pool-id` server tag exceeding Nova's 60-character limit, failing every instance creation ([cloudbase/garm-provider-openstack#34](https://github.com/cloudbase/garm-provider-openstack/issues/34)). GARM now derives a fixed-length UUID for the pool ID instead, so scale set name length no longer affects the tag. The bump also required updating how the entrypoint launches GARM, to match a config-flag syntax change in the newer GARM version.
