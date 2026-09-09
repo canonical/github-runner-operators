@@ -49,8 +49,8 @@ The promotion does not require a new edge revision for both charms
 — the check step compares each charm's edge
 and candidate revisions independently, and promotes whichever charm is ahead.
 If only `garm` gets a new revision, `garm-configurator` is retested and
-re-released at its current, unchanged edge revision alongside it, so
-a successful promotion leaves `latest/candidate` holding a pair that was
+re-released at its current, unchanged edge revision alongside it.
+A successful promotion leaves `latest/candidate` holding a pair that was
 validated together.
 
 Charmhub has no way to release two charms in one transaction, so the workflow
