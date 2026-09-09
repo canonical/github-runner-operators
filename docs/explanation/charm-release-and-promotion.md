@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    "description lang=en": "Explain how GitHub runner charms move through edge, candidate, and stable."
+    "description lang=en": "Explain how GitHub runner charms move through edge, candidate, and stable risk levels."
 ---
 
 (release_process)=
@@ -36,36 +36,33 @@ Every push to `main` publishes all charms to `latest/edge` through
 
 Once a day, `promote_edge_to_candidate.yaml` compares the edge revision with
 the candidate revision. If edge is not ahead of candidate, the workflow skips
-so the repository does not rerun the expensive end-to-end test for no change.
+so the repository does not run the expensive end-to-end test.
 When edge is ahead, the workflow runs the GARM end-to-end test from
 `garm_e2e.yaml` against the published edge revision. If that test passes, the
 workflow releases the new revision to `latest/candidate`.
 
 Only two charms move through this automated edge-to-candidate promotion:
-`garm` and `garm-configurator`. They always move together, because the
-configurator supplies GARM's scale-set configuration: a revision of one is only
-ever validated against the revision of the other it was tested with, and the
-end-to-end test exercises the pair. "Together" does not mean both must have a
-new edge revision on the same day — the check step compares each charm's edge
+`garm` and `garm-configurator`. They always move together because the
+end-to-end test covers the two charms simultaneously: one revision of
+`garm` is validated against only one other revision of `garm-configurator`.
+The promotion does not require a new edge revision for both charms
+— the check step compares each charm's edge
 and candidate revisions independently, and promotes whichever charm is ahead.
 If only `garm` gets a new revision, `garm-configurator` is retested and
 re-released at its current, unchanged edge revision alongside it, so
-`latest/candidate` always holds a pair that was actually validated together,
-never a `garm` bump promoted on its own.
+`latest/candidate` always holds a pair that was validated together.
 
 Charmhub has no way to release two charms in one transaction, so the workflow
-releases them one after the other — `garm`, with the `app-image` resource
-revision that was attached to the tested edge revision, then
-`garm-configurator`. If the second release fails, the first has already
-happened: `latest/candidate` then holds a mismatched pair. The workflow says so
+releases `garm` first and `garm-configurator` after.
+If the `garm-configurator` release fails, then
+`latest/candidate` holds a mismatched pair. The workflow says so
 in its run summary, naming what it already released.
 
-The check step compares live Charmhub revisions rather than tracking what a
-run already did, so simply re-running the failed workflow — "Re-run failed
-jobs" reuses the cached edge/candidate comparison and end-to-end result — is
-the normal repair: it safely re-issues the release for the charm that already
-succeeded (a no-op, since candidate already holds that revision) and completes
-the one that failed. Only fall back to a manual release if you need to change
+The check step compares live Charmhub revisions, so re-running
+the failed workflow is the normal repair: the workflow safely
+re-issues the release for `garm` and completes the
+`garm-configurator` release.
+Only fall back to a manual release if you need to change
 what gets released, for example to release an older, already-tested revision
 instead of retrying the same one:
 
@@ -79,6 +76,8 @@ before the run, following the rollback steps in
 production pins candidate, so an untested combination is what the next
 production promotion would ship.
 
+## Human review gates
+
 Production does not follow candidate automatically. Instead, production is
 pinned to a specific candidate revision, and moving that pin to a newer
 candidate revision requires a human to review and approve the change. That
@@ -88,8 +87,6 @@ Once a candidate revision has soaked for seven days, the weekly
 `promote_candidate_to_stable.yaml` workflow promotes it to `latest/stable`.
 The workflow uses a GitHub Environment named `charmhub-stable` with required
 reviewers so a human approves the stable release at the end of the soak window.
-
-## Human review gates
 
 ### Production promotion gate
 
@@ -119,12 +116,10 @@ authenticates to Charmhub with the repository-level `CHARMHUB_TOKEN` secret, the
 same one the other release workflows use. The environment is there for the
 approval, not for the credentials.
 
-A missing environment would not fail an approval on its own — GitHub treats
+A missing environment would not cause the workflow to fail — GitHub treats
 `environment:` pointing at nothing as a no-op and runs the job straight through.
-The weekly workflow therefore checks first: its `verify-environment` job queries
-the environment and fails the run if it is absent or has no required-reviewers
-rule. The stable gate cannot silently disappear; an environment without
-required reviewers stops the release instead of waving it through.
+The weekly workflow therefore queries the environment using its
+its `verify-environment` job and fails the run if it is absent.
 
 ## Hotfixes and rollbacks
 
