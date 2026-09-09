@@ -11,8 +11,8 @@ myst:
 GitHub runner charm releases move through three Charmhub channels:
 `latest/edge`, `latest/candidate`, and `latest/stable`.
 
-The release process is designed to keep the fast path automated while leaving
-the two production decisions with a human reviewer:
+Publication to `latest/edge` and promotion to `latest/candidate` are automated.
+Two decisions require human review:
 
 - whether to take a candidate revision into production, and
 - whether a candidate revision has truly soaked in production long enough to
@@ -50,31 +50,14 @@ The promotion does not require a new edge revision for both charms
 and candidate revisions independently, and promotes whichever charm is ahead.
 If only `garm` gets a new revision, `garm-configurator` is retested and
 re-released at its current, unchanged edge revision alongside it, so
-`latest/candidate` always holds a pair that was validated together.
+a successful promotion leaves `latest/candidate` holding a pair that was
+validated together.
 
 Charmhub has no way to release two charms in one transaction, so the workflow
 releases `garm` first and `garm-configurator` after.
 If the `garm-configurator` release fails, then
 `latest/candidate` holds a mismatched pair. The workflow says so
 in its run summary, naming what it already released.
-
-The check step compares live Charmhub revisions, so re-running
-the failed workflow is the normal repair: the workflow safely
-re-issues the release for `garm` and completes the
-`garm-configurator` release.
-Only fall back to a manual release if you need to change
-what gets released, for example to release an older, already-tested revision
-instead of retrying the same one:
-
-```bash
-charmcraft release garm-configurator --revision=<n> --channel=latest/candidate
-```
-
-or to put the charm that did get released back to the revision candidate held
-before the run, following the rollback steps in
-{ref}`hotfix_and_rollback_charm_releases`. Do not leave the pair mismatched:
-production pins candidate, so an untested combination is what the next
-production promotion would ship.
 
 ## Human review gates
 
@@ -103,10 +86,6 @@ timestamp. That timestamp proves when the revision was published to
 the full soak window. The reviewer at this gate must confirm that the revision
 really has been running in production for the required time.
 
-That limitation is intentional in the current design, so the approval step is
-the place where a human closes the gap between candidate publication and
-production promotion.
-
 ## The `charmhub-stable` environment
 
 The stable gate needs one piece of repository configuration: a GitHub
@@ -118,13 +97,10 @@ approval, not for the credentials.
 
 A missing environment would not cause the workflow to fail — GitHub treats
 `environment:` pointing at nothing as a no-op and runs the job straight through.
-The weekly workflow therefore queries the environment using its
+The weekly workflow therefore queries the environment using
 its `verify-environment` job and fails the run if it is absent.
 
 ## Hotfixes and rollbacks
 
-Releasing a hotfix outside the normal edge-to-candidate pipeline, and manually
-rolling a release back, are both covered in a separate how-to guide:
-{ref}`hotfix_and_rollback_charm_releases`. Both paths still go through the
-production gate described above; only the candidate release step is done by
-hand.
+Maintainers can release hotfixes to candidate or restore earlier revisions
+manually. Both paths still require approval before production changes.
