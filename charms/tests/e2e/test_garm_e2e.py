@@ -9,7 +9,6 @@ import time
 import jubilant
 import pytest
 import requests
-
 from tests.integration.conftest import (
     _collect_debug_info,
     _garm_login,
@@ -93,16 +92,16 @@ def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str
 def _wait_for_runner_online(
     juju: jubilant.Juju,
     garm_app: str,
-    scaleset_name: str,
+    runner_label: str,
     timeout: int = 25 * 60,
     poll_interval: int = 15,
 ) -> None:
-    """Block until the named scale set has a runner GitHub has registered.
+    """Block until a scale set serving the label has a registered runner.
 
     Args:
         juju: Juju client for the model GARM is deployed in.
         garm_app: Name of the deployed GARM application.
-        scaleset_name: Name of the scale set whose runners to wait for.
+        runner_label: Unique runner label configured by the E2E fixture.
         timeout: Seconds to wait before failing the test.
         poll_interval: Seconds between polls.
     """
@@ -116,20 +115,30 @@ def _wait_for_runner_online(
     deadline = time.time() + timeout
     last_instances: list[dict] = []
     last_summary: list[str] | None = None
-    logger.info("Waiting for a registered runner in scale set %r", scaleset_name)
+    logger.info("Waiting for a registered runner serving label %r", runner_label)
 
     while time.time() < deadline:
         try:
             headers = {"Authorization": f"Bearer {token}"}
-            scalesets = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
+            scalesets = requests.get(
+                f"{base_url}/scalesets", headers=headers, timeout=30
+            )
             if scalesets.status_code == 401:
                 # The poll window outlives the JWT; renew and retry on the next pass.
                 token = _garm_login(juju, address)
                 time.sleep(poll_interval)
                 continue
             scalesets.raise_for_status()
+            # The charm adds a label hash to scale-set names. Match the unique
+            # routing label instead, excluding disabled generations being drained.
             scaleset = next(
-                (s for s in scalesets.json() or [] if s.get("name") == scaleset_name), None
+                (
+                    s
+                    for s in scalesets.json() or []
+                    if s.get("enabled") is True
+                    and any(t.get("name") == runner_label for t in s.get("tags") or [])
+                ),
+                None,
             )
             if scaleset is not None:
                 instances_response = requests.get(
@@ -173,16 +182,16 @@ def _wait_for_runner_online(
     # Leave the evidence in the log before failing: the instance state says which
     # stage stalled, since GARM only reaches "registered" after spawning an
     # instance, booting its VM, and installing the runner against the callback
-    # URL. An empty last observation means GARM never spawned an instance at
-    # all; pending_create means the provider never picked one up; running with a
+    # URL. An empty last observation means no instance was found for the label;
+    # pending_create means the provider never picked one up; running with a
     # pending runner_status means the VM booted but its bootstrap never called
     # back, with GARM's own logs -- collected next, through the sentinel
     # redactor -- carrying the reason.
     if last_instances:
         logger.error(
-            "Last instances observed in scale set %s (possibly reaped by GARM's "
+            "Last instances observed for runner label %s (possibly reaped by GARM's "
             "bootstrap-timeout reaper by now): %s",
-            scaleset_name,
+            runner_label,
             sorted(
                 f"{i.get('name')}: status={i.get('status')} "
                 f"runner_status={i.get('runner_status')} provider_id={i.get('provider_id')!r}"
@@ -190,9 +199,9 @@ def _wait_for_runner_online(
             ),
         )
     else:
-        logger.error("No instance was ever observed in scale set %s", scaleset_name)
+        logger.error("No instance was ever observed for runner label %s", runner_label)
     _collect_debug_info(juju, garm_app)
     pytest.fail(
-        f"No runner in scale set {scaleset_name!r} reached a registered state "
+        f"No runner serving label {runner_label!r} reached a registered state "
         f"({' or '.join(REGISTERED_RUNNER_STATUSES)}) within {timeout}s."
     )
