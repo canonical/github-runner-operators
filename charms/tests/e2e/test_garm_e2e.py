@@ -135,7 +135,7 @@ def _wait_for_runner_online(
                 (
                     s
                     for s in scalesets.json() or []
-                    if s.get("enabled")
+                    if s.get("enabled") is True
                     and any(t.get("name") == runner_label for t in s.get("tags") or [])
                 ),
                 None,
