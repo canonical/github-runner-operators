@@ -11,14 +11,18 @@ runners.
 
 There is no mandatory action for GARM charm to function.
 
-See [Actions for GARM charm](https://charmhub.io/garm/actions).
+```{seealso}
+[Actions for GARM charm](https://charmhub.io/garm/actions)
+```
 
 ### Configurations
 
 The credentials to access GitHub API are required for GARM charm to function. The GARM charm  supports only 
 GitHub App authentication. See `app-secret-key` and `app-secret-key-id` configurations for more details.
 
-See [Configurations for GARM charm](https://charmhub.io/garm/configurations).
+```{seealso}
+[Configurations for GARM charm](https://charmhub.io/garm/configurations)
+```
 
 ### Integrations
 
@@ -28,7 +32,9 @@ a single set GitHub self-hosted runners.
 
 The GARM charm supports integration with COS (Canonical Observability Stack). See [observe your charm with COS lite](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/).
 
-See [Integrations for GARM charm](https://charmhub.io/garm/integrations).
+```{seealso}
+[Integrations for GARM charm](https://charmhub.io/garm/integrations)
+```
 
 ## GARM configurator charm
 
@@ -53,7 +59,9 @@ The GARM configurator charm has all the relevant configuration for the GARM scal
 
 While the remaining configurations are optional or have defaults, it is recommended to review all the configurations for this charm.
 
-See [Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations).
+```{seealso}
+[Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations)
+```
 
 ### Integrations
 
@@ -62,4 +70,6 @@ The GARM configurator charm needs to be integrated with a GARM charm and a
 The GARM charm manages the GitHub self-hosted runners according to the configuration on the GARM configurator charm.
 The GitHub image builder charm is for building images for the GitHub self-hosted runners.
 
-See [Integrations for GARM configurator charm](https://charmhub.io/garm-configurator/integrations).
+```{seealso}
+[Integrations for GARM configurator charm](https://charmhub.io/garm-configurator/integrations)
+```
