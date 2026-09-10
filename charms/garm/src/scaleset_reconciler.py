@@ -5,7 +5,10 @@
 """Scaleset reconciler: diffs desired vs observed GARM scalesets and applies changes."""
 
 import base64
+import enum
+import hashlib
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +16,7 @@ from charm_state import RunnerConfig
 from garm_api import (
     GarmApiError,
     GarmAuthenticatedClient,
+    GarmConnectionError,
     GarmNotFoundError,
     GarmUnauthorizedError,
 )
@@ -70,6 +74,52 @@ PENDING_FORCE_DELETE_STATUS = "pending_force_delete"
 # legitimate job, which costs more than leaving a scaleset around for longer.
 MAX_JOB_RUNTIME = timedelta(days=5)
 
+LABEL_HASH_LENGTH = 8
+
+# A conservative bound on the generated name: the operator-supplied part is truncated to
+# fit, never the hash. GARM validates only that the name is non-empty, and the tighter
+# ceiling that used to apply is gone — GARM derived the OpenStack `garm-pool-id` tag from
+# the scale set name, so anything over 10 characters overran Nova's 60-character tag limit
+# until the pinned GARM bump replaced it with a fixed-length UUID. What remains is
+# GitHub's own limit on the System label GARM registers the scale set under.
+MAX_SCALESET_NAME_LENGTH = 64
+
+# Past this, a runner a retired scaleset still reports cannot be doing a legitimate
+# job: these are self-hosted runners, bound by MAX_JOB_RUNTIME, not the six-hour cap
+# GitHub enforces on the runners it hosts itself. The margin absorbs reconcile
+# cadence rather than trying to catch the instant MAX_JOB_RUNTIME is crossed. Past
+# the deadline the charm stops waiting on GARM's own scale-down reaper and removes
+# what remains directly — which still leaves a genuinely running job's runner alone,
+# though past MAX_JOB_RUNTIME none legitimately can be one.
+DRAIN_DEADLINE = MAX_JOB_RUNTIME + timedelta(hours=1)
+
+
+class Handover(enum.Enum):
+    """How far the routing hand-over from a replaced generation has got.
+
+    Attributes:
+        PENDING: The replacement is not up yet, so the predecessor must stay enabled.
+        FAILED: GARM refused to disable the predecessor; the next reconcile retries.
+        DONE: The predecessor is disabled and the replacement holds their shared labels.
+    """
+
+    # Both unfinished states leave the predecessor enabled and serving jobs, so nothing
+    # is draining yet and the runner count reported alongside them is 0.
+    PENDING = "pending"
+    FAILED = "failed"
+    DONE = "done"
+
+
+@dataclass(frozen=True)
+class ScalesetProgress:
+    """A scaleset replacement still in flight: the generation it replaced is not gone yet."""
+
+    logical_name: str
+    retiring_name: str
+    replacement_name: str
+    remaining_runners: int
+    handover: Handover = Handover.DONE
+
 
 @dataclass
 class ScalesetSpec:
@@ -103,7 +153,7 @@ class ScalesetReconciler:
         """
         self._client = client
 
-    def reconcile(self, desired: list[ScalesetSpec]) -> None:
+    def reconcile(self, desired: list[ScalesetSpec]) -> list[ScalesetProgress]:
         """Sync GARM scalesets to match *desired*.
 
         Performs the minimum set of CREATE / UPDATE / DELETE operations, and
@@ -112,9 +162,35 @@ class ScalesetReconciler:
         (org/repo) is not registered in GARM, that spec is skipped silently
         (deferred creation) — no error state is set.
 
+        A label change is applied by creating a replacement scaleset and draining
+        the old one (see ``_retire_replaced``), which spans several reconciles.
+
+        A spec that fails against the GARM API does not abort the pass: the
+        remaining specs and the orphan sweep still run, and the first failure is
+        re-raised at the end so the charm still reports the sync as failed.
+
+        Two failures are not contained that way, because neither is specific to the
+        spec that hit it and both make the rest of the pass harmful rather than
+        merely useless. A connection error means GARM is down, so retrying every
+        remaining spec would only stall the hook. An unauthorized error means a
+        credential the whole pass depends on was rejected, so every remaining spec
+        would be rejected too — and letting the pass reach the orphan sweep would
+        have it read each runner's 401 as grounds for the GitHub-unauthorized
+        bypass, deleting runners from GARM while leaving them registered in GitHub
+        for an operator to clean up by hand.
+
         Args:
             desired: The full desired set of scalesets.
+
+        Returns:
+            One entry per replacement still in flight; empty once converged.
+
+        Raises:
+            GarmApiError: If any spec failed to reconcile, re-raised once the rest
+                of the pass has completed — or immediately, without running the rest,
+                for a connection or unauthorized failure.
         """
+        desired = self._dedupe(desired)
         providers = {provider.name for provider in self._client.list_providers()}
         observed: dict[str, ScaleSet] = {}
         for scaleset in self._client.list_scalesets():
@@ -124,15 +200,87 @@ class ScalesetReconciler:
             observed[scaleset.name] = scaleset
 
         templates = self._load_templates(desired, observed)
-        all_desired_names: set[str] = {spec.name for spec in desired}
+        families = self._resolve_families(desired, observed)
+        # Covers in-flight replacements and draining predecessors, so the orphan pass
+        # can't delete one mid-changeover. Built before the provider/entity gates.
+        claimed: set[str] = set()
+        for family in families.values():
+            claimed.update(family)
 
+        progress: list[ScalesetProgress] = []
+        failure: GarmApiError | None = None
         for spec in desired:
-            self._reconcile_one(spec, providers, observed, templates)
+            try:
+                progress.extend(
+                    self._reconcile_one(
+                        spec, providers, observed, templates, families.get(spec.name, [])
+                    )
+                )
+            except (GarmConnectionError, GarmUnauthorizedError):
+                raise
+            except GarmApiError as exc:
+                logger.warning("Failed to reconcile scaleset %s: %s", spec.name, exc)
+                failure = failure or exc
 
         for name, scaleset in observed.items():
-            if name not in all_desired_names:
-                self._delete_orphaned(scaleset)
+            if name not in claimed and self._delete_orphaned(scaleset):
                 self._delete_custom_template(name, templates)
+        if failure is not None:
+            raise failure
+        return progress
+
+    @staticmethod
+    def _dedupe(desired: list[ScalesetSpec]) -> list[ScalesetSpec]:
+        """Drop specs repeating a logical name already claimed by an earlier one.
+
+        Args:
+            desired: The full desired set of scalesets.
+
+        Returns:
+            The specs with duplicate names removed, first occurrence winning. Two
+            specs sharing a name would each own the other's live scaleset and retire
+            it on every reconcile, so they would replace each other forever.
+        """
+        unique: dict[str, ScalesetSpec] = {}
+        for spec in desired:
+            existing = unique.get(spec.name)
+            if existing is not None:
+                # Only a conflicting duplicate is worth a warning: the scaleset config is
+                # app-level, so every configurator unit's databag yields the same spec and
+                # a multi-unit configurator would otherwise warn on every hook.
+                if existing != spec:
+                    logger.warning(
+                        "Ignoring duplicate desired scaleset %s: a logical name must"
+                        " identify exactly one scaleset",
+                        spec.name,
+                    )
+                continue
+            unique[spec.name] = spec
+        return list(unique.values())
+
+    @staticmethod
+    def _resolve_families(
+        desired: list[ScalesetSpec], observed: dict[str, ScaleSet]
+    ) -> dict[str, list[str]]:
+        """Group the live scalesets by the desired spec that owns them.
+
+        Args:
+            desired: The full desired set of scalesets.
+            observed: Observed scalesets keyed by name.
+
+        Returns:
+            Per logical name, every live generation it owns plus its target name
+            (which may not exist yet). The hash suffix makes a generation's live
+            name unambiguous, so ``foo``'s family can't swallow a separate scaleset
+            that happens to be named ``foo-1a2b3c4d``: only ``foo-1a2b3c4d``'s own
+            generations match the pattern ``_family_pattern`` builds from it.
+        """
+        families: dict[str, list[str]] = {}
+        for spec in desired:
+            target = target_scaleset_name(spec.name, spec.labels)
+            family = [name for name in observed if _is_family_member(name, spec.name)]
+            families[spec.name] = sorted({*family, target})
+        return families
 
     def _load_templates(
         self, desired: list[ScalesetSpec], observed: dict[str, ScaleSet]
@@ -166,7 +314,8 @@ class ScalesetReconciler:
         providers: set[str | None],
         observed: dict[str, ScaleSet],
         templates: dict[str, Template],
-    ) -> None:
+        family: list[str],
+    ) -> list[ScalesetProgress]:
         """Reconcile a single desired scaleset: validate, create or update, and sync its template.
 
         Args:
@@ -174,12 +323,20 @@ class ScalesetReconciler:
             providers: Names of providers currently registered in GARM.
             observed: Observed scalesets keyed by name.
             templates: Observed templates keyed by name.
+            family: Every live generation of this spec, plus its target name.
+
+        Returns:
+            One entry per replaced generation of this spec still draining.
         """
+        active_name = target_scaleset_name(spec.name, spec.labels)
         try:
-            create_params = self._to_create_params(spec)
+            create_params = self._to_create_params(spec, active_name)
         except Exception as exc:
-            logger.warning("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
-            return
+            # Error, not warning: unlike the provider/entity gates below this does not
+            # resolve on its own — the spec is malformed and will fail every pass until
+            # the operator changes it.
+            logger.error("Skipping scaleset %s: spec validation failed: %s", spec.name, exc)
+            return []
 
         if spec.provider_name not in providers:
             logger.warning(
@@ -187,7 +344,7 @@ class ScalesetReconciler:
                 spec.name,
                 spec.provider_name,
             )
-            return
+            return []
 
         entity_id = self._resolve_entity_id(spec)
         if entity_id is None:
@@ -197,46 +354,301 @@ class ScalesetReconciler:
                 spec.entity_type,
                 spec.entity_name,
             )
-            return
+            return []
 
-        template_id = self._ensure_template(spec, templates)
+        template_id = self._ensure_template(spec, active_name, templates)
 
-        if spec.name in observed:
-            self._maybe_update(observed[spec.name], spec, template_id)
+        if active_name in observed:
+            self._maybe_update(observed[active_name], spec, template_id)
         else:
-            self._create(spec, entity_id, create_params, template_id)
+            self._create(spec, active_name, entity_id, create_params, template_id)
 
         if not spec.runner_config.has_config():
             # Runner options were cleared (or the system template is
             # unavailable): the scaleset has been reverted to the default
             # template above, so drop any now-unreferenced custom template.
-            self._delete_custom_template(spec.name, templates)
+            self._delete_custom_template(active_name, templates)
 
-    def _delete_orphaned(self, scaleset: ScaleSet) -> None:
-        """Disable, drain, then delete a scaleset that is no longer in the desired set."""
+        return self._retire_replaced(spec, active_name, observed, templates, family)
+
+    def _retire_replaced(
+        self,
+        spec: ScalesetSpec,
+        active_name: str,
+        observed: dict[str, ScaleSet],
+        templates: dict[str, Template],
+        family: list[str],
+    ) -> list[ScalesetProgress]:
+        """Hand routing over to the current generation and drain the ones it replaced.
+
+        Workloads route by label, not by scaleset name, and GitHub only assigns jobs to
+        a scaleset holding a live listener session. So the replacement is brought up
+        first and only then is the old one disabled, which closes its session and leaves
+        the replacement as the sole holder of the labels they share. Any label carried by
+        both is served throughout — by one scaleset or the other, both fully functional —
+        so the changeover has no queue gap, and runners already mid-job are left to
+        finish rather than being killed.
+
+        Args:
+            spec: The desired scaleset.
+            active_name: The generation that should serve *spec*.
+            observed: Observed scalesets keyed by name.
+            templates: Observed templates keyed by name.
+            family: Every live generation of this spec, plus its target name.
+
+        Returns:
+            One entry per replaced generation not yet gone.
+        """
+        # Read from `observed`, the snapshot taken before this pass's own create and
+        # update: the name is "seen enabled", not "is enabled now", and the difference
+        # is deliberate. A replacement this pass has just enabled is not yet serving —
+        # GARM restarts the listener asynchronously, so its GitHub message session may
+        # not exist for a while yet — and closing the predecessor's session before then
+        # leaves the labels they share unserved. Requiring an earlier pass to have seen
+        # it enabled buys GARM that interval, and covers the charm dying in between.
+        # The cost is one extra reconcile before a retirement that could have started
+        # this pass, which is the safe direction to be wrong in.
+        replacement_seen_enabled = (
+            active_name in observed and observed[active_name].enabled is True
+        )
+
+        progress: list[ScalesetProgress] = []
+        for name in family:
+            old = observed.get(name)
+            if name == active_name or old is None:
+                continue
+            if not replacement_seen_enabled:
+                progress.append(
+                    ScalesetProgress(spec.name, name, active_name, 0, Handover.PENDING)
+                )
+                continue
+            entry = self._advance_retirement(spec, active_name, name, old, templates)
+            if entry is not None:
+                progress.append(entry)
+        return progress
+
+    def _advance_retirement(
+        self,
+        spec: ScalesetSpec,
+        active_name: str,
+        name: str,
+        old: ScaleSet,
+        templates: dict[str, Template],
+    ) -> ScalesetProgress | None:
+        """Move one replaced generation a step closer to being gone.
+
+        Args:
+            spec: The desired scaleset.
+            active_name: The generation that should serve *spec*.
+            name: Name of the replaced generation.
+            old: The replaced generation, as GARM reports it.
+            templates: Observed templates keyed by name.
+
+        Returns:
+            What to report for this generation, or None once it is gone and there is
+            nothing left to report.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners`` and
+                ``_remove_runners``.
+        """
+        # Truthy, not `is not False`: GARM tags Enabled `omitempty`, so a disabled
+        # scaleset comes back with no `enabled` key at all and the client reads None.
+        if old.enabled:
+            if not self._retire(old):
+                # It is still enabled, so its session is still open and nothing is
+                # draining: report the stalled hand-over rather than a runner count,
+                # which would read as a changeover that is quietly making progress.
+                return ScalesetProgress(spec.name, name, active_name, 0, Handover.FAILED)
+            return ScalesetProgress(spec.name, name, active_name, self._remaining_runners(old))
+        remaining = self._remaining_runners(old)
+        if remaining and not _drain_deadline_passed(old):
+            return ScalesetProgress(spec.name, name, active_name, remaining)
+        if remaining and old.id is not None:
+            # GARM's own scale-down reaper has had long enough to clear idle runners
+            # on its own; GARM rejects the scaleset delete below while any instance —
+            # not only an active one — is still listed, so whatever is left needs the
+            # same guarded cleanup the orphan sweep uses: a plain delete for anything
+            # removable, escalating to forced removal only once GARM itself is stuck
+            # carrying one out, and still leaving a genuinely running job's runner
+            # alone, though past MAX_JOB_RUNTIME none legitimately can be one.
+            logger.warning(
+                "Scaleset %s still reports %d runner(s) after %s of draining;"
+                " removing them directly rather than continuing to wait for GARM's"
+                " own reaper.",
+                name,
+                remaining,
+                DRAIN_DEADLINE,
+            )
+            if not self._remove_runners(old.id, name, past_deadline=True):
+                # Removal is asynchronous, so whatever is still listed makes this
+                # pass's delete a certain 400; wait for the next reconcile to see it
+                # cleared.
+                return ScalesetProgress(spec.name, name, active_name, remaining)
+        if not self._delete_drained(old, templates):
+            # Keep reporting it: a scaleset GARM refused to delete is still on
+            # GitHub, so the replacement has not actually converged yet.
+            return ScalesetProgress(spec.name, name, active_name, remaining)
+        return None
+
+    def _retire(self, scaleset: ScaleSet) -> bool:
+        """Disable a replaced scaleset and stop it launching runners.
+
+        Disabling closes its listener session, handing the shared labels to the
+        replacement. GARM's handleScaleDown then reaps idle runners but skips
+        RunnerActive, so a runner mid-job finishes instead of being killed. The
+        second call is defensive: GARM rejects max_runners=0 on create only.
+
+        Args:
+            scaleset: The replaced scaleset.
+
+        Returns:
+            Whether the scaleset is now disabled. False leaves both generations
+            enabled and their min_idle_runners doubled, so the caller must report the
+            changeover as stalled rather than as a drain in progress.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners``.
+        """
+        if scaleset.id is None:
+            logger.warning("Scaleset %s has no id; cannot retire it", scaleset.name)
+            return False
+        logger.info("Retiring replaced scaleset %s (id=%s)", scaleset.name, scaleset.id)
+        try:
+            self._client.update_scaleset(
+                scaleset.id,
+                UpdateScaleSetParams(enabled=False, min_idle_runners=0, max_runners=0),
+            )
+            return True
+        except GarmConnectionError:
+            raise
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not zero runner counts on scaleset %s; disabling only: %s",
+                scaleset.name,
+                exc,
+            )
+        try:
+            self._client.update_scaleset(
+                scaleset.id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
+            )
+        except GarmConnectionError:
+            raise
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not disable scaleset %s (will retry on next reconcile): %s",
+                scaleset.name,
+                exc,
+            )
+            return False
+        return True
+
+    def _remaining_runners(self, scaleset: ScaleSet) -> int:
+        """Return how many runners a scaleset still has.
+
+        Args:
+            scaleset: The scaleset to inspect.
+
+        Returns:
+            The instance count, or 1 when it cannot be read — an unknown count must
+            never be mistaken for a drained scaleset and delete live runners.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable. Contained failures are
+                per-scaleset; an outage is not, and must reach the charm's status
+                rather than be reported as drain progress.
+        """
+        if scaleset.id is None:
+            return 0
+        try:
+            return len(self._client.list_scale_set_instances(scaleset.id))
+        except GarmConnectionError:
+            raise
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not count runners of scaleset %s; assuming still draining: %s",
+                scaleset.name,
+                exc,
+            )
+            return 1
+
+    def _delete_drained(self, scaleset: ScaleSet, templates: dict[str, Template]) -> bool:
+        """Delete a replaced scaleset that has finished draining, and its template.
+
+        Args:
+            scaleset: The drained scaleset.
+            templates: Observed templates keyed by name.
+
+        Returns:
+            Whether the caller can stop tracking it. False means GARM still holds the
+            scaleset, so the replacement has not converged yet. An id-less scaleset is
+            untouchable rather than gone, but reporting it forever would wedge the
+            status, so it reads as done — matching ``_remaining_runners``.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_remaining_runners``.
+        """
+        if scaleset.id is None:
+            return True
+        logger.info("Deleting drained scaleset %s (id=%s)", scaleset.name, scaleset.id)
+        try:
+            self._client.delete_scaleset(scaleset.id)
+        except GarmConnectionError:
+            raise
+        except GarmApiError as exc:
+            logger.warning(
+                "Could not delete drained scaleset %s (will retry on next reconcile): %s",
+                scaleset.name,
+                exc,
+            )
+            return False
+        self._delete_custom_template(scaleset.name or "", templates)
+        return True
+
+    def _delete_orphaned(self, scaleset: ScaleSet) -> bool:
+        """Disable, drain, then delete a scaleset that is no longer in the desired set.
+
+        Args:
+            scaleset: The orphaned scaleset.
+
+        Returns:
+            Whether GARM no longer holds it, and so whether its runner template can go
+            too. A template is only ever deleted after the scaleset referencing it, so
+            a scaleset awaiting a retry keeps the runner config that retry relies on.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — an outage is not a per-scaleset
+                failure and must reach the charm's status rather than read as a sweep
+                that found nothing left to do.
+        """
         name = scaleset.name or ""
         logger.info("Deleting orphaned scaleset %s (id=%s)", name, scaleset.id)
         if scaleset.id is None:
-            return
+            logger.warning("Scaleset %s has no id; skipping delete", name)
+            return False
         if not self._disable(scaleset.id, name):
             # GARM rejects the delete of a scaleset that is still enabled, so nothing
             # below can succeed this pass. Removing the runners of a scaleset that is
             # still enabled and sized up would only have GARM launch replacements —
             # churning instances on every pass instead of draining — so both the drain
             # and the delete wait for the next reconcile.
-            return
+            return False
         # GARM rejects the delete while the scaleset still owns runners (and, above,
         # while it is enabled), so the runners have to go first; anything left behind
         # is retried on the next pass.
-        if not self._remove_runners(scaleset.id, name):
+        if not self._remove_runners(
+            scaleset.id, name, past_deadline=_drain_deadline_passed(scaleset)
+        ):
             # Runner removal is asynchronous: GARM only unlists a runner once the
             # provider has finished tearing it down. So anything still listed — a
             # delete issued just above and still in flight, a runner left mid-job, or
             # one in a status GARM will not delete — makes this pass's delete a
             # certain 400, and it waits for the next reconcile instead.
-            return
+            return False
         try:
             self._client.delete_scaleset(scaleset.id)
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             # The scaleset was empty when its runners were listed, so this is either a
             # runner registered in the window since (the scaleset is disabled, so only
@@ -246,6 +658,8 @@ class ScalesetReconciler:
                 name,
                 exc,
             )
+            return False
+        return True
 
     def _disable(self, scaleset_id: int, name: str) -> bool:
         """Stop a scaleset launching runners, before its existing ones are removed.
@@ -256,6 +670,9 @@ class ScalesetReconciler:
 
         Returns:
             Whether the scaleset is now disabled.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_delete_orphaned``.
         """
         try:
             # Neither field is propagated to GitHub: GARM only calls GitHub from this
@@ -265,6 +682,8 @@ class ScalesetReconciler:
                 scaleset_id, UpdateScaleSetParams(enabled=False, min_idle_runners=0)
             )
             return True
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning(
                 "Could not disable scaleset %s; deferring its delete, which GARM rejects while"
@@ -274,18 +693,26 @@ class ScalesetReconciler:
             )
             return False
 
-    def _remove_runners(self, scaleset_id: int, name: str) -> bool:
+    def _remove_runners(self, scaleset_id: int, name: str, *, past_deadline: bool) -> bool:
         """Remove every runner belonging to a scaleset being deleted.
 
         Args:
             scaleset_id: Id of the scaleset being deleted.
             name: Name of the scaleset being deleted, for logging.
+            past_deadline: Whether the scaleset has been draining longer than any job
+                can last, which turns a runner GARM will not accept a delete for from
+                something to wait out into something to report.
 
         Returns:
             Whether the scaleset owns no runners, so GARM will accept its delete.
+
+        Raises:
+            GarmConnectionError: If GARM is unreachable — see ``_delete_orphaned``.
         """
         try:
             instances = self._client.list_scale_set_instances(scaleset_id)
+        except GarmConnectionError:
+            raise
         except GarmApiError as exc:
             logger.warning(
                 "Could not list runners of scaleset %s (will retry on next reconcile): %s",
@@ -308,13 +735,7 @@ class ScalesetReconciler:
                 # one the provider is already tearing down. Both resolve on their own,
                 # so wait for GARM to move the runner on rather than retry into the
                 # same error every pass.
-                logger.info(
-                    "Leaving runner %s of scaleset %s in place: GARM does not accept a delete"
-                    " in status %s (will retry on the next reconcile)",
-                    instance.name,
-                    name,
-                    instance.status,
-                )
+                self._log_undeletable_runner(instance, name, past_deadline)
                 continue
             if _is_running_job(instance):
                 # Deleting the runner here would fail the workflow job running on
@@ -333,6 +754,41 @@ class ScalesetReconciler:
         # the ones just handed to GARM: their records outlive this call.
         return not instances
 
+    @staticmethod
+    def _log_undeletable_runner(instance: Instance, name: str, past_deadline: bool) -> None:
+        """Report a runner GARM will not accept a delete for, loudly once it is overdue.
+
+        Args:
+            instance: The runner GARM would reject a delete for.
+            name: Name of the owning scaleset, for logging.
+            past_deadline: Whether the scaleset is past ``DRAIN_DEADLINE``.
+        """
+        if not past_deadline:
+            logger.info(
+                "Leaving runner %s of scaleset %s in place: GARM does not accept a delete"
+                " in status %s (will retry on the next reconcile)",
+                instance.name,
+                name,
+                instance.status,
+            )
+            return
+        # The charm has no way out of this on its own: GARM validates the runner's status
+        # before it looks at force_remove, so a forced delete is refused for exactly the
+        # same statuses as a plain one. Retrying is all that is left, and it is what the
+        # caller does — but past the deadline this has stopped being a status that
+        # resolves on its own, so say so at a level that gets noticed rather than logging
+        # the same untrue "will retry" line forever.
+        logger.error(
+            "Runner %s of scaleset %s has been in status %s for more than %s, and GARM"
+            " rejects a delete in that status whether or not it is forced. The scaleset"
+            " cannot be deleted while the runner is listed, so it will stay behind until"
+            " GARM moves the runner on or an operator clears it by hand.",
+            instance.name,
+            name,
+            instance.status,
+            DRAIN_DEADLINE,
+        )
+
     def _delete_runner(self, instance: Instance, scaleset_name: str) -> None:
         """Delete one runner, escalating past a stuck provider or an unauthorized GitHub.
 
@@ -350,7 +806,7 @@ class ScalesetReconciler:
         instance_name = instance.name or ""
         force_remove = _is_delete_stuck(instance)
         logger.info(
-            "Removing runner %s from orphaned scaleset %s (force=%s)",
+            "Removing runner %s from scaleset %s pending deletion (force=%s)",
             instance_name,
             scaleset_name,
             force_remove,
@@ -422,7 +878,9 @@ class ScalesetReconciler:
         logger.warning("Unknown entity_type %r for scaleset %s", spec.entity_type, spec.name)
         return None
 
-    def _ensure_template(self, spec: ScalesetSpec, templates: dict[str, Template]) -> int:
+    def _ensure_template(
+        self, spec: ScalesetSpec, scaleset_name: str, templates: dict[str, Template]
+    ) -> int:
         """Ensure the scaleset's runner template reflects its runner options.
 
         Copies the system ``github_linux`` template, injects the runner options,
@@ -432,6 +890,9 @@ class ScalesetReconciler:
 
         Args:
             spec: The desired scaleset.
+            scaleset_name: The live name of the scaleset the template belongs to. Each
+                generation owns its own template, so a draining predecessor keeps the
+                template its runners were built from until it is deleted.
             templates: Observed templates keyed by name.
 
         Returns:
@@ -440,7 +901,7 @@ class ScalesetReconciler:
             is unavailable and no custom template already exists). Returning ``0``
             for a scaleset that previously had a custom template detaches it.
         """
-        custom_name = f"{SYSTEM_TEMPLATE_NAME}-{spec.name}"
+        custom_name = f"{SYSTEM_TEMPLATE_NAME}-{scaleset_name}"
         existing = templates.get(custom_name)
 
         if not spec.runner_config.has_config():
@@ -458,13 +919,13 @@ class ScalesetReconciler:
                 logger.warning(
                     "System template %s not found; keeping existing custom template for %s",
                     SYSTEM_TEMPLATE_NAME,
-                    spec.name,
+                    scaleset_name,
                 )
                 return existing.id or 0
             logger.warning(
                 "System template %s not found; scaleset %s will use the default template",
                 SYSTEM_TEMPLATE_NAME,
-                spec.name,
+                scaleset_name,
             )
             return 0
 
@@ -474,7 +935,7 @@ class ScalesetReconciler:
                 logger.warning(
                     "Runner template %s has no id; scaleset %s will use the default template",
                     custom_name,
-                    spec.name,
+                    scaleset_name,
                 )
                 return 0
             if self._template_bytes(existing) != new_data:
@@ -486,7 +947,7 @@ class ScalesetReconciler:
         created = self._client.create_template(
             name=custom_name,
             data=new_data,
-            description=f"Runner template for scaleset {spec.name}",
+            description=f"Runner template for scaleset {scaleset_name}",
         )
         return created.id or 0
 
@@ -555,11 +1016,12 @@ class ScalesetReconciler:
                 )
 
     @staticmethod
-    def _to_create_params(spec: ScalesetSpec) -> CreateScaleSetParams:
+    def _to_create_params(spec: ScalesetSpec, scaleset_name: str) -> CreateScaleSetParams:
         """Build and validate CreateScaleSetParams from a ScalesetSpec.
 
         Args:
             spec: The desired scaleset specification.
+            scaleset_name: The live name to create the scaleset under.
 
         Returns:
             Validated CreateScaleSetParams ready for the GARM API.
@@ -569,7 +1031,7 @@ class ScalesetReconciler:
         """
         return CreateScaleSetParams.model_validate(
             {
-                "name": spec.name,
+                "name": scaleset_name,
                 "provider_name": spec.provider_name,
                 "image": spec.image,
                 "flavor": spec.flavor,
@@ -588,29 +1050,27 @@ class ScalesetReconciler:
     def _create(
         self,
         spec: ScalesetSpec,
+        scaleset_name: str,
         entity_id: str,
         params: CreateScaleSetParams,
         template_id: int,
     ) -> None:
         if template_id:
             params.template_id = template_id
-        logger.info("Creating scaleset %s under %s %s", spec.name, spec.entity_type, entity_id)
+        logger.info("Creating scaleset %s under %s %s", scaleset_name, spec.entity_type, entity_id)
         if spec.entity_type == "organization":
             self._client.create_org_scaleset(entity_id, params)
         else:
             self._client.create_repo_scaleset(entity_id, params)
 
     def _maybe_update(self, observed: ScaleSet, spec: ScalesetSpec, template_id: int) -> None:
-        observed_labels = sorted(t.name for t in (observed.tags or []) if t.name)
+        observed_labels = _observed_labels(observed)
         if observed_labels != sorted(spec.labels):
-            # UpdateScaleSetParams has no labels field; label changes require
-            # recreating the scaleset. To delete a scaleset, remove the
-            # garm-configurator relation for the corresponding unit.
             logger.warning(
-                "Scaleset %s labels changed (%s -> %s) but cannot be updated in place;"
-                " to apply label changes, remove and re-add the garm-configurator relation"
-                " for this unit",
-                spec.name,
+                "Scaleset %s carries labels %s but %s were expected; updating its other"
+                " fields anyway. Labels are immutable in GitHub — delete this scaleset"
+                " in GARM to let the charm recreate it with the expected labels.",
+                observed.name,
                 observed_labels,
                 sorted(spec.labels),
             )
@@ -620,12 +1080,12 @@ class ScalesetReconciler:
         # _needs_update already covers the template id (its last clause), so an
         # id change alone forces an update here.
         if not self._needs_update(observed, spec, template_id):
-            logger.debug("Scaleset %s is up to date", spec.name)
+            logger.debug("Scaleset %s is up to date", observed.name)
             return
 
         # UpdateScaleSetParams omits None fields (exclude_none), so None can only
         # leave extra_specs untouched, never clear them. Send an explicit empty
-        # dict when the desired specs are empty but the scaleset still carries
+        # dict when the desired extra specs are empty but the scaleset still carries
         # some (e.g. a proxy was unset) — otherwise a stale aproxy script would
         # persist and _needs_update would loop forever trying to converge.
         desired_extra = _effective_extra_specs(spec)
@@ -645,9 +1105,9 @@ class ScalesetReconciler:
         # unrelated update never spuriously sets the field.
         if template_id or observed_template_id:
             params.template_id = template_id
-        logger.info("Updating scaleset %s (id=%s)", spec.name, observed.id)
+        logger.info("Updating scaleset %s (id=%s)", observed.name, observed.id)
         if observed.id is None:
-            logger.warning("Scaleset %s has no id; skipping update", spec.name)
+            logger.warning("Scaleset %s has no id; skipping update", observed.name)
             return
         self._client.update_scaleset(observed.id, params)
 
@@ -670,6 +1130,85 @@ class ScalesetReconciler:
             != bool(desired_extra.get("disable_updates"))
             or (observed.template_id or 0) != template_id
         )
+
+
+def target_scaleset_name(logical_name: str, labels: list[str]) -> str:
+    """Return the live GARM name a spec's scaleset should have.
+
+    Args:
+        logical_name: The scaleset name the operator configured.
+        labels: The desired labels.
+
+    Returns:
+        ``<name>-<label hash>``. Only the labels feed the hash: every other spec
+        field is updatable in place and must not trigger a recreate.
+    """
+    digest = hashlib.sha256(",".join(sorted(labels)).encode("utf-8")).hexdigest()
+    return f"{_name_base(logical_name)}-{digest[:LABEL_HASH_LENGTH]}"
+
+
+def _name_base(logical_name: str) -> str:
+    """Return the part of a live scaleset name that precedes the label hash.
+
+    Args:
+        logical_name: The scaleset name the operator configured.
+
+    Returns:
+        The name itself when it fits, else a truncation ending in a hash of the full
+        name — two long names sharing a prefix would otherwise collapse onto one live
+        scaleset and fight over it on every reconcile.
+    """
+    limit = MAX_SCALESET_NAME_LENGTH - LABEL_HASH_LENGTH - 1
+    if len(logical_name) <= limit:
+        return logical_name
+    digest = hashlib.sha256(logical_name.encode("utf-8")).hexdigest()[:LABEL_HASH_LENGTH]
+    return f"{logical_name[: limit - LABEL_HASH_LENGTH - 1]}-{digest}"
+
+
+def _is_family_member(observed_name: str, logical_name: str) -> bool:
+    """Return whether a live scaleset is a generation of *logical_name*.
+
+    Args:
+        observed_name: The live scaleset name.
+        logical_name: The configured scaleset name.
+
+    Returns:
+        True for a hash-suffixed generation of *logical_name*.
+    """
+    return bool(_family_pattern(logical_name).match(observed_name))
+
+
+def _family_pattern(logical_name: str) -> re.Pattern[str]:
+    """Return the regex matching every generation of *logical_name*."""
+    return re.compile(rf"^{re.escape(_name_base(logical_name))}-[0-9a-f]{{{LABEL_HASH_LENGTH}}}$")
+
+
+def _observed_labels(scaleset: ScaleSet) -> list[str]:
+    """Return a scaleset's labels, sorted, for comparison against a spec."""
+    return sorted(tag.name for tag in (scaleset.tags or []) if tag.name)
+
+
+def _drain_deadline_passed(scaleset: ScaleSet) -> bool:
+    """Return whether a retired scaleset has been draining longer than any job can last.
+
+    Args:
+        scaleset: The retired scaleset.
+
+    Returns:
+        True once ``DRAIN_DEADLINE`` has elapsed since GARM last wrote the scaleset —
+        which, for a retired one, is the moment it was disabled: the only writes to that
+        row while it drains would come from the listener's message handler
+        (``SetScaleSetLastMessageID`` / ``SetScaleSetDesiredRunnerCount``), and disabling
+        stopped the listener. ``handleAutoScale`` keeps running but writes instances, a
+        separate table. False when GARM reports no timestamp: an unknown drain age must
+        never read as an expired one.
+    """
+    retired_at = scaleset.updated_at
+    if retired_at is None:
+        return False
+    if retired_at.tzinfo is None:
+        retired_at = retired_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - retired_at > DRAIN_DEADLINE
 
 
 def _is_running_job(instance: Instance) -> bool:

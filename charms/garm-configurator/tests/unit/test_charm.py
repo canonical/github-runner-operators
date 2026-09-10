@@ -658,6 +658,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     )
     assert "repo" not in garm_out.local_unit_data
 
+
 @pytest.mark.parametrize(
     "config_key, bad_value, expected_fragment",
     [

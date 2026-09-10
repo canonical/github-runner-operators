@@ -340,7 +340,7 @@ def _drain_and_delete_scaleset(juju: jubilant.Juju, garm_app: str, label: str) -
     Args:
         juju: Juju client for the model GARM is deployed in.
         garm_app: Name of the deployed GARM application.
-        label: Name of the scale set to drain and delete.
+        label: Unique runner label identifying the scale sets to drain and delete.
     """
     address = _get_garm_address(juju, garm_app)
     headers = {"Authorization": f"Bearer {_garm_login(juju, address)}"}
@@ -348,10 +348,23 @@ def _drain_and_delete_scaleset(juju: jubilant.Juju, garm_app: str, label: str) -
 
     response = requests.get(f"{base_url}/scalesets", headers=headers, timeout=30)
     response.raise_for_status()
-    scaleset = next((s for s in response.json() or [] if s.get("name") == label), None)
-    if scaleset is None:
-        return
-    scaleset_id = scaleset["id"]
+    # Include disabled generations: they may still own runners or GitHub state.
+    for scaleset in response.json() or []:
+        if any(tag.get("name") == label for tag in scaleset.get("tags") or []):
+            _drain_and_delete_scaleset_id(base_url, headers, scaleset["id"], label)
+
+
+def _drain_and_delete_scaleset_id(
+    base_url: str, headers: dict[str, str], scaleset_id: int, label: str
+) -> None:
+    """Drain and delete one scale set belonging to the E2E run.
+
+    Args:
+        base_url: GARM API base URL.
+        headers: Authentication headers for GARM.
+        scaleset_id: ID of the scale set to remove.
+        label: Runner label used in diagnostic messages.
+    """
     logger.info("Draining E2E scale set %s (%s)", scaleset_id, label)
 
     # Disabling stops replacement; min_idle_runners=0 lets the existing ones go.
