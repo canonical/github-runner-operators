@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-09-08
+
+- Document the charm release pipeline from `latest/edge` through `latest/candidate` to `latest/stable`, including the production gate on the production pin.
+
 ## 2026-09-07
 
 - `garm`: **breaking change** — a scale set's live name now carries a hash of its labels, so `runs-on: <configured name>` no longer routes jobs to it. GARM registers the scale set name as a GitHub `System` label alongside the configured ones, and that label is now `<configured name>-<label hash>` (for example `my-scaleset-1a2b3c4d`) rather than the name you configured. It also changes every time the labels do, so there is no stable name-derived label to route by: change any workflow using `runs-on: <configured name>` to use one of the scale set's configured labels instead. The configured name remains the operator-facing identity and is what the unit status reports.
