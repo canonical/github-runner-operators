@@ -5,7 +5,6 @@
 from unittest.mock import Mock
 
 import pytest
-
 from tests.e2e import test_garm_e2e as e2e
 
 

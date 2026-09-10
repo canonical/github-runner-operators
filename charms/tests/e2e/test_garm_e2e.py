@@ -9,7 +9,6 @@ import time
 import jubilant
 import pytest
 import requests
-
 from tests.integration.conftest import (
     _collect_debug_info,
     _garm_login,
