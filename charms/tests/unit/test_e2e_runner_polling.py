@@ -5,6 +5,7 @@
 from unittest.mock import Mock
 
 import pytest
+from tests.e2e import conftest as fixtures
 from tests.e2e import test_garm_e2e as e2e
 
 
@@ -42,4 +43,43 @@ def test_runner_polling_resolves_enabled_scaleset_by_label(monkeypatch, name):
     assert [call.args[0] for call in get.call_args_list] == [
         "http://garm:8080/api/v1/scalesets",
         "http://garm:8080/api/v1/scalesets/5/instances",
+    ]
+
+
+@pytest.mark.parametrize("name", ["e2e-f624f0", "e2e-f624f0-d0f3c26d"])
+def test_teardown_removes_all_generations_for_label(monkeypatch, name):
+    """
+    arrange: Active and disabled scale sets with the run label plus unrelated sets.
+    act: Tear down the E2E scale sets with no remaining instances.
+    assert: Delete every matching generation by ID while preserving unrelated sets.
+    """
+    label = "e2e-f624f0"
+    tags = [{"name": label}]
+    scalesets = [
+        {"id": 1, "name": label, "tags": [{"name": "other"}]},
+        {"id": 2, "name": name, "enabled": True, "tags": tags},
+        {"id": 3, "name": "disabled-generation", "enabled": False, "tags": tags},
+        {"id": 4, "name": "omitted-enabled", "tags": tags},
+        {"id": 5, "name": "no-tags", "tags": None},
+    ]
+    get = Mock(
+        side_effect=[
+            Mock(json=Mock(return_value=scalesets)),
+            *[Mock(json=Mock(return_value=[])) for _ in range(3)],
+        ]
+    )
+    put, delete = Mock(), Mock()
+    monkeypatch.setattr(fixtures.requests, "get", get)
+    monkeypatch.setattr(fixtures.requests, "put", put)
+    monkeypatch.setattr(fixtures.requests, "delete", delete)
+    monkeypatch.setattr(fixtures, "_get_garm_address", Mock(return_value="garm"))
+    monkeypatch.setattr(fixtures, "_garm_login", Mock(return_value="token"))
+
+    fixtures._drain_and_delete_scaleset(Mock(), "garm", label)
+
+    expected = [f"http://garm:8080/api/v1/scalesets/{id}" for id in (2, 3, 4)]
+    assert [call.args[0] for call in put.call_args_list] == expected
+    assert [call.args[0] for call in delete.call_args_list] == expected
+    assert [call.args[0] for call in get.call_args_list[1:]] == [
+        f"{url}/instances" for url in expected
     ]
