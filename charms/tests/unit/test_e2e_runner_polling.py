@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from tests.e2e import conftest as fixtures
+from tests.e2e import openstack as os_mod
 from tests.e2e import test_garm_e2e as e2e
 
 
@@ -160,4 +161,52 @@ def test_provider_running_instance_wait_fails_on_timeout(monkeypatch):
     with pytest.raises(pytest.fail.Exception):
         e2e._wait_for_provider_running_instance(
             Mock(), "garm", "e2e-f624f0", timeout=0.2, poll_interval=0.01
+        )
+
+
+class _FakeServer:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeCompute:
+    def __init__(self, active: bool) -> None:
+        self._active = active
+
+    def servers(self, name: str):
+        return [_FakeServer(name)] if self._active else []
+
+
+class _FakeConnection:
+    def __init__(self, active: bool) -> None:
+        self.compute = _FakeCompute(active)
+
+
+def test_wait_for_server_state_present(monkeypatch):
+    """A server that exists satisfies the present wait on the first poll."""
+    monkeypatch.setattr(
+        os_mod, "_connect", Mock(return_value=_FakeConnection(active=True))
+    )
+    os_mod.wait_for_server_state({}, "srv", present=True, timeout=2, poll_interval=0.01)
+
+
+def test_wait_for_server_state_absent(monkeypatch):
+    """A server that is gone satisfies the absent wait on the first poll."""
+    monkeypatch.setattr(
+        os_mod, "_connect", Mock(return_value=_FakeConnection(active=False))
+    )
+    os_mod.wait_for_server_state(
+        {}, "srv", present=False, timeout=2, poll_interval=0.01
+    )
+
+
+def test_wait_for_server_state_times_out(monkeypatch):
+    """A server that never reaches the awaited state fails the test."""
+    monkeypatch.setattr(
+        os_mod, "_connect", Mock(return_value=_FakeConnection(active=False))
+    )
+
+    with pytest.raises(pytest.fail.Exception):
+        os_mod.wait_for_server_state(
+            {}, "srv", present=True, timeout=0.2, poll_interval=0.01
         )
