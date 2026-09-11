@@ -5,3 +5,4 @@ pytest
 pytest-asyncio
 requests
 tenacity
+openstacksdk==4.20.0

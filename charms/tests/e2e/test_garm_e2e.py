@@ -4,8 +4,6 @@
 
 import logging
 import os
-import time
-from typing import Any
 
 import jubilant
 import pytest
@@ -16,6 +14,7 @@ from tenacity import (
     stop_after_delay,
     wait_fixed,
 )
+from tests.e2e.openstack import wait_for_server_state
 from tests.integration.conftest import (
     _collect_debug_info,
     _garm_login,
@@ -355,88 +354,6 @@ def _wait_for_provider_running_instance(
         )
 
 
-def _openstack_endpoint_and_token(credentials: dict[str, str]) -> tuple[str, str]:
-    """Authenticate to Keystone and return the compute endpoint and token."""
-    auth_url = credentials["auth_url"].rstrip("/")
-    payload = {
-        "auth": {
-            "identity": {
-                "methods": ["password"],
-                "password": {
-                    "user": {
-                        "name": credentials["username"],
-                        "domain": {"name": credentials["user_domain_name"]},
-                    }
-                },
-            },
-            "scope": {
-                "project": {
-                    "name": credentials["project_name"],
-                    "domain": {"name": credentials["project_domain_name"]},
-                }
-            },
-        }
-    }
-    response = requests.post(f"{auth_url}/auth/tokens", json=payload, timeout=30)
-    response.raise_for_status()
-    token = response.headers.get("X-Subject-Token")
-    assert token, "Keystone did not return a subject token"
-
-    catalog = response.json()["token"]["catalog"]
-    compute = next(service for service in catalog if service.get("type") == "compute")
-    endpoints = compute.get("endpoints", [])
-    region = credentials["region_name"]
-    endpoint = next(
-        (
-            item["url"]
-            for item in endpoints
-            if item.get("region") == region and item.get("interface") == "public"
-        ),
-        None,
-    )
-    if endpoint is None:
-        endpoint = next(
-            (item["url"] for item in endpoints if item.get("region") == region),
-            None,
-        )
-    assert endpoint, f"No compute endpoint was returned for region {region!r}"
-    return endpoint.rstrip("/"), token
-
-
-def _wait_for_openstack_server_state(
-    credentials: dict[str, str], server_name: str, present: bool, timeout: int
-) -> None:
-    """Wait until the exact GARM server is present or absent in Nova."""
-    endpoint, token = _openstack_endpoint_and_token(credentials)
-    deadline = time.monotonic() + timeout
-    last_servers: list[dict[str, Any]] = []
-
-    while time.monotonic() < deadline:
-        response = requests.get(
-            f"{endpoint}/servers/detail",
-            params={"name": server_name},
-            headers={"X-Auth-Token": token},
-            timeout=30,
-        )
-        response.raise_for_status()
-        last_servers = response.json().get("servers", [])
-        exists = any(item.get("name") == server_name for item in last_servers)
-        if exists == present:
-            logger.info(
-                "Nova server %s is %s",
-                server_name,
-                "present" if present else "absent",
-            )
-            return
-        time.sleep(10)
-
-    pytest.fail(
-        f"Nova server {server_name!r} did not become "
-        f"{'present' if present else 'absent'}; last response contained "
-        f"{len(last_servers)} matching server(s)"
-    )
-
-
 def test_garm_charm_removal_drains_provider_runner(
     juju: jubilant.Juju,
     garm_with_ingress: str,
@@ -454,7 +371,7 @@ def test_garm_charm_removal_drains_provider_runner(
     server_name = instance.get("name")
     assert server_name, f"GARM instance did not include a provider name: {instance!r}"
 
-    _wait_for_openstack_server_state(
+    wait_for_server_state(
         openstack_credentials,
         server_name,
         present=True,
@@ -469,7 +386,7 @@ def test_garm_charm_removal_drains_provider_runner(
         delay=10,
     )
 
-    _wait_for_openstack_server_state(
+    wait_for_server_state(
         openstack_credentials,
         server_name,
         present=False,
