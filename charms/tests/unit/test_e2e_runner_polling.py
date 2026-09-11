@@ -1,6 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Model-free regression tests for E2E runner discovery."""
+"""Model-free regression tests for E2E runner discovery and removal scenarios."""
 
 from unittest.mock import Mock
 
@@ -34,9 +34,9 @@ def test_runner_polling_resolves_enabled_scaleset_by_label(monkeypatch, name):
     monkeypatch.setattr(e2e.requests, "get", get)
     monkeypatch.setattr(e2e, "_get_garm_address", Mock(return_value="garm"))
     monkeypatch.setattr(e2e, "_garm_login", Mock(return_value="token"))
-    monkeypatch.setattr(e2e.time, "time", Mock(side_effect=[0, 1, 100]))
-    monkeypatch.setattr(e2e.time, "sleep", Mock())
     monkeypatch.setattr(e2e, "_collect_debug_info", Mock())
+    monkeypatch.setattr(e2e, "GARM_TOKEN_CACHE", {})
+    monkeypatch.setattr(e2e, "LAST_INSTANCE_SUMMARIES", {})
 
     e2e._wait_for_runner_online(Mock(), "garm", label, timeout=10)
 
@@ -83,3 +83,81 @@ def test_teardown_removes_all_generations_for_label(monkeypatch, name):
     assert [call.args[0] for call in get.call_args_list[1:]] == [
         f"{url}/instances" for url in expected
     ]
+
+
+def test_wait_for_runner_online_fails_with_debug_info(monkeypatch):
+    """On timeout the wait reports the last state and collects debug info."""
+    monkeypatch.setattr(
+        e2e,
+        "_registered_runner",
+        Mock(side_effect=e2e._RunnerNotRegistered([])),
+    )
+    monkeypatch.setattr(e2e, "_collect_debug_info", Mock())
+    monkeypatch.setattr(e2e, "GARM_TOKEN_CACHE", {})
+
+    with pytest.raises(pytest.fail.Exception):
+        e2e._wait_for_runner_online(
+            Mock(), "garm", "e2e-f624f0", timeout=0.2, poll_interval=0.01
+        )
+
+    e2e._collect_debug_info.assert_called_once()
+
+
+def test_provider_running_instance_wait_succeeds(monkeypatch):
+    """A provider-running instance in the label's scale set ends the wait."""
+    label = "e2e-f624f0"
+    get = Mock(
+        side_effect=[
+            Mock(
+                status_code=200,
+                json=Mock(
+                    return_value=[
+                        {
+                            "id": 5,
+                            "name": label,
+                            "enabled": True,
+                            "tags": [{"name": label}],
+                        }
+                    ]
+                ),
+            ),
+            Mock(
+                json=Mock(
+                    return_value=[
+                        {"name": "vm", "status": "running", "runner_status": "idle"}
+                    ]
+                )
+            ),
+        ]
+    )
+    monkeypatch.setattr(e2e.requests, "get", get)
+    monkeypatch.setattr(e2e, "_get_garm_address", Mock(return_value="garm"))
+    monkeypatch.setattr(e2e, "_garm_login", Mock(return_value="token"))
+    monkeypatch.setattr(e2e, "GARM_TOKEN_CACHE", {})
+
+    instance = e2e._wait_for_provider_running_instance(
+        Mock(), "garm", label, timeout=10
+    )
+
+    assert instance["name"] == "vm"
+    assert [call.args[0] for call in get.call_args_list] == [
+        "http://garm:8080/api/v1/scalesets",
+        "http://garm:8080/api/v1/scalesets/5/instances",
+    ]
+
+
+def test_provider_running_instance_wait_fails_on_timeout(monkeypatch):
+    """No provider-running instance within the deadline fails the test."""
+    monkeypatch.setattr(
+        e2e,
+        "_running_instance",
+        Mock(
+            side_effect=e2e._InstanceNotRunning([{"name": "vm", "status": "building"}])
+        ),
+    )
+    monkeypatch.setattr(e2e, "GARM_TOKEN_CACHE", {})
+
+    with pytest.raises(pytest.fail.Exception):
+        e2e._wait_for_provider_running_instance(
+            Mock(), "garm", "e2e-f624f0", timeout=0.2, poll_interval=0.01
+        )
