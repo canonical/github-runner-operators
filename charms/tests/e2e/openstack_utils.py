@@ -29,20 +29,6 @@ logger = logging.getLogger(__name__)
 NOVA_SERVER_POLL_INTERVAL = 10
 
 
-def _connect(credentials: dict[str, str]) -> Any:
-    """Authenticate to Keystone and return an openstacksdk connection."""
-    return openstack.connect(
-        auth_url=credentials["auth_url"],
-        username=credentials["username"],
-        password=credentials["password"],
-        project_name=credentials["project_name"],
-        user_domain_name=credentials["user_domain_name"],
-        project_domain_name=credentials["project_domain_name"],
-        region_name=credentials["region_name"],
-        identity_api_version=3,
-    )
-
-
 class _ServerStateNotReached(Exception):
     """Raised between polls until the Nova server reaches the awaited state.
 
@@ -52,24 +38,6 @@ class _ServerStateNotReached(Exception):
     def __init__(self, servers: list[Any]) -> None:
         super().__init__("Nova server state not reached yet")
         self.servers = servers
-
-
-def _server_state_reached(connection: Any, server_name: str, present: bool) -> None:
-    """One poll: verify the exact GARM server is present or absent in Nova.
-
-    Raises _ServerStateNotReached until the awaited state holds, which the
-    tenacity retry in wait_for_server_state turns into another poll.
-    """
-    servers = list(connection.compute.servers(name=server_name))
-    exists = any(item.name == server_name for item in servers)
-    if exists == present:
-        logger.info(
-            "Nova server %s is %s",
-            server_name,
-            "present" if present else "absent",
-        )
-        return
-    raise _ServerStateNotReached(servers)
 
 
 def wait_for_server_state(
@@ -106,3 +74,36 @@ def wait_for_server_state(
             f"{'present' if present else 'absent'}; last response contained "
             f"{len(exc.servers)} matching server(s)"
         )
+
+
+def _server_state_reached(connection: Any, server_name: str, present: bool) -> None:
+    """One poll: verify the exact GARM server is present or absent in Nova.
+
+    Raises _ServerStateNotReached until the awaited state holds, which the
+    tenacity retry in wait_for_server_state turns into another poll.
+    """
+    servers = list(connection.compute.servers(name=server_name))
+    exists = any(item.name == server_name for item in servers)
+    if exists == present:
+        logger.info(
+            "Nova server %s is %s",
+            server_name,
+            "present" if present else "absent",
+        )
+        return
+    raise _ServerStateNotReached(servers)
+
+
+def _connect(credentials: dict[str, str]) -> Any:
+    """Authenticate to Keystone and return an openstacksdk connection."""
+    return openstack.connect(
+        auth_url=credentials["auth_url"],
+        username=credentials["username"],
+        password=credentials["password"],
+        project_name=credentials["project_name"],
+        user_domain_name=credentials["user_domain_name"],
+        project_domain_name=credentials["project_domain_name"],
+        region_name=credentials["region_name"],
+        identity_api_version=3,
+        api_timeout=30,
+    )
