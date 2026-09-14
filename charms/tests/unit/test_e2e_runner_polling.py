@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from tests.e2e import conftest as fixtures
-from tests.e2e import openstack as os_mod
+from tests.e2e import openstack_utils as os_mod
 from tests.e2e import test_garm_e2e as e2e
 
 

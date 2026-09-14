@@ -14,7 +14,7 @@ from tenacity import (
     stop_after_delay,
     wait_fixed,
 )
-from tests.e2e.openstack import wait_for_server_state
+from tests.e2e.openstack_utils import wait_for_server_state
 from tests.integration.conftest import (
     _collect_debug_info,
     _garm_login,
