@@ -5,6 +5,7 @@
 | Directory | Purpose |
 |---|---|
 | `charms/<charm>/cos_custom/grafana_dashboards/` | Dashboards for a specific charm's workload metrics |
+| `charms/garm/cos_custom/grafana_dashboards/` | GARM controller and runner operations metrics |
 | `runner_grafana_dashboards/` | Dashboards for runner VM host-level metrics (CPU, memory, disk, network) |
 
 ## Conventions
