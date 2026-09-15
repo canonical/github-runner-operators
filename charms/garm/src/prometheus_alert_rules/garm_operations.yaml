@@ -1,0 +1,97 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# GARM operational alerts. Expressions are qualified with Juju topology labels
+# by the prometheus_k8s interface before they are sent to COS Prometheus/Mimir.
+groups:
+  - name: garm_operations
+    rules:
+      - alert: GarmUnhealthy
+        expr: min(garm_health) < 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: GARM controller is unhealthy
+          description: One or more selected GARM controllers have reported unhealthy for 5 minutes.
+
+      - alert: GarmJobQueueLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(garm_job_queue_duration_seconds_bucket[10m]))) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM job queue latency is high
+          description: The 95th percentile job queue time has exceeded 5 minutes for 10 minutes.
+
+      - alert: GarmRunnerReadyLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(garm_runner_ready_duration_seconds_bucket[10m]))) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM runner readiness latency is high
+          description: The 95th percentile time to make a runner ready has exceeded 5 minutes.
+
+      - alert: GarmRunnerBootstrapTimeouts
+        expr: sum by (provider) (increase(garm_runner_lifecycle_events_total{outcome="bootstrap_timeout"}[10m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM runners are timing out during bootstrap
+          description: At least one runner bootstrap timeout occurred for provider {{ $labels.provider }}.
+
+      - alert: GarmScaleSetListenerStale
+        expr: time() - garm_scaleset_listener_last_success_timestamp > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: GARM scale-set listener is stale
+          description: A scale-set listener has not completed a successful poll for more than 5 minutes.
+
+      - alert: GarmProviderErrors
+        expr: sum by (provider, error_kind) (rate(garm_provider_operation_errors_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM provider operations are failing
+          description: Provider {{ $labels.provider }} is reporting {{ $labels.error_kind }} errors.
+
+      - alert: GarmGithubApiErrorRatioHigh
+        expr: 100 * sum by (operation, scope) (rate(garm_github_errors_total[10m])) / clamp_min(sum by (operation, scope) (rate(garm_github_operations_total[10m])), 1) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM GitHub API error ratio is high
+          description: GitHub API operation {{ $labels.operation }} in {{ $labels.scope }} is failing above 5 percent.
+
+      - alert: GarmGithubRateLimitLow
+        expr: 100 * garm_github_rate_limit_remaining / clamp_min(garm_github_rate_limit_limit, 1) < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM GitHub API rate limit is low
+          description: A GARM GitHub credential has less than 10 percent of its API rate limit remaining.
+
+      - alert: GarmWatcherNotificationsDropped
+        expr: increase(garm_watcher_notify_timeouts_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: GARM watcher dropped database notifications
+          description: Database change notifications were dropped under watcher backpressure; controller state may be stale.
+
+      - alert: GarmWatcherConsumerBacklog
+        expr: max by (consumer) (garm_watcher_consumer_queue_depth) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: GARM watcher consumer backlog is growing
+          description: Consumer {{ $labels.consumer }} has more than 100 undelivered database events.
