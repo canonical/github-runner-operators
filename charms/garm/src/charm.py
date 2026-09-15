@@ -504,42 +504,46 @@ class GarmCharm(paas_charm.go.Charm):
             (auth_url, username, password, project_name, etc.) plus a
             ``unit_name`` key for the provider's TOML name.
         """
-        relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
-        if relation is None:
+        relations = sorted(
+            self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []),
+            key=lambda relation: relation.id,
+        )
+        if not relations:
             logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
         configs: list[dict[str, str]] = []
-        for unit in sorted(relation.units, key=lambda unit: unit.name):
-            data = relation.data[unit]
-            # Only include units that have sent the full provider config
-            if "openstack_auth_url" not in data:
-                continue
+        for relation in relations:
+            for unit in sorted(relation.units, key=lambda unit: unit.name):
+                data = relation.data[unit]
+                # Only include units that have sent the full provider config
+                if "openstack_auth_url" not in data:
+                    continue
 
-            # Resolve password: may be a plain value or a secret URI.
-            password = data.get("openstack_password", "")
-            unit_name = unit.name.replace("/", "-")
-            password_secret_uri = data.get("openstack_password_secret_uri", "")
-            if not password and password_secret_uri:
-                password = self._resolve_secret_value(str(password_secret_uri))
+                # Resolve password: may be a plain value or a secret URI.
+                password = data.get("openstack_password", "")
+                unit_name = unit.name.replace("/", "-")
+                password_secret_uri = data.get("openstack_password_secret_uri", "")
+                if not password and password_secret_uri:
+                    password = self._resolve_secret_value(str(password_secret_uri))
 
-            configs.append(
-                {
-                    "unit_name": unit_name,
-                    "auth_url": data.get("openstack_auth_url", ""),
-                    "username": data.get("openstack_username", ""),
-                    "password": password,
-                    "project_name": data.get("openstack_project_name", ""),
-                    "user_domain_name": data.get("openstack_user_domain_name", ""),
-                    "project_domain_name": data.get("openstack_project_domain_name", ""),
-                    "region_name": data.get("openstack_region_name", ""),
-                    "network": data.get("openstack_network", ""),
-                }
-            )
+                configs.append(
+                    {
+                        "unit_name": unit_name,
+                        "auth_url": data.get("openstack_auth_url", ""),
+                        "username": data.get("openstack_username", ""),
+                        "password": password,
+                        "project_name": data.get("openstack_project_name", ""),
+                        "user_domain_name": data.get("openstack_user_domain_name", ""),
+                        "project_domain_name": data.get("openstack_project_domain_name", ""),
+                        "region_name": data.get("openstack_region_name", ""),
+                        "network": data.get("openstack_network", ""),
+                    }
+                )
 
         logger.info(
             "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
-            len(relation.units),
+            sum(len(relation.units) for relation in relations),
             len(configs),
         )
         return configs

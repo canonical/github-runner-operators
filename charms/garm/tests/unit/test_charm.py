@@ -180,6 +180,7 @@ def _state(
     postgresql_data: dict | None = None,
     configurator_related: bool = True,
     configurator_units_data: dict[int, dict] | None = None,
+    configurator_relations: typing.Sequence[Relation] | None = None,
     debug_ssh_related: bool = False,
     secrets: typing.Sequence[Secret] = (),
     unit_status: ops.StatusBase | None = None,
@@ -203,16 +204,20 @@ def _state(
         ),
     ]
     if configurator_related:
-        relations.append(
-            Relation(
-                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
-                remote_app_name="garm-configurator",
-                remote_units_data=(
-                    {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
-                    if configurator_units_data is None
-                    else configurator_units_data
-                ),
-            )
+        relations.extend(
+            configurator_relations
+            if configurator_relations is not None
+            else [
+                Relation(
+                    endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                    remote_app_name="garm-configurator",
+                    remote_units_data=(
+                        {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
+                        if configurator_units_data is None
+                        else configurator_units_data
+                    ),
+                )
+            ]
         )
     if debug_ssh_related:
         relations.append(
@@ -390,6 +395,58 @@ def test_provider_environment_is_sorted_by_configurator_unit(
         "garm-configurator-0",
         "garm-configurator-1",
     ]
+
+
+def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: Two separately deployed configurator applications publish provider data.
+    act: Reconcile the GARM charm.
+    assert: Both providers are rendered and reconciliation completes, so the endpoint supports
+        multiple remote applications as declared by its metadata.
+    """
+    configurator_relations = [
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            remote_app_name="configurator-a",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": "scaleset-a",
+                    "provider_name": "configurator-a-0",
+                }
+            },
+        ),
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            remote_app_name="configurator-b",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": "scaleset-b",
+                    "provider_name": "configurator-b-0",
+                    "openstack_auth_url": "https://ks2.example.com:5000/v3",
+                }
+            },
+        ),
+    ]
+
+    first = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_relations=configurator_relations),
+    )
+    second = ctx.run(ctx.on.update_status(), first)
+
+    first_environment = _service_environment(first)
+    second_environment = _service_environment(second)
+    assert first_environment["GARM_PROVIDERS_JSON"] == second_environment["GARM_PROVIDERS_JSON"]
+    providers = json.loads(first_environment["GARM_PROVIDERS_JSON"])
+    assert [provider["unit_name"] for provider in providers] == [
+        "configurator-a-0",
+        "configurator-b-0",
+    ]
+    assert second.unit_status == ops.ActiveStatus()
 
 
 def test_workload_is_not_configured_without_postgresql_data(ctx: Context, garm_api: _GarmApiMocks):
