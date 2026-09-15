@@ -269,6 +269,11 @@ linkcheck_retries = 3
 
 # myst_enable_extensions = set()
 
+# Lets a plain ```mermaid fence (which GitHub also renders natively) be
+# treated as the {mermaid} directive, instead of requiring that directive
+# syntax explicitly.
+myst_fence_as_directive = {"mermaid"}
+
 
 # Custom Sphinx extensions; see
 # https://www.sphinx-doc.org/en/master/usage/extensions/index.html
