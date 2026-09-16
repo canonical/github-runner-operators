@@ -3,6 +3,7 @@
 
 """Unit tests for the entity reconciler."""
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,16 +36,20 @@ def _reconcile(client, desired):
     EntityReconciler(client).reconcile(desired)
 
 
-def test_create_org_when_missing():
+def test_create_org_when_missing(caplog):
     """
     arrange: A client with the managed credential and no registered orgs.
     act: Reconcile a desired organization entity.
-    assert: create_org is called once with the org name, managed credential, and a non-empty
-        webhook secret; no update/delete.
+    assert: The GARM organization registration is logged and created with its managed credential
+        and a non-empty webhook secret; no update/delete.
     """
     client = _client(orgs=[])
-    _reconcile(client, [EntitySpec("organization", "canonical", "app-1-2")])
+    with caplog.at_level(logging.INFO):
+        _reconcile(client, [EntitySpec("organization", "canonical", "app-1-2")])
 
+    assert (
+        "Creating organization registration in GARM database: name='canonical'" in caplog.messages
+    )
     client.create_org.assert_called_once()
     params = client.create_org.call_args[0][0]
     assert params.name == "canonical"
@@ -125,17 +130,23 @@ def test_update_org_when_credential_drifts():
     assert params.credentials_name == "app-1-2"
 
 
-def test_update_repo_when_credential_drifts():
+def test_update_repo_when_credential_drifts(caplog):
     """
     arrange: A repo bound to a managed credential whose name differs from the desired one.
     act: Reconcile the repo with a different (desired) credential name.
-    assert: update_repo is called once with the repo id and the new credential name.
+    assert: The GARM repository registration update is logged and issued with its id and new
+        credential name.
     """
     managed_other = {"id": 1, "name": "app-9-9", "description": MANAGED_CREDENTIAL_DESCRIPTION}
     repo = {"owner": "canonical", "name": "runner", "id": "repo-uuid", "credentials_id": 1}
     client = _client(credentials=[managed_other], repos=[repo])
-    _reconcile(client, [EntitySpec("repository", "canonical/runner", "app-1-2")])
+    with caplog.at_level(logging.INFO):
+        _reconcile(client, [EntitySpec("repository", "canonical/runner", "app-1-2")])
 
+    assert (
+        "Updating repository registration in GARM database: "
+        "name='canonical/runner', credential='app-1-2'" in caplog.messages
+    )
     client.update_repo.assert_called_once()
     repo_id, params = client.update_repo.call_args[0]
     assert repo_id == "repo-uuid"
@@ -177,16 +188,21 @@ def test_orphan_org_deletion_respects_ownership(credentials, credentials_id, exp
     assert client.delete_org.called is expect_deleted
 
 
-def test_delete_orphan_repo_when_managed():
+def test_delete_orphan_repo_when_managed(caplog):
     """
     arrange: A client with an orphan repo bound to the managed credential.
     act: Reconcile with no desired entities.
-    assert: delete_repo is called once with the repo id.
+    assert: The orphaned GARM repository registration deletion is logged and issued with its id.
     """
     repo = {"owner": "canonical", "name": "runner", "id": "repo-uuid", "credentials_id": 1}
     client = _client(repos=[repo])
-    _reconcile(client, [])
+    with caplog.at_level(logging.INFO):
+        _reconcile(client, [])
 
+    assert (
+        "Deleting orphaned repository registration from GARM database: "
+        "name='canonical/runner', id=repo-uuid" in caplog.messages
+    )
     client.delete_repo.assert_called_once_with("repo-uuid")
 
 
