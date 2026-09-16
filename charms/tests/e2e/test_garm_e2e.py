@@ -1,14 +1,21 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""GARM end-to-end test on ProdStack."""
+"""GARM end-to-end tests on ProdStack."""
 
 import logging
 import os
 import time
+from typing import Any
 
 import jubilant
 import pytest
 import requests
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_delay,
+    wait_fixed,
+)
 from tests.integration.conftest import (
     _collect_debug_info,
     _garm_login,
@@ -34,6 +41,113 @@ GARM_API_PORT = 8080
 # what a dispatch can safely follow; `pending` is registered-but-not-yet-usable.
 # Values from params.RunnerStatus in GARM.
 REGISTERED_RUNNER_STATUSES = ("idle", "active")
+
+# Timeout and cadence constants for the tenacity-backed waits below.
+RUNNER_REGISTRATION_TIMEOUT = 25 * 60
+RUNNER_POLL_INTERVAL = 15
+WORKFLOW_COMPLETION_TIMEOUT = 45 * 60
+REMOVAL_SERVER_PRESENT_TIMEOUT = 2 * 60
+REMOVAL_SERVER_ABSENT_TIMEOUT = 10 * 60
+REMOVAL_APP_REMOVED_TIMEOUT = 15 * 60
+GARM_HTTP_TIMEOUT = 30
+
+# The poll windows outlive the admin JWT, so the token is cached per GARM
+# address and only refreshed once the API answers 401.
+GARM_TOKEN_CACHE: dict[str, str] = {}
+LAST_INSTANCE_SUMMARIES: dict[str, list[str]] = {}
+
+
+def _garm_headers(juju: jubilant.Juju, address: str) -> dict[str, str]:
+    """Authorization headers, logging in once per address and caching the JWT."""
+    token = GARM_TOKEN_CACHE.get(address)
+    if token is None:
+        token = _garm_login(juju, address)
+        GARM_TOKEN_CACHE[address] = token
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _scaleset_by_label(
+    base_url: str, headers: dict[str, str], runner_label: str
+) -> dict | None:
+    """Return the enabled scale set tagged with the label, or None.
+
+    The charm adds a hash to scale-set names, so the unique routing label is
+    the only stable handle; disabled generations being drained are excluded.
+    """
+    response = requests.get(
+        f"{base_url}/scalesets", headers=headers, timeout=GARM_HTTP_TIMEOUT
+    )
+    response.raise_for_status()
+    return next(
+        (
+            scaleset
+            for scaleset in response.json() or []
+            if scaleset.get("enabled") is True
+            and any(
+                tag.get("name") == runner_label for tag in scaleset.get("tags") or []
+            )
+        ),
+        None,
+    )
+
+
+class _RunnerNotRegistered(Exception):
+    """Raised between polls until an instance reaches a registered state.
+
+    Carries the last observed instances so the failure report can say which
+    stage stalled instead of "nothing ever spawned."
+    """
+
+    def __init__(self, instances: list[dict]) -> None:
+        super().__init__("no registered runner observed yet")
+        self.instances = instances
+
+
+def _log_instances_on_change(runner_label: str, instances: list[dict]) -> None:
+    """Log the instance list only when it changes, so the poll trail stays short."""
+    summary = sorted(
+        f"{i.get('name')}: status={i.get('status')} "
+        f"runner_status={i.get('runner_status')}"
+        for i in instances
+    )
+    if summary != LAST_INSTANCE_SUMMARIES.get(runner_label):
+        LAST_INSTANCE_SUMMARIES[runner_label] = summary
+        logger.info("Scale set instances: %s", summary)
+
+
+def _registered_runner(juju: jubilant.Juju, garm_app: str, runner_label: str) -> dict:
+    """One poll: return a registered runner in the label's scale set.
+
+    Raises _RunnerNotRegistered when the state is not reached, which the
+    tenacity retry in _wait_for_runner_online turns into another poll.
+    """
+    address = _get_garm_address(juju, garm_app)
+    base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
+    headers = _garm_headers(juju, address)
+    scaleset = _scaleset_by_label(base_url, headers, runner_label)
+    if scaleset is None:
+        raise _RunnerNotRegistered([])
+    response = requests.get(
+        f"{base_url}/scalesets/{scaleset['id']}/instances",
+        headers=headers,
+        timeout=GARM_HTTP_TIMEOUT,
+    )
+    if response.status_code == 401:
+        # The old JWT died mid-window; the next poll logs in again.
+        GARM_TOKEN_CACHE.pop(address, None)
+        raise _RunnerNotRegistered([])
+    response.raise_for_status()
+    instances = response.json() or []
+    _log_instances_on_change(runner_label, instances)
+    for instance in instances:
+        if instance.get("runner_status") in REGISTERED_RUNNER_STATUSES:
+            logger.info(
+                "Runner %s registered (runner_status=%s)",
+                instance.get("name"),
+                instance.get("runner_status"),
+            )
+            return instance
+    raise _RunnerNotRegistered(instances)
 
 
 def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str):
@@ -79,8 +193,8 @@ def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str
         github_client=github_client,
         repo_path=repo_path,
         run_id=run_id,
-        poll_interval=15,
-        timeout=45 * 60,
+        poll_interval=RUNNER_POLL_INTERVAL,
+        timeout=WORKFLOW_COMPLETION_TIMEOUT,
     )
 
     assert conclusion == "success", (
@@ -93,10 +207,14 @@ def _wait_for_runner_online(
     juju: jubilant.Juju,
     garm_app: str,
     runner_label: str,
-    timeout: int = 25 * 60,
-    poll_interval: int = 15,
+    timeout: int = RUNNER_REGISTRATION_TIMEOUT,
+    poll_interval: int = RUNNER_POLL_INTERVAL,
 ) -> None:
     """Block until a scale set serving the label has a registered runner.
+
+    Tenacity polls _registered_runner every ``poll_interval`` seconds until
+    ``timeout`` elapses; _RunnerNotRegistered (with the last observed
+    instances) carries the diagnostics for the failure report.
 
     Args:
         juju: Juju client for the model GARM is deployed in.
@@ -109,99 +227,251 @@ def _wait_for_runner_online(
     # and not configurable through garm-configurator. Waiting less fails the test
     # on a runner GARM still considers booting, instead of letting GARM reap a
     # stuck one and spawn a replacement.
+    logger.info("Waiting for a registered runner serving label %r", runner_label)
+    try:
+        Retrying(
+            stop=stop_after_delay(timeout),
+            wait=wait_fixed(poll_interval),
+            retry=retry_if_exception_type(
+                (
+                    _RunnerNotRegistered,
+                    requests.RequestException,
+                    ValueError,
+                    KeyError,
+                )
+            ),
+            reraise=True,
+        )(_registered_runner, juju, garm_app, runner_label)
+    except _RunnerNotRegistered as exc:
+        # Leave the evidence in the log before failing: the instance state says
+        # which stage stalled, since GARM only reaches "registered" after spawning
+        # an instance, booting its VM, and installing the runner against the
+        # callback URL. An empty last observation means no instance was found for
+        # the label; pending_create means the provider never picked one up;
+        # running with a pending runner_status means the VM booted but its
+        # bootstrap never called back, with GARM's own logs -- collected next,
+        # through the sentinel redactor -- carrying the reason.
+        if exc.instances:
+            logger.error(
+                "Last instances observed for runner label %s (possibly reaped by "
+                "GARM's bootstrap-timeout reaper by now): %s",
+                runner_label,
+                sorted(
+                    f"{i.get('name')}: status={i.get('status')} "
+                    f"runner_status={i.get('runner_status')} "
+                    f"provider_id={i.get('provider_id')!r}"
+                    for i in exc.instances
+                ),
+            )
+        else:
+            logger.error(
+                "No instance was ever observed for runner label %s", runner_label
+            )
+        _collect_debug_info(juju, garm_app)
+        pytest.fail(
+            f"No runner serving label {runner_label!r} reached a registered state "
+            f"({' or '.join(REGISTERED_RUNNER_STATUSES)}) within {timeout}s."
+        )
+
+
+class _InstanceNotRunning(Exception):
+    """Raised between polls until an instance reaches provider status running.
+
+    Carries the last observed instances for the failure report.
+    """
+
+    def __init__(self, instances: list[dict]) -> None:
+        super().__init__("no provider-running instance observed yet")
+        self.instances = instances
+
+
+def _running_instance(juju: jubilant.Juju, garm_app: str, runner_label: str) -> dict:
+    """One poll: return a provider-running instance in the label's scale set.
+
+    Raises _InstanceNotRunning until one is observed, which the tenacity retry
+    in _wait_for_provider_running_instance turns into another poll.
+    """
     address = _get_garm_address(juju, garm_app)
     base_url = f"http://{address}:{GARM_API_PORT}/api/v1"
-    token = _garm_login(juju, address)
-    deadline = time.time() + timeout
+    headers = _garm_headers(juju, address)
+    scaleset = _scaleset_by_label(base_url, headers, runner_label)
+    if scaleset is None:
+        raise _InstanceNotRunning([])
+    response = requests.get(
+        f"{base_url}/scalesets/{scaleset['id']}/instances",
+        headers=headers,
+        timeout=GARM_HTTP_TIMEOUT,
+    )
+    if response.status_code == 401:
+        # The old JWT died mid-window; the next poll logs in again.
+        GARM_TOKEN_CACHE.pop(address, None)
+        raise _InstanceNotRunning([])
+    response.raise_for_status()
+    instances = response.json() or []
+    for instance in instances:
+        if instance.get("status") == "running":
+            logger.info(
+                "Observed provider-running GARM instance %s (runner_status=%s)",
+                instance.get("name"),
+                instance.get("runner_status"),
+            )
+            return instance
+    raise _InstanceNotRunning(instances)
+
+
+def _wait_for_provider_running_instance(
+    juju: jubilant.Juju,
+    garm_app: str,
+    runner_label: str,
+    timeout: int = RUNNER_REGISTRATION_TIMEOUT,
+    poll_interval: int = RUNNER_POLL_INTERVAL,
+) -> dict:
+    """Wait for the GARM provider to report one real runner instance as running.
+
+    Tenacity polls _running_instance every ``poll_interval`` seconds until
+    ``timeout`` elapses; _InstanceNotRunning (with the last observed instances)
+    carries the diagnostics for the failure report.
+    """
     last_instances: list[dict] = []
-    last_summary: list[str] | None = None
-    logger.info("Waiting for a registered runner serving label %r", runner_label)
-
-    while time.time() < deadline:
-        try:
-            headers = {"Authorization": f"Bearer {token}"}
-            scalesets = requests.get(
-                f"{base_url}/scalesets", headers=headers, timeout=30
-            )
-            if scalesets.status_code == 401:
-                # The poll window outlives the JWT; renew and retry on the next pass.
-                token = _garm_login(juju, address)
-                time.sleep(poll_interval)
-                continue
-            scalesets.raise_for_status()
-            # The charm adds a label hash to scale-set names. Match the unique
-            # routing label instead, excluding disabled generations being drained.
-            scaleset = next(
+    try:
+        return Retrying(
+            stop=stop_after_delay(timeout),
+            wait=wait_fixed(poll_interval),
+            retry=retry_if_exception_type(
                 (
-                    s
-                    for s in scalesets.json() or []
-                    if s.get("enabled") is True
-                    and any(t.get("name") == runner_label for t in s.get("tags") or [])
-                ),
-                None,
-            )
-            if scaleset is not None:
-                instances_response = requests.get(
-                    f"{base_url}/scalesets/{scaleset['id']}/instances",
-                    headers=headers,
-                    timeout=30,
+                    _InstanceNotRunning,
+                    requests.RequestException,
+                    ValueError,
+                    KeyError,
                 )
-                instances_response.raise_for_status()
-                instances = instances_response.json() or []
-                summary = sorted(
-                    f"{i.get('name')}: status={i.get('status')} "
-                    f"runner_status={i.get('runner_status')}"
-                    for i in instances
-                )
-                if summary != last_summary:
-                    # Log on change only: the wait spans many polls, and this trail
-                    # is what shows whether instances are appearing, failing, or
-                    # never being created at all.
-                    last_summary = summary
-                    logger.info("Scale set instances: %s", summary)
-                if instances:
-                    # Keep the last non-empty observation: GARM's reaper removes
-                    # instances from the scale set when the bootstrap timeout
-                    # fires, so the final poll can be empty even though a VM
-                    # existed -- and reporting that as "never spawned" would
-                    # point the investigation at the wrong stage entirely.
-                    last_instances = instances
-                for instance in instances:
-                    if instance.get("runner_status") in REGISTERED_RUNNER_STATUSES:
-                        logger.info(
-                            "Runner %s registered (runner_status=%s)",
-                            instance.get("name"),
-                            instance.get("runner_status"),
-                        )
-                        return
-        except (requests.RequestException, ValueError) as exc:
-            logger.warning("Transient error polling GARM, retrying: %s", exc)
-
-        time.sleep(poll_interval)
-
-    # Leave the evidence in the log before failing: the instance state says which
-    # stage stalled, since GARM only reaches "registered" after spawning an
-    # instance, booting its VM, and installing the runner against the callback
-    # URL. An empty last observation means no instance was found for the label;
-    # pending_create means the provider never picked one up; running with a
-    # pending runner_status means the VM booted but its bootstrap never called
-    # back, with GARM's own logs -- collected next, through the sentinel
-    # redactor -- carrying the reason.
-    if last_instances:
-        logger.error(
-            "Last instances observed for runner label %s (possibly reaped by GARM's "
-            "bootstrap-timeout reaper by now): %s",
-            runner_label,
-            sorted(
-                f"{i.get('name')}: status={i.get('status')} "
-                f"runner_status={i.get('runner_status')} provider_id={i.get('provider_id')!r}"
-                for i in last_instances
             ),
+            reraise=True,
+        )(_running_instance, juju, garm_app, runner_label)
+    except _InstanceNotRunning as exc:
+        last_instances = exc.instances
+        pytest.fail(
+            f"No provider-running instance appeared in {runner_label!r}; "
+            f"last observed instances: {last_instances!r}"
         )
-    else:
-        logger.error("No instance was ever observed for runner label %s", runner_label)
-    _collect_debug_info(juju, garm_app)
+
+
+def _openstack_endpoint_and_token(credentials: dict[str, str]) -> tuple[str, str]:
+    """Authenticate to Keystone and return the compute endpoint and token."""
+    auth_url = credentials["auth_url"].rstrip("/")
+    payload = {
+        "auth": {
+            "identity": {
+                "methods": ["password"],
+                "password": {
+                    "user": {
+                        "name": credentials["username"],
+                        "domain": {"name": credentials["user_domain_name"]},
+                    }
+                },
+            },
+            "scope": {
+                "project": {
+                    "name": credentials["project_name"],
+                    "domain": {"name": credentials["project_domain_name"]},
+                }
+            },
+        }
+    }
+    response = requests.post(f"{auth_url}/auth/tokens", json=payload, timeout=30)
+    response.raise_for_status()
+    token = response.headers.get("X-Subject-Token")
+    assert token, "Keystone did not return a subject token"
+
+    catalog = response.json()["token"]["catalog"]
+    compute = next(service for service in catalog if service.get("type") == "compute")
+    endpoints = compute.get("endpoints", [])
+    region = credentials["region_name"]
+    endpoint = next(
+        (
+            item["url"]
+            for item in endpoints
+            if item.get("region") == region and item.get("interface") == "public"
+        ),
+        None,
+    )
+    if endpoint is None:
+        endpoint = next(
+            (item["url"] for item in endpoints if item.get("region") == region),
+            None,
+        )
+    assert endpoint, f"No compute endpoint was returned for region {region!r}"
+    return endpoint.rstrip("/"), token
+
+
+def _wait_for_openstack_server_state(
+    credentials: dict[str, str], server_name: str, present: bool, timeout: int
+) -> None:
+    """Wait until the exact GARM server is present or absent in Nova."""
+    endpoint, token = _openstack_endpoint_and_token(credentials)
+    deadline = time.monotonic() + timeout
+    last_servers: list[dict[str, Any]] = []
+
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{endpoint}/servers/detail",
+            params={"name": server_name},
+            headers={"X-Auth-Token": token},
+            timeout=30,
+        )
+        response.raise_for_status()
+        last_servers = response.json().get("servers", [])
+        exists = any(item.get("name") == server_name for item in last_servers)
+        if exists == present:
+            logger.info(
+                "Nova server %s is %s",
+                server_name,
+                "present" if present else "absent",
+            )
+            return
+        time.sleep(10)
+
     pytest.fail(
-        f"No runner serving label {runner_label!r} reached a registered state "
-        f"({' or '.join(REGISTERED_RUNNER_STATUSES)}) within {timeout}s."
+        f"Nova server {server_name!r} did not become "
+        f"{'present' if present else 'absent'}; last response contained "
+        f"{len(last_servers)} matching server(s)"
+    )
+
+
+def test_garm_charm_removal_drains_provider_runner(
+    juju: jubilant.Juju,
+    garm_with_ingress: str,
+    e2e_scaleset: str,
+    openstack_credentials: dict[str, str],
+) -> None:
+    """Remove GARM normally and verify its live runner is removed from Nova.
+
+    Runs after ``test_garm_e2e`` in the same deployed topology, so the runner
+    observed here is the one that just served the dispatched job.
+    """
+    instance = _wait_for_provider_running_instance(
+        juju, garm_with_ingress, e2e_scaleset
+    )
+    server_name = instance.get("name")
+    assert server_name, f"GARM instance did not include a provider name: {instance!r}"
+
+    _wait_for_openstack_server_state(
+        openstack_credentials,
+        server_name,
+        present=True,
+        timeout=REMOVAL_SERVER_PRESENT_TIMEOUT,
+    )
+
+    logger.info("Removing disposable GARM application through the normal Juju path")
+    juju.remove_application(garm_with_ingress)
+    juju.wait(
+        lambda status: garm_with_ingress not in status.apps,
+        timeout=REMOVAL_APP_REMOVED_TIMEOUT,
+        delay=10,
+    )
+
+    _wait_for_openstack_server_state(
+        openstack_credentials,
+        server_name,
+        present=False,
+        timeout=REMOVAL_SERVER_ABSENT_TIMEOUT,
     )

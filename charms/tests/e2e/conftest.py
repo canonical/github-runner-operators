@@ -329,7 +329,13 @@ def deploy_e2e_scaleset_fixture(
     # Best effort only: the workflow's own sweep is what guarantees no VM is left
     # behind, since a fixture cannot run if the model or the runner dies mid-test.
     try:
-        _drain_and_delete_scaleset(juju, garm_app, label)
+        if garm_app not in juju.status().apps:
+            logger.info(
+                "GARM application %s was removed by the test; skipping API scale-set drain",
+                garm_app,
+            )
+        else:
+            _drain_and_delete_scaleset(juju, garm_app, label)
     except (requests.RequestException, ValueError, KeyError) as exc:
         logger.warning("Best-effort scale set teardown did not complete: %s", exc)
 
