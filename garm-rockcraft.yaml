@@ -16,12 +16,11 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # 2026/09/04: Pin to commit with the scale set pseudo pool ID fix (PR #866,
-    # merged post-v0.2.1). Without it, OpenStack scale set names over 10 chars
-    # produce a garm-pool-id server tag that exceeds Nova's 60-char tag limit,
-    # failing every instance creation (cloudbase/garm-provider-openstack#34).
-    # Switch to source-tag once v0.2.2+ is released.
-    source-commit: e03045fc5861a903f72cb04ff37327b19a0d1e20
+    # 2026/09/15: Pin to the post-PR #878 metrics commit. This keeps the
+    # scale-set pseudo pool ID fix from PR #866 and supplies the lifecycle,
+    # listener, provider-operation, job, and watcher metrics used by the COS
+    # operations dashboards and alert rules.
+    source-commit: 9b86fcfb2826f45ffc881c2f5bf7070577ddc9a2
     source-depth: 1
     build-snaps:
       - go/1.26/stable
