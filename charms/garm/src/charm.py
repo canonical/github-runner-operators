@@ -496,12 +496,12 @@ class GarmCharm(paas_charm.go.Charm):
     def _get_configurator_provider_configs(
         self,
     ) -> list[dict[str, str]]:
-        """Read OpenStack provider configs from all Configurator units.
+        """Read OpenStack provider configs from all Configurator applications.
 
-        Each Configurator unit writes its provider config to unit-level
-        relation data on the ``garm-configurator`` endpoint. This method
-        collects all such configs, keyed by unit name for TOML provider
-        naming.
+        Each Configurator application must have exactly one unit, which writes
+        its provider config to unit-level relation data on the
+        ``garm-configurator`` endpoint. This method collects one config from
+        each application, keyed by unit name for TOML provider naming.
 
         Passwords stored as Juju secret URIs are resolved at this point
         so that the plaintext value is available for the provider's
@@ -522,32 +522,42 @@ class GarmCharm(paas_charm.go.Charm):
 
         configs: list[dict[str, str]] = []
         for relation in relations:
-            for unit in sorted(relation.units, key=lambda unit: unit.name):
-                data = relation.data[unit]
-                # Only include units that have sent the full provider config
-                if "openstack_auth_url" not in data:
-                    continue
-
-                # Resolve password: may be a plain value or a secret URI.
-                password = data.get("openstack_password", "")
-                unit_name = unit.name.replace("/", "-")
-                password_secret_uri = data.get("openstack_password_secret_uri", "")
-                if not password and password_secret_uri:
-                    password = self._resolve_secret_value(str(password_secret_uri))
-
-                configs.append(
-                    {
-                        "unit_name": unit_name,
-                        "auth_url": data.get("openstack_auth_url", ""),
-                        "username": data.get("openstack_username", ""),
-                        "password": password,
-                        "project_name": data.get("openstack_project_name", ""),
-                        "user_domain_name": data.get("openstack_user_domain_name", ""),
-                        "project_domain_name": data.get("openstack_project_domain_name", ""),
-                        "region_name": data.get("openstack_region_name", ""),
-                        "network": data.get("openstack_network", ""),
-                    }
+            units = list(relation.units)
+            if len(units) != 1:
+                logger.warning(
+                    "GARM configurator application must have exactly one unit: "
+                    "relation_id=%d unit_count=%d",
+                    relation.id,
+                    len(units),
                 )
+                return []
+
+            unit = units[0]
+            data = relation.data[unit]
+            # Only include units that have sent the full provider config
+            if "openstack_auth_url" not in data:
+                continue
+
+            # Resolve password: may be a plain value or a secret URI.
+            password = data.get("openstack_password", "")
+            unit_name = unit.name.replace("/", "-")
+            password_secret_uri = data.get("openstack_password_secret_uri", "")
+            if not password and password_secret_uri:
+                password = self._resolve_secret_value(str(password_secret_uri))
+
+            configs.append(
+                {
+                    "unit_name": unit_name,
+                    "auth_url": data.get("openstack_auth_url", ""),
+                    "username": data.get("openstack_username", ""),
+                    "password": password,
+                    "project_name": data.get("openstack_project_name", ""),
+                    "user_domain_name": data.get("openstack_user_domain_name", ""),
+                    "project_domain_name": data.get("openstack_project_domain_name", ""),
+                    "region_name": data.get("openstack_region_name", ""),
+                    "network": data.get("openstack_network", ""),
+                }
+            )
 
         logger.info(
             "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
