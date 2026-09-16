@@ -498,9 +498,10 @@ class GarmCharm(paas_charm.go.Charm):
     ) -> list[dict[str, str]]:
         """Read OpenStack provider configs from all Configurator applications.
 
-        Each Configurator application must have exactly one unit, which writes
-        its provider config to unit-level relation data on the
-        ``garm-configurator`` endpoint. This method collects one config from
+        Each Configurator application is expected to have one unit, which
+        writes its provider config to unit-level relation data on the
+        ``garm-configurator`` endpoint. If an application has multiple units,
+        its first unit by name is used. This method collects one config from
         each application, keyed by unit name for TOML provider naming.
 
         Passwords stored as Juju secret URIs are resolved at this point
@@ -522,15 +523,21 @@ class GarmCharm(paas_charm.go.Charm):
 
         configs: list[dict[str, str]] = []
         for relation in relations:
-            units = list(relation.units)
-            if len(units) != 1:
+            units = sorted(relation.units, key=lambda unit: unit.name)
+            if not units:
                 logger.warning(
-                    "GARM configurator application must have exactly one unit: "
-                    "relation_id=%d unit_count=%d",
+                    "GARM configurator application has no units: relation_id=%d",
                     relation.id,
-                    len(units),
                 )
                 return []
+            if len(units) > 1:
+                logger.warning(
+                    "GARM configurator application has multiple units; using first unit: "
+                    "relation_id=%d unit_count=%d unit=%s",
+                    relation.id,
+                    len(units),
+                    units[0].name,
+                )
 
             unit = units[0]
             data = relation.data[unit]

@@ -370,27 +370,36 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
 
 
 @pytest.mark.parametrize(
-    "unit_count, expected_status",
+    "unit_count, expected_status, expected_provider_names",
     [
         pytest.param(
-            0, ops.WaitingStatus("Waiting for garm-configurator relation"), id="no-units"
+            0,
+            ops.WaitingStatus("Waiting for garm-configurator relation"),
+            None,
+            id="no-units",
         ),
-        pytest.param(1, ops.ActiveStatus(), id="one-unit"),
+        pytest.param(1, ops.ActiveStatus(), ["garm-configurator-0"], id="one-unit"),
         pytest.param(
-            2, ops.WaitingStatus("Waiting for garm-configurator relation"), id="two-units"
+            2,
+            ops.ActiveStatus(),
+            ["garm-configurator-0"],
+            id="two-units",
         ),
     ],
 )
-def test_configurator_application_requires_exactly_one_unit(
+def test_configurator_application_uses_first_unit(
     ctx: Context,
     garm_api: _GarmApiMocks,
+    caplog: pytest.LogCaptureFixture,
     unit_count: int,
     expected_status: ops.StatusBase,
+    expected_provider_names: list[str] | None,
 ):
     """
     arrange: A configurator application has the parametrized number of units.
     act: Reconcile the GARM charm.
-    assert: Only a single-unit application is accepted, preventing duplicate configuration.
+    assert: No units waits; otherwise only the first unit configures GARM, with a warning when
+        additional units are ignored.
     """
     unit_data = {
         unit_id: {
@@ -404,11 +413,12 @@ def test_configurator_application_requires_exactly_one_unit(
     out = ctx.run(ctx.on.update_status(), _state(configurator_units_data=unit_data))
 
     assert out.unit_status == expected_status
-    if unit_count == 1:
+    if expected_provider_names is not None:
         providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
-        assert [provider["unit_name"] for provider in providers] == ["garm-configurator-0"]
+        assert [provider["unit_name"] for provider in providers] == expected_provider_names
     else:
         garm_api.scaleset.assert_not_called()
+    assert ("using first unit" in caplog.text) is (unit_count > 1)
 
 
 def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api: _GarmApiMocks):
