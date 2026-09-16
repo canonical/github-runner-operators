@@ -370,7 +370,7 @@ class CharmState:
         return cls(
             ssh_debug_connections=_get_ssh_debug_connections(charm),
             desired_entities=_get_desired_entities(charm),
-            configurator_related=(
-                charm.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME) is not None
+            configurator_related=bool(
+                charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, [])
             ),
         )

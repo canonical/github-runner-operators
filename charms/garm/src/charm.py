@@ -496,12 +496,13 @@ class GarmCharm(paas_charm.go.Charm):
     def _get_configurator_provider_configs(
         self,
     ) -> list[dict[str, str]]:
-        """Read OpenStack provider configs from all Configurator units.
+        """Read OpenStack provider configs from all Configurator applications.
 
-        Each Configurator unit writes its provider config to unit-level
-        relation data on the ``garm-configurator`` endpoint. This method
-        collects all such configs, keyed by unit name for TOML provider
-        naming.
+        Each Configurator application is expected to have one unit, which
+        writes its provider config to unit-level relation data on the
+        ``garm-configurator`` endpoint. If an application has multiple units,
+        its first unit by name is used. This method collects one config from
+        each application, keyed by unit name for TOML provider naming.
 
         Passwords stored as Juju secret URIs are resolved at this point
         so that the plaintext value is available for the provider's
@@ -512,13 +513,33 @@ class GarmCharm(paas_charm.go.Charm):
             (auth_url, username, password, project_name, etc.) plus a
             ``unit_name`` key for the provider's TOML name.
         """
-        relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
-        if relation is None:
+        relations = sorted(
+            self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []),
+            key=lambda relation: relation.id,
+        )
+        if not relations:
             logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
         configs: list[dict[str, str]] = []
-        for unit in sorted(relation.units, key=lambda unit: unit.name):
+        for relation in relations:
+            units = sorted(relation.units, key=lambda unit: unit.name)
+            if not units:
+                logger.warning(
+                    "GARM configurator application has no units: relation_id=%d",
+                    relation.id,
+                )
+                return []
+            if len(units) > 1:
+                logger.warning(
+                    "GARM configurator application has multiple units; using first unit: "
+                    "relation_id=%d unit_count=%d unit=%s",
+                    relation.id,
+                    len(units),
+                    units[0].name,
+                )
+
+            unit = units[0]
             data = relation.data[unit]
             # Only include units that have sent the full provider config
             if "openstack_auth_url" not in data:
@@ -547,7 +568,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         logger.info(
             "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
-            len(relation.units),
+            sum(len(relation.units) for relation in relations),
             len(configs),
         )
         return configs
