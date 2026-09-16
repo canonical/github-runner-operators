@@ -183,6 +183,7 @@ def _state(
     postgresql_data: dict | None = None,
     configurator_related: bool = True,
     configurator_units_data: dict[int, dict] | None = None,
+    configurator_relations: typing.Sequence[Relation] | None = None,
     debug_ssh_related: bool = False,
     secrets: typing.Sequence[Secret] = (),
     unit_status: ops.StatusBase | None = None,
@@ -206,16 +207,20 @@ def _state(
         ),
     ]
     if configurator_related:
-        relations.append(
-            Relation(
-                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
-                remote_app_name="garm-configurator",
-                remote_units_data=(
-                    {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
-                    if configurator_units_data is None
-                    else configurator_units_data
-                ),
-            )
+        relations.extend(
+            configurator_relations
+            if configurator_relations is not None
+            else [
+                Relation(
+                    endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                    remote_app_name="garm-configurator",
+                    remote_units_data=(
+                        {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
+                        if configurator_units_data is None
+                        else configurator_units_data
+                    ),
+                )
+            ]
         )
     if debug_ssh_related:
         relations.append(
@@ -364,25 +369,97 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
     assert out.unit_status == ops.ActiveStatus()
 
 
-def test_provider_environment_is_sorted_by_configurator_unit(
-    ctx: Context, garm_api: _GarmApiMocks
+@pytest.mark.parametrize(
+    "unit_count, expected_status, expected_provider_names",
+    [
+        pytest.param(
+            0,
+            ops.WaitingStatus("Waiting for garm-configurator relation"),
+            None,
+            id="no-units",
+        ),
+        pytest.param(1, ops.ActiveStatus(), ["garm-configurator-0"], id="one-unit"),
+        pytest.param(
+            2,
+            ops.ActiveStatus(),
+            ["garm-configurator-0"],
+            id="two-units",
+        ),
+    ],
+)
+def test_configurator_application_uses_first_unit(
+    ctx: Context,
+    garm_api: _GarmApiMocks,
+    caplog: pytest.LogCaptureFixture,
+    unit_count: int,
+    expected_status: ops.StatusBase,
+    expected_provider_names: list[str] | None,
 ):
     """
-    arrange: Two configurator units publish provider data.
-    act: Reconcile the charm.
-    assert: Providers are serialized in unit-name order, so unchanged relation data produces a
-        stable Pebble environment.
+    arrange: A configurator application has the parametrized number of units.
+    act: Reconcile the GARM charm.
+    assert: No units waits; otherwise only the first unit configures GARM, with a warning when
+        additional units are ignored.
     """
-    provider_data = {
-        1: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA},
-        0: {
+    unit_data = {
+        unit_id: {
             **_PROVIDER_UNIT_DATA,
             **_SCALESET_UNIT_DATA,
-            "openstack_auth_url": "https://ks0.example.com:5000/v3",
-        },
+            "provider_name": f"garm-configurator-{unit_id}",
+        }
+        for unit_id in range(unit_count)
     }
 
-    first = ctx.run(ctx.on.update_status(), _state(configurator_units_data=provider_data))
+    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data=unit_data))
+
+    assert out.unit_status == expected_status
+    if expected_provider_names is not None:
+        providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
+        assert [provider["unit_name"] for provider in providers] == expected_provider_names
+    else:
+        garm_api.scaleset.assert_not_called()
+    assert ("using first unit" in caplog.text) is (unit_count > 1)
+
+
+def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: Two separately deployed configurator applications publish provider data.
+    act: Reconcile the GARM charm.
+    assert: Both providers are rendered and reconciliation completes, so the endpoint supports
+        multiple remote applications as declared by its metadata.
+    """
+    configurator_relations = [
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            remote_app_name="configurator-a",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": "scaleset-a",
+                    "provider_name": "configurator-a-0",
+                }
+            },
+        ),
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            remote_app_name="configurator-b",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": "scaleset-b",
+                    "provider_name": "configurator-b-0",
+                    "openstack_auth_url": "https://ks2.example.com:5000/v3",
+                }
+            },
+        ),
+    ]
+
+    first = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_relations=configurator_relations),
+    )
     second = ctx.run(ctx.on.update_status(), first)
 
     first_environment = _service_environment(first)
@@ -390,9 +467,10 @@ def test_provider_environment_is_sorted_by_configurator_unit(
     assert first_environment["GARM_PROVIDERS_JSON"] == second_environment["GARM_PROVIDERS_JSON"]
     providers = json.loads(first_environment["GARM_PROVIDERS_JSON"])
     assert [provider["unit_name"] for provider in providers] == [
-        "garm-configurator-0",
-        "garm-configurator-1",
+        "configurator-a-0",
+        "configurator-b-0",
     ]
+    assert second.unit_status == ops.ActiveStatus()
 
 
 def test_workload_is_not_configured_without_postgresql_data(ctx: Context, garm_api: _GarmApiMocks):
@@ -1048,16 +1126,29 @@ def test_github_credential_is_built_from_relation_data(ctx: Context, garm_api: _
     )
 
 
-def test_units_sharing_a_github_app_yield_one_credential(ctx: Context, garm_api: _GarmApiMocks):
+def test_applications_sharing_a_github_app_yield_one_credential(
+    ctx: Context, garm_api: _GarmApiMocks
+):
     """
-    arrange: Two configurator units sharing one GitHub App and installation.
+    arrange: Two single-unit configurator applications share one GitHub App and installation.
     act: Run update-status.
     assert: They collapse to a single credential.
     """
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
     unit_data = {**_PROVIDER_UNIT_DATA, **_github_unit_data(key_secret.id, "1", "2")}
     state = _state(
-        configurator_units_data={0: dict(unit_data), 1: dict(unit_data)},
+        configurator_relations=[
+            Relation(
+                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                remote_app_name="configurator-a",
+                remote_units_data={0: dict(unit_data)},
+            ),
+            Relation(
+                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                remote_app_name="configurator-b",
+                remote_units_data={0: dict(unit_data)},
+            ),
+        ],
         secrets=[key_secret],
     )
 
