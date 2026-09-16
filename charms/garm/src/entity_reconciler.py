@@ -71,7 +71,9 @@ class EntityReconciler:
             existing = observed.get(name)
             try:
                 if existing is None:
-                    logger.info("Registering organization '%s' in GARM", name)
+                    logger.info(
+                        "Creating organization registration in GARM database: name='%s'", name
+                    )
                     self._client.create_org(
                         CreateOrgParams(
                             name=name,
@@ -86,7 +88,8 @@ class EntityReconciler:
                     and existing.id
                 ):
                     logger.info(
-                        "Updating organization '%s' credential -> '%s'",
+                        "Updating organization registration in GARM database: "
+                        "name='%s', credential='%s'",
                         name,
                         spec.credentials_name,
                     )
@@ -114,10 +117,14 @@ class EntityReconciler:
                     owner, _, name = full_name.partition("/")
                     if not (owner and name):
                         logger.warning(
-                            "Skipping repository '%s': expected 'owner/repo' format", full_name
+                            "Skipping repository registration in GARM database: name='%s'; "
+                            "expected 'owner/repo' format",
+                            full_name,
                         )
                         continue
-                    logger.info("Registering repository '%s' in GARM", full_name)
+                    logger.info(
+                        "Creating repository registration in GARM database: name='%s'", full_name
+                    )
                     self._client.create_repo(
                         CreateRepoParams(
                             owner=owner,
@@ -133,7 +140,8 @@ class EntityReconciler:
                     and existing.id
                 ):
                     logger.info(
-                        "Updating repository '%s' credential -> '%s'",
+                        "Updating repository registration in GARM database: "
+                        "name='%s', credential='%s'",
                         full_name,
                         spec.credentials_name,
                     )
@@ -159,7 +167,8 @@ class EntityReconciler:
             return False
         if current is not None and current.description != MANAGED_CREDENTIAL_DESCRIPTION:
             logger.warning(
-                "Skipping credential update for '%s': bound to unmanaged credential '%s'",
+                "Skipping credential update for entity registration in GARM database: "
+                "name='%s', unmanaged credential='%s'",
                 name,
                 current.name,
             )
@@ -180,7 +189,8 @@ class EntityReconciler:
         # transient GitHub/credential issue must not abort the whole reconcile or block scalesets
         # for other entities. Defer like the scaleset reconciler does and retry on the next pass.
         logger.warning(
-            "Deferring registration of %s '%s' (GARM could not register it yet; will retry): %s",
+            "Deferring %s registration operation in GARM database: name='%s' "
+            "(GARM could not complete it yet; will retry): %s",
             kind,
             name,
             exc,
@@ -188,12 +198,18 @@ class EntityReconciler:
 
     @staticmethod
     def _safe_delete(delete_fn, entity_id, kind: str, name: str) -> None:
-        logger.info("Deleting orphaned %s '%s' (id=%s)", kind, name, entity_id)
+        logger.info(
+            "Deleting orphaned %s registration from GARM database: name='%s', id=%s",
+            kind,
+            name,
+            entity_id,
+        )
         try:
             delete_fn(entity_id)
         except GarmApiError as exc:
             logger.warning(
-                "Could not delete %s '%s' (scalesets may still reference it; will retry): %s",
+                "Could not delete %s registration from GARM database: name='%s' (scalesets may "
+                "still reference it; will retry): %s",
                 kind,
                 name,
                 exc,
