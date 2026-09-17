@@ -54,6 +54,7 @@ class TestPool(unittest.TestCase):
                 enterprise_name = '',
                 extra_specs = garm_client.models.extra_specs.extra_specs(),
                 flavor = '',
+                forge_instance_id = '',
                 generation = 56,
                 github_runner_group = '',
                 id = '',
@@ -79,6 +80,7 @@ class TestPool(unittest.TestCase):
                             conclusion = '', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             enterprise_id = '', 
+                            forge_instance_id = '', 
                             id = 56, 
                             labels = [
                                 ''
@@ -129,6 +131,8 @@ class TestPool(unittest.TestCase):
                 os_type = '',
                 priority = 56,
                 provider_name = '',
+                proxy_id = 56,
+                proxy_name = '',
                 repo_id = '',
                 repo_name = '',
                 runner_bootstrap_timeout = 56,

@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **created_at** | **datetime** |  | [optional] 
 **credentials** | [**ForgeCredentials**](ForgeCredentials.md) |  | [optional] 
 **entity_type** | **str** |  | [optional] 
+**forge** | [**ForgeEndpoint**](ForgeEndpoint.md) |  | [optional] 
 **id** | **str** |  | [optional] 
 **name** | **str** |  | [optional] 
 **owner** | **str** |  | [optional] 

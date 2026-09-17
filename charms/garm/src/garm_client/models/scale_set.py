@@ -56,6 +56,8 @@ class ScaleSet(BaseModel):
     os_arch: Optional[StrictStr] = None
     os_type: Optional[StrictStr] = None
     provider_name: Optional[StrictStr] = None
+    proxy_id: Optional[StrictInt] = Field(default=None, description="ProxyID is the ID of the proxy definition that will be used by runners spawned in this scale set. Runners will use the proxy settings to reach back to GARM, the forge and any other resources they need during setup.")
+    proxy_name: Optional[StrictStr] = None
     repo_id: Optional[StrictStr] = None
     repo_name: Optional[StrictStr] = None
     runner_bootstrap_timeout: Optional[StrictInt] = None
@@ -67,7 +69,7 @@ class ScaleSet(BaseModel):
     template_id: Optional[StrictInt] = None
     template_name: Optional[StrictStr] = None
     updated_at: Optional[datetime] = None
-    __properties: ClassVar[List[str]] = ["created_at", "desired_runner_count", "disable_update", "enable_shell", "enabled", "endpoint", "enterprise_id", "enterprise_name", "extended_state", "extra_specs", "flavor", "generation", "github-runner-group", "id", "image", "instances", "max_runners", "min_idle_runners", "name", "org_id", "org_name", "os_arch", "os_type", "provider_name", "repo_id", "repo_name", "runner_bootstrap_timeout", "runner_prefix", "scale_set_id", "state", "status_messages", "tags", "template_id", "template_name", "updated_at"]
+    __properties: ClassVar[List[str]] = ["created_at", "desired_runner_count", "disable_update", "enable_shell", "enabled", "endpoint", "enterprise_id", "enterprise_name", "extended_state", "extra_specs", "flavor", "generation", "github-runner-group", "id", "image", "instances", "max_runners", "min_idle_runners", "name", "org_id", "org_name", "os_arch", "os_type", "provider_name", "proxy_id", "proxy_name", "repo_id", "repo_name", "runner_bootstrap_timeout", "runner_prefix", "scale_set_id", "state", "status_messages", "tags", "template_id", "template_name", "updated_at"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -168,6 +170,8 @@ class ScaleSet(BaseModel):
             "os_arch": obj.get("os_arch"),
             "os_type": obj.get("os_type"),
             "provider_name": obj.get("provider_name"),
+            "proxy_id": obj.get("proxy_id"),
+            "proxy_name": obj.get("proxy_name"),
             "repo_id": obj.get("repo_id"),
             "repo_name": obj.get("repo_name"),
             "runner_bootstrap_timeout": obj.get("runner_bootstrap_timeout"),
