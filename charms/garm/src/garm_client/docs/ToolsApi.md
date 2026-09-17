@@ -5,6 +5,7 @@ All URIs are relative to */api/v1*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**admin_garm_agent_list**](ToolsApi.md#admin_garm_agent_list) | **GET** /tools/garm-agent | List GARM agent tools for admin users.
+[**list_garm_agent_releases**](ToolsApi.md#list_garm_agent_releases) | **GET** /tools/garm-agent/releases | List the garm-agent releases available at the controller&#39;s releases URL,
 [**upload_garm_agent_tool**](ToolsApi.md#upload_garm_agent_tool) | **POST** /tools/garm-agent | Upload a GARM agent tool binary.
 
 
@@ -86,6 +87,83 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | GARMAgentToolsPaginatedResponse |  -  |
+**400** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **list_garm_agent_releases**
+> List[GARMAgentRelease] list_garm_agent_releases()
+
+List the garm-agent releases available at the controller's releases URL,
+
+as recorded in the cached release index. The release the controller is
+pinned to and the release "latest" resolves to are marked.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.garm_agent_release import GARMAgentRelease
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.ToolsApi(api_client)
+
+    try:
+        # List the garm-agent releases available at the controller's releases URL,
+        api_response = api_instance.list_garm_agent_releases()
+        print("The response of ToolsApi->list_garm_agent_releases:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ToolsApi->list_garm_agent_releases: %s\n" % e)
+```
+
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**List[GARMAgentRelease]**](GARMAgentRelease.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | GARMAgentReleases |  -  |
 **400** | APIErrorResponse |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

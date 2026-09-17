@@ -6,11 +6,13 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **agent_url** | **str** |  | [optional] 
+**allow_insecure_garm_agent** | **bool** | AllowInsecureGARMAgent configures deployed garm-agents to connect to GARM over plain http/ws (the agent&#39;s force_insecure setting). Meant for local development and testing only. | [optional] 
 **ca_cert_bundle** | **bytes** |  | [optional] 
 **callback_url** | **str** |  | [optional] 
 **clear_ca_cert_bundle** | **bool** |  | [optional] 
 **enable_agent_tools_sync** | **bool** |  | [optional] 
 **garm_agent_releases_url** | **str** |  | [optional] 
+**garm_agent_version** | **str** | GARMAgentVersion pins the garm-agent version the controller uses. An empty string or \&quot;latest\&quot; tracks the newest release at GARMAgentReleasesURL; any other value must be a valid semver version. | [optional] 
 **metadata_url** | **str** |  | [optional] 
 **minimum_job_age_backoff** | **int** |  | [optional] 
 **webhook_url** | **str** |  | [optional] 

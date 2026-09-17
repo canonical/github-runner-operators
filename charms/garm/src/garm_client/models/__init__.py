@@ -19,6 +19,7 @@ from garm_client.models.agent_capabilities import AgentCapabilities
 from garm_client.models.controller_info import ControllerInfo
 from garm_client.models.create_enterprise_params import CreateEnterpriseParams
 from garm_client.models.create_file_object_params import CreateFileObjectParams
+from garm_client.models.create_forge_instance_params import CreateForgeInstanceParams
 from garm_client.models.create_garm_tool_params import CreateGARMToolParams
 from garm_client.models.create_gitea_credentials_params import CreateGiteaCredentialsParams
 from garm_client.models.create_gitea_endpoint_params import CreateGiteaEndpointParams
@@ -26,6 +27,7 @@ from garm_client.models.create_github_credentials_params import CreateGithubCred
 from garm_client.models.create_github_endpoint_params import CreateGithubEndpointParams
 from garm_client.models.create_org_params import CreateOrgParams
 from garm_client.models.create_pool_params import CreatePoolParams
+from garm_client.models.create_proxy_params import CreateProxyParams
 from garm_client.models.create_repo_params import CreateRepoParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.create_template_params import CreateTemplateParams
@@ -37,6 +39,9 @@ from garm_client.models.file_object_paginated_response_results_inner import File
 from garm_client.models.forge_credentials import ForgeCredentials
 from garm_client.models.forge_endpoint import ForgeEndpoint
 from garm_client.models.forge_entity import ForgeEntity
+from garm_client.models.forge_instance import ForgeInstance
+from garm_client.models.garm_agent_release import GARMAgentRelease
+from garm_client.models.garm_agent_release_asset import GARMAgentReleaseAsset
 from garm_client.models.garm_agent_tool import GARMAgentTool
 from garm_client.models.garm_agent_tools_paginated_response import GARMAgentToolsPaginatedResponse
 from garm_client.models.garm_agent_tools_paginated_response_results_inner import GARMAgentToolsPaginatedResponseResultsInner
@@ -56,6 +61,7 @@ from garm_client.models.password_login_params import PasswordLoginParams
 from garm_client.models.pool import Pool
 from garm_client.models.pool_manager_status import PoolManagerStatus
 from garm_client.models.provider import Provider
+from garm_client.models.proxy import Proxy
 from garm_client.models.repository import Repository
 from garm_client.models.restore_template_request import RestoreTemplateRequest
 from garm_client.models.runner_application_download import RunnerApplicationDownload
@@ -72,6 +78,7 @@ from garm_client.models.update_gitea_endpoint_params import UpdateGiteaEndpointP
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_github_endpoint_params import UpdateGithubEndpointParams
 from garm_client.models.update_pool_params import UpdatePoolParams
+from garm_client.models.update_proxy_params import UpdateProxyParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 from garm_client.models.update_template_params import UpdateTemplateParams
 from garm_client.models.user import User
