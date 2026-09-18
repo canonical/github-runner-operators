@@ -106,7 +106,7 @@ config:
         Runner group for org registration. Ignored when repo is set.
     enable-shell:
       type: boolean
-      default: false
+      default: true
       description: |
         Enable the GARM remote shell on the scaleset, letting an administrator open an
         interactive session on a runner through GARM. The session rides the GARM agent's
