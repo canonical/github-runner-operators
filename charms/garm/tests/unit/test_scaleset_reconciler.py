@@ -45,6 +45,7 @@ class _FakeScaleset:
         max_runners=5,
         min_idle_runners=0,
         github_runner_group=None,
+        enable_shell=None,
         extra_specs=None,
         tags=None,
         template_id=None,
@@ -58,6 +59,8 @@ class _FakeScaleset:
         self.max_runners = max_runners
         self.min_idle_runners = min_idle_runners
         self.github_runner_group = github_runner_group
+        # Like `enabled`, GARM omits this when false, so the client reads back None.
+        self.enable_shell = enable_shell
         self.extra_specs = extra_specs or {}
         self.tags = [_FakeTag(t) for t in (tags or [])]
         self.template_id = template_id
@@ -142,6 +145,7 @@ class FakeGarmClient:
                 max_runners=ss.get("max_runners", 5),
                 min_idle_runners=ss.get("min_idle_runners", 0),
                 github_runner_group=ss.get("github_runner_group", None),
+                enable_shell=ss.get("enable_shell", None),
                 extra_specs=ss.get("extra_specs", {}),
                 tags=ss.get("tags", []),
                 template_id=ss.get("template_id", None),
@@ -244,6 +248,7 @@ def _spec(
     entity_name="my-org",
     labels=None,
     runner_group="",
+    enable_shell=False,
     pre_install_scripts=None,
     template_id=None,
     runner_config=None,
@@ -260,6 +265,7 @@ def _spec(
         entity_name=entity_name,
         labels=labels or [],
         runner_group=runner_group,
+        enable_shell=enable_shell,
         pre_install_scripts=pre_install_scripts or {},
         template_id=template_id,
         runner_config=runner_config or RunnerConfig(),
@@ -2289,3 +2295,38 @@ def test_identical_duplicate_specs_are_not_warned_about(caplog):
 
     assert [params.name for _, _, params in client.created] == [_OLD_NAME]
     assert "duplicate" not in caplog.text
+
+
+def test_remote_shell_is_passed_in_create():
+    """
+    arrange: FakeGarmClient with the provider registered and no existing scalesets.
+    act: Reconcile a spec asking for the GARM remote shell.
+    assert: The created scaleset has the shell enabled.
+    """
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(client, [_spec(enable_shell=True)])
+
+    _, _, params = client.created[0]
+    assert params.enable_shell is True
+
+
+@pytest.mark.parametrize(
+    "observed, desired",
+    [(None, True), (True, False)],
+    ids=["turning-on", "turning-off"],
+)
+def test_remote_shell_drift_is_updated_in_place(observed, desired):
+    """
+    arrange: A live scaleset whose remote-shell setting differs from the spec. GARM omits the
+        field when it is off, so an unset scaleset reads back as None rather than False.
+    act: Reconcile.
+    assert: The scaleset is updated rather than replaced — the shell is not part of the
+        label hash, so toggling it must not drain and recreate a live scaleset.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"], scalesets=[_existing_scaleset(enable_shell=observed)]
+    )
+    _reconcile(client, [_spec(enable_shell=desired)])
+
+    assert client.created == []
+    assert client.updated[0][1].enable_shell is desired

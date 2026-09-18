@@ -37,6 +37,7 @@ SCALESET_LABELS_CONFIG_NAME = "labels"
 SCALESET_REPO_CONFIG_NAME = "repo"
 SCALESET_ORG_CONFIG_NAME = "org"
 SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
+SCALESET_ENABLE_SHELL_CONFIG_NAME = "enable-shell"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
 
 DOCKERHUB_MIRROR_CONFIG_NAME = "dockerhub-mirror"
@@ -225,6 +226,7 @@ class ScalesetConfig(BaseModel):
         repo: Repository to register runners to.
         org: Organization to register runners to.
         runner_group: Runner group for org registration.
+        enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
     """
 
@@ -237,6 +239,7 @@ class ScalesetConfig(BaseModel):
     repo: str | None = None
     org: str | None = None
     runner_group: str = "Default"
+    enable_shell: bool = False
     pre_install_scripts: str | None = None
 
     @classmethod
@@ -311,6 +314,7 @@ class ScalesetConfig(BaseModel):
             repo=repo,
             org=org,
             runner_group=runner_group,
+            enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
         )
 

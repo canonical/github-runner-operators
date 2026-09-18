@@ -17,6 +17,11 @@ from garm_api import (
     GarmUnauthorizedError,
 )
 from garm_client.exceptions import ApiException
+from garm_client.models.file_object import FileObject
+from garm_client.models.garm_agent_tools_paginated_response import GARMAgentToolsPaginatedResponse
+from garm_client.models.garm_agent_tools_paginated_response_results_inner import (
+    GARMAgentToolsPaginatedResponseResultsInner,
+)
 from garm_client.models.instance import Instance
 
 BASE_URL = "http://127.0.0.1:9997/api/v1"
@@ -606,8 +611,9 @@ def test_delete_credentials_raises_on_api_error():
 def test_update_controller_calls_api():
     """
     arrange: GarmAuthenticatedClient with ControllerApi stubbed.
-    act: Call update_controller() with metadata, callback and webhook URLs.
-    assert: update_controller is called once.
+    act: Call update_controller() with the metadata, callback, webhook and agent URLs.
+    assert: Every URL reaches GARM in one call, including the agent URL and the insecure-agent
+        flag, without which deployed agents refuse to dial a plain ws:// controller.
     """
     client = GarmAuthenticatedClient(BASE_URL, "token")
     with _stub_api_client(client):
@@ -616,8 +622,12 @@ def test_update_controller_calls_api():
                 metadata_url="http://garm/api/v1/metadata",
                 callback_url="http://garm/api/v1/callbacks",
                 webhook_url="http://garm/webhooks",
+                agent_url="http://garm/agent",
+                allow_insecure_agent=True,
             )
-    MockApi.return_value.update_controller.assert_called_once()
+    body = MockApi.return_value.update_controller.call_args.kwargs["body"]
+    assert body.agent_url == "http://garm/agent"
+    assert body.allow_insecure_garm_agent is True
 
 
 def test_update_controller_raises_on_api_error():
@@ -635,6 +645,8 @@ def test_update_controller_raises_on_api_error():
                     metadata_url="http://garm/api/v1/metadata",
                     callback_url="http://garm/api/v1/callbacks",
                     webhook_url="http://garm/webhooks",
+                    agent_url="http://garm/agent",
+                    allow_insecure_agent=True,
                 )
 
 
@@ -793,3 +805,111 @@ def test_entity_delete_calls_api(method, api_name, api_method, arg):
         with patch(f"garm_api.{api_name}") as MockApi:
             getattr(client, method)(arg)
             getattr(MockApi.return_value, api_method).assert_called_once()
+
+
+def _agent_tool(tool_id, sha256, arch):
+    """A stored agent tool as GARM lists it back."""
+    return GARMAgentToolsPaginatedResponseResultsInner(
+        id=tool_id,
+        name=f"garm-agent-linux-{arch}",
+        os_type="linux",
+        os_arch=arch,
+        sha256sum=sha256,
+        version="v0.1.1",
+    )
+
+
+def test_list_agent_tools_follows_every_page():
+    """
+    arrange: ToolsApi returning two pages of stored agent tools.
+    act: Call list_agent_tools().
+    assert: Both pages are returned, and only locally stored tools are asked for — a tool
+        sitting past the first page must not be mistaken for missing and re-uploaded, and one
+        that exists only in GARM's cached view of the upstream release index is not stored at
+        all, so counting it would suppress the upload that keeps runners off github.com.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    first = GARMAgentToolsPaginatedResponse(results=[_agent_tool(1, "aa", "amd64")], next_page=2)
+    second = GARMAgentToolsPaginatedResponse(
+        results=[_agent_tool(2, "bb", "arm64")], next_page=None
+    )
+    with _stub_api_client(client):
+        with patch("garm_api.ToolsApi") as MockApi:
+            MockApi.return_value.admin_garm_agent_list.side_effect = [first, second]
+            tools = client.list_agent_tools()
+
+    assert [tool.id for tool in tools] == [1, 2]
+    assert MockApi.return_value.admin_garm_agent_list.call_args.kwargs["upstream"] is False
+
+
+def test_list_agent_tools_raises_on_api_error():
+    """
+    arrange: ToolsApi rejecting the listing.
+    act: Call list_agent_tools().
+    assert: GarmApiError is raised, so the charm retries rather than treating an unreadable
+        store as empty and re-uploading every binary.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.ToolsApi") as MockApi:
+            MockApi.return_value.admin_garm_agent_list.side_effect = ApiException(status=500)
+            with pytest.raises(GarmApiError):
+                client.list_agent_tools()
+
+
+def test_upload_agent_tool_sends_the_raw_bytes_with_metadata_headers():
+    """
+    arrange: A GarmAuthenticatedClient whose api client is stubbed.
+    act: Call upload_agent_tool() with binary content.
+    assert: The content is the request body unencoded and the metadata travels as X-Tool-*
+        headers against the dedicated endpoint — GARM refuses agent binaries on the generic
+        object endpoint, and declares no request body for this one, so the generated client
+        cannot carry the binary itself.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    content = b"\x7fELF binary"
+    stub = MagicMock()
+    api_client = MagicMock()
+    stub.__enter__ = MagicMock(return_value=api_client)
+    stub.__exit__ = MagicMock(return_value=False)
+    api_client.param_serialize.return_value = ("POST", "url", {}, content, None)
+    api_client.response_deserialize.return_value.data = FileObject(id=7, sha256="cc")
+    with patch.object(client, "_api_client", return_value=stub):
+        created = client.upload_agent_tool(
+            name="garm-agent-linux-amd64",
+            description="garm-agent v0.1.1 for linux/amd64",
+            os_arch="amd64",
+            version="v0.1.1",
+            content=content,
+        )
+
+    assert created.id == 7
+    kwargs = api_client.param_serialize.call_args.kwargs
+    assert kwargs["body"] == content
+    assert kwargs["resource_path"] == "/tools/garm-agent"
+    headers = kwargs["header_params"]
+    assert headers["X-Tool-Name"] == "garm-agent-linux-amd64"
+    assert headers["X-Tool-OS-Type"] == "linux"
+    assert headers["X-Tool-OS-Arch"] == "amd64"
+    assert headers["X-Tool-Version"] == "v0.1.1"
+
+
+def test_upload_agent_tool_raises_on_api_error():
+    """
+    arrange: A GarmAuthenticatedClient whose upload is rejected by GARM.
+    act: Call upload_agent_tool().
+    assert: GarmApiError is raised, so the charm leaves agent mode off rather than enabling it
+        against a GARM that has no binary to serve.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    stub = MagicMock()
+    api_client = MagicMock()
+    stub.__enter__ = MagicMock(return_value=api_client)
+    stub.__exit__ = MagicMock(return_value=False)
+    api_client.param_serialize.return_value = ("POST", "url", {}, b"", None)
+    api_client.response_deserialize.side_effect = ApiException(status=500)
+    with patch.object(client, "_api_client", return_value=stub):
+        with pytest.raises(GarmApiError):
+            client.upload_agent_tool(
+                name="n", description="d", os_arch="amd64", version="v1", content=b""
+            )
