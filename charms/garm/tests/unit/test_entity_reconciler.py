@@ -32,8 +32,110 @@ def _client(credentials=None, orgs=None, repos=None):
     return client
 
 
-def _reconcile(client, desired):
-    EntityReconciler(client).reconcile(desired)
+def _reconcile(client, desired, agent_mode=None):
+    EntityReconciler(client, agent_mode).reconcile(desired)
+
+
+def test_agent_mode_is_set_on_newly_created_entities():
+    """
+    arrange: A client with the managed credential and no registered entities.
+    act: Reconcile a desired org and repo with agent mode confirmed available.
+    assert: Both are created with agent mode on, so their runners install the garm-agent the
+        charm published rather than starting without one.
+    """
+    client = _client(orgs=[], repos=[])
+    _reconcile(
+        client,
+        [
+            EntitySpec("organization", "canonical", "app-1-2"),
+            EntitySpec("repository", "canonical/runner", "app-1-2"),
+        ],
+        agent_mode=True,
+    )
+
+    assert client.create_org.call_args[0][0].agent_mode is True
+    assert client.create_repo.call_args[0][0].agent_mode is True
+
+
+def test_agent_mode_is_turned_on_for_entities_registered_before_it_existed():
+    """
+    arrange: An org and a repo already registered with the right credential but agent mode off,
+        as an upgrade from a charm revision that predates agent mode leaves them.
+    act: Reconcile them with agent mode confirmed available.
+    assert: Each is updated with agent_mode alone, and no credentials_name — sending the
+        credential too would be a no-op write, and an update that carried an empty one would
+        be rejected.
+    """
+    client = _client(
+        orgs=[{"id": "org-id", "name": "canonical", "credentials_id": 1, "agent_mode": False}],
+        repos=[
+            {
+                "id": "repo-id",
+                "owner": "canonical",
+                "name": "runner",
+                "credentials_id": 1,
+                "agent_mode": None,
+            }
+        ],
+    )
+    _reconcile(
+        client,
+        [
+            EntitySpec("organization", "canonical", "app-1-2"),
+            EntitySpec("repository", "canonical/runner", "app-1-2"),
+        ],
+        agent_mode=True,
+    )
+
+    assert client.update_org.call_args[0][1].to_dict() == {"agent_mode": True}
+    assert client.update_repo.call_args[0][1].to_dict() == {"agent_mode": True}
+
+
+def test_entity_already_in_agent_mode_is_left_alone():
+    """
+    arrange: An org already registered with the right credential and agent mode on.
+    act: Reconcile it with agent mode confirmed available.
+    assert: No update is sent, so a converged deployment stops writing to GARM.
+    """
+    client = _client(
+        orgs=[{"id": "org-id", "name": "canonical", "credentials_id": 1, "agent_mode": True}]
+    )
+    _reconcile(client, [EntitySpec("organization", "canonical", "app-1-2")], agent_mode=True)
+
+    client.update_org.assert_not_called()
+
+
+def test_unconfirmed_agent_mode_leaves_the_setting_alone():
+    """
+    arrange: An org registered with agent mode on, and a charm that could not confirm the
+        garm-agent binaries are published.
+    act: Reconcile it with agent mode unknown.
+    assert: Agent mode is not touched, so a transient loss of the workload container does not
+        flap every entity off and back on again.
+    """
+    client = _client(
+        orgs=[{"id": "org-id", "name": "canonical", "credentials_id": 1, "agent_mode": True}]
+    )
+    _reconcile(client, [EntitySpec("organization", "canonical", "app-1-2")], agent_mode=None)
+
+    client.update_org.assert_not_called()
+
+
+def test_credential_and_agent_mode_drift_are_sent_together():
+    """
+    arrange: An org bound to an unclaimed credential and with agent mode off.
+    act: Reconcile it against the managed credential with agent mode confirmed available.
+    assert: One update carries both changes, rather than costing two round trips.
+    """
+    client = _client(
+        orgs=[{"id": "org-id", "name": "canonical", "credentials_id": 99, "agent_mode": False}]
+    )
+    _reconcile(client, [EntitySpec("organization", "canonical", "app-1-2")], agent_mode=True)
+
+    assert client.update_org.call_args[0][1].to_dict() == {
+        "agent_mode": True,
+        "credentials_name": "app-1-2",
+    }
 
 
 def test_create_org_when_missing(caplog):
@@ -134,8 +236,8 @@ def test_update_repo_when_credential_drifts(caplog):
     """
     arrange: A repo bound to a managed credential whose name differs from the desired one.
     act: Reconcile the repo with a different (desired) credential name.
-    assert: The GARM repository registration update is logged and issued with its id and new
-        credential name.
+    assert: The GARM repository registration update is logged with the fields it changes and
+        issued with its id and new credential name.
     """
     managed_other = {"id": 1, "name": "app-9-9", "description": MANAGED_CREDENTIAL_DESCRIPTION}
     repo = {"owner": "canonical", "name": "runner", "id": "repo-uuid", "credentials_id": 1}
@@ -145,7 +247,7 @@ def test_update_repo_when_credential_drifts(caplog):
 
     assert (
         "Updating repository registration in GARM database: "
-        "name='canonical/runner', credential='app-1-2'" in caplog.messages
+        "name='canonical/runner', fields=['credentials_name']" in caplog.messages
     )
     client.update_repo.assert_called_once()
     repo_id, params = client.update_repo.call_args[0]
