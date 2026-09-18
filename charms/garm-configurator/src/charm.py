@@ -131,9 +131,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """Publish scaleset configuration to the garm-configurator relation.
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
-        flavor, arch, runner counts, labels, runner group, and pre-install
-        scripts) to the relation. The optional ``org`` and ``repo`` fields are
-        included only when set.
+        flavor, arch, runner counts, labels, runner group, remote-shell toggle,
+        and pre-install scripts) to the relation. The optional ``org`` and
+        ``repo`` fields are included only when set.
 
         When the image UUID is present and this unit holds leadership, also
         provisions Juju secrets for the OpenStack password and GitHub App
@@ -163,6 +163,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "max_runner": str(state.scaleset_config.max_runner),
             "labels": state.scaleset_config.labels,
             "runner_group": state.scaleset_config.runner_group,
+            "enable_shell": str(state.scaleset_config.enable_shell).lower(),
             "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
             if pre_install
             else "",

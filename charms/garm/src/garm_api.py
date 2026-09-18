@@ -22,6 +22,7 @@ from garm_client.api.providers_api import ProvidersApi
 from garm_client.api.repositories_api import RepositoriesApi
 from garm_client.api.scalesets_api import ScalesetsApi
 from garm_client.api.templates_api import TemplatesApi
+from garm_client.api.tools_api import ToolsApi
 from garm_client.api_client import ApiClient
 from garm_client.configuration import Configuration
 from garm_client.exceptions import ApiException
@@ -30,7 +31,11 @@ from garm_client.models.create_org_params import CreateOrgParams
 from garm_client.models.create_repo_params import CreateRepoParams
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.create_template_params import CreateTemplateParams
+from garm_client.models.file_object import FileObject
 from garm_client.models.forge_credentials import ForgeCredentials
+from garm_client.models.garm_agent_tools_paginated_response_results_inner import (
+    GARMAgentToolsPaginatedResponseResultsInner,
+)
 from garm_client.models.instance import Instance
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.organization import Organization
@@ -48,6 +53,10 @@ from garm_client.models.update_template_params import UpdateTemplateParams
 logger = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT = 30
+_UPLOAD_TIMEOUT = 300  # agent binaries are ~8MB each and stream into the database
+_TOOL_PAGE_SIZE = 100
+# GARM only serves linux runners in this charm; windows agents are not built by the rock.
+_AGENT_OS_TYPE = "linux"
 _READINESS_POLL_INTERVAL = 1  # seconds between retries
 _READINESS_TIMEOUT = 30  # seconds before giving up
 
@@ -377,17 +386,28 @@ class GarmAuthenticatedClient(GarmApiClient):
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
-    def update_controller(self, metadata_url: str, callback_url: str, webhook_url: str) -> None:
-        """Set the controller metadata, callback and webhook URLs.
+    def update_controller(
+        self,
+        metadata_url: str,
+        callback_url: str,
+        webhook_url: str,
+        agent_url: str,
+        allow_insecure_agent: bool,
+    ) -> None:
+        """Set the controller URLs and the agent transport mode.
 
         GARM rejects operational endpoints (credentials, endpoints, scalesets) with
-        HTTP 409 ``urls_required`` until these controller URLs are configured. The call
-        is idempotent.
+        HTTP 409 ``urls_required`` until the metadata, callback and webhook URLs are
+        configured. The call is idempotent.
 
         Args:
             metadata_url: URL runners use to fetch instance metadata.
             callback_url: URL runners use for status callbacks.
             webhook_url: URL GitHub uses to deliver webhooks.
+            agent_url: Websocket URL the garm-agent on each runner connects back to.
+            allow_insecure_agent: Whether deployed agents may connect over plain
+                http/ws. ``garm-agent`` refuses a non-TLS ``server_url`` unless this
+                is set, so it must track whether ``agent_url`` is https or not.
 
         Raises:
             GarmApiError: On API error.
@@ -399,6 +419,8 @@ class GarmAuthenticatedClient(GarmApiClient):
                         metadata_url=metadata_url,
                         callback_url=callback_url,
                         webhook_url=webhook_url,
+                        agent_url=agent_url,
+                        allow_insecure_garm_agent=allow_insecure_agent,
                     ),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
@@ -1010,6 +1032,98 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def list_agent_tools(self) -> list[GARMAgentToolsPaginatedResponseResultsInner]:
+        """List the garm-agent binaries GARM currently stores locally.
+
+        Returns:
+            Every locally stored tool, across all pages, each carrying the sha256 GARM
+            computed when it was uploaded. Tools that exist only in GARM's cached view of
+            the upstream release index are excluded: they are not stored binaries, and
+            treating them as such would suppress the uploads this charm exists to make.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        results: list[GARMAgentToolsPaginatedResponseResultsInner] = []
+        with self._api_client() as client:
+            api = ToolsApi(api_client=client)
+            page: int | None = 1
+            try:
+                while page is not None:
+                    response = api.admin_garm_agent_list(
+                        page=page,
+                        page_size=_TOOL_PAGE_SIZE,
+                        upstream=False,
+                        _request_timeout=_REQUEST_TIMEOUT,
+                    )
+                    results.extend(response.results or [])
+                    page = response.next_page
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to list garm-agent tools ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+        return results
+
+    def upload_agent_tool(
+        self, name: str, description: str, os_arch: str, version: str, content: bytes
+    ) -> FileObject:
+        """Upload one garm-agent binary, replacing any tool for the same OS and arch.
+
+        GARM refuses garm-agent binaries on the generic object-store endpoint and requires
+        this dedicated one, which tags the stored object itself and deletes whatever it
+        supersedes. The swagger declares no request body for it, so the generated client's
+        method cannot carry the binary and the request is issued through the api client
+        directly: the body is the raw binary and all metadata travels in headers.
+
+        Args:
+            name: Tool name, sent as ``X-Tool-Name``.
+            description: Human-readable description, sent as ``X-Tool-Description``.
+            os_arch: Runner architecture, sent as ``X-Tool-OS-Arch``. GARM accepts only
+                ``amd64`` and ``arm64`` here.
+            version: Agent version, sent as ``X-Tool-Version``. GARM rejects an empty one
+                and will not serve a stored tool that has no version.
+            content: The binary itself.
+
+        Returns:
+            The stored object's metadata, including the sha256 GARM computed.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                request = client.param_serialize(
+                    method="POST",
+                    resource_path="/tools/garm-agent",
+                    header_params={
+                        "X-Tool-Name": name,
+                        "X-Tool-Description": description,
+                        "X-Tool-OS-Type": _AGENT_OS_TYPE,
+                        "X-Tool-OS-Arch": os_arch,
+                        "X-Tool-Version": version,
+                        "Content-Type": "application/octet-stream",
+                        "Accept": "application/json",
+                    },
+                    body=content,
+                    auth_settings=["Bearer"],
+                )
+                response = client.call_api(*request, _request_timeout=_UPLOAD_TIMEOUT)
+                response.read()
+                created = client.response_deserialize(
+                    response_data=response, response_types_map={"200": "FileObject"}
+                ).data
+            except ApiException as exc:
+                raise GarmApiError(
+                    f"Failed to upload garm-agent tool {name} ({exc.status}): {exc.body}"
+                ) from exc
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+        if not isinstance(created, FileObject):
+            raise GarmApiError(f"GARM returned no object metadata for {name}")
+        return created
 
 
 def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
