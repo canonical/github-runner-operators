@@ -29,6 +29,8 @@ Name | Type | Description | Notes
 **os_arch** | **str** |  | [optional] 
 **os_type** | **str** |  | [optional] 
 **provider_name** | **str** |  | [optional] 
+**proxy_id** | **int** | ProxyID is the ID of the proxy definition that will be used by runners spawned in this scale set. Runners will use the proxy settings to reach back to GARM, the forge and any other resources they need during setup. | [optional] 
+**proxy_name** | **str** |  | [optional] 
 **repo_id** | **str** |  | [optional] 
 **repo_name** | **str** |  | [optional] 
 **runner_bootstrap_timeout** | **int** |  | [optional] 
