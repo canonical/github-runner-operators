@@ -3,7 +3,7 @@ paas-charm==1.12.3
 Jinja2==3.1.6
 tomli-w==1.2.0
 PyYAML==6.0.3
-urllib3==2.7.0
+urllib3==2.8.0
 python-dateutil==2.9.0.post0
 pydantic==2.13.5
 typing-extensions==4.16.0
