@@ -822,3 +822,30 @@ def test_runner_config_fields_absent_when_unset():
         "pre_job_script",
     ):
         assert rel_out.local_unit_data.get(key, "") == ""
+
+
+@pytest.mark.parametrize(
+    "configured, expected",
+    [(True, "true"), (False, "false"), (None, "false")],
+    ids=["enabled", "disabled", "default"],
+)
+def test_enable_shell_written_to_garm_configurator_relation(configured, expected):
+    """
+    arrange: Valid config with enable-shell set on, off, or left at its default.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: The databag carries the setting as a lowercase boolean string, which is how the
+        garm charm parses it onto the scaleset; the default is off, so an existing deployment
+        does not silently gain remote shell access on upgrade.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    if configured is not None:
+        config["enable-shell"] = configured
+    garm_relation = _make_garm_configurator_relation()
+    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.get_relation(garm_relation.id).local_unit_data["enable_shell"] == expected
