@@ -53,7 +53,7 @@ def _client(stored: list[GARMAgentToolsPaginatedResponseResultsInner] | None = N
     return client
 
 
-def _stored(arch: str, sha256: str, version: str = _VERSION):
+def _stored_tools(arch: str, sha256: str, version: str = _VERSION):
     """A stored agent tool as GARM lists it back."""
     return GARMAgentToolsPaginatedResponseResultsInner(
         id=1,
