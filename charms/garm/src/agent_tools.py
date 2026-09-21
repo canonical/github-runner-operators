@@ -55,7 +55,7 @@ def ensure_agent_tools(client: GarmAuthenticatedClient, container: ops.Container
     tools_per_arch = {tool.os_arch: tool for tool in client.list_agent_tools()}
 
     for arch in sorted(digests):
-        current = stored.get(arch)
+        current = tools_per_arch.get(arch)
         if (
             current is not None
             and current.sha256sum == digests[arch]
