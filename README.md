@@ -19,12 +19,12 @@ charms/
   planner-operator/         # Juju charm: GitHub runner planner
     cos_custom/
       grafana_dashboards/   # Grafana dashboards for the planner charm
-  tests/                    # Integration and E2E tests for the charms
+  tests/                    # Shared charm tests (unit, integration, e2e)
   webhook-gateway-operator/ # Juju charm: GitHub webhook gateway
 
 cmd/
   planner/                  # Application entry point: planner
-  waiting-p80-report        # Application entry point: tool for calculating p80 waiting time
+  waiting-p80-report/       # Application entry point: p80 job waiting time report
   webhook-gateway/          # Application entry point: webhook gateway
 
 internal/                   # Shared Go packages
@@ -33,20 +33,21 @@ docs/                       # Documentation
 
 runner_grafana_dashboards/  # Grafana dashboards for runner VM host metrics
 
-scripts/                    # Collection of various scripts
+scripts/                    # Repository maintenance scripts (e.g. AGENTS.md check)
 ```
 
 ## Charms
 
 This repository contains four charms, representing two different architectures:
 
-The planner architecture, which is no longer in active development but rather in maintaince mode, is 
-implemented by the **planner** and the **webhook-gateway** charms.
+The planner architecture, which is no longer in active development but rather in maintenance
+mode, is implemented by the **planner-operator** and the **webhook-gateway-operator** charms.
 
-The other architecture is based on [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) and 
-implemented by the **garm** and **garm-configurator** charms.
+The other architecture is based on
+[GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) and is implemented by
+the **garm** and **garm-configurator** charms.
 
-[Charms](https://canonical.com/juju/docs/github-runner-charms/latest/reference/charms/)
+See [Charms](https://canonical.com/juju/docs/github-runner-charms/latest/reference/charms/)
 in the documentation for their roles and integrations.
 
 ### Charmhub
