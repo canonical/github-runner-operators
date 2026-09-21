@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-09-17
+
+- `garm`: run runners in GARM agent mode. The `garm` rock now builds the `garm-agent` binary for every architecture GARM can serve, and the charm publishes those binaries to GARM and switches agent mode on for each registered organization and repository. GARM serves the agent to each runner from its own store, so no runner and no GARM unit ever downloads an agent binary from github.com. The charm re-publishes a binary only when its checksum differs from the one already stored, so an agent upgrade shipped in a new rock revision costs one upload and no downtime. Existing deployments gain agent mode on upgrade with no operator action.
+- `garm-configurator`: add the `enable-shell` configuration option, which turns on GARM's remote shell for the scale set so an administrator can open an interactive session on a runner through GARM. It defaults to on, and requires the `garm` charm to be reachable over a TLS ingress — the agent silently disables its own shell when the agent URL is a plain `ws://` one, so that a shell is never exposed unencrypted. Set it to `false` for scale sets where a GARM administrator should not be able to open a session on a runner.
+
 ## 2026-09-08
 
 - Document the charm release pipeline from `latest/edge` through `latest/candidate` to `latest/stable`, including the production gate on the production pin.

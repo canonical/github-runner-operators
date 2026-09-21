@@ -104,6 +104,15 @@ config:
       default: Default
       description: |
         Runner group for org registration. Ignored when repo is set.
+    enable-shell:
+      type: boolean
+      default: true
+      description: |
+        Enable the GARM remote shell on the scaleset, letting an administrator open an
+        interactive session on a runner through GARM. The session rides the GARM agent's
+        websocket, so the garm charm needs an ingress for the agent to dial back to, and
+        that ingress must terminate TLS: the agent silently disables its shell whenever
+        the agent URL is cleartext, rather than expose a shell in the clear.
     pre-install-scripts:
       type: string
       description: |
