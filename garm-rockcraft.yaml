@@ -24,6 +24,9 @@ parts:
     # Switch to source-tag once v0.2.2+ is released.
     source-commit: e03045fc5861a903f72cb04ff37327b19a0d1e20
     source-depth: 1
+    override-pull: |
+      craftctl default
+      git apply "${CRAFT_PROJECT_DIR}/patches/garm.patch"
     build-snaps:
       - go/1.26/stable
     build-environment:
