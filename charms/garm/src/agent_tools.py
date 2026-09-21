@@ -52,7 +52,7 @@ def ensure_agent_tools(client: GarmAuthenticatedClient, container: ops.Container
             that case, so the failure is not swallowed here.
     """
     version, digests = _read_manifest(container)
-tools_per_arch = {tool.os_arch: tool for tool in client.list_agent_tools()}
+    tools_per_arch = {tool.os_arch: tool for tool in client.list_agent_tools()}
 
     for arch in sorted(digests):
         current = stored.get(arch)
