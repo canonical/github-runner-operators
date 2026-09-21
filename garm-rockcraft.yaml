@@ -24,6 +24,9 @@ parts:
     # Switch to source-tag once v0.2.2+ is released.
     source-commit: e03045fc5861a903f72cb04ff37327b19a0d1e20
     source-depth: 1
+    # Add a patch to garm code to reduce the websocket heartbeat interval from 54 seconds to 30 seconds
+    # This is to accommodate the HAProxy charm which has a default timeout of 60 seconds.
+    # This should be removed once the timeout in HAProxy has been lowen in the deployment.
     override-pull: |
       craftctl default
       git apply "${CRAFT_PROJECT_DIR}/patches/garm.patch"
