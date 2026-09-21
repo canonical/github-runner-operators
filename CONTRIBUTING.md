@@ -204,7 +204,7 @@ issue that lists the function for refactoring in an upcoming PR.
 ### Charm development
 
 The `garm`, `planner-operator` and `webhook-gateway-operator` charms use the
-[12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/);
+[12 factor app pattern](https://canonical.com/juju/docs/12-factor/latest/);
 `garm-configurator` is a plain `ops` charm.
 In order to build the `charm-name` rock, use the
 `build-charm-name-rock.sh` script.
