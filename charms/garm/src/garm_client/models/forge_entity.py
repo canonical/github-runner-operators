@@ -21,6 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from garm_client.models.forge_credentials import ForgeCredentials
+from garm_client.models.forge_endpoint import ForgeEndpoint
 from garm_client.models.pool_manager_status import PoolManagerStatus
 from typing import Optional, Set
 from typing_extensions import Self
@@ -34,13 +35,14 @@ class ForgeEntity(BaseModel):
     created_at: Optional[datetime] = None
     credentials: Optional[ForgeCredentials] = None
     entity_type: Optional[StrictStr] = None
+    forge: Optional[ForgeEndpoint] = None
     id: Optional[StrictStr] = None
     name: Optional[StrictStr] = None
     owner: Optional[StrictStr] = None
     pool_balancing_type: Optional[StrictStr] = None
     pool_manager_status: Optional[PoolManagerStatus] = None
     updated_at: Optional[datetime] = None
-    __properties: ClassVar[List[str]] = ["agent_mode", "created_at", "credentials", "entity_type", "id", "name", "owner", "pool_balancing_type", "pool_manager_status", "updated_at"]
+    __properties: ClassVar[List[str]] = ["agent_mode", "created_at", "credentials", "entity_type", "forge", "id", "name", "owner", "pool_balancing_type", "pool_manager_status", "updated_at"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -84,6 +86,9 @@ class ForgeEntity(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of credentials
         if self.credentials:
             _dict['credentials'] = self.credentials.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of forge
+        if self.forge:
+            _dict['forge'] = self.forge.to_dict()
         # override the default output from pydantic by calling `to_dict()` of pool_manager_status
         if self.pool_manager_status:
             _dict['pool_manager_status'] = self.pool_manager_status.to_dict()
@@ -103,6 +108,7 @@ class ForgeEntity(BaseModel):
             "created_at": obj.get("created_at"),
             "credentials": ForgeCredentials.from_dict(obj["credentials"]) if obj.get("credentials") is not None else None,
             "entity_type": obj.get("entity_type"),
+            "forge": ForgeEndpoint.from_dict(obj["forge"]) if obj.get("forge") is not None else None,
             "id": obj.get("id"),
             "name": obj.get("name"),
             "owner": obj.get("owner"),

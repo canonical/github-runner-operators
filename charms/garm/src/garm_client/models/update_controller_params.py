@@ -29,15 +29,17 @@ class UpdateControllerParams(BaseModel):
     UpdateControllerParams
     """ # noqa: E501
     agent_url: Optional[StrictStr] = None
+    allow_insecure_garm_agent: Optional[StrictBool] = Field(default=None, description="AllowInsecureGARMAgent configures deployed garm-agents to connect to GARM over plain http/ws (the agent's force_insecure setting). Meant for local development and testing only.")
     ca_cert_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = None
     callback_url: Optional[StrictStr] = None
     clear_ca_cert_bundle: Optional[StrictBool] = None
     enable_agent_tools_sync: Optional[StrictBool] = None
     garm_agent_releases_url: Optional[StrictStr] = None
+    garm_agent_version: Optional[StrictStr] = Field(default=None, description="GARMAgentVersion pins the garm-agent version the controller uses. An empty string or \"latest\" tracks the newest release at GARMAgentReleasesURL; any other value must be a valid semver version.")
     metadata_url: Optional[StrictStr] = None
     minimum_job_age_backoff: Optional[StrictInt] = None
     webhook_url: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["agent_url", "ca_cert_bundle", "callback_url", "clear_ca_cert_bundle", "enable_agent_tools_sync", "garm_agent_releases_url", "metadata_url", "minimum_job_age_backoff", "webhook_url"]
+    __properties: ClassVar[List[str]] = ["agent_url", "allow_insecure_garm_agent", "ca_cert_bundle", "callback_url", "clear_ca_cert_bundle", "enable_agent_tools_sync", "garm_agent_releases_url", "garm_agent_version", "metadata_url", "minimum_job_age_backoff", "webhook_url"]
 
     @field_validator('ca_cert_bundle')
     def ca_cert_bundle_validate_regular_expression(cls, value):
@@ -104,11 +106,13 @@ class UpdateControllerParams(BaseModel):
 
         _obj = cls.model_validate({
             "agent_url": obj.get("agent_url"),
+            "allow_insecure_garm_agent": obj.get("allow_insecure_garm_agent"),
             "ca_cert_bundle": obj.get("ca_cert_bundle"),
             "callback_url": obj.get("callback_url"),
             "clear_ca_cert_bundle": obj.get("clear_ca_cert_bundle"),
             "enable_agent_tools_sync": obj.get("enable_agent_tools_sync"),
             "garm_agent_releases_url": obj.get("garm_agent_releases_url"),
+            "garm_agent_version": obj.get("garm_agent_version"),
             "metadata_url": obj.get("metadata_url"),
             "minimum_job_age_backoff": obj.get("minimum_job_age_backoff"),
             "webhook_url": obj.get("webhook_url")

@@ -46,6 +46,7 @@ class TestUpdatePoolParams(unittest.TestCase):
                 os_arch = '',
                 os_type = '',
                 priority = 56,
+                proxy_id = 56,
                 runner_bootstrap_timeout = 56,
                 runner_prefix = '',
                 tags = [
