@@ -94,7 +94,7 @@ def test_matching_digests_upload_nothing():
     assert: Nothing is uploaded, and no binary is even read out of the container, so a
         converged deployment costs one listing and a kilobyte of manifest per reconcile.
     """
-    client = _client([_stored(arch, digest) for arch, digest in _DIGESTS.items()])
+    client = _client([_stored_tools(arch, digest) for arch, digest in _DIGESTS.items()])
     container = _container()
 
     ensure_agent_tools(client, container)
@@ -106,8 +106,8 @@ def test_matching_digests_upload_nothing():
 @pytest.mark.parametrize(
     "stale",
     [
-        _stored("amd64", "0" * 64),
-        _stored("amd64", _DIGESTS["amd64"], version="v0.0.1"),
+        _stored_tools("amd64", "0" * 64),
+        _stored_tools("amd64", _DIGESTS["amd64"], version="v0.0.1"),
     ],
     ids=["different-binary", "different-version"],
 )
@@ -120,7 +120,7 @@ def test_a_tool_that_differs_from_the_rock_is_replaced(stale):
         supersedes itself, so the charm never has to open a window with nothing stored — the
         one window in which GARM would hand a runner a github.com download URL instead.
     """
-    client = _client([stale, _stored("arm64", _DIGESTS["arm64"])])
+    client = _client([stale, _stored_tools("arm64", _DIGESTS["arm64"])])
 
     ensure_agent_tools(client, _container())
 
