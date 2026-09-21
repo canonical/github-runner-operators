@@ -9,7 +9,7 @@ guidance in `.github/instructions/` and the human-facing `CONTRIBUTING.md`.
 | Path | Contents |
 | --- | --- |
 | `charms/` | Four Juju charms (see below) plus shared integration tests in `charms/tests/integration/`, the GARM end-to-end test in `charms/tests/e2e/`, and model-free tests of that shared test-support code in `charms/tests/unit/`. |
-| `cmd/` | Go application entry points: `planner`, `webhook-gateway`. |
+| `cmd/` | Go application entry points: `planner`, `waiting-p80-report`, `webhook-gateway`. |
 | `internal/` | Shared Go packages (`database`, `github`, `planner`, `queue`, `server`, `telemetry`, `webhook`, …) — the application logic the paas charms package and deploy. |
 | `*-rockcraft.yaml`, `build-*-rock.sh` (repo root) | Rock/image build definitions and their build scripts. |
 | `docs/` | Diátaxis-structured docs (Read the Docs). ADRs in `docs/adr/`. |
@@ -17,8 +17,7 @@ guidance in `.github/instructions/` and the human-facing `CONTRIBUTING.md`.
 | `parts`, `prime`, `stage`, `**/lib/charms/**` | **Generated or vendored — do not edit.** `lib/charms/**` is auto-updated; see `.github/instructions/charms-lib-updates.instructions.md`. |
 
 The Go layout follows the [community Go project layout](https://github.com/golang-standards/project-layout).
-`README.md` has the canonical layout (note: it predates the `garm` and `garm-configurator`
-charms — there are four charms, not two).
+`README.md` has the canonical layout.
 
 ### Charms
 

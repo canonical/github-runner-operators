@@ -89,7 +89,7 @@ To add signatures on your commits, follow the
 
 ## Develop
 
-For any problems with this charm, please [report bugs here](https://github.com/canonical/github-runner-operator/issues).
+For any problems with these charms, please [report bugs here](https://github.com/canonical/github-runner-operator/issues).
 
 The code can be downloaded as follows:
 
@@ -100,8 +100,9 @@ git clone https://github.com/canonical/github-runner-operators.git
 The code structure is as follows
 
 - `internal/`: Internal Go libraries for the applications
-- `cmd/`: Entry points for Go applications (planner, webhook-gateway)
-- `charms/`: Entry point for charms (planner, webhook-gateway)
+- `cmd/`: Entry points for Go applications (planner, waiting-p80-report, webhook-gateway)
+- `charms/`: Entry point for charms (garm, garm-configurator, planner-operator,
+  webhook-gateway-operator)
 
 ### Style
 
@@ -202,7 +203,9 @@ issue that lists the function for refactoring in an upcoming PR.
 
 ### Charm development
 
-The charm uses the [12 factor app pattern](https://canonical-12-factor-app-support.readthedocs-hosted.com/latest/).
+The `garm`, `planner-operator` and `webhook-gateway-operator` charms use the
+[12 factor app pattern](https://canonical.com/juju/docs/12-factor/latest/);
+`garm-configurator` is a plain `ops` charm.
 In order to build the `charm-name` rock, use the
 `build-charm-name-rock.sh` script.
 
