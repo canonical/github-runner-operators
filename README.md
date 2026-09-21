@@ -40,8 +40,8 @@ scripts/                    # Repository maintenance scripts (e.g. AGENTS.md che
 
 This repository contains four charms, representing two different architectures:
 
-The planner architecture, which is no longer in active development but rather in maintenance
-mode, is implemented by the **planner-operator** and the **webhook-gateway-operator** charms.
+The planner architecture, which is no longer in active development,
+is implemented by the **planner-operator** and the **webhook-gateway-operator** charms.
 
 The other architecture is based on
 [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) and is implemented by
