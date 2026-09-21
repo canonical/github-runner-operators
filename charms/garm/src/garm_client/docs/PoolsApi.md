@@ -5,21 +5,26 @@ All URIs are relative to */api/v1*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**create_enterprise_pool**](PoolsApi.md#create_enterprise_pool) | **POST** /enterprises/{enterpriseID}/pools | Create enterprise pool with the parameters given.
+[**create_forge_instance_pool**](PoolsApi.md#create_forge_instance_pool) | **POST** /forge-instances/{forgeInstanceID}/pools | Create forge instance pool with the parameters given.
 [**create_org_pool**](PoolsApi.md#create_org_pool) | **POST** /organizations/{orgID}/pools | Create organization pool with the parameters given.
 [**create_repo_pool**](PoolsApi.md#create_repo_pool) | **POST** /repositories/{repoID}/pools | Create repository pool with the parameters given.
 [**delete_enterprise_pool**](PoolsApi.md#delete_enterprise_pool) | **DELETE** /enterprises/{enterpriseID}/pools/{poolID} | Delete enterprise pool by ID.
+[**delete_forge_instance_pool**](PoolsApi.md#delete_forge_instance_pool) | **DELETE** /forge-instances/{forgeInstanceID}/pools/{poolID} | Delete forge instance pool by ID.
 [**delete_org_pool**](PoolsApi.md#delete_org_pool) | **DELETE** /organizations/{orgID}/pools/{poolID} | Delete organization pool by ID.
 [**delete_pool**](PoolsApi.md#delete_pool) | **DELETE** /pools/{poolID} | Delete pool by ID.
 [**delete_repo_pool**](PoolsApi.md#delete_repo_pool) | **DELETE** /repositories/{repoID}/pools/{poolID} | Delete repository pool by ID.
 [**get_enterprise_pool**](PoolsApi.md#get_enterprise_pool) | **GET** /enterprises/{enterpriseID}/pools/{poolID} | Get enterprise pool by ID.
+[**get_forge_instance_pool**](PoolsApi.md#get_forge_instance_pool) | **GET** /forge-instances/{forgeInstanceID}/pools/{poolID} | Get forge instance pool by ID.
 [**get_org_pool**](PoolsApi.md#get_org_pool) | **GET** /organizations/{orgID}/pools/{poolID} | Get organization pool by ID.
 [**get_pool**](PoolsApi.md#get_pool) | **GET** /pools/{poolID} | Get pool by ID.
 [**get_repo_pool**](PoolsApi.md#get_repo_pool) | **GET** /repositories/{repoID}/pools/{poolID} | Get repository pool by ID.
 [**list_enterprise_pools**](PoolsApi.md#list_enterprise_pools) | **GET** /enterprises/{enterpriseID}/pools | List enterprise pools.
+[**list_forge_instance_pools**](PoolsApi.md#list_forge_instance_pools) | **GET** /forge-instances/{forgeInstanceID}/pools | List forge instance pools.
 [**list_org_pools**](PoolsApi.md#list_org_pools) | **GET** /organizations/{orgID}/pools | List organization pools.
 [**list_pools**](PoolsApi.md#list_pools) | **GET** /pools | List all pools.
 [**list_repo_pools**](PoolsApi.md#list_repo_pools) | **GET** /repositories/{repoID}/pools | List repository pools.
 [**update_enterprise_pool**](PoolsApi.md#update_enterprise_pool) | **PUT** /enterprises/{enterpriseID}/pools/{poolID} | Update enterprise pool with the parameters given.
+[**update_forge_instance_pool**](PoolsApi.md#update_forge_instance_pool) | **PUT** /forge-instances/{forgeInstanceID}/pools/{poolID} | Update forge instance pool with the parameters given.
 [**update_org_pool**](PoolsApi.md#update_org_pool) | **PUT** /organizations/{orgID}/pools/{poolID} | Update organization pool with the parameters given.
 [**update_pool**](PoolsApi.md#update_pool) | **PUT** /pools/{poolID} | Update pool by ID.
 [**update_repo_pool**](PoolsApi.md#update_repo_pool) | **PUT** /repositories/{repoID}/pools/{poolID} | Update repository pool with the parameters given.
@@ -83,6 +88,87 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **enterprise_id** | **str**| Enterprise ID. | 
  **body** | [**CreatePoolParams**](CreatePoolParams.md)| Parameters used when creating the enterprise pool. | 
+
+### Return type
+
+[**Pool**](Pool.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Pool |  -  |
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **create_forge_instance_pool**
+> Pool create_forge_instance_pool(forge_instance_id, body)
+
+Create forge instance pool with the parameters given.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.create_pool_params import CreatePoolParams
+from garm_client.models.pool import Pool
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.PoolsApi(api_client)
+    forge_instance_id = 'forge_instance_id_example' # str | Forge instance ID.
+    body = garm_client.CreatePoolParams() # CreatePoolParams | Parameters used when creating the forge instance pool.
+
+    try:
+        # Create forge instance pool with the parameters given.
+        api_response = api_instance.create_forge_instance_pool(forge_instance_id, body)
+        print("The response of PoolsApi->create_forge_instance_pool:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PoolsApi->create_forge_instance_pool: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **forge_instance_id** | **str**| Forge instance ID. | 
+ **body** | [**CreatePoolParams**](CreatePoolParams.md)| Parameters used when creating the forge instance pool. | 
 
 ### Return type
 
@@ -325,6 +411,85 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **enterprise_id** | **str**| Enterprise ID. | 
  **pool_id** | **str**| ID of the enterprise pool to delete. | 
+
+### Return type
+
+[**APIErrorResponse**](APIErrorResponse.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **delete_forge_instance_pool**
+> APIErrorResponse delete_forge_instance_pool(forge_instance_id, pool_id)
+
+Delete forge instance pool by ID.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.api_error_response import APIErrorResponse
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.PoolsApi(api_client)
+    forge_instance_id = 'forge_instance_id_example' # str | Forge instance ID.
+    pool_id = 'pool_id_example' # str | ID of the forge instance pool to delete.
+
+    try:
+        # Delete forge instance pool by ID.
+        api_response = api_instance.delete_forge_instance_pool(forge_instance_id, pool_id)
+        print("The response of PoolsApi->delete_forge_instance_pool:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PoolsApi->delete_forge_instance_pool: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **forge_instance_id** | **str**| Forge instance ID. | 
+ **pool_id** | **str**| ID of the forge instance pool to delete. | 
 
 ### Return type
 
@@ -638,6 +803,86 @@ with garm_client.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **enterprise_id** | **str**| Enterprise ID. | 
+ **pool_id** | **str**| Pool ID. | 
+
+### Return type
+
+[**Pool**](Pool.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Pool |  -  |
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **get_forge_instance_pool**
+> Pool get_forge_instance_pool(forge_instance_id, pool_id)
+
+Get forge instance pool by ID.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.pool import Pool
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.PoolsApi(api_client)
+    forge_instance_id = 'forge_instance_id_example' # str | Forge instance ID.
+    pool_id = 'pool_id_example' # str | Pool ID.
+
+    try:
+        # Get forge instance pool by ID.
+        api_response = api_instance.get_forge_instance_pool(forge_instance_id, pool_id)
+        print("The response of PoolsApi->get_forge_instance_pool:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PoolsApi->get_forge_instance_pool: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **forge_instance_id** | **str**| Forge instance ID. | 
  **pool_id** | **str**| Pool ID. | 
 
 ### Return type
@@ -978,6 +1223,84 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **list_forge_instance_pools**
+> List[Pool] list_forge_instance_pools(forge_instance_id)
+
+List forge instance pools.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.pool import Pool
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.PoolsApi(api_client)
+    forge_instance_id = 'forge_instance_id_example' # str | Forge instance ID.
+
+    try:
+        # List forge instance pools.
+        api_response = api_instance.list_forge_instance_pools(forge_instance_id)
+        print("The response of PoolsApi->list_forge_instance_pools:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PoolsApi->list_forge_instance_pools: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **forge_instance_id** | **str**| Forge instance ID. | 
+
+### Return type
+
+[**List[Pool]**](Pool.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Pools |  -  |
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **list_org_pools**
 > List[Pool] list_org_pools(org_id)
 
@@ -1268,6 +1591,89 @@ Name | Type | Description  | Notes
  **enterprise_id** | **str**| Enterprise ID. | 
  **pool_id** | **str**| ID of the enterprise pool to update. | 
  **body** | [**UpdatePoolParams**](UpdatePoolParams.md)| Parameters used when updating the enterprise pool. | 
+
+### Return type
+
+[**Pool**](Pool.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Pool |  -  |
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **update_forge_instance_pool**
+> Pool update_forge_instance_pool(forge_instance_id, pool_id, body)
+
+Update forge instance pool with the parameters given.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.pool import Pool
+from garm_client.models.update_pool_params import UpdatePoolParams
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.PoolsApi(api_client)
+    forge_instance_id = 'forge_instance_id_example' # str | Forge instance ID.
+    pool_id = 'pool_id_example' # str | ID of the forge instance pool to update.
+    body = garm_client.UpdatePoolParams() # UpdatePoolParams | Parameters used when updating the forge instance pool.
+
+    try:
+        # Update forge instance pool with the parameters given.
+        api_response = api_instance.update_forge_instance_pool(forge_instance_id, pool_id, body)
+        print("The response of PoolsApi->update_forge_instance_pool:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling PoolsApi->update_forge_instance_pool: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **forge_instance_id** | **str**| Forge instance ID. | 
+ **pool_id** | **str**| ID of the forge instance pool to update. | 
+ **body** | [**UpdatePoolParams**](UpdatePoolParams.md)| Parameters used when updating the forge instance pool. | 
 
 ### Return type
 

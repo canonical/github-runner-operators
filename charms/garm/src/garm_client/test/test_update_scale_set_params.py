@@ -35,6 +35,7 @@ class TestUpdateScaleSetParams(unittest.TestCase):
         model = UpdateScaleSetParams()
         if include_optional:
             return UpdateScaleSetParams(
+                disable_update = True,
                 enable_shell = True,
                 enabled = True,
                 extended_state = '',
@@ -46,6 +47,7 @@ class TestUpdateScaleSetParams(unittest.TestCase):
                 name = '',
                 os_arch = '',
                 os_type = '',
+                proxy_id = 56,
                 runner_bootstrap_timeout = 56,
                 runner_group = '',
                 runner_prefix = '',

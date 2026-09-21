@@ -33,6 +33,13 @@ class TestPoolsApi(unittest.TestCase):
         """
         pass
 
+    def test_create_forge_instance_pool(self) -> None:
+        """Test case for create_forge_instance_pool
+
+        Create forge instance pool with the parameters given.
+        """
+        pass
+
     def test_create_org_pool(self) -> None:
         """Test case for create_org_pool
 
@@ -51,6 +58,13 @@ class TestPoolsApi(unittest.TestCase):
         """Test case for delete_enterprise_pool
 
         Delete enterprise pool by ID.
+        """
+        pass
+
+    def test_delete_forge_instance_pool(self) -> None:
+        """Test case for delete_forge_instance_pool
+
+        Delete forge instance pool by ID.
         """
         pass
 
@@ -82,6 +96,13 @@ class TestPoolsApi(unittest.TestCase):
         """
         pass
 
+    def test_get_forge_instance_pool(self) -> None:
+        """Test case for get_forge_instance_pool
+
+        Get forge instance pool by ID.
+        """
+        pass
+
     def test_get_org_pool(self) -> None:
         """Test case for get_org_pool
 
@@ -110,6 +131,13 @@ class TestPoolsApi(unittest.TestCase):
         """
         pass
 
+    def test_list_forge_instance_pools(self) -> None:
+        """Test case for list_forge_instance_pools
+
+        List forge instance pools.
+        """
+        pass
+
     def test_list_org_pools(self) -> None:
         """Test case for list_org_pools
 
@@ -135,6 +163,13 @@ class TestPoolsApi(unittest.TestCase):
         """Test case for update_enterprise_pool
 
         Update enterprise pool with the parameters given.
+        """
+        pass
+
+    def test_update_forge_instance_pool(self) -> None:
+        """Test case for update_forge_instance_pool
+
+        Update forge instance pool with the parameters given.
         """
         pass
 

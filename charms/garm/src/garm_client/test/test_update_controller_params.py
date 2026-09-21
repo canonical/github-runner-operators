@@ -36,11 +36,13 @@ class TestUpdateControllerParams(unittest.TestCase):
         if include_optional:
             return UpdateControllerParams(
                 agent_url = '',
+                allow_insecure_garm_agent = True,
                 ca_cert_bundle = 'YQ==',
                 callback_url = '',
                 clear_ca_cert_bundle = True,
                 enable_agent_tools_sync = True,
                 garm_agent_releases_url = '',
+                garm_agent_version = '',
                 metadata_url = '',
                 minimum_job_age_backoff = 56,
                 webhook_url = ''

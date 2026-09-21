@@ -36,6 +36,7 @@ class TestControllerInfo(unittest.TestCase):
         if include_optional:
             return ControllerInfo(
                 agent_url = '',
+                allow_insecure_garm_agent = True,
                 ca_cert_bundle = 'YQ==',
                 cached_garm_agent_release_fetched_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 callback_url = '',
@@ -43,6 +44,7 @@ class TestControllerInfo(unittest.TestCase):
                 controller_webhook_url = '',
                 enable_agent_tools_sync = True,
                 garm_agent_releases_url = '',
+                garm_agent_version = '',
                 hostname = '',
                 metadata_url = '',
                 minimum_job_age_backoff = 56,

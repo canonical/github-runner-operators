@@ -5,6 +5,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**disable_update** | **bool** |  | [optional] 
 **enable_shell** | **bool** |  | [optional] 
 **enabled** | **bool** |  | [optional] 
 **extended_state** | **str** |  | [optional] 
@@ -16,6 +17,7 @@ Name | Type | Description | Notes
 **name** | **str** |  | [optional] 
 **os_arch** | **str** |  | [optional] 
 **os_type** | **str** |  | [optional] 
+**proxy_id** | **int** | ProxyID is the ID of the proxy definition runners in this scale set will use. Setting it to 0 removes the proxy from the scale set. | [optional] 
 **runner_bootstrap_timeout** | **int** |  | [optional] 
 **runner_group** | **str** | GithubRunnerGroup is the github runner group in which the runners of this pool will be added to. The runner group must be created by someone with access to the enterprise. | [optional] 
 **runner_prefix** | **str** |  | [optional] 
