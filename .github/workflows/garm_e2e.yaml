@@ -402,6 +402,17 @@ jobs:
           chmod 600 "${AUTH_KEYS}"
           chown "${TUNNEL_USER}:" "${HOME_DIR}/.ssh" "${AUTH_KEYS}"
 
+          # Nothing guarantees the file ends in a newline, and appending to one that
+          # does not splices the entry onto the end of the last key, leaving both
+          # unusable. The tmate step above does exactly that: action-tmate appends the
+          # actor's public keys with `join('\n')`, so the last one has no terminator,
+          # and every debug re-run would otherwise fail here with "Permission denied
+          # (publickey)". It would also make the removal step below delete the actor's
+          # key along with the entry, since the two share a line.
+          if [ -s "${AUTH_KEYS}" ] && [ -n "$(tail -c 1 "${AUTH_KEYS}")" ]; then
+            printf '\n' >> "${AUTH_KEYS}"
+          fi
+
           KEY_DIR=$(mktemp -d)
           ssh-keygen -q -t ed25519 -N '' \
             -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
