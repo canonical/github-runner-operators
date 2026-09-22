@@ -372,11 +372,12 @@ jobs:
       - name: Publish an SSH tunnel entry for runner VM callbacks
         # The private-endpoint host's security group (github-runner-v1, managed by
         # the legacy github-runner-operator charm) admits only ingress tcp/22, so
-        # the GARM runner VM cannot reach traefik on :80 -- the port its metadata
-        # and callback URLs use. The VM instead opens an SSH connection back to
-        # this host, the one port the SG allows, and forwards its GARM traffic
-        # through it. The key is ephemeral, restricted to port forwarding (no
-        # shell, no command execution), and removed again by the cleanup step.
+        # the GARM runner VM cannot reach traefik on :80/:443 -- the ports its
+        # metadata, callback and agent-websocket URLs use. The VM instead opens an
+        # SSH connection back to this host, the one port the SG allows, and
+        # forwards its GARM traffic through it. The key is ephemeral, restricted
+        # to port forwarding (no shell, no command execution), and removed again
+        # by the cleanup step.
         run: |
           set -euo pipefail
 
@@ -405,16 +406,21 @@ jobs:
           ssh-keygen -q -t ed25519 -N '' \
             -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
             -f "${KEY_DIR}/garm-e2e-tunnel"
-          # permitopen pins the forward to this host's :80, the only destination
-          # the tunnel exists for, so the key cannot be used to reach anything
-          # else while it exists.
-          printf 'restrict,port-forwarding,permitopen="%s:80" %s\n' \
-            "${TUNNEL_TARGET}" "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
+          # permitopen pins the forward to this host's :80 and :443, the only
+          # destinations the tunnel exists for, so the key cannot be used to reach
+          # anything else while it exists. Both ports are required: the VM script
+          # forwards both in one client with ExitOnForwardFailure=yes, so omitting
+          # either makes sshd refuse that forward and the client drop *both*.
+          printf 'restrict,port-forwarding,permitopen="%s:80",permitopen="%s:443" %s\n' \
+            "${TUNNEL_TARGET}" "${TUNNEL_TARGET}" \
+            "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
 
           # Prove the entry works before the suite relies on it: authenticate with
-          # the key from this host, forwarding exactly as the VM will, and pull
-          # traefik's plain-404 through the forward. -f -N backgrounds the client
-          # once the listener is up, which is also what the VM's script does.
+          # the key from this host, forwarding exactly as the VM will -- both
+          # ports, one client, ExitOnForwardFailure -- so a permitopen that has
+          # fallen behind the VM script fails here rather than silently leaving
+          # every runner unable to reach GARM. -f -N backgrounds the client once
+          # the listeners are up, which is also what the VM's script does.
           ssh -f -N \
             -o BatchMode=yes -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null \
@@ -422,6 +428,7 @@ jobs:
             -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
             -o ConnectTimeout=10 \
             -L 127.0.0.1:18080:"${TUNNEL_TARGET}":80 \
+            -L 127.0.0.1:18443:"${TUNNEL_TARGET}":443 \
             "${TUNNEL_USER}@${TUNNEL_TARGET}"
           if ! curl -s --max-time 10 -o /dev/null http://127.0.0.1:18080/; then
             # A non-timeout answer (404/502 from traefik) is success: the auth and
