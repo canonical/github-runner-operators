@@ -17,8 +17,10 @@ import requests
 from tests.e2e.conftest import GarmCli
 from tests.integration.conftest import (
     _collect_debug_info,
+    _credential_sentinels,
     _garm_login,
     _get_garm_address,
+    _redact_sentinels,
 )
 from tests.integration.helpers import (
     E2E_APP_ENV,
@@ -40,6 +42,9 @@ GARM_API_PORT = 8080
 # what a dispatch can safely follow; `pending` is registered-but-not-yet-usable.
 # Values from params.RunnerStatus in GARM.
 REGISTERED_RUNNER_STATUSES = ("idle", "active")
+# Terminal: GARM reaps the VM shortly after marking a runner failed, so anything
+# that needs the instance itself has to happen on the poll that first sees this.
+FAILED_RUNNER_STATUS = "failed"
 
 # CSI and OSC sequences: garm-cli drives a raw terminal, so the transcript is
 # interleaved with colour, cursor and window-title control codes.
@@ -199,6 +204,7 @@ def _wait_for_runner_online(
     deadline = time.time() + timeout
     last_instances: list[dict] = []
     last_summary: list[str] | None = None
+    consoles_logged: set[str] = set()
     logger.info("Waiting for a registered runner serving label %r", runner_label)
 
     while time.time() < deadline:
@@ -250,6 +256,15 @@ def _wait_for_runner_online(
                     # existed -- and reporting that as "never spawned" would
                     # point the investigation at the wrong stage entirely.
                     last_instances = instances
+                newly_failed = [
+                    i
+                    for i in instances
+                    if i.get("runner_status") == FAILED_RUNNER_STATUS
+                    and i.get("name") not in consoles_logged
+                ]
+                if newly_failed:
+                    _log_instance_diagnostics(base_url, token, newly_failed)
+                    consoles_logged.update(str(i.get("name")) for i in newly_failed)
                 for instance in instances:
                     if instance.get("runner_status") in REGISTERED_RUNNER_STATUSES:
                         logger.info(
@@ -284,11 +299,109 @@ def _wait_for_runner_online(
         )
     else:
         logger.error("No instance was ever observed for runner label %s", runner_label)
+    _log_instance_diagnostics(base_url, token, last_instances)
     _collect_debug_info(juju, garm_app)
     pytest.fail(
         f"No runner serving label {runner_label!r} reached a registered state "
         f"({' or '.join(REGISTERED_RUNNER_STATUSES)}) within {timeout}s."
     )
+
+
+def _log_instance_diagnostics(base_url: str, token: str, instances: list[dict]) -> None:
+    """Log why each VM that failed to produce a runner gave up.
+
+    Two complementary sources, because the interesting failures fall either side of
+    the VM's ability to talk to GARM. The bootstrap reports each step it completes and
+    the reason it aborts, and GARM keeps those per instance, so when the VM did reach
+    GARM its own account of the failure is already recorded and exact. When it did not,
+    the last status message is simply the last step that worked, and only the serial
+    console says what happened after it.
+    """
+    for instance in instances:
+        _log_instance_status_messages(base_url, token, instance)
+    _log_instance_console(instances)
+
+
+def _log_instance_status_messages(base_url: str, token: str, instance: dict) -> None:
+    """Log the bootstrap's own status messages for one instance.
+
+    Best effort: this runs on a path that has already failed, and the instance may
+    have been reaped between the poll that saw it and this call, so a failure to
+    fetch must not mask the real failure.
+    """
+    name = instance.get("name")
+    try:
+        response = requests.get(
+            f"{base_url}/instances/{name}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        instance_detail = response.json() or {}
+        messages = instance_detail.get("status_messages") or []
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("Could not read the status messages of %s: %s", name, exc)
+        return
+    # Set only when the IaaS itself refused the instance -- a missing image, an
+    # exhausted quota -- which never reaches the bootstrap and so leaves no status
+    # message at all.
+    provider_fault = instance_detail.get("provider_fault")
+    if provider_fault:
+        logger.error("Provider fault for %s: %s", name, provider_fault)
+    logger.error(
+        "=== Bootstrap status messages for %s ===\n%s",
+        name,
+        "\n".join(
+            f"{m.get('created_at')} [{m.get('event_level')}] {m.get('message')}"
+            for m in messages
+        ),
+    )
+
+
+def _log_instance_console(instances: list[dict]) -> None:
+    """Log the serial console of each VM that failed to produce a runner.
+
+    Everything above is GARM's side of the story, which ends at the last callback the
+    VM managed to send. The bootstrap runs with ``set -x`` and echoes the reason it
+    gave up, so when a VM stops calling back the console is the only place the cause
+    is recorded -- and it distinguishes the cases that look identical from outside:
+    no route to the callback URL (curl exit 7), a certificate the VM does not trust
+    (exit 60), and a bootstrap that ran but failed later.
+
+    Best effort: the console is a diagnostic aid on a path that has already failed, so
+    a missing client, an expired credential or an instance GARM has already reaped
+    must not replace the real failure with an error from this function.
+    """
+    sentinel_values = _credential_sentinels()
+    for instance in instances:
+        provider_id = instance.get("provider_id")
+        if not provider_id:
+            continue
+        cmd = [
+            "openstack",
+            "console",
+            "log",
+            "show",
+            "--lines",
+            "200",
+            str(provider_id),
+        ]
+        try:
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120, check=False
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.error("Could not read the console of %s: %s", provider_id, exc)
+            continue
+        # The bootstrap echoes its callback bearer token and the runner's JIT
+        # configuration under `set -x`, so this has to go through the redactor.
+        logger.error(
+            "=== Console log of %s (%s) ===\n%s%s",
+            instance.get("name"),
+            provider_id,
+            _redact_sentinels(out.stdout, sentinel_values),
+            _redact_sentinels(out.stderr, sentinel_values),
+        )
 
 
 def _wait_for_shell_capability(
