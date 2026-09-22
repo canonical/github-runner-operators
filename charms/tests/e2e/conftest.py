@@ -350,7 +350,11 @@ def deploy_e2e_scaleset_fixture(
         "labels": label,
         "flavor": os.environ.get("E2E_OPENSTACK_FLAVOR", "m1.small"),
         "os-arch": "amd64",
-        "min-idle-runner": "1",
+        # Held at zero so that no runner can be created before _trust_ingress_ca has set
+        # the controller's ca_cert_bundle; raised to 1 below once it has. GARM bakes the
+        # bundle into each instance's cloud-init at render time, so a runner created
+        # first can never verify the self-signed ingress certificate.
+        "min-idle-runner": "0",
         "max-runner": "1",
         "repo": repo,
         # Exercised by test_garm_agent_shell, and harmless to the workflow run:
@@ -428,12 +432,34 @@ def deploy_e2e_scaleset_fixture(
         _collect_debug_info(juju, garm_app)
         raise
 
+    # Trust the ingress CA before any runner can exist -- which is why the scale set is
+    # deployed with min-idle-runner at zero. GARM bakes ca_cert_bundle into each
+    # instance's cloud-init at render time, so a runner created before this lands cannot
+    # verify the self-signed ingress certificate: its very first call, fetching the
+    # install script, fails the TLS handshake (curl exit 60). Such an instance reaches
+    # status=running but never leaves runner_status=pending, and is replaced only once
+    # GARM's bootstrap timeout reaps it -- long enough on its own to exhaust the budget
+    # test_garm_e2e allows for a runner to come online.
+    _trust_ingress_ca(juju, garm_app, certificate_authority)
+
     # Checked here rather than when the ingress relation is made, which is the first
     # moment GARM is serving and still before any runner has been asked for: a VM that
     # boots against an unroutable callback URL never reports back, and the failure
     # surfaces much later as a runner that simply never registers.
-    _trust_ingress_ca(juju, garm_app, certificate_authority)
     assert_controller_urls_routable(juju, garm_app, traefik)
+
+    # Only now ask for a runner, with both the CA and the controller URLs known good.
+    juju.config(app_name, {"min-idle-runner": "1"})
+    try:
+        juju.wait(
+            lambda status: jubilant.all_active(status, app_name, garm_app),
+            error=lambda status: jubilant.any_error(status, app_name),
+            timeout=6 * 60,
+            delay=10,
+        )
+    except (TimeoutError, jubilant.WaitError):
+        _collect_debug_info(juju, garm_app)
+        raise
 
     yield label
 
