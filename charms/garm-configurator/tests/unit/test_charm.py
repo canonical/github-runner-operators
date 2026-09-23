@@ -60,6 +60,90 @@ def test_charm_waiting_with_valid_config_no_relation():
     assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
 
 
+def test_configured_image_is_published_without_image_relation():
+    """
+    arrange: A stable image name is configured and only the GARM relation is joined.
+    act: Run config-changed.
+    assert: The charm is ready and publishes the complete payload with the stable image name.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    garm_out = out.get_relation(garm_relation.id)
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert garm_out.local_unit_data["image_id"] == "runner-noble-amd64"
+    assert garm_out.local_unit_data["openstack_auth_url"] == (
+        "https://keystone.example.com:5000/v3"
+    )
+    assert garm_out.local_unit_data["github_app_id"] == "99999"
+
+
+def test_configured_image_takes_precedence_without_disabling_image_relation():
+    """
+    arrange: A stable image is configured and the legacy image relation provides a UUID.
+    act: Run config-changed.
+    assert: GARM receives the stable name while the image relation still receives credentials.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == (
+        "runner-noble-amd64"
+    )
+    assert out.get_relation(image_relation.id).local_unit_data["project_name"] == "myproject"
+
+
+def test_blank_configured_image_falls_back_to_image_relation():
+    """
+    arrange: The image config is blank and the legacy image relation provides a UUID.
+    act: Run config-changed.
+    assert: GARM receives the related UUID, preserving existing deployments.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "   "
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+
+
 # Represents a missing config value in parameterized tests below
 _MISSING_CONFIG_SENTINEL = object()
 

@@ -46,6 +46,7 @@ APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME = "aproxy-exclude-addresses"
 APROXY_REDIRECT_PORTS_CONFIG_NAME = "aproxy-redirect-ports"
 OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
+IMAGE_CONFIG_NAME = "image"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 _IP_NETWORK_ADAPTER: TypeAdapter[IPvAnyNetwork] = TypeAdapter(IPvAnyNetwork)
@@ -474,7 +475,7 @@ class CharmState:
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
         runner_config: Optional runner-level configuration.
-        image_id: OpenStack image UUID received from the image builder relation, or None.
+        image: OpenStack image name or ID from config or the image builder relation.
     """
 
     def __init__(
@@ -484,7 +485,7 @@ class CharmState:
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
         runner_config: RunnerConfig,
-        image_id: str | None,
+        image: str | None,
     ) -> None:
         """Initialize the charm state.
 
@@ -493,13 +494,13 @@ class CharmState:
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
             runner_config: The optional runner configuration.
-            image_id: The OpenStack image UUID from the image builder relation.
+            image: The OpenStack image name or ID from config or the image builder relation.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
         self.runner_config = runner_config
-        self.image_id = image_id
+        self.image = image
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -518,25 +519,29 @@ class CharmState:
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
-        image_id = _get_image_id_from_relation(charm)
+        image = _get_image_reference(charm)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
             runner_config=runner_config,
-            image_id=image_id,
+            image=image,
         )
 
 
-def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
-    """Return the OpenStack image UUID from the image builder relation, if available.
+def _get_image_reference(charm: ops.CharmBase) -> str | None:
+    """Return the configured OpenStack image name or related image UUID, if available.
 
     Args:
         charm: The charm instance.
 
     Returns:
-        The image UUID string, or None if the relation is absent or no UUID has been set yet.
+        The configured image reference, related image UUID, or None if neither is available.
     """
+    configured_image = charm.config.get(IMAGE_CONFIG_NAME)
+    if configured_image and str(configured_image).strip():
+        return str(configured_image).strip()
+
     relation = charm.model.get_relation(IMAGE_RELATION_NAME)
     if relation is None:
         return None
