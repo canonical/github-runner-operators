@@ -350,7 +350,7 @@ def deploy_e2e_scaleset_fixture(
         "labels": label,
         "flavor": os.environ.get("E2E_OPENSTACK_FLAVOR", "m1.small"),
         "os-arch": "amd64",
-        "min-idle-runner": "1",
+        "min-idle-runner": "0",
         "max-runner": "1",
         "repo": repo,
         # Exercised by test_garm_agent_shell, and harmless to the workflow run:
@@ -434,6 +434,19 @@ def deploy_e2e_scaleset_fixture(
     # surfaces much later as a runner that simply never registers.
     _trust_ingress_ca(juju, garm_app, certificate_authority)
     assert_controller_urls_routable(juju, garm_app, traefik)
+
+    # Only now ask for a runner, with both the CA and the controller URLs known good.
+    juju.config(app_name, {"min-idle-runner": "1"})
+    try:
+        juju.wait(
+            lambda status: jubilant.all_active(status, app_name, garm_app),
+            error=lambda status: jubilant.any_error(status, app_name),
+            timeout=6 * 60,
+            delay=10,
+        )
+    except (TimeoutError, jubilant.WaitError):
+        _collect_debug_info(juju, garm_app)
+        raise
 
     yield label
 
@@ -589,6 +602,9 @@ def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> 
         A bash script for the configurator's pre-install-scripts config.
     """
     return f"""#!/bin/bash
+# wait for https://github.com/canonical/github-runner-image-builder-operator/pull/244
+groupadd --non-unique --gid 1000 runner
+
 # GARM E2E callback tunnel. Delivered as a pre-install script so it runs before
 # GARM's install wrapper, whose first action is fetching the install script
 # from the metadata URL on the host this tunnel reaches.
