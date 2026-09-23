@@ -1,67 +1,35 @@
 # Architecture overview
 
-This product deploys two Juju charms that coordinate self-hosted GitHub Actions runners.
-The architecture focuses on reliable webhook ingestion, durable event delivery, and a planner API
-that manages runner flavors and job state.
+The GitHub runner deployment will utilize charms to manage the GitHub self-hosted runners. The GARM charm uses the [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) to manage the runners with the GARM configurator charm providing the configuration for the runners. In addition, the PostgreSQL charm is used to store the state of the GARM.
 
 ## High-level overview of the deployment
 
 ```mermaid
 flowchart TD
-  GH(["GitHub"]) --> WG_WEBHOOK["webhook-gateway"]
-
-  subgraph WG["Webhook gateway charm"]
-    WG_WEBHOOK
-  end
-
-  WG_WEBHOOK -->|Webhooks| MQ["RabbitMQ"]
-
-  subgraph PL["Planner charm"]
-    PL_CONSUMER["job-consumer"]
-    PL_API["planner"]
-  end
-
-  MQ -->|Webhooks| PL_CONSUMER
-
-  PL_CONSUMER --> PG[(PostgreSQL)]
-  PG <--> PL_API
-
-  PL_API -->|"HTTP streaming (pressure info)"| GR["GitHub runner charm"]
+  G(["GARM charm"]) --> PG[("PostgreSQL")]
+  GC(["GARM configurator charms"]) -->|many-to-one| G
+  G -->|GitHub API| GH["GitHub"]
+  G -->|OpenStack API| OS["OpenStack"]
+  OS -->|Spawns multiple| RUN["Runner VMs"]
+  RUN -->|callback| G
+  COS(["OpenTelemetry Collector charm"]) -->|scrapes metrics| G
 ```
+
+There can be multiple GARM configurator charms providing configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset. 
 
 ## Components
 
-- GitHub runner webhook gateway charm: includes a `webhook-gateway` component that receives,
-  validates, and forwards GitHub webhooks to the AMQP broker.
-- GitHub runner planner charm: includes a `job-consumer` component that processes workflow job
-  events and writes job state to PostgreSQL, plus a `planner` API component that manages flavors
-  and auth tokens.
-- AMQP message broker: carries events from the webhook gateway to the planner. RabbitMQ is the
-  expected broker.
-- PostgreSQL database: stores job records, flavor definitions, and auth token metadata for the
-  planner.
-- [GitHub runner charm](https://github.com/canonical/github-runner-operator): consumes the planner relation to reconcile runner flavors and use auth
-  tokens when interacting with the planner API.
+- GARM charm: Operates a [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) instance which manages GitHub Scalesets. The Scaleset is a GitHub feature for managing a set of Self-hosted runners.
+- GARM configurator charm: Provides configuration of a single GitHub scaleset to the GARM charm. Multiple GARM configurator charms can be related to a single GARM charm.
+- PostgreSQL charm: Provides a PostgreSQL database for the GARM charm to store its state.
+- OpenStack: The substrate where the runner VMs are spawned.
 
-## Event flow
+## Ingress
 
-GitHub sends workflow job webhooks to the webhook gateway, which validates the signature and
-forwards the payload to the AMQP broker. The planner consumes the message, parses the workflow
-job event, and stores job state changes in PostgreSQL. The planner API exposes job and flavor
-endpoints, calculates flavor pressure internally, and streams pressure information to the GitHub
-runner charm.
-
-## Control plane and relations
-
-- The webhook gateway requires a `rabbitmq` relation for AMQP connectivity.
-- The planner requires `rabbitmq` and `postgresql` relations for event processing and storage.
-- The planner provides a `planner` relation endpoint (using the `github_runner_planner_v0`
-  interface) so the GitHub runner charm can retrieve auth tokens and desired flavor configuration.
+- The GARM charm services it REST API of GARM on the 8080 port. The spawned runners will need to call back to GARM on this port as part of the runner spawning process.
 
 ## Observability
 
-- Both charms emit OpenTelemetry traces when connected to a tracing charm.
-- Both charms expose Prometheus metrics that can be scraped by a monitoring stack and visualized
+- The GARM charm exposes Prometheus metrics that can be scraped by a monitoring stack and visualized
   in Grafana dashboards.
-- Logs and metrics should be used together to diagnose webhook ingestion failures, message broker
-  delays, and job processing errors.
+- The logs of the GARM charm are ingested by Loki to the dashboard.
