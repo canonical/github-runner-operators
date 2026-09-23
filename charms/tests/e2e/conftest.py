@@ -602,8 +602,6 @@ def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> 
         A bash script for the configurator's pre-install-scripts config.
     """
     return f"""#!/bin/bash
-# wait for https://github.com/canonical/github-runner-image-builder-operator/pull/244
-groupadd --non-unique --gid 1000 runner
 
 # GARM E2E callback tunnel. Delivered as a pre-install script so it runs before
 # GARM's install wrapper, whose first action is fetching the install script
