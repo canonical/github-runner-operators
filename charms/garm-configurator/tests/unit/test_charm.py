@@ -3,6 +3,7 @@
 
 """Unit tests for GarmConfiguratorCharm."""
 
+import dataclasses
 import json
 
 import ops
@@ -50,14 +51,16 @@ def test_charm_waiting_with_valid_config_no_relation():
     """
     arrange: All configs are valid but no image builder relation.
     act: Run config-changed.
-    assert: Unit status is Waiting — image builder relation is required.
+    assert: Unit status explains that image config or an image builder relation is required.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+    assert out.unit_status == ops.WaitingStatus(
+        "Waiting for image config or image builder relation"
+    )
 
 
 def test_configured_image_is_published_without_image_relation():
@@ -142,6 +145,75 @@ def test_blank_configured_image_falls_back_to_image_relation():
 
     assert out.unit_status == ops.ActiveStatus("Ready")
     assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+
+
+def test_clearing_configured_image_falls_back_to_image_relation():
+    """
+    arrange: A configured image takes precedence over a related legacy image UUID.
+    act: Clear the image config while the image builder relation remains.
+    assert: The charm stays ready and republishes the related UUID to GARM.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+    configured = ctx.run(ctx.on.config_changed(), state)
+    cleared_config = dict(config)
+    cleared_config["image"] = ""
+
+    cleared = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(configured, config=cleared_config),
+    )
+
+    assert cleared.unit_status == ops.ActiveStatus("Ready")
+    assert cleared.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+
+
+def test_clearing_configured_image_without_relation_withdraws_image():
+    """
+    arrange: A configured image has published a complete GARM relation payload.
+    act: Clear the image config while no image builder relation exists.
+    assert: The charm waits and withdraws image_id, so GARM skips the incomplete scaleset.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+    configured = ctx.run(ctx.on.config_changed(), state)
+    cleared_config = dict(config)
+    cleared_config["image"] = ""
+
+    cleared = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(configured, config=cleared_config),
+    )
+
+    garm_out = cleared.get_relation(garm_relation.id)
+    assert cleared.unit_status == ops.WaitingStatus(
+        "Waiting for image config or image builder relation"
+    )
+    assert "image_id" not in garm_out.local_unit_data
+    assert garm_out.local_unit_data["openstack_auth_url"] == (
+        "https://keystone.example.com:5000/v3"
+    )
 
 
 # Represents a missing config value in parameterized tests below
@@ -506,7 +578,9 @@ def test_status_waiting_when_image_relation_has_no_uuid():
         relations=[image_relation],
     )
     out = ctx.run(ctx.on.relation_changed(image_relation), state)
-    assert out.unit_status == ops.WaitingStatus("Waiting for image UUID from image builder")
+    assert out.unit_status == ops.WaitingStatus(
+        "Waiting for image config or image UUID from image builder"
+    )
 
 
 def test_status_active_when_image_uuid_is_present():
@@ -532,8 +606,8 @@ def test_status_waiting_on_relation_broken():
     """
     arrange: Valid config and the image relation being torn down.
     act: relation_broken fires.
-    assert: Unit status is Waiting — ops excludes the breaking relation from model.relations,
-        so the charm correctly reflects that it has no image builder connected.
+    assert: Unit status identifies both ways to provide an image because ops excludes the
+        breaking relation from model.relations.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -545,7 +619,9 @@ def test_status_waiting_on_relation_broken():
         relations=[image_relation],
     )
     out = ctx.run(ctx.on.relation_broken(image_relation), state)
-    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+    assert out.unit_status == ops.WaitingStatus(
+        "Waiting for image config or image builder relation"
+    )
 
 
 def test_garm_configurator_relation_data_reflects_charm_state():
@@ -590,7 +666,7 @@ def test_garm_configurator_no_error_when_no_image_relation():
     """
     arrange: Valid config with no image builder relation.
     act: Run config-changed.
-    assert: Status is waiting for image builder relation.
+    assert: Status says to configure an image or add an image builder relation.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -599,7 +675,9 @@ def test_garm_configurator_no_error_when_no_image_relation():
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+    assert out.unit_status == ops.WaitingStatus(
+        "Waiting for image config or image builder relation"
+    )
 
 
 def test_reconcile_writes_full_config_to_garm_relation():

@@ -67,9 +67,13 @@ class GarmConfiguratorCharm(ops.CharmBase):
         if state.image is not None:
             self.unit.status = ops.ActiveStatus("Ready")
         elif self.model.get_relation(IMAGE_RELATION_NAME) is None:
-            self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
+            self.unit.status = ops.WaitingStatus(
+                "Waiting for image config or image builder relation"
+            )
         else:
-            self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
+            self.unit.status = ops.WaitingStatus(
+                "Waiting for image config or image UUID from image builder"
+            )
 
     def _update_image_relation(self, state: CharmState) -> None:
         """Push OpenStack provider credentials to the image-builder relation.
@@ -210,7 +214,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "github_app_id": str(state.github_app_config.app_id),
                 "github_installation_id": str(state.github_app_config.installation_id),
                 "github_private_key_secret_uri": str(github_key_secret.id),
-                "image_id": state.image,
             }
         )
 

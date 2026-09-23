@@ -31,7 +31,6 @@ import requests
 from tests.integration.conftest import (  # noqa: F401
     _collect_debug_info,
     _deploy_configurator,
-    _deploy_image_builder,
     _garm_login,
     _get_garm_address,
     deploy_garm_app_no_integration_fixture,
@@ -267,23 +266,6 @@ def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik:
     )
 
 
-@pytest.fixture(scope="module", name="image_builder_stub")
-def deploy_image_builder_stub_fixture(juju: jubilant.Juju) -> str:
-    """Deploy any-charm as a stub image builder publishing the tenant's real image.
-
-    The same stub the integration suite deploys; what differs is the image name it
-    publishes over the relation -- one that exists on the tenant, so the provider
-    can actually boot it.
-    """
-    image_name = required_env("E2E_RUNNER_IMAGE_NAME")
-    return _deploy_image_builder(
-        juju=juju,
-        app_name="image-builder",
-        image_id=image_name,
-        tags="x64,noble",
-    )
-
-
 @pytest.fixture(scope="module", name="e2e_scaleset")
 def deploy_e2e_scaleset_fixture(
     juju: jubilant.Juju,
@@ -291,13 +273,12 @@ def deploy_e2e_scaleset_fixture(
     traefik: str,
     certificate_authority: str,
     openstack_credentials: dict[str, str],
-    image_builder_stub: str,
     garm_configurator_charm_file: str,
 ) -> Iterator[str]:
     """Deploy garm-configurator with real tenant values and a unique run label.
 
     Creates Juju secrets for the password and private key, deploys the configurator,
-    integrates with the image builder and GARM, and waits for the scaleset to register.
+    configures a stable image name, integrates with GARM, and waits for the scaleset to register.
     Returns the unique runner label that runners will register with.
     """
     app_name = "garm-configurator"
@@ -348,6 +329,7 @@ def deploy_e2e_scaleset_fixture(
         "github-app-private-key": private_key_secret,
         "name": label,
         "labels": label,
+        "image": required_env("E2E_RUNNER_IMAGE_NAME"),
         "flavor": os.environ.get("E2E_OPENSTACK_FLAVOR", "m1.small"),
         "os-arch": "amd64",
         "min-idle-runner": "1",
@@ -401,20 +383,7 @@ def deploy_e2e_scaleset_fixture(
         secret_uris=[password_secret, private_key_secret],
     )
 
-    # Integrate with image builder first
-    juju.integrate(app_name, image_builder_stub)
-    try:
-        juju.wait(
-            lambda status: jubilant.all_active(status, app_name),
-            error=lambda status: jubilant.any_error(status, app_name),
-            timeout=6 * 60,
-            delay=10,
-        )
-    except (TimeoutError, jubilant.WaitError):
-        _collect_debug_info(juju, app_name)
-        raise
-
-    # Then integrate with GARM. This is what starts the workload: until provider configs
+    # Integrate with GARM. This is what starts the workload: until provider configs
     # arrive from the configurator, the charm's restart() returns before starting it.
     juju.integrate(app_name, garm_app)
     try:

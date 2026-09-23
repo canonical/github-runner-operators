@@ -31,6 +31,7 @@ GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 SCALESET_NAME_CONFIG_NAME = "name"
 SCALESET_FLAVOR_CONFIG_NAME = "flavor"
 SCALESET_OS_ARCH_CONFIG_NAME = "os-arch"
+SCALESET_IMAGE_CONFIG_NAME = "image"
 SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME = "min-idle-runner"
 SCALESET_MAX_RUNNER_CONFIG_NAME = "max-runner"
 SCALESET_LABELS_CONFIG_NAME = "labels"
@@ -46,7 +47,6 @@ APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME = "aproxy-exclude-addresses"
 APROXY_REDIRECT_PORTS_CONFIG_NAME = "aproxy-redirect-ports"
 OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
-IMAGE_CONFIG_NAME = "image"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 _IP_NETWORK_ADAPTER: TypeAdapter[IPvAnyNetwork] = TypeAdapter(IPvAnyNetwork)
@@ -70,6 +70,14 @@ class CharmConfigInvalidError(Exception):
         """
         super().__init__(msg)
         self.msg = msg
+
+
+def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
+    """Return a stripped optional string configuration value."""
+    value = charm.config.get(key)
+    if not value:
+        return None
+    return str(value).strip() or None
 
 
 class ProviderConfig(BaseModel):
@@ -221,6 +229,7 @@ class ScalesetConfig(BaseModel):
         name: The name of the scaleset.
         flavor: The resource flavor for runners.
         os_arch: The CPU architecture for runners.
+        image: Optional stable OpenStack image name or ID.
         min_idle_runner: Minimum number of idle runners.
         max_runner: Maximum number of runners.
         labels: Comma-separated list of labels for runners.
@@ -234,6 +243,7 @@ class ScalesetConfig(BaseModel):
     name: str
     flavor: str
     os_arch: str
+    image: str | None = None
     min_idle_runner: int
     max_runner: int
     labels: str = ""
@@ -304,11 +314,13 @@ class ScalesetConfig(BaseModel):
         labels = str(labels).strip() if labels else ""
         pre_install_scripts = charm.config.get(SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME)
         pre_install_scripts = str(pre_install_scripts) if pre_install_scripts else None
+        image = _get_optional_string_config(charm, SCALESET_IMAGE_CONFIG_NAME)
 
         return cls(
             name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
             flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
             os_arch=str(charm.config.get(SCALESET_OS_ARCH_CONFIG_NAME)).strip(),
+            image=image,
             min_idle_runner=min_idle_runner,
             max_runner=max_runner,
             labels=labels,
@@ -519,7 +531,7 @@ class CharmState:
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
-        image = _get_image_reference(charm)
+        image = scaleset_config.image or _get_image_id_from_relation(charm)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
@@ -529,19 +541,15 @@ class CharmState:
         )
 
 
-def _get_image_reference(charm: ops.CharmBase) -> str | None:
-    """Return the configured OpenStack image name or related image UUID, if available.
+def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
+    """Return the OpenStack image UUID from the image builder relation, if available.
 
     Args:
         charm: The charm instance.
 
     Returns:
-        The configured image reference, related image UUID, or None if neither is available.
+        The related image UUID, or None if the relation has not published one.
     """
-    configured_image = charm.config.get(IMAGE_CONFIG_NAME)
-    if configured_image and str(configured_image).strip():
-        return str(configured_image).strip()
-
     relation = charm.model.get_relation(IMAGE_RELATION_NAME)
     if relation is None:
         return None

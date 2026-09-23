@@ -17,16 +17,15 @@ watch it register a runner scale set with GitHub.
 
 Runners themselves are created on an OpenStack cloud. Setting up an OpenStack cloud, and building a
 runner image for it, is a substantial task in its own right, so this tutorial uses placeholder
-OpenStack values and a stand-in image provider. Everything up to and including the scale set
-registration on GitHub is real: the last section explains exactly which values you would change to
-make runners boot.
+OpenStack values and an image reference. Everything up to and including the scale set registration
+on GitHub is real: the last section explains exactly which values you would change to make runners
+boot.
 
 ## What you'll do
 
 1. Deploy GARM and PostgreSQL, and integrate them.
-1. Deploy a stand-in image provider.
 1. Deploy the GARM configurator and configure a scale set.
-1. Integrate the configurator with GARM and the image provider.
+1. Integrate the configurator with GARM.
 1. Verify that the scale set is registered with GitHub.
 1. Clean up the environment.
 
@@ -136,44 +135,6 @@ garm/0*            waiting   idle   10.1.0.66         Waiting for garm-configura
 postgresql-k8s/0*  active    idle   10.1.0.54         Primary
 ```
 
-## Deploy a stand-in image provider
-
-Runners boot from an OpenStack image, and the GARM configurator requires an integration with a
-charm that supplies the image ID over the `github_runner_image_v0` interface. Because this tutorial
-does not create real runners, you can satisfy that requirement with
-[`any-charm`](https://charmhub.io/any-charm), a charm whose behavior you supply as source code.
-
-Write a small charm that publishes a placeholder image ID whenever something integrates with it:
-
-```bash
-cat > fake_image_builder.py <<'EOF'
-from any_charm_base import AnyCharmBase
-
-IMAGE_ID = "00000000-0000-0000-0000-000000000000"
-IMAGE_TAGS = "x64,noble"
-
-
-class AnyCharm(AnyCharmBase):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.framework.observe(
-            self.on["provide-github-runner-image-v0"].relation_joined,
-            self._on_image_relation_joined,
-        )
-
-    def _on_image_relation_joined(self, event):
-        event.relation.data[self.unit]["id"] = IMAGE_ID
-        event.relation.data[self.unit]["tags"] = IMAGE_TAGS
-EOF
-```
-
-Deploy the charm as `fake-image-builder`, passing that file as the charm's source:
-
-```bash
-juju deploy any-charm fake-image-builder --channel latest/beta \
-  --config src-overwrite="$(python3 -c 'import json; print(json.dumps({"any_charm.py": open("fake_image_builder.py").read()}))')"
-```
-
 ## Configure a scale set
 
 The GARM configurator charm holds the configuration for a single scale set: which repository it
@@ -224,6 +185,7 @@ juju config garm-configurator \
   name="tutorial-scaleset" \
   flavor="m1.large" \
   os-arch="amd64" \
+  image="00000000-0000-0000-0000-000000000000" \
   min-idle-runner=0 \
   max-runner=1 \
   labels="tutorial" \
@@ -231,29 +193,28 @@ juju config garm-configurator \
 ```
 
 `min-idle-runner=0` keeps GARM from trying to create a runner while it has nowhere to create one.
+The `image` value is also a placeholder; a real deployment can use a stable OpenStack image name
+or an image ID.
 
-The configurator now reports that it is waiting for an image provider
-in the output of `juju status`:
+The configurator now reports that it is ready in the output of `juju status`:
 
 ```{terminal}
 :output-only:
 
 Unit                   Workload  Agent  Address     Ports  Message
-garm-configurator/0*   waiting   idle   10.1.0.133         Waiting for image builder relation
+garm-configurator/0*   active    idle   10.1.0.133         Ready
 ```
 
 ## Integrate the charms
 
-Connect the configurator to the image provider and to GARM:
+Connect the configurator to GARM:
 
 ```bash
-juju integrate garm-configurator:image fake-image-builder:provide-github-runner-image-v0
 juju integrate garm garm-configurator
 ```
 
-Over the first relation, `fake-image-builder` publishes its image ID to the configurator, which
-becomes active. Over the second relation, the configurator hands GARM the scale set configuration, and GARM
-registers the repository and the scale set with GitHub.
+The configurator hands GARM the scale set configuration, and GARM registers the repository and the
+scale set with GitHub.
 
 Run `juju status` to check the result:
 
@@ -261,13 +222,11 @@ Run `juju status` to check the result:
 :output-only:
 
 App                 Version  Status  Scale  Charm              Channel      Rev  Address         Exposed  Message
-fake-image-builder           active      1  any-charm          latest/beta  175  10.152.183.254  no
 garm                         active      1  garm               latest/edge   95  10.152.183.123  no
 garm-configurator            active      1  garm-configurator  latest/edge   87  10.152.183.87   no       Ready
 postgresql-k8s      16.14    active      1  postgresql-k8s     16/stable    927  10.152.183.82   no
 
 Unit                   Workload  Agent  Address     Ports  Message
-fake-image-builder/0*  active    idle   10.1.0.244
 garm-configurator/0*   active    idle   10.1.0.133         Ready
 garm/0*                active    idle   10.1.0.66
 postgresql-k8s/0*      active    idle   10.1.0.54          Primary
@@ -318,8 +277,8 @@ This command should return:
 }
 ```
 
-The `image` field holds the placeholder ID published by the stand-in image provider, which is where
-a real image ID would appear.
+The `image` field holds the placeholder configured above, which is where a real stable image name
+or image ID would appear.
 
 Congratulations! You have a working GARM deployment with a scale set registered on GitHub.
 
@@ -337,9 +296,8 @@ deployment and one that runs jobs:
 
 - **Real OpenStack credentials.** The eight `openstack-*` options take the values of an existing
   project. No other configuration changes are required.
-- **A runner image.** `fake-image-builder` stands in for a charm that builds a runner image in your
-  OpenStack project and publishes its ID. Replace it with a real image provider and remove the
-  stand-in.
+- **A runner image.** Build a suitable image in your OpenStack project, then replace the placeholder
+  `image` configuration with its stable image name or image ID.
 - **A reachable GARM.** Runners call back to GARM to report their status, using a URL that GARM
   derives from its own address. The in-cluster address used in this tutorial is not reachable from
   an OpenStack tenant, so GARM needs an ingress with an address that the runner network can reach.
