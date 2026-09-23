@@ -47,19 +47,19 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
     }
 
 
-def test_charm_waiting_with_valid_config_no_relation():
+def test_charm_blocked_with_valid_config_no_image_source():
     """
     arrange: All configs are valid but no image builder relation.
     act: Run config-changed.
-    assert: Unit status explains that image config or an image builder relation is required.
+    assert: Unit is blocked until an image is configured or an image builder is integrated.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.WaitingStatus(
-        "Waiting for image config or image builder relation"
+    assert out.unit_status == ops.BlockedStatus(
+        "Missing image config or image builder relation"
     )
 
 
@@ -183,7 +183,7 @@ def test_clearing_configured_image_without_relation_withdraws_image():
     """
     arrange: A configured image has published a complete GARM relation payload.
     act: Clear the image config while no image builder relation exists.
-    assert: The charm waits and withdraws image_id, so GARM skips the incomplete scaleset.
+    assert: The charm blocks and withdraws image_id, so GARM skips the incomplete scaleset.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -207,8 +207,8 @@ def test_clearing_configured_image_without_relation_withdraws_image():
     )
 
     garm_out = cleared.get_relation(garm_relation.id)
-    assert cleared.unit_status == ops.WaitingStatus(
-        "Waiting for image config or image builder relation"
+    assert cleared.unit_status == ops.BlockedStatus(
+        "Missing image config or image builder relation"
     )
     assert "image_id" not in garm_out.local_unit_data
     assert garm_out.local_unit_data["openstack_auth_url"] == (
@@ -389,16 +389,17 @@ def test_charm_not_blocked_with_http_auth_url():
     """
     arrange: openstack-auth-url uses http:// (not https://).
     act: Run config-changed.
-    assert: Unit status is not Blocked — http:// is a valid scheme.
+    assert: Unit is ready because http:// is a valid scheme.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
     config["openstack-auth-url"] = "http://keystone.local:5000/v3"
+    config["image"] = "runner-noble-amd64"
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert not isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status == ops.ActiveStatus("Ready")
 
 
 def test_charm_blocked_github_app_private_key_secret_missing_value_key():
@@ -602,12 +603,12 @@ def test_status_active_when_image_uuid_is_present():
     assert out.unit_status == ops.ActiveStatus("Ready")
 
 
-def test_status_waiting_on_relation_broken():
+def test_status_blocked_on_relation_broken():
     """
     arrange: Valid config and the image relation being torn down.
     act: relation_broken fires.
-    assert: Unit status identifies both ways to provide an image because ops excludes the
-        breaking relation from model.relations.
+    assert: Unit is blocked because ops excludes the breaking relation from model.relations,
+        leaving no configured or related image source.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -619,8 +620,8 @@ def test_status_waiting_on_relation_broken():
         relations=[image_relation],
     )
     out = ctx.run(ctx.on.relation_broken(image_relation), state)
-    assert out.unit_status == ops.WaitingStatus(
-        "Waiting for image config or image builder relation"
+    assert out.unit_status == ops.BlockedStatus(
+        "Missing image config or image builder relation"
     )
 
 
@@ -662,11 +663,11 @@ def test_garm_configurator_relation_data_reflects_charm_state():
         assert rel_out.local_unit_data[key] == value
 
 
-def test_garm_configurator_no_error_when_no_image_relation():
+def test_garm_configurator_blocked_when_no_image_source():
     """
     arrange: Valid config with no image builder relation.
     act: Run config-changed.
-    assert: Status says to configure an image or add an image builder relation.
+    assert: Status is blocked and says to configure an image or add an image builder relation.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -675,8 +676,8 @@ def test_garm_configurator_no_error_when_no_image_relation():
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.unit_status == ops.WaitingStatus(
-        "Waiting for image config or image builder relation"
+    assert out.unit_status == ops.BlockedStatus(
+        "Missing image config or image builder relation"
     )
 
 

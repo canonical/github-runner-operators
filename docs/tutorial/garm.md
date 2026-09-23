@@ -316,7 +316,8 @@ under `/tmp`. Move the key into your home directory and pass that path.
 
 **The configurator stays blocked on `Missing required configuration`.** The status message names
 the first option that is missing. Every option in the `juju config` command above is required
-except `labels`.
+except `labels`; `image` may instead come from an integrated image builder, but this tutorial does
+not deploy one.
 
 ## Clean up the environment
 

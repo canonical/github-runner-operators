@@ -67,9 +67,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         if state.image is not None:
             self.unit.status = ops.ActiveStatus("Ready")
         elif self.model.get_relation(IMAGE_RELATION_NAME) is None:
-            self.unit.status = ops.WaitingStatus(
-                "Waiting for image config or image builder relation"
-            )
+            self.unit.status = ops.BlockedStatus("Missing image config or image builder relation")
         else:
             self.unit.status = ops.WaitingStatus(
                 "Waiting for image config or image UUID from image builder"
