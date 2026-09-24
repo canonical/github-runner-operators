@@ -323,8 +323,9 @@ builder; this tutorial does not deploy one. Removing both image sources makes GA
 scale set and its runners.
 
 **The configurator waits on `Waiting for image UUID from image builder`.** The integrated image
-builder has not published an image ID. Check the builder's status and logs, or remove the relation
-and configure `image` directly.
+builder has not published an image ID. Check the builder's status and logs, or configure `image`
+directly before removing the relation. You can also leave the relation attached; configured
+`image` takes precedence while the relation remains available as a fallback.
 
 ## Clean up the environment
 

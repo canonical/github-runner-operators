@@ -73,24 +73,12 @@ def _configurator_is_blocked_without_image(
     """Return whether the configurator unit is blocked specifically on its image source."""
     if app_name not in status.apps:
         return False
-    unit = status.apps[app_name].units.get(f"{app_name}/0")
-    return bool(
-        unit
-        and unit.workload_status.current == "blocked"
+    units = tuple(status.apps[app_name].units.values())
+    return bool(units) and all(
+        unit.workload_status.current == "blocked"
         and unit.workload_status.message == MISSING_IMAGE_STATUS
+        for unit in units
     )
-
-
-def test_garm_configurator_blocks_without_image_source(
-    juju: jubilant.Juju,
-    garm_configurator_app: str,
-) -> None:
-    """
-    arrange: garm-configurator charm deployed with valid mock configuration.
-    act: Check the application status before any image builder is connected.
-    assert: Application is Blocked because operator action is required.
-    """
-    assert _configurator_is_blocked_without_image(juju.status(), garm_configurator_app)
 
 
 def test_garm_configurator_uses_configured_image_without_builder(
@@ -111,13 +99,13 @@ def test_garm_configurator_uses_configured_image_without_builder(
         )
     finally:
         juju.config(garm_configurator_app, values={"image": ""})
-        juju.wait(
-            lambda status: _configurator_is_blocked_without_image(
-                status, garm_configurator_app
-            ),
-            timeout=5 * 60,
-            delay=10,
-        )
+    juju.wait(
+        lambda status: _configurator_is_blocked_without_image(
+            status, garm_configurator_app
+        ),
+        timeout=5 * 60,
+        delay=10,
+    )
 
 
 def test_garm_configurator_image_relation(

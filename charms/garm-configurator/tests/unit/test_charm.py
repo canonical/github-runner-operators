@@ -5,7 +5,6 @@
 
 import dataclasses
 import json
-import logging
 
 import ops
 import pytest
@@ -85,6 +84,7 @@ def test_configured_image_is_published_without_image_relation():
 
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.ActiveStatus("Ready")
+    assert garm_out.local_unit_data["image"] == "runner-noble-amd64"
     assert garm_out.local_unit_data["image_id"] == "runner-noble-amd64"
     assert garm_out.local_unit_data["openstack_auth_url"] == (
         "https://keystone.example.com:5000/v3"
@@ -92,11 +92,12 @@ def test_configured_image_is_published_without_image_relation():
     assert garm_out.local_unit_data["github_app_id"] == "99999"
 
 
-def test_configured_image_takes_precedence_without_disabling_image_relation(caplog):
+def test_configured_image_takes_precedence_without_disabling_image_relation():
     """
     arrange: A stable image is configured and the legacy image relation provides a UUID.
     act: Run config-changed.
-    assert: GARM receives the stable name, the relation receives credentials, and precedence is logged.
+    assert: GARM receives the stable name, the relation receives credentials, and status reports
+        that the configured image overrides the builder.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -112,12 +113,12 @@ def test_configured_image_takes_precedence_without_disabling_image_relation(capl
         leader=True,
     )
 
-    with caplog.at_level(logging.DEBUG):
-        out = ctx.run(ctx.on.config_changed(), state)
+    out = ctx.run(ctx.on.config_changed(), state)
 
+    assert out.unit_status == ops.ActiveStatus("Ready; configured image overrides image builder")
+    assert out.get_relation(garm_relation.id).local_unit_data["image"] == ("runner-noble-amd64")
     assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == ("runner-noble-amd64")
     assert out.get_relation(image_relation.id).local_unit_data["project_name"] == "myproject"
-    assert "Configured image overrides the image builder relation" in caplog.messages
 
 
 def test_blank_configured_image_falls_back_to_image_relation():
@@ -210,6 +211,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert cleared.unit_status == ops.BlockedStatus(
         "Missing image config or image builder relation"
     )
+    assert "image" not in garm_out.local_unit_data
     assert "image_id" not in garm_out.local_unit_data
     assert garm_out.local_unit_data["openstack_auth_url"] == (
         "https://keystone.example.com:5000/v3"

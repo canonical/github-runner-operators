@@ -64,9 +64,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
         self._update_image_relation(state)
         self._configure_garm_relation(state)
 
-        if state.image is not None:
+        if state.image_overrides_builder:
+            self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
+        elif state.image is not None:
             self.unit.status = ops.ActiveStatus("Ready")
-        elif self.model.get_relation(IMAGE_RELATION_NAME) is None:
+        elif state.image_relation is None:
             self.unit.status = ops.BlockedStatus("Missing image config or image builder relation")
         else:
             self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
@@ -79,7 +81,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         Args:
             state: Current resolved charm state.
         """
-        relation = self.model.get_relation(IMAGE_RELATION_NAME)
+        relation = state.image_relation
         if relation is None:
             return
         relation.data[self.unit].update(
@@ -132,9 +134,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
         flavor, arch, runner counts, labels, runner group, remote-shell toggle,
-        and pre-install scripts) to the relation. The legacy ``image_id`` wire
-        key accepts either an OpenStack image name or ID. The optional ``org``
-        and ``repo`` fields are included only when set.
+        and pre-install scripts) to the relation. ``image`` is the current wire
+        key; the equivalent legacy ``image_id`` key remains during migration.
+        The optional ``org`` and ``repo`` fields are included only when set.
 
         When the image reference is present and this unit holds leadership, also
         provisions Juju secrets for the OpenStack password and GitHub App
@@ -157,6 +159,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
+            "image": state.image or "",
             "image_id": state.image or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
