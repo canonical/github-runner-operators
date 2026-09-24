@@ -39,6 +39,7 @@
       "datasourceTemplate": "pypi"
     }
   ],
+  "ignorePaths": ["docs/**"],
   "packageRules": [
     {
       "groupName": "charm-ci",
