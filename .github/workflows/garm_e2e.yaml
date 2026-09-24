@@ -405,11 +405,12 @@ jobs:
           ssh-keygen -q -t ed25519 -N '' \
             -C "garm-e2e-tunnel-${GITHUB_RUN_ID}" \
             -f "${KEY_DIR}/garm-e2e-tunnel"
-          # permitopen pins the forward to this host's :80, the only destination
+          # permitopen pins the forward to this host's :80 and :443, the only destination
           # the tunnel exists for, so the key cannot be used to reach anything
           # else while it exists.
-          printf 'restrict,port-forwarding,permitopen="%s:80" %s\n' \
-            "${TUNNEL_TARGET}" "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
+          printf 'restrict,port-forwarding,permitopen="%s:80",permitopen="%s:443" %s\n' \
+            "${TUNNEL_TARGET}" "${TUNNEL_TARGET}" \
+            "$(cat "${KEY_DIR}/garm-e2e-tunnel.pub")" >> "${AUTH_KEYS}"
 
           # Prove the entry works before the suite relies on it: authenticate with
           # the key from this host, forwarding exactly as the VM will, and pull
@@ -422,6 +423,7 @@ jobs:
             -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
             -o ConnectTimeout=10 \
             -L 127.0.0.1:18080:"${TUNNEL_TARGET}":80 \
+            -L 127.0.0.1:18443:"${TUNNEL_TARGET}":443 \
             "${TUNNEL_USER}@${TUNNEL_TARGET}"
           if ! curl -s --max-time 10 -o /dev/null http://127.0.0.1:18080/; then
             # A non-timeout answer (404/502 from traefik) is success: the auth and
