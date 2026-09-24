@@ -76,6 +76,14 @@ GARM_CLI_URL = (
 GARM_CLI_SHA256 = "983fa54557f3f5ce3aa1eeb2387499f5f823d14512a0559ba888667bc3b3e88e"
 
 
+def _e2e_label() -> str:
+    """Return a provider-safe scale-set label unique to this workflow attempt."""
+    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    suffix = hashlib.sha256(f"{run_id}:{run_attempt}".encode()).hexdigest()[:6]
+    return f"e2e-{suffix}"
+
+
 @pytest.fixture(scope="module", name="openstack_credentials")
 def openstack_credentials_fixture() -> dict[str, str]:
     """Read real ProdStack OpenStack credentials from the environment.
@@ -287,14 +295,13 @@ def deploy_e2e_scaleset_fixture(
     # which is 50 fixed characters before the name starts, and Nova rejects tags
     # longer than 60. Reported upstream at
     # https://github.com/cloudbase/garm-provider-openstack/issues/34; until it is
-    # fixed the name has to fit. The last six digits of the run id keep the label
-    # unique across reruns, and the workflow serialises the suite repository-wide,
-    # so no two scale sets are ever live at once.
+    # fixed the name has to fit. A six-character digest of the run ID and attempt
+    # keeps the label unique across reruns, and the workflow serialises the suite
+    # repository-wide, so no two scale sets are ever live at once.
     # The promotion pipeline unsets GITHUB_RUN_ID to stop opcli's spread prepare
     # waiting on build artifacts it never produces, so the label needs a fallback
     # for when it is absent.
-    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
-    label = f"e2e-{run_id[-6:]}"
+    label = _e2e_label()
     garm_app = garm_with_ingress
     creds = openstack_credentials
     repo = required_env(GITHUB_REPOSITORY_ENV_VAR)

@@ -9,6 +9,24 @@ from tests.e2e import conftest as fixtures
 from tests.e2e import test_garm_e2e as e2e
 
 
+def test_e2e_label_is_unique_per_workflow_attempt(monkeypatch):
+    """
+    arrange: Two attempts of the same GitHub Actions workflow run.
+    act: Generate the E2E scale-set label for each attempt.
+    assert: Labels differ and stay within the OpenStack provider's 10-character limit.
+    """
+    monkeypatch.setenv("GITHUB_RUN_ID", "35945417480")
+
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    first_attempt = fixtures._e2e_label()
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    second_attempt = fixtures._e2e_label()
+
+    assert first_attempt != second_attempt
+    assert len(first_attempt) <= 10
+    assert len(second_attempt) <= 10
+
+
 @pytest.mark.parametrize("name", ["e2e-f624f0", "e2e-f624f0-d0f3c26d"])
 def test_runner_polling_resolves_enabled_scaleset_by_label(monkeypatch, name):
     """
