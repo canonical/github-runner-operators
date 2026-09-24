@@ -285,7 +285,10 @@ def test_runner_config_from_databag_drops_malformed_port_and_address_tokens():
     config = RunnerConfig.from_databag(
         {
             "aproxy_redirect_ports": "80,not-a-port,8000-9000,99 rm,99999,443-80",
-            "aproxy_exclude_addresses": ("10.0.0.0/8,10.0.0.0-10.141.167.255,evil;,2001:db8::1"),
+            "aproxy_exclude_addresses": (
+                "10.0.0.0/8,10.0.0.0-10.141.167.255,"
+                "10.0.0.8-10.0.0.1,10.0.0.0-not-an-ip,evil;,2001:db8::1"
+            ),
         }
     )
 
