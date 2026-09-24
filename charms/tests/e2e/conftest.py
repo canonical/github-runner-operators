@@ -271,15 +271,15 @@ def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik:
 def deploy_image_builder_stub_fixture(juju: jubilant.Juju) -> str:
     """Deploy any-charm as a stub image builder publishing the tenant's real image.
 
-    The same stub the integration suite deploys; what differs is the image name it
+    The same stub the integration suite deploys; what differs is the image UUID it
     publishes over the relation -- one that exists on the tenant, so the provider
     can actually boot it.
     """
-    image_name = required_env("E2E_RUNNER_IMAGE_NAME")
+    image_id = required_env("E2E_RUNNER_IMAGE_ID")
     return _deploy_image_builder(
         juju=juju,
         app_name="image-builder",
-        image_id=image_name,
+        image_id=image_id,
         tags="x64,noble",
     )
 

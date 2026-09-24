@@ -135,7 +135,7 @@ jobs:
           E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
           E2E_GITHUB_APP_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_APP_INSTALLATION_ID }}
           E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.E2E_GITHUB_APP_PRIVATE_KEY }}
-          E2E_RUNNER_IMAGE_NAME: ${{ secrets.E2E_RUNNER_IMAGE_NAME }}
+          E2E_RUNNER_IMAGE_ID: ${{ secrets.E2E_RUNNER_IMAGE_ID }}
           E2E_OPENSTACK_FLAVOR: ${{ secrets.E2E_OPENSTACK_FLAVOR }}
           E2E_RUNNER_HTTP_PROXY: ${{ secrets.E2E_RUNNER_HTTP_PROXY }}
           E2E_APROXY_EXCLUDE_ADDRESSES: ${{ secrets.E2E_APROXY_EXCLUDE_ADDRESSES }}
@@ -145,7 +145,7 @@ jobs:
           for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
                      OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
                      E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
-                     E2E_GITHUB_APP_PRIVATE_KEY E2E_RUNNER_IMAGE_NAME; do
+                     E2E_GITHUB_APP_PRIVATE_KEY E2E_RUNNER_IMAGE_ID; do
             if [ -z "${!KEY:-}" ]; then
               echo "::error::Missing repository secret: $KEY (Settings > Secrets > Actions)."
               exit 1
@@ -156,7 +156,7 @@ jobs:
           for KEY in OS_AUTH_URL OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
                      OS_PROJECT_DOMAIN_NAME OS_REGION_NAME OS_NETWORK \
                      E2E_GITHUB_APP_ID E2E_GITHUB_APP_INSTALLATION_ID \
-                     E2E_RUNNER_IMAGE_NAME; do
+                     E2E_RUNNER_IMAGE_ID; do
             echo "${KEY}=${!KEY}" >> "$GITHUB_ENV"
           done
 
@@ -336,7 +336,7 @@ jobs:
             return 1
           }
 
-          check image "$E2E_RUNNER_IMAGE_NAME"
+          check image "$E2E_RUNNER_IMAGE_ID"
           # Optional: unset means the suite falls back to its own default flavor.
           if [ -n "${E2E_OPENSTACK_FLAVOR:-}" ]; then
             check flavor "$E2E_OPENSTACK_FLAVOR"
@@ -503,8 +503,8 @@ jobs:
           # This runs on every outcome, including failures that predate the tenant
           # configuration: bail out cleanly rather than die on an unbound variable
           # or a missing client and bury the real failure under cleanup noise.
-          if [ -z "${E2E_RUNNER_IMAGE_NAME:-}" ]; then
-            echo "E2E_RUNNER_IMAGE_NAME is not set; the run failed before the tenant was configured. No sweep possible."
+          if [ -z "${E2E_RUNNER_IMAGE_ID:-}" ]; then
+            echo "E2E_RUNNER_IMAGE_ID is not set; the run failed before the tenant was configured. No sweep possible."
             exit 0
           fi
           if ! command -v openstack >/dev/null 2>&1; then
@@ -516,7 +516,7 @@ jobs:
           # alongside the runner image scopes the sweep to VMs this suite's GARM
           # created, so a failure that skips the suite's own teardown cannot leave them
           # running and billing.
-          ORPHANS=$(openstack server list --long --image "$E2E_RUNNER_IMAGE_NAME" -f json \
+          ORPHANS=$(openstack server list --long --image "$E2E_RUNNER_IMAGE_ID" -f json \
             | python3 -c "import json,sys; print('\n'.join(s['ID'] for s in json.load(sys.stdin) if 'garm-controller-id' in (s.get('Properties') or {})))")
 
           if [ -z "$ORPHANS" ]; then
