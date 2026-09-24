@@ -127,23 +127,14 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         return secret
 
-    def _revoke_relation_secret(self, relation: ops.Relation, secret_name: str) -> None:
-        """Revoke a relation's access to an owned secret when it exists."""
-        if not self.unit.is_leader():
-            return
-        try:
-            secret = self.model.get_secret(label=secret_name)
-        except ops.SecretNotFoundError:
-            return
-        secret.revoke(relation)
-
     def _configure_garm_relation(self, state: CharmState) -> None:
         """Publish scaleset configuration to the garm-configurator relation.
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
         flavor, arch, runner counts, labels, runner group, remote-shell toggle,
-        and pre-install scripts) to the relation. The optional ``org`` and
-        ``repo`` fields are included only when set.
+        and pre-install scripts) to the relation. The legacy ``image_id`` wire
+        key accepts either an OpenStack image name or ID. The optional ``org``
+        and ``repo`` fields are included only when set.
 
         When the image reference is present and this unit holds leadership, also
         provisions Juju secrets for the OpenStack password and GitHub App
@@ -191,7 +182,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         garm_relation.data[self.unit].update(basic_data)
 
         if state.image is None:
-            self._withdraw_garm_credentials(garm_relation)
             return
 
         password_secret = self._ensure_relation_secret(
@@ -223,25 +213,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "github_private_key_secret_uri": str(github_key_secret.id),
             }
         )
-
-    def _withdraw_garm_credentials(self, relation: ops.Relation) -> None:
-        """Remove image-dependent credentials and revoke the relation's secret access."""
-        for key in (
-            "openstack_auth_url",
-            "openstack_username",
-            "openstack_password_secret_uri",
-            "openstack_project_name",
-            "openstack_user_domain_name",
-            "openstack_project_domain_name",
-            "openstack_region_name",
-            "openstack_network",
-            "github_app_id",
-            "github_installation_id",
-            "github_private_key_secret_uri",
-        ):
-            relation.data[self.unit][key] = ""
-        self._revoke_relation_secret(relation, "configurator-password")
-        self._revoke_relation_secret(relation, "configurator-github-key")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
 
 import dataclasses
 import json
+import logging
 
 import ops
 import pytest
@@ -58,9 +59,7 @@ def test_charm_blocked_with_valid_config_no_image_source():
     pk_secret = _make_private_key_secret()
     state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing image config or image builder relation"
-    )
+    assert out.unit_status == ops.BlockedStatus("Missing image config or image builder relation")
 
 
 def test_configured_image_is_published_without_image_relation():
@@ -113,11 +112,10 @@ def test_configured_image_takes_precedence_without_disabling_image_relation(capl
         leader=True,
     )
 
-    out = ctx.run(ctx.on.config_changed(), state)
+    with caplog.at_level(logging.DEBUG):
+        out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == (
-        "runner-noble-amd64"
-    )
+    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == ("runner-noble-amd64")
     assert out.get_relation(image_relation.id).local_unit_data["project_name"] == "myproject"
     assert "Configured image overrides the image builder relation" in caplog.messages
 
@@ -180,11 +178,12 @@ def test_clearing_configured_image_falls_back_to_image_relation():
     assert cleared.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
 
 
-def test_clearing_configured_image_without_relation_withdraws_image():
+def test_clearing_configured_image_without_relation_withdraws_only_image():
     """
     arrange: A configured image has published a complete GARM relation payload.
     act: Clear the image config while no image builder relation exists.
-    assert: The charm blocks and withdraws the image-dependent payload.
+    assert: The charm blocks and withdraws only the image, retaining credentials so GARM
+        can remove the old scale set.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -212,15 +211,17 @@ def test_clearing_configured_image_without_relation_withdraws_image():
         "Missing image config or image builder relation"
     )
     assert "image_id" not in garm_out.local_unit_data
-    assert "openstack_auth_url" not in garm_out.local_unit_data
-    assert "openstack_password_secret_uri" not in garm_out.local_unit_data
-    assert "github_private_key_secret_uri" not in garm_out.local_unit_data
+    assert garm_out.local_unit_data["openstack_auth_url"] == (
+        "https://keystone.example.com:5000/v3"
+    )
+    assert "openstack_password_secret_uri" in garm_out.local_unit_data
+    assert "github_private_key_secret_uri" in garm_out.local_unit_data
     relation_id = garm_relation.id
     relation_secrets = {
         secret.label: secret for secret in cleared.secrets if secret.label is not None
     }
-    assert relation_id not in relation_secrets["configurator-password"].remote_grants
-    assert relation_id not in relation_secrets["configurator-github-key"].remote_grants
+    assert relation_id in relation_secrets["configurator-password"].remote_grants
+    assert relation_id in relation_secrets["configurator-github-key"].remote_grants
 
 
 # Represents a missing config value in parameterized tests below
@@ -625,9 +626,7 @@ def test_status_blocked_on_relation_broken():
         relations=[image_relation],
     )
     out = ctx.run(ctx.on.relation_broken(image_relation), state)
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing image config or image builder relation"
-    )
+    assert out.unit_status == ops.BlockedStatus("Missing image config or image builder relation")
 
 
 def test_garm_configurator_relation_data_reflects_charm_state():
@@ -681,9 +680,7 @@ def test_garm_configurator_blocked_when_no_image_source():
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.unit_status == ops.BlockedStatus(
-        "Missing image config or image builder relation"
-    )
+    assert out.unit_status == ops.BlockedStatus("Missing image config or image builder relation")
 
 
 def test_reconcile_writes_full_config_to_garm_relation():

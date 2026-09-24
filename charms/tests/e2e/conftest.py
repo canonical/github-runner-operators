@@ -76,14 +76,6 @@ GARM_CLI_URL = (
 GARM_CLI_SHA256 = "983fa54557f3f5ce3aa1eeb2387499f5f823d14512a0559ba888667bc3b3e88e"
 
 
-def _e2e_label() -> str:
-    """Return a provider-safe scale-set label unique to this workflow attempt."""
-    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
-    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
-    suffix = hashlib.sha256(f"{run_id}:{run_attempt}".encode()).hexdigest()[:6]
-    return f"e2e-{suffix}"
-
-
 @pytest.fixture(scope="module", name="openstack_credentials")
 def openstack_credentials_fixture() -> dict[str, str]:
     """Read real ProdStack OpenStack credentials from the environment.
@@ -419,6 +411,14 @@ def deploy_e2e_scaleset_fixture(
         _drain_and_delete_scaleset(juju, garm_app, label)
     except (requests.RequestException, ValueError, KeyError) as exc:
         logger.warning("Best-effort scale set teardown did not complete: %s", exc)
+
+
+def _e2e_label() -> str:
+    """Return a provider-safe scale-set label unique to this workflow attempt."""
+    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    suffix = hashlib.sha256(f"{run_id}:{run_attempt}".encode()).hexdigest()[:6]
+    return f"e2e-{suffix}"
 
 
 def _drain_and_delete_scaleset(juju: jubilant.Juju, garm_app: str, label: str) -> None:

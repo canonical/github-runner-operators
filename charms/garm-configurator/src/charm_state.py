@@ -534,7 +534,7 @@ class CharmState:
         related_image = _get_image_id_from_relation(charm)
         image = scaleset_config.image or related_image
         if scaleset_config.image and related_image:
-            logger.info("Configured image overrides the image builder relation")
+            logger.debug("Configured image overrides the image builder relation")
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,

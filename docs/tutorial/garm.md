@@ -315,8 +315,9 @@ that lacks the Actions and Administration permissions. Check the details with
 under `/tmp`. Move the key into your home directory and pass that path.
 
 **The configurator stays blocked on `Missing required configuration`.** The status message names
-the first option that is missing. Every option in the `juju config` command above except `labels`
-and `image` is required.
+the first option that is missing. For this tutorial, every option in the `juju config` command
+above except `labels` is required. You can omit `image` only when an image builder relation
+provides it; this tutorial does not deploy one.
 
 **The configurator stays blocked on `Missing image config or image builder relation`.** Configure
 `image` with a stable OpenStack image name or image ID. Alternatively, integrate an image builder;

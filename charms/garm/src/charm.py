@@ -670,9 +670,10 @@ class GarmCharm(paas_charm.go.Charm):
 
         Returns:
             The spec, or None when the databag names no scaleset or is incomplete
-            or invalid, so the caller can skip the unit. Skips are logged except
-            for malformed ``min_idle_runner``/``max_runner`` values, which skip
-            silently.
+            or invalid, so the caller can skip the unit. The legacy ``image_id``
+            wire key accepts either an OpenStack image name or ID. Skips are logged
+            except for malformed ``min_idle_runner``/``max_runner`` values, which
+            skip silently.
         """
         name = data.get("name", "")
         if not name:
