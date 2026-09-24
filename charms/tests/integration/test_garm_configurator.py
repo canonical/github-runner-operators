@@ -8,6 +8,8 @@ import json
 import jubilant
 import pytest
 
+MISSING_IMAGE_STATUS = "Missing image config or image builder relation"
+
 
 @pytest.fixture(name="garm_configurator_app", scope="module")
 def deploy_garm_configurator_app_fixture(
@@ -16,8 +18,8 @@ def deploy_garm_configurator_app_fixture(
 ) -> str:
     """Deploy the garm-configurator application with mock config.
 
-    Returns the application name once the app reaches Waiting (config valid,
-    image builder relation not yet connected).
+    Returns the application name once the app reaches Blocked (config valid,
+    but no image or image builder relation configured).
     """
     app_name = "garm-configurator"
     juju.deploy(charm=garm_configurator_charm_file, app=app_name)
@@ -58,24 +60,52 @@ def deploy_garm_configurator_app_fixture(
         },
     )
     juju.wait(
-        lambda status: jubilant.all_waiting(status, app_name),
+        lambda status: _configurator_is_blocked_without_image(status, app_name),
         timeout=5 * 60,
         delay=10,
     )
     return app_name
 
 
-def test_garm_configurator_waits_without_image_relation(
+def _configurator_is_blocked_without_image(
+    status: jubilant.Status, app_name: str
+) -> bool:
+    """Return whether the configurator unit is blocked specifically on its image source."""
+    if app_name not in status.apps:
+        return False
+    units = tuple(status.apps[app_name].units.values())
+    return bool(units) and all(
+        unit.workload_status.current == "blocked"
+        and unit.workload_status.message == MISSING_IMAGE_STATUS
+        for unit in units
+    )
+
+
+def test_garm_configurator_uses_configured_image_without_builder(
     juju: jubilant.Juju,
     garm_configurator_app: str,
 ) -> None:
     """
-    arrange: garm-configurator charm deployed with valid mock configuration.
-    act: Check the application status before any image builder is connected.
-    assert: Application is Waiting — the image builder relation is required.
+    arrange: A valid configurator with no image builder relation.
+    act: Configure a stable image name.
+    assert: The deployed charm becomes Active without an image builder.
     """
-    status = juju.status()
-    assert jubilant.all_waiting(status, garm_configurator_app)
+    juju.config(garm_configurator_app, values={"image": "runner-noble-amd64"})
+    try:
+        juju.wait(
+            lambda status: jubilant.all_active(status, garm_configurator_app),
+            timeout=5 * 60,
+            delay=10,
+        )
+    finally:
+        juju.config(garm_configurator_app, values={"image": ""})
+    juju.wait(
+        lambda status: _configurator_is_blocked_without_image(
+            status, garm_configurator_app
+        ),
+        timeout=5 * 60,
+        delay=10,
+    )
 
 
 def test_garm_configurator_image_relation(
@@ -95,7 +125,7 @@ def test_garm_configurator_image_relation(
         f"{garm_configurator_app}:image",
         f"{any_charm_image_builder_app}:provide-github-runner-image-v0",
     )
-    # The charm starts in WaitingStatus (no relation). ActiveStatus is only
+    # The charm starts in BlockedStatus (no image source). ActiveStatus is only
     # reached after credentials are written AND the UUID is received back, so
     # all_active is a reliable signal that the full handshake completed.
     juju.wait(

@@ -46,7 +46,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Reads the current charm state, forwards OpenStack credentials to the
         image-builder relation, publishes scaleset configuration (and secrets
-        when the image UUID is available) to all garm-configurator relations,
+        when the image reference is available) to all garm-configurator relations,
         then sets unit status to reflect readiness.
 
         Args:
@@ -64,12 +64,14 @@ class GarmConfiguratorCharm(ops.CharmBase):
         self._update_image_relation(state)
         self._configure_garm_relation(state)
 
-        if self.model.get_relation(IMAGE_RELATION_NAME) is None:
-            self.unit.status = ops.WaitingStatus("Waiting for image builder relation")
-        elif state.image_id is None:
-            self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
-        else:
+        if state.image_overrides_builder:
+            self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
+        elif state.image is not None:
             self.unit.status = ops.ActiveStatus("Ready")
+        elif state.image_relation is None:
+            self.unit.status = ops.BlockedStatus("Missing image config or image builder relation")
+        else:
+            self.unit.status = ops.WaitingStatus("Waiting for image UUID from image builder")
 
     def _update_image_relation(self, state: CharmState) -> None:
         """Push OpenStack provider credentials to the image-builder relation.
@@ -79,7 +81,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         Args:
             state: Current resolved charm state.
         """
-        relation = self.model.get_relation(IMAGE_RELATION_NAME)
+        relation = state.image_relation
         if relation is None:
             return
         relation.data[self.unit].update(
@@ -132,10 +134,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
         flavor, arch, runner counts, labels, runner group, remote-shell toggle,
-        and pre-install scripts) to the relation. The optional ``org`` and
-        ``repo`` fields are included only when set.
+        and pre-install scripts) to the relation. ``image`` is the current wire
+        key; the equivalent legacy ``image_id`` key remains during migration.
+        The optional ``org`` and ``repo`` fields are included only when set.
 
-        When the image UUID is present and this unit holds leadership, also
+        When the image reference is present and this unit holds leadership, also
         provisions Juju secrets for the OpenStack password and GitHub App
         private key, then writes the full OpenStack provider and GitHub App
         credential fields alongside their secret URIs.
@@ -156,7 +159,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
-            "image_id": state.image_id or "",
+            "image": state.image or "",
+            "image_id": state.image or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
             "min_idle_runner": str(state.scaleset_config.min_idle_runner),
@@ -180,7 +184,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             basic_data["repo"] = state.scaleset_config.repo
         garm_relation.data[self.unit].update(basic_data)
 
-        if state.image_id is None:
+        if state.image is None:
             return
 
         password_secret = self._ensure_relation_secret(
@@ -210,7 +214,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "github_app_id": str(state.github_app_config.app_id),
                 "github_installation_id": str(state.github_app_config.installation_id),
                 "github_private_key_secret_uri": str(github_key_secret.id),
-                "image_id": state.image_id,
             }
         )
 

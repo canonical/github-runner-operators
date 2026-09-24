@@ -31,6 +31,7 @@ GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 SCALESET_NAME_CONFIG_NAME = "name"
 SCALESET_FLAVOR_CONFIG_NAME = "flavor"
 SCALESET_OS_ARCH_CONFIG_NAME = "os-arch"
+SCALESET_IMAGE_CONFIG_NAME = "image"
 SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME = "min-idle-runner"
 SCALESET_MAX_RUNNER_CONFIG_NAME = "max-runner"
 SCALESET_LABELS_CONFIG_NAME = "labels"
@@ -282,10 +283,8 @@ class ScalesetConfig(BaseModel):
                 f"{SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME}"
             )
 
-        repo = charm.config.get(SCALESET_REPO_CONFIG_NAME)
-        repo = str(repo).strip() if repo else None
-        org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
-        org = str(org).strip() if org else None
+        repo = _get_optional_string_config(charm, SCALESET_REPO_CONFIG_NAME)
+        org = _get_optional_string_config(charm, SCALESET_ORG_CONFIG_NAME)
         runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "Default")).strip()
 
         if repo and org:
@@ -303,7 +302,6 @@ class ScalesetConfig(BaseModel):
         labels = str(labels).strip() if labels else ""
         pre_install_scripts = charm.config.get(SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME)
         pre_install_scripts = str(pre_install_scripts) if pre_install_scripts else None
-
         return cls(
             name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
             flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
@@ -317,6 +315,12 @@ class ScalesetConfig(BaseModel):
             enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
         )
+
+
+def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
+    """Return a stripped optional string configuration value."""
+    value = charm.config.get(key)
+    return (str(value).strip() if value else "") or None
 
 
 class RunnerConfig(BaseModel):
@@ -474,7 +478,9 @@ class CharmState:
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
         runner_config: Optional runner-level configuration.
-        image_id: OpenStack image UUID received from the image builder relation, or None.
+        image: OpenStack image name or ID from config or the image builder relation.
+        image_relation: The image builder relation, when connected.
+        image_overrides_builder: Whether configured image takes precedence over the builder.
     """
 
     def __init__(
@@ -484,7 +490,9 @@ class CharmState:
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
         runner_config: RunnerConfig,
-        image_id: str | None,
+        image: str | None,
+        image_relation: ops.Relation | None,
+        image_overrides_builder: bool,
     ) -> None:
         """Initialize the charm state.
 
@@ -493,13 +501,17 @@ class CharmState:
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
             runner_config: The optional runner configuration.
-            image_id: The OpenStack image UUID from the image builder relation.
+            image: The OpenStack image name or ID from config or the image builder relation.
+            image_relation: The image builder relation, when connected.
+            image_overrides_builder: Whether configured image takes precedence over the builder.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
         self.runner_config = runner_config
-        self.image_id = image_id
+        self.image = image
+        self.image_relation = image_relation
+        self.image_overrides_builder = image_overrides_builder
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -518,26 +530,29 @@ class CharmState:
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
-        image_id = _get_image_id_from_relation(charm)
+        image_relation = charm.model.get_relation(IMAGE_RELATION_NAME)
+        configured_image = _get_optional_string_config(charm, SCALESET_IMAGE_CONFIG_NAME)
+        related_image = _get_image_id_from_relation(image_relation)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
             runner_config=runner_config,
-            image_id=image_id,
+            image=configured_image or related_image,
+            image_relation=image_relation,
+            image_overrides_builder=bool(configured_image and image_relation),
         )
 
 
-def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
+def _get_image_id_from_relation(relation: ops.Relation | None) -> str | None:
     """Return the OpenStack image UUID from the image builder relation, if available.
 
     Args:
-        charm: The charm instance.
+        relation: The image builder relation, when connected.
 
     Returns:
-        The image UUID string, or None if the relation is absent or no UUID has been set yet.
+        The related image UUID, or None if the relation has not published one.
     """
-    relation = charm.model.get_relation(IMAGE_RELATION_NAME)
     if relation is None:
         return None
     for unit in relation.units:

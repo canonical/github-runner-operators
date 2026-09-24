@@ -1214,6 +1214,40 @@ def test_scaleset_is_built_from_relation_data(ctx: Context, garm_api: _GarmApiMo
     assert scaleset.template_id == _TEMPLATE_ID
 
 
+def test_scaleset_prefers_image_key_over_legacy_image_id(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator publishes the new image key and a different legacy image_id value.
+    act: Run update-status.
+    assert: The scale set uses the new image contract while retaining legacy compatibility.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "image": "stable-image"}
+
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    (scalesets,) = garm_api.scaleset.return_value.reconcile.call_args.args
+    assert scalesets[0].image == "stable-image"
+
+
+def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator publishes complete provider data and a scale-set payload without an
+        image, representing withdrawal of its previous image reference.
+    act: Run update-status.
+    assert: GARM remains provider-ready and reconciles an empty scale-set list, removing the old
+        scale set instead of waiting for configurator data.
+    """
+    scaleset_data = {**_SCALESET_UNIT_DATA}
+    scaleset_data.pop("image_id")
+
+    out = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **scaleset_data}}),
+    )
+
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
+    assert out.unit_status == ops.ActiveStatus()
+
+
 # --- Controller URLs ----------------------------------------------------------------------
 
 
