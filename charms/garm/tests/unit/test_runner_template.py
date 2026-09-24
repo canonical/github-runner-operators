@@ -144,12 +144,13 @@ def test_aproxy_render_uses_configured_ports_and_excludes():
     config = RunnerConfig(
         runner_http_proxy="http://p.test:3128",
         aproxy_redirect_ports="80,8000-9000",
-        aproxy_exclude_addresses="10.0.0.0/8",
+        aproxy_exclude_addresses="10.0.0.0/8,10.0.0.0-10.141.167.255",
     )
     result = render_aproxy_pre_install_script(config)
 
     assert "tcp dport { 80, 8000-9000 }" in result
     assert "10.0.0.0/8" in result
+    assert "10.0.0.0-10.141.167.255" in result
 
 
 def test_render_aproxy_pre_install_script_happy_path():
