@@ -78,6 +78,30 @@ def test_garm_configurator_blocks_without_image_source(
     assert jubilant.all_blocked(status, garm_configurator_app)
 
 
+def test_garm_configurator_uses_configured_image_without_builder(
+    juju: jubilant.Juju,
+    garm_configurator_app: str,
+) -> None:
+    """
+    arrange: A valid configurator with no image builder relation.
+    act: Configure a stable image name.
+    assert: The deployed charm becomes Active without an image builder.
+    """
+    juju.config(garm_configurator_app, values={"image": "runner-noble-amd64"})
+    juju.wait(
+        lambda status: jubilant.all_active(status, garm_configurator_app),
+        timeout=5 * 60,
+        delay=10,
+    )
+
+    juju.config(garm_configurator_app, values={"image": ""})
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, garm_configurator_app),
+        timeout=5 * 60,
+        delay=10,
+    )
+
+
 def test_garm_configurator_image_relation(
     juju: jubilant.Juju,
     garm_configurator_app: str,

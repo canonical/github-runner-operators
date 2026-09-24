@@ -315,9 +315,16 @@ that lacks the Actions and Administration permissions. Check the details with
 under `/tmp`. Move the key into your home directory and pass that path.
 
 **The configurator stays blocked on `Missing required configuration`.** The status message names
-the first option that is missing. Every option in the `juju config` command above is required
-except `labels`; `image` may instead come from an integrated image builder, but this tutorial does
-not deploy one.
+the first option that is missing. Every option in the `juju config` command above except `labels`
+and `image` is required.
+
+**The configurator stays blocked on `Missing image config or image builder relation`.** Configure
+`image` with a stable OpenStack image name or image ID. Alternatively, integrate an image builder;
+this tutorial does not deploy one.
+
+**The configurator waits on `Waiting for image UUID from image builder`.** The integrated image
+builder has not published an image ID. Check the builder's status and logs, or remove the relation
+and configure `image` directly.
 
 ## Clean up the environment
 

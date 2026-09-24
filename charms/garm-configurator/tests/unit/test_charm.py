@@ -93,11 +93,11 @@ def test_configured_image_is_published_without_image_relation():
     assert garm_out.local_unit_data["github_app_id"] == "99999"
 
 
-def test_configured_image_takes_precedence_without_disabling_image_relation():
+def test_configured_image_takes_precedence_without_disabling_image_relation(caplog):
     """
     arrange: A stable image is configured and the legacy image relation provides a UUID.
     act: Run config-changed.
-    assert: GARM receives the stable name while the image relation still receives credentials.
+    assert: GARM receives the stable name, the relation receives credentials, and precedence is logged.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -119,6 +119,7 @@ def test_configured_image_takes_precedence_without_disabling_image_relation():
         "runner-noble-amd64"
     )
     assert out.get_relation(image_relation.id).local_unit_data["project_name"] == "myproject"
+    assert "Configured image overrides the image builder relation" in caplog.messages
 
 
 def test_blank_configured_image_falls_back_to_image_relation():
@@ -183,7 +184,7 @@ def test_clearing_configured_image_without_relation_withdraws_image():
     """
     arrange: A configured image has published a complete GARM relation payload.
     act: Clear the image config while no image builder relation exists.
-    assert: The charm blocks and withdraws image_id, so GARM skips the incomplete scaleset.
+    assert: The charm blocks and withdraws the image-dependent payload.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -211,9 +212,15 @@ def test_clearing_configured_image_without_relation_withdraws_image():
         "Missing image config or image builder relation"
     )
     assert "image_id" not in garm_out.local_unit_data
-    assert garm_out.local_unit_data["openstack_auth_url"] == (
-        "https://keystone.example.com:5000/v3"
-    )
+    assert "openstack_auth_url" not in garm_out.local_unit_data
+    assert "openstack_password_secret_uri" not in garm_out.local_unit_data
+    assert "github_private_key_secret_uri" not in garm_out.local_unit_data
+    relation_id = garm_relation.id
+    relation_secrets = {
+        secret.label: secret for secret in cleared.secrets if secret.label is not None
+    }
+    assert relation_id not in relation_secrets["configurator-password"].remote_grants
+    assert relation_id not in relation_secrets["configurator-github-key"].remote_grants
 
 
 # Represents a missing config value in parameterized tests below
@@ -567,7 +574,7 @@ def test_status_waiting_when_image_relation_has_no_uuid():
     """
     arrange: Valid config, image relation joined, but provider has not set an image UUID yet.
     act: relation_changed fires (no UUID in remote data).
-    assert: Unit status is Waiting.
+    assert: Unit waits specifically for the connected image builder.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -579,9 +586,7 @@ def test_status_waiting_when_image_relation_has_no_uuid():
         relations=[image_relation],
     )
     out = ctx.run(ctx.on.relation_changed(image_relation), state)
-    assert out.unit_status == ops.WaitingStatus(
-        "Waiting for image config or image UUID from image builder"
-    )
+    assert out.unit_status == ops.WaitingStatus("Waiting for image UUID from image builder")
 
 
 def test_status_active_when_image_uuid_is_present():

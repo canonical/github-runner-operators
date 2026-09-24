@@ -3,6 +3,8 @@
 
 """State of the GARM configurator charm."""
 
+import logging
+
 import ops
 from pydantic import (
     BaseModel,
@@ -14,6 +16,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+logger = logging.getLogger(__name__)
 
 OPENSTACK_AUTH_URL_CONFIG_NAME = "openstack-auth-url"
 OPENSTACK_USERNAME_CONFIG_NAME = "openstack-username"
@@ -70,14 +74,6 @@ class CharmConfigInvalidError(Exception):
         """
         super().__init__(msg)
         self.msg = msg
-
-
-def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
-    """Return a stripped optional string configuration value."""
-    value = charm.config.get(key)
-    if not value:
-        return None
-    return str(value).strip() or None
 
 
 class ProviderConfig(BaseModel):
@@ -293,10 +289,8 @@ class ScalesetConfig(BaseModel):
                 f"{SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME}"
             )
 
-        repo = charm.config.get(SCALESET_REPO_CONFIG_NAME)
-        repo = str(repo).strip() if repo else None
-        org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
-        org = str(org).strip() if org else None
+        repo = _get_optional_string_config(charm, SCALESET_REPO_CONFIG_NAME)
+        org = _get_optional_string_config(charm, SCALESET_ORG_CONFIG_NAME)
         runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "Default")).strip()
 
         if repo and org:
@@ -330,6 +324,12 @@ class ScalesetConfig(BaseModel):
             enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
         )
+
+
+def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
+    """Return a stripped optional string configuration value."""
+    value = charm.config.get(key)
+    return str(value).strip() or None if value else None
 
 
 class RunnerConfig(BaseModel):
@@ -531,7 +531,10 @@ class CharmState:
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
-        image = scaleset_config.image or _get_image_id_from_relation(charm)
+        related_image = _get_image_id_from_relation(charm)
+        image = scaleset_config.image or related_image
+        if scaleset_config.image and related_image:
+            logger.info("Configured image overrides the image builder relation")
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
