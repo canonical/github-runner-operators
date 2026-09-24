@@ -315,13 +315,12 @@ that lacks the Actions and Administration permissions. Check the details with
 under `/tmp`. Move the key into your home directory and pass that path.
 
 **The configurator stays blocked on `Missing required configuration`.** The status message names
-the first option that is missing. For this tutorial, every option in the `juju config` command
-above except `labels` is required. You can omit `image` only when an image builder relation
-provides it; this tutorial does not deploy one.
+the first required option that is missing. Set that option in the `juju config` command above.
 
 **The configurator stays blocked on `Missing image config or image builder relation`.** Configure
-`image` with a stable OpenStack image name or image ID. Alternatively, integrate an image builder;
-this tutorial does not deploy one.
+`image` with a unique OpenStack image name or an image ID. Alternatively, integrate an image
+builder; this tutorial does not deploy one. Removing both image sources makes GARM remove the
+scale set and its runners.
 
 **The configurator waits on `Waiting for image UUID from image builder`.** The integrated image
 builder has not published an image ID. Check the builder's status and logs, or remove the relation

@@ -8,6 +8,8 @@ import json
 import jubilant
 import pytest
 
+MISSING_IMAGE_STATUS = "Missing image config or image builder relation"
+
 
 @pytest.fixture(name="garm_configurator_app", scope="module")
 def deploy_garm_configurator_app_fixture(
@@ -58,11 +60,25 @@ def deploy_garm_configurator_app_fixture(
         },
     )
     juju.wait(
-        lambda status: jubilant.all_blocked(status, app_name),
+        lambda status: _configurator_is_blocked_without_image(status, app_name),
         timeout=5 * 60,
         delay=10,
     )
     return app_name
+
+
+def _configurator_is_blocked_without_image(
+    status: jubilant.Status, app_name: str
+) -> bool:
+    """Return whether the configurator unit is blocked specifically on its image source."""
+    if app_name not in status.apps:
+        return False
+    unit = status.apps[app_name].units.get(f"{app_name}/0")
+    return bool(
+        unit
+        and unit.workload_status.current == "blocked"
+        and unit.workload_status.message == MISSING_IMAGE_STATUS
+    )
 
 
 def test_garm_configurator_blocks_without_image_source(
@@ -74,8 +90,7 @@ def test_garm_configurator_blocks_without_image_source(
     act: Check the application status before any image builder is connected.
     assert: Application is Blocked because operator action is required.
     """
-    status = juju.status()
-    assert jubilant.all_blocked(status, garm_configurator_app)
+    assert _configurator_is_blocked_without_image(juju.status(), garm_configurator_app)
 
 
 def test_garm_configurator_uses_configured_image_without_builder(
@@ -97,7 +112,9 @@ def test_garm_configurator_uses_configured_image_without_builder(
     finally:
         juju.config(garm_configurator_app, values={"image": ""})
         juju.wait(
-            lambda status: jubilant.all_blocked(status, garm_configurator_app),
+            lambda status: _configurator_is_blocked_without_image(
+                status, garm_configurator_app
+            ),
             timeout=5 * 60,
             delay=10,
         )

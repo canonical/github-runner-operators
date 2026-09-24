@@ -29,6 +29,20 @@ def test_e2e_label_is_unique_per_workflow_attempt(monkeypatch):
     assert len(second_attempt) <= 10
 
 
+def test_e2e_label_treats_empty_workflow_attempt_as_first_attempt(monkeypatch):
+    """
+    arrange: Spread exports an empty workflow attempt for a local run with a run ID.
+    act: Generate labels with an empty attempt and with the documented default of one.
+    assert: Both labels match, so an exported empty value does not bypass the default.
+    """
+    monkeypatch.setenv("GITHUB_RUN_ID", "35945417480")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "")
+    empty_attempt = fixtures._e2e_label()
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+
+    assert empty_attempt == fixtures._e2e_label()
+
+
 def test_spread_forwards_workflow_attempt_to_e2e_pytest():
     """
     arrange: The spread configuration used by the GARM E2E workflow.

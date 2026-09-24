@@ -329,7 +329,7 @@ class ScalesetConfig(BaseModel):
 def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
     """Return a stripped optional string configuration value."""
     value = charm.config.get(key)
-    return str(value).strip() or None if value else None
+    return (str(value).strip() if value else "") or None
 
 
 class RunnerConfig(BaseModel):

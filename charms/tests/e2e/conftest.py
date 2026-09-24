@@ -382,6 +382,17 @@ def deploy_e2e_scaleset_fixture(
         secret_uris=[password_secret, private_key_secret],
     )
 
+    try:
+        juju.wait(
+            lambda status: jubilant.all_active(status, app_name),
+            error=lambda status: jubilant.any_error(status, app_name),
+            timeout=5 * 60,
+            delay=10,
+        )
+    except (TimeoutError, jubilant.WaitError):
+        _collect_debug_info(juju, app_name)
+        raise
+
     # Integrate with GARM. This is what starts the workload: until provider configs
     # arrive from the configurator, the charm's restart() returns before starting it.
     juju.integrate(app_name, garm_app)
@@ -393,6 +404,7 @@ def deploy_e2e_scaleset_fixture(
             delay=10,
         )
     except (TimeoutError, jubilant.WaitError):
+        _collect_debug_info(juju, app_name)
         _collect_debug_info(juju, garm_app)
         raise
 
@@ -416,7 +428,7 @@ def deploy_e2e_scaleset_fixture(
 def _e2e_label() -> str:
     """Return a provider-safe scale-set label unique to this workflow attempt."""
     run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
-    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT") or "1"
     suffix = hashlib.sha256(f"{run_id}:{run_attempt}".encode()).hexdigest()[:6]
     return f"e2e-{suffix}"
 
