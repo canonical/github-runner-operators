@@ -129,7 +129,7 @@ config:
     aproxy-exclude-addresses:
       type: string
       description: |
-        Optional comma-separated IPv4 addresses/CIDRs to exclude from aproxy forwarding.
+        Optional comma-separated IPv4 addresses, CIDRs, or ranges to exclude from aproxy forwarding.
     aproxy-redirect-ports:
       type: string
       description: |
