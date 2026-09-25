@@ -1,0 +1,1352 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Fleet-level GARM health, CI service performance, capacity, and controller dependency signals.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "garm"
+      ],
+      "title": "GARM dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "min(garm_health{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "0=unhealthy, 1=healthy",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "GARM health",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(garm_job_queue_duration_seconds_bucket{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Job queue p95",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "green",
+                "value": 25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "min(100 * garm_github_rate_limit_remaining{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"} / clamp_min(garm_github_rate_limit_limit{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}, 1))",
+          "legendFormat": "remaining %",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Rate limit remaining",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "count(garm_runner_status{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "tracked instances",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Tracked runners",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (runner_status) (garm_runner_status{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "{{runner_status}}",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Runner state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "unit": "runners",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum(garm_scaleset_desired_runner_count{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "scale-set requested",
+          "range": true,
+          "refId": "65"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "count(garm_runner_status{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "tracked runners",
+          "range": true,
+          "refId": "66"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum(garm_scaleset_max_runners{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "scale-set maximum",
+          "range": true,
+          "refId": "67"
+        }
+      ],
+      "title": "Capacity fulfillment",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (outcome) (rate(garm_runner_lifecycle_events_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\",provider=~\"$provider\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Lifecycle outcomes",
+      "type": "timeseries",
+      "description": "Bootstrap and provider errors are the primary runner health signals."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(garm_runner_ready_duration_seconds_bucket{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\",provider=~\"$provider\"}[$__rate_interval])))",
+          "legendFormat": "ready p95",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Runner ready p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 120
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "max(time() - garm_scaleset_listener_last_success_timestamp{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "oldest poll age",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Scale-set listener age",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (error_kind) (rate(garm_provider_operation_errors_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\",provider=~\"$provider\"}[$__rate_interval]))",
+          "legendFormat": "provider: {{error_kind}}",
+          "range": true,
+          "refId": "65"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(garm_runner_errors_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\",provider=~\"$provider\"}[$__rate_interval]))",
+          "legendFormat": "runner errors",
+          "range": true,
+          "refId": "66"
+        }
+      ],
+      "title": "Provider and runner errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum by (operation, scope) (rate(garm_github_errors_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval])) / clamp_min(sum by (operation, scope) (rate(garm_github_operations_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval])), 1)",
+          "legendFormat": "{{operation}} / {{scope}}",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "GitHub API error ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "increase(garm_watcher_notify_timeouts_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[5m])",
+          "legendFormat": "dropped notifications / 5m",
+          "range": true,
+          "refId": "65"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (consumer) (garm_watcher_consumer_queue_depth{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "{{consumer}} queue depth",
+          "range": true,
+          "refId": "66"
+        }
+      ],
+      "title": "Watcher health",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "count by (status) (garm_job_status{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "{{status}}",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Jobs by status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (conclusion) (rate(garm_job_completed_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]))",
+          "legendFormat": "{{conclusion}}",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Completed jobs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (valid, reason) (rate(garm_webhook_received_total{juju_application=~\"$juju_application\",juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_unit=~\"$juju_unit\"}[$__rate_interval]))",
+          "legendFormat": "valid={{valid}} reason={{reason}}",
+          "range": true,
+          "refId": "65"
+        }
+      ],
+      "title": "Webhook validity",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "garm",
+    "operations"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Prometheus datasource",
+        "multi": true,
+        "name": "prometheusds",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(up{juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_application=~\"$juju_application\"},juju_unit)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju unit",
+        "multi": true,
+        "name": "juju_unit",
+        "options": [],
+        "query": {
+          "query": "label_values(up{juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\",juju_application=~\"$juju_application\"},juju_unit)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(up{juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\"},juju_application)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju application",
+        "multi": true,
+        "name": "juju_application",
+        "options": [],
+        "query": {
+          "query": "label_values(up{juju_model=~\"$juju_model\",juju_model_uuid=~\"$juju_model_uuid\"},juju_application)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(up{juju_model=~\"$juju_model\"},juju_model_uuid)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju model uuid",
+        "multi": true,
+        "name": "juju_model_uuid",
+        "options": [],
+        "query": {
+          "query": "label_values(up{juju_model=~\"$juju_model\"},juju_model_uuid)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(up,juju_model)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju model",
+        "multi": true,
+        "name": "juju_model",
+        "options": [],
+        "query": {
+          "query": "label_values(up,juju_model)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "GARM Operations",
+  "uid": "garm-operations",
+  "version": 1,
+  "weekStart": "",
+  "__inputs": [
+    {
+      "name": "prometheusds",
+      "label": "Prometheus / Mimir",
+      "description": "COS Mimir datasource",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ]
+}
