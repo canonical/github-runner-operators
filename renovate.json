@@ -39,8 +39,11 @@
       "datasourceTemplate": "pypi"
     }
   ],
-  "ignorePaths": ["docs/**"],
   "packageRules": [
+    {
+      "enabled": false,
+      "matchFileNames": ["docs/**"]
+    },
     {
       "groupName": "charm-ci",
       "description": "Keep the opcli git dependency (tox.ini) and the canonical/charm-ci reusable workflow refs (.github/workflows) in lockstep, since they must always point at the same charm-ci release.",
