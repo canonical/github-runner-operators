@@ -670,10 +670,9 @@ class GarmCharm(paas_charm.go.Charm):
 
         Returns:
             The spec, or None when the databag names no scaleset or is incomplete
-            or invalid, so the caller can skip the unit. ``image`` accepts an
-            OpenStack image name or ID; ``image_id`` is its legacy fallback.
-            Skips are logged except for malformed ``min_idle_runner``/``max_runner``
-            values, which skip silently.
+            or invalid, so the caller can skip the unit. Skips are logged except
+            for malformed ``min_idle_runner``/``max_runner`` values, which skip
+            silently.
         """
         name = data.get("name", "")
         if not name:
@@ -687,7 +686,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         required = {
             "provider_name": data.get("provider_name", ""),
-            "image": data.get("image", "") or data.get("image_id", ""),
+            "image": data.get("image_id", ""),
             "flavor": data.get("flavor", ""),
             "os_arch": data.get("os_arch", ""),
             "max_runner": data.get("max_runner", ""),

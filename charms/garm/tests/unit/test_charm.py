@@ -1214,18 +1214,19 @@ def test_scaleset_is_built_from_relation_data(ctx: Context, garm_api: _GarmApiMo
     assert scaleset.template_id == _TEMPLATE_ID
 
 
-def test_scaleset_prefers_image_key_over_legacy_image_id(ctx: Context, garm_api: _GarmApiMocks):
+def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_api: _GarmApiMocks):
     """
-    arrange: A configurator publishes the new image key and a different legacy image_id value.
+    arrange: A downgraded configurator withdraws image_id while a stale image key remains.
     act: Run update-status.
-    assert: The scale set uses the new image contract while retaining legacy compatibility.
+    assert: GARM ignores the stale key and removes the scale set.
     """
-    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "image": "stable-image"}
+    scaleset_data = {**_SCALESET_UNIT_DATA, "image": "stable-image"}
+    scaleset_data.pop("image_id")
+    data = {**_PROVIDER_UNIT_DATA, **scaleset_data}
 
     ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
 
-    (scalesets,) = garm_api.scaleset.return_value.reconcile.call_args.args
-    assert scalesets[0].image == "stable-image"
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
 
 
 def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api: _GarmApiMocks):

@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-09-23
 
-- `garm-configurator`: add the optional `image` configuration for selecting a runner image by stable OpenStack image name or image ID. The configured value takes precedence over the image builder relation, allowing deployments to promote the image behind a stable name without updating the scale set configuration. Existing deployments can continue to receive an image UUID through the `github_runner_image_v0` relation when `image` is unset.
+- `garm-configurator`: add the optional `image` configuration for selecting a runner image by stable OpenStack image name or image ID. The configured value takes precedence over the image builder relation, allowing deployments to promote the image behind a stable name without updating the scale set configuration. Existing deployments can continue to receive an image UUID through the `github_runner_image_v0` relation when `image` is unset. When neither source supplies an image, the configurator now reports Blocked instead of Waiting and GARM removes the scale set and its runners.
 
 ## 2026-09-17
 

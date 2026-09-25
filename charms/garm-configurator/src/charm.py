@@ -134,8 +134,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
         flavor, arch, runner counts, labels, runner group, remote-shell toggle,
-        and pre-install scripts) to the relation. ``image`` is the current wire
-        key; the equivalent legacy ``image_id`` key remains during migration.
+        and pre-install scripts) to the relation. The ``image_id`` wire field
+        carries either an OpenStack image name or ID for compatibility.
         The optional ``org`` and ``repo`` fields are included only when set.
 
         When the image reference is present and this unit holds leadership, also
@@ -159,7 +159,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
-            "image": state.image or "",
             "image_id": state.image or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
