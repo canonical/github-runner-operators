@@ -42,7 +42,7 @@ environment:
   OS_PROJECT_DOMAIN_NAME: '$(HOST: echo "${OS_PROJECT_DOMAIN_NAME:-}")'
   OS_REGION_NAME: '$(HOST: echo "${OS_REGION_NAME:-}")'
   OS_NETWORK: '$(HOST: echo "${OS_NETWORK:-}")'
-  E2E_RUNNER_IMAGE_NAME: '$(HOST: echo "${E2E_RUNNER_IMAGE_NAME:-}")'
+  E2E_RUNNER_IMAGE_ID: '$(HOST: echo "${E2E_RUNNER_IMAGE_ID:-}")'
   E2E_RUNNER_HTTP_PROXY: '$(HOST: echo "${E2E_RUNNER_HTTP_PROXY:-}")'
   E2E_APROXY_EXCLUDE_ADDRESSES: '$(HOST: echo "${E2E_APROXY_EXCLUDE_ADDRESSES:-}")'
   E2E_TUNNEL_USER: '$(HOST: echo "${E2E_TUNNEL_USER:-}")'
@@ -96,7 +96,7 @@ integration-suites:
       OS_PROJECT_DOMAIN_NAME={{ env.get("OS_PROJECT_DOMAIN_NAME", "") }}
       OS_REGION_NAME={{ env.get("OS_REGION_NAME", "") }}
       OS_NETWORK={{ env.get("OS_NETWORK", "") }}
-      E2E_RUNNER_IMAGE_NAME={{ env.get("E2E_RUNNER_IMAGE_NAME", "") }}
+      E2E_RUNNER_IMAGE_ID={{ env.get("E2E_RUNNER_IMAGE_ID", "") }}
       E2E_RUNNER_HTTP_PROXY={{ env.get("E2E_RUNNER_HTTP_PROXY", "") }}
       E2E_APROXY_EXCLUDE_ADDRESSES={{ env.get("E2E_APROXY_EXCLUDE_ADDRESSES", "") }}
       E2E_TUNNEL_USER={{ env.get("E2E_TUNNEL_USER", "") }}

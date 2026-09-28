@@ -300,7 +300,7 @@ not register masks for these itself.
 | `OS_PROJECT_DOMAIN_NAME` | OpenStack project domain name |
 | `OS_REGION_NAME` | OpenStack region name |
 | `OS_NETWORK` | OpenStack network for runner VMs |
-| `E2E_RUNNER_IMAGE_NAME` | Name of the published runner image the VMs boot from; must exist on the tenant |
+| `E2E_RUNNER_IMAGE_ID` | UUID of the published OpenStack runner image the VMs boot from; must be accessible to the tenant |
 | `E2E_OPENSTACK_FLAVOR` | Optional. OpenStack flavor for the runner VMs; the suite falls back to `m1.small` |
 | `E2E_GITHUB_APP_ID` | GitHub App ID |
 | `E2E_GITHUB_APP_INSTALLATION_ID` | Installation ID of that App on this repository |
@@ -308,6 +308,9 @@ not register masks for these itself.
 | `E2E_RUNNER_HTTP_PROXY` | Optional. Proxy the runner VMs' egress is routed through |
 | `E2E_APROXY_EXCLUDE_ADDRESSES` | Optional. Addresses excluded from the aproxy redirect when a proxy is set; the suite falls back to `10.150.0.0/15` |
 | `E2E_VAULT_KV_PATH` | Optional. Defaults to `kv/data/garm-e2e/prodstack` |
+
+If migrating from `E2E_RUNNER_IMAGE_NAME`, store the existing image UUID in
+`E2E_RUNNER_IMAGE_ID` before running the workflow. The old secret name is no longer read.
 
 The OpenStack username and password are **not** repository secrets. They are read at run
 time from the Vault KV v2 secret above, which must hold `username` and `password`.

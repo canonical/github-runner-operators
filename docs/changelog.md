@@ -11,6 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-09-24
 
 - `garm-configurator`: accept IPv4 address ranges in `aproxy-exclude-addresses`, in addition to individual addresses and CIDR networks.
+- GARM E2E: rename the runner image secret and environment variable from `E2E_RUNNER_IMAGE_NAME` to `E2E_RUNNER_IMAGE_ID` to reflect its OpenStack image UUID value. Store the existing UUID under the new secret name before running the workflow; the old name is no longer read.
 
 ## 2026-09-17
 

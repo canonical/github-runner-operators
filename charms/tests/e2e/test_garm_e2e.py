@@ -92,7 +92,7 @@ def test_garm_agent_shell(
 def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str):
     """
     arrange: GARM deployed with postgresql + traefik ingress; garm-configurator holding real
-        ProdStack credentials, a stable runner-image name, and a unique run label;
+        ProdStack credentials, a stable runner-image UUID, and a unique run label;
         GARM's controller metadata_url resolved to the routable LB address.
     act: Dispatch garm_e2e_test_run.yaml against the run label and wait for completion.
     assert: The workflow run concludes 'success' — which is only reachable if GARM
