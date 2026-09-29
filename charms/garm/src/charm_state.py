@@ -69,7 +69,8 @@ class RunnerConfig:
     Attributes:
         dockerhub_mirror: Docker registry mirror URL, or "".
         runner_http_proxy: Upstream HTTP proxy that aproxy forwards to, or "".
-        aproxy_exclude_addresses: Comma-separated addresses/CIDRs to bypass, or "".
+        aproxy_exclude_addresses: Comma-separated IPv4 addresses, CIDRs, or ranges to bypass,
+            or "".
         aproxy_redirect_ports: Comma-separated ports / N-M ranges to redirect, or "".
         otel_collector_endpoint: OTEL exporter endpoint, or "".
         pre_job_script: Operator bash appended to the pre-job hook, or "".
@@ -143,23 +144,33 @@ def _valid_port_tokens(spec: str) -> list[str]:
     return valid
 
 
+def _valid_ipv4_exclude_token(token: str) -> bool:
+    """Whether a token is an IPv4 address, CIDR, or ascending address range."""
+    endpoints = token.split("-")
+    try:
+        if len(endpoints) == 1:
+            return ipaddress.ip_network(token, strict=False).version == 4
+        if len(endpoints) != 2:
+            return False
+        start, end = (ipaddress.ip_address(endpoint) for endpoint in endpoints)
+    except ValueError:
+        return False
+    return start.version == 4 and end.version == 4 and start <= end
+
+
 def _valid_ipv4_tokens(spec: str) -> list[str]:
-    """Return only the valid IPv4 address/CIDR tokens from a comma list.
+    """Return valid IPv4 addresses, CIDRs, and ranges from a comma list.
 
     Args:
         spec: A comma-separated address string (possibly empty or untrusted).
 
     Returns:
-        The subset of tokens that parse as IPv4 networks.
+        The subset of tokens that parse as IPv4 addresses, networks, or ranges.
     """
     valid: list[str] = []
-    for token in spec.split(","):
-        token = token.strip()
-        try:
-            network = ipaddress.ip_network(token, strict=False)
-        except ValueError:
-            continue
-        if network.version == 4:
+    for raw_token in spec.split(","):
+        token = raw_token.strip()
+        if _valid_ipv4_exclude_token(token):
             valid.append(token)
     return valid
 
