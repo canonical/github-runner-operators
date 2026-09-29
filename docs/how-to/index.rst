@@ -1,11 +1,13 @@
+.. meta::
+   :description: Follow how-to guides for operating GARM and the GARM configurator.
+
 How-to guides
 =============
 
-The following guides cover key processes and common tasks for managing and using the GitHub runner charms.
+The following guides cover focused operational tasks for GARM and the
+GARM configurator.
 
 .. toctree::
    :maxdepth: 1
 
-   Contribute <contribute>
-   Enable log forwarding <enable-log-forwarding>
    Retrieve GARM admin credentials <retrieve-garm-credentials>

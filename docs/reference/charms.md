@@ -1,49 +1,62 @@
-# Charms
+# Charm reference
 
-This product is composed of two primary charms. The sections below describe each charm, its role,
-and the integrations it expects in a typical deployment.
+This page describes the two Juju charms that make up the GARM deployment.
 
-## GitHub runner webhook gateway charm
+## `garm` charm
 
-Purpose
+The `garm` charm deploys and manages GARM on Kubernetes. GARM provides the
+API and coordinates GitHub runner scale sets.
 
-- Receives GitHub webhooks and validates the `X-Hub-Signature-256` HMAC signature.
-- Forwards workflow job events and GitHub request metadata to an AMQP-compatible message broker.
+### Integrations
 
-Required integrations
+Required integrations:
 
-- AMQP message broker: the charm requires a `rabbitmq` relation to push webhook events.
+- `postgresql`: provides storage for GARM state.
+- `garm-configurator`: provides runner scale set and provider configuration
+  through the `garm_configurator_v0` interface.
 
-Optional integrations
+Optional integrations:
 
-- Tracing: the charm supports optional `tracing` relation to export OpenTelemetry traces.
+- `debug-ssh`: provides debug SSH access.
 
-Configuration
+### Actions
 
-- `webhook-secret`: required to validate GitHub webhook signatures.
+- `get-credentials`: displays the generated GARM administrator credentials.
 
-## GitHub runner planner charm
+### Service endpoints
 
-Purpose
+GARM serves its API and Prometheus metrics on port `8080`.
 
-- Provides a REST API for job and flavor management.
-- Consumes workflow job events from the AMQP broker and persists state in PostgreSQL.
-- Issues and reconciles auth tokens and flavor definitions for runner integrations.
+## `garm-configurator` charm
 
-Required integrations
+The `garm-configurator` charm stores the configuration for one GARM runner
+scale set and shares it with the `garm` charm.
 
-- AMQP message broker: the charm requires a `rabbitmq` relation to consume webhook events.
-- PostgreSQL: the charm requires a `postgresql` relation to store job and flavor data.
+### Integrations
 
-Optional integrations
+Required integrations:
 
-- Tracing: the charm can export OpenTelemetry traces when connected to a tracing charm.
+- `image`: provides a runner image through the `github_runner_image_v0`
+  interface.
 
-Provided integrations
+Provided integrations:
 
-- Planner relation: the charm provides the `planner` relation endpoint (interface `github_runner_planner_v0`) so the GitHub runner charm can
-  retrieve auth tokens and desired flavor state.
+- `garm-configurator`: provides configuration to the `garm` charm through the
+  `garm_configurator_v0` interface.
 
-Configuration
+### Configuration
 
-- `admin-token`: required to create or delete general auth tokens.
+The configuration options fall into these groups:
+
+- **GitHub:** App ID, installation ID, private key, repository or organization,
+  and runner group.
+- **OpenStack:** authentication URL, user, password secret, project, domains,
+  region, and network.
+- **Scale set:** name, flavor, architecture, minimum idle runners, maximum
+  runners, and labels.
+- **Runner behavior:** shell access, pre-install scripts, Docker registry
+  mirror, HTTP proxy, proxy exclusions and redirects, OpenTelemetry endpoint,
+  and pre-job script.
+
+The `openstack-password` and `github-app-private-key` options are Juju secret
+references. Do not provide those credentials as plain-text configuration.
