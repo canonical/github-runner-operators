@@ -23,6 +23,7 @@ The diagram above contains the following components:
 - GARM configurator charm: Provides configuration of a single GitHub scaleset to the GARM charm. Multiple GARM configurator charms can be related to a single GARM charm.
 - PostgreSQL charm: Provides a PostgreSQL database for the GARM charm to store its state.
 - OpenStack: The substrate where the runner VMs are spawned.
+- OpenTelemetry Collector charm: Scapes the metrics from the GARM charm and sends them to COS.
 
 ## Ingress
 
@@ -30,6 +31,5 @@ The GARM charm services ingress using the REST API of GARM on the 8080 port. The
 
 ## Observability
 
-- The GARM charm exposes Prometheus metrics that can be scraped by a monitoring stack and visualized
-  in Grafana dashboards.
-- The logs of the GARM charm are ingested by Loki to the dashboard.
+The GARM charm exposes Prometheus metrics that can be scraped by a monitoring stack and visualized in Grafana dashboards.
+The logs of the GARM charm are ingested by Loki to the dashboard.
