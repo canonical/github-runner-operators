@@ -12,6 +12,10 @@ Each revision is versioned by the date of the revision.
 
 - `garm-configurator`: accept IPv4 address ranges in `aproxy-exclude-addresses`, in addition to individual addresses and CIDR networks.
 
+## 2026-09-23
+
+- `garm-configurator`: add the optional `image` configuration for selecting a runner image by stable OpenStack image name or image ID. The configured value takes precedence over the image builder relation, allowing deployments to promote the image behind a stable name without updating the scale set configuration. Existing deployments can continue to receive an image UUID through the `github_runner_image_v0` relation when `image` is unset. When neither source supplies an image, the configurator now reports Blocked instead of Waiting and GARM removes the scale set and its runners.
+
 ## 2026-09-17
 
 - `garm`: run runners in GARM agent mode. The `garm` rock now builds the `garm-agent` binary for every architecture GARM can serve, and the charm publishes those binaries to GARM and switches agent mode on for each registered organization and repository. GARM serves the agent to each runner from its own store, so no runner and no GARM unit ever downloads an agent binary from github.com. The charm re-publishes a binary only when its checksum differs from the one already stored, so an agent upgrade shipped in a new rock revision costs one upload and no downtime. Existing deployments gain agent mode on upgrade with no operator action.

@@ -77,6 +77,14 @@ config:
       type: string
       description: |
         The CPU architecture for runners in the scaleset.
+    image:
+      type: string
+      description: |
+        Stable OpenStack image name or image ID to use for runners. An image name
+        must uniquely identify one image in the OpenStack project. When unset,
+        the image is read from the image relation for backwards compatibility.
+        If neither source provides an image, GARM removes this configurator's
+        scale set and its runners.
     min-idle-runner:
       type: int
       default: 0
@@ -147,7 +155,7 @@ requires:
   image:
     interface: github_runner_image_v0
     limit: 1
-    optional: false
+    optional: true
 
 provides:
   garm-configurator:
