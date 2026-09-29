@@ -82,6 +82,7 @@ class TestScaleSet(unittest.TestCase):
                             conclusion = '', 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             enterprise_id = '', 
+                            forge_instance_id = '', 
                             id = 56, 
                             labels = [
                                 ''
@@ -132,6 +133,8 @@ class TestScaleSet(unittest.TestCase):
                 os_arch = '',
                 os_type = '',
                 provider_name = '',
+                proxy_id = 56,
+                proxy_name = '',
                 repo_id = '',
                 repo_name = '',
                 runner_bootstrap_timeout = 56,

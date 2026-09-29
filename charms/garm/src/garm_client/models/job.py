@@ -34,6 +34,7 @@ class Job(BaseModel):
     conclusion: Optional[StrictStr] = Field(default=None, description="Conclusion is the outcome of the job. Possible values: \"success\", \"failure\", \"neutral\", \"cancelled\", \"skipped\", \"timed_out\", \"action_required\"")
     created_at: Optional[datetime] = None
     enterprise_id: Optional[UUID] = None
+    forge_instance_id: Optional[UUID] = None
     id: Optional[StrictInt] = Field(default=None, description="ID is the ID of the job.")
     labels: Optional[List[StrictStr]] = None
     locked_by: Optional[UUID] = None
@@ -53,7 +54,7 @@ class Job(BaseModel):
     updated_at: Optional[datetime] = None
     workflow_job_id: Optional[StrictInt] = None
     workflow_run_url: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["action", "completed_at", "conclusion", "created_at", "enterprise_id", "id", "labels", "locked_by", "name", "org_id", "repo_id", "repository_name", "repository_owner", "run_id", "runner_group_id", "runner_group_name", "runner_id", "runner_name", "scaleset_job_id", "started_at", "status", "updated_at", "workflow_job_id", "workflow_run_url"]
+    __properties: ClassVar[List[str]] = ["action", "completed_at", "conclusion", "created_at", "enterprise_id", "forge_instance_id", "id", "labels", "locked_by", "name", "org_id", "repo_id", "repository_name", "repository_owner", "run_id", "runner_group_id", "runner_group_name", "runner_id", "runner_name", "scaleset_job_id", "started_at", "status", "updated_at", "workflow_job_id", "workflow_run_url"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -111,6 +112,7 @@ class Job(BaseModel):
             "conclusion": obj.get("conclusion"),
             "created_at": obj.get("created_at"),
             "enterprise_id": obj.get("enterprise_id"),
+            "forge_instance_id": obj.get("forge_instance_id"),
             "id": obj.get("id"),
             "labels": obj.get("labels"),
             "locked_by": obj.get("locked_by"),

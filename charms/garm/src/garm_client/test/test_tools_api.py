@@ -33,6 +33,13 @@ class TestToolsApi(unittest.TestCase):
         """
         pass
 
+    def test_list_garm_agent_releases(self) -> None:
+        """Test case for list_garm_agent_releases
+
+        List the garm-agent releases available at the controller's releases URL,
+        """
+        pass
+
     def test_upload_garm_agent_tool(self) -> None:
         """Test case for upload_garm_agent_tool
 

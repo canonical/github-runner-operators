@@ -31,9 +31,10 @@ except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
 import garm_template
+from agent_tools import AgentToolsError
 from charm import GARM_ADMIN_CREDENTIALS_LABEL, GARM_PORT, GARM_SECRETS_LABEL, GarmCharm
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, GARM_CONFIGURATOR_RELATION_NAME
-from garm_api import GarmConnectionError
+from garm_api import GarmApiError, GarmConnectionError
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
     MANAGED_CREDENTIAL_DESCRIPTION,
@@ -101,6 +102,7 @@ _SCALESET_UNIT_DATA = {
 }
 
 _TEMPLATE_ID = 99
+_AGENT_VERSION = "v0.1.1"
 
 
 @pytest.fixture(name="ctx")
@@ -120,6 +122,7 @@ class _GarmApiMocks:
         entity: charm.EntityReconciler.
         scaleset: charm.ScalesetReconciler.
         apply_template: charm._apply_garm_template, returning _TEMPLATE_ID.
+        agent_tools: charm.ensure_agent_tools, returning _AGENT_VERSION.
         calls: Parent mock recording the reconcile steps in the order they run.
     """
 
@@ -130,6 +133,7 @@ class _GarmApiMocks:
     entity: MagicMock
     scaleset: MagicMock
     apply_template: MagicMock
+    agent_tools: MagicMock
     calls: MagicMock
 
 
@@ -143,12 +147,14 @@ def garm_api_fixture() -> typing.Iterator[_GarmApiMocks]:
         patch("charm.EntityReconciler") as entity_cls,
         patch("charm.ScalesetReconciler") as scaleset_cls,
         patch("charm._apply_garm_template", return_value=_TEMPLATE_ID) as apply_template,
+        patch("charm.ensure_agent_tools", return_value=_AGENT_VERSION) as agent_tools,
     ):
         auth_client = auth_cls.from_login.return_value
         # No scaleset is mid-replacement by default, so the charm reports active.
         scaleset_cls.return_value.reconcile.return_value = []
         calls = MagicMock()
         calls.attach_mock(auth_client.update_controller, "controller")
+        calls.attach_mock(agent_tools, "agent_tools")
         calls.attach_mock(github_cls.return_value.reconcile, "github")
         calls.attach_mock(entity_cls.return_value.reconcile, "entity")
         calls.attach_mock(scaleset_cls.return_value.reconcile, "scaleset")
@@ -160,6 +166,7 @@ def garm_api_fixture() -> typing.Iterator[_GarmApiMocks]:
             entity=entity_cls,
             scaleset=scaleset_cls,
             apply_template=apply_template,
+            agent_tools=agent_tools,
             calls=calls,
         )
 
@@ -183,6 +190,7 @@ def _state(
     postgresql_data: dict | None = None,
     configurator_related: bool = True,
     configurator_units_data: dict[int, dict] | None = None,
+    configurator_relations: typing.Sequence[Relation] | None = None,
     debug_ssh_related: bool = False,
     secrets: typing.Sequence[Secret] = (),
     unit_status: ops.StatusBase | None = None,
@@ -206,16 +214,20 @@ def _state(
         ),
     ]
     if configurator_related:
-        relations.append(
-            Relation(
-                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
-                remote_app_name="garm-configurator",
-                remote_units_data=(
-                    {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
-                    if configurator_units_data is None
-                    else configurator_units_data
-                ),
-            )
+        relations.extend(
+            configurator_relations
+            if configurator_relations is not None
+            else [
+                Relation(
+                    endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                    remote_app_name="garm-configurator",
+                    remote_units_data=(
+                        {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
+                        if configurator_units_data is None
+                        else configurator_units_data
+                    ),
+                )
+            ]
         )
     if debug_ssh_related:
         relations.append(
@@ -364,25 +376,97 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
     assert out.unit_status == ops.ActiveStatus()
 
 
-def test_provider_environment_is_sorted_by_configurator_unit(
-    ctx: Context, garm_api: _GarmApiMocks
+@pytest.mark.parametrize(
+    "unit_count, expected_status, expected_provider_names",
+    [
+        pytest.param(
+            0,
+            ops.WaitingStatus("Waiting for garm-configurator relation"),
+            None,
+            id="no-units",
+        ),
+        pytest.param(1, ops.ActiveStatus(), ["garm-configurator-0"], id="one-unit"),
+        pytest.param(
+            2,
+            ops.ActiveStatus(),
+            ["garm-configurator-0"],
+            id="two-units",
+        ),
+    ],
+)
+def test_configurator_application_uses_first_unit(
+    ctx: Context,
+    garm_api: _GarmApiMocks,
+    caplog: pytest.LogCaptureFixture,
+    unit_count: int,
+    expected_status: ops.StatusBase,
+    expected_provider_names: list[str] | None,
 ):
     """
-    arrange: Two configurator units publish provider data.
-    act: Reconcile the charm.
-    assert: Providers are serialized in unit-name order, so unchanged relation data produces a
-        stable Pebble environment.
+    arrange: A configurator application has the parametrized number of units.
+    act: Reconcile the GARM charm.
+    assert: No units waits; otherwise only the first unit configures GARM, with a warning when
+        additional units are ignored.
     """
-    provider_data = {
-        1: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA},
-        0: {
+    unit_data = {
+        unit_id: {
             **_PROVIDER_UNIT_DATA,
             **_SCALESET_UNIT_DATA,
-            "openstack_auth_url": "https://ks0.example.com:5000/v3",
-        },
+            "provider_name": f"garm-configurator-{unit_id}",
+        }
+        for unit_id in range(unit_count)
     }
 
-    first = ctx.run(ctx.on.update_status(), _state(configurator_units_data=provider_data))
+    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data=unit_data))
+
+    assert out.unit_status == expected_status
+    if expected_provider_names is not None:
+        providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
+        assert [provider["unit_name"] for provider in providers] == expected_provider_names
+    else:
+        garm_api.scaleset.assert_not_called()
+    assert ("using first unit" in caplog.text) is (unit_count > 1)
+
+
+def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: Two separately deployed configurator applications publish provider data.
+    act: Reconcile the GARM charm.
+    assert: Both providers are rendered and reconciliation completes, so the endpoint supports
+        multiple remote applications as declared by its metadata.
+    """
+    configurator_relations = [
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            remote_app_name="configurator-a",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": "scaleset-a",
+                    "provider_name": "configurator-a-0",
+                }
+            },
+        ),
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            remote_app_name="configurator-b",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": "scaleset-b",
+                    "provider_name": "configurator-b-0",
+                    "openstack_auth_url": "https://ks2.example.com:5000/v3",
+                }
+            },
+        ),
+    ]
+
+    first = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_relations=configurator_relations),
+    )
     second = ctx.run(ctx.on.update_status(), first)
 
     first_environment = _service_environment(first)
@@ -390,9 +474,10 @@ def test_provider_environment_is_sorted_by_configurator_unit(
     assert first_environment["GARM_PROVIDERS_JSON"] == second_environment["GARM_PROVIDERS_JSON"]
     providers = json.loads(first_environment["GARM_PROVIDERS_JSON"])
     assert [provider["unit_name"] for provider in providers] == [
-        "garm-configurator-0",
-        "garm-configurator-1",
+        "configurator-a-0",
+        "configurator-b-0",
     ]
+    assert second.unit_status == ops.ActiveStatus()
 
 
 def test_workload_is_not_configured_without_postgresql_data(ctx: Context, garm_api: _GarmApiMocks):
@@ -920,19 +1005,22 @@ def test_reconcilers_run_in_dependency_order(ctx: Context, garm_api: _GarmApiMoc
     act: Run update-status.
     assert: Controller URLs are configured first — GARM 409s every operational call until they
         are set — then credentials, entities and scalesets reconcile in that order, since
-        entities reference a credential and scalesets are created under an entity. All of them
-        run against the one authenticated client.
+        entities reference a credential and scalesets are created under an entity. The
+        garm-agent binaries are published before the entities that switch agent mode on, so
+        GARM never falls back to handing a runner a github.com download URL. All of them run
+        against the one authenticated client.
     """
     ctx.run(ctx.on.update_status(), _state())
 
     assert [name for name, _, _ in garm_api.calls.mock_calls] == [
         "controller",
+        "agent_tools",
         "github",
         "entity",
         "scaleset",
     ]
     garm_api.github.assert_called_once_with(garm_api.auth_client)
-    garm_api.entity.assert_called_once_with(garm_api.auth_client)
+    garm_api.entity.assert_called_once_with(garm_api.auth_client, True)
     garm_api.scaleset.assert_called_once_with(garm_api.auth_client)
 
 
@@ -1048,16 +1136,29 @@ def test_github_credential_is_built_from_relation_data(ctx: Context, garm_api: _
     )
 
 
-def test_units_sharing_a_github_app_yield_one_credential(ctx: Context, garm_api: _GarmApiMocks):
+def test_applications_sharing_a_github_app_yield_one_credential(
+    ctx: Context, garm_api: _GarmApiMocks
+):
     """
-    arrange: Two configurator units sharing one GitHub App and installation.
+    arrange: Two single-unit configurator applications share one GitHub App and installation.
     act: Run update-status.
     assert: They collapse to a single credential.
     """
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
     unit_data = {**_PROVIDER_UNIT_DATA, **_github_unit_data(key_secret.id, "1", "2")}
     state = _state(
-        configurator_units_data={0: dict(unit_data), 1: dict(unit_data)},
+        configurator_relations=[
+            Relation(
+                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                remote_app_name="configurator-a",
+                remote_units_data={0: dict(unit_data)},
+            ),
+            Relation(
+                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                remote_app_name="configurator-b",
+                remote_units_data={0: dict(unit_data)},
+            ),
+        ],
         secrets=[key_secret],
     )
 
@@ -1113,6 +1214,41 @@ def test_scaleset_is_built_from_relation_data(ctx: Context, garm_api: _GarmApiMo
     assert scaleset.template_id == _TEMPLATE_ID
 
 
+def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A downgraded configurator withdraws image_id while a stale image key remains.
+    act: Run update-status.
+    assert: GARM ignores the stale key and removes the scale set.
+    """
+    scaleset_data = {**_SCALESET_UNIT_DATA, "image": "stable-image"}
+    scaleset_data.pop("image_id")
+    data = {**_PROVIDER_UNIT_DATA, **scaleset_data}
+
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
+
+
+def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator publishes complete provider data and a scale-set payload without an
+        image, representing withdrawal of its previous image reference.
+    act: Run update-status.
+    assert: GARM remains provider-ready and reconciles an empty scale-set list, removing the old
+        scale set instead of waiting for configurator data.
+    """
+    scaleset_data = {**_SCALESET_UNIT_DATA}
+    scaleset_data.pop("image_id")
+
+    out = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **scaleset_data}}),
+    )
+
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
+    assert out.unit_status == ops.ActiveStatus()
+
+
 # --- Controller URLs ----------------------------------------------------------------------
 
 
@@ -1123,7 +1259,8 @@ def test_controller_urls_default_to_the_kubernetes_service_url(
     arrange: A ready charm with no ingress.
     act: Run update-status.
     assert: The controller URLs point at the in-cluster service, which runners reach for
-        metadata and callbacks.
+        metadata and callbacks, and agents are told to accept it despite it being plain
+        http — without which every agent would refuse to connect.
     """
     ctx.run(ctx.on.update_status(), _state())
 
@@ -1132,6 +1269,8 @@ def test_controller_urls_default_to_the_kubernetes_service_url(
         metadata_url=f"{base}/api/v1/metadata",
         callback_url=f"{base}/api/v1/callbacks",
         webhook_url=f"{base}/webhooks",
+        agent_url=f"{base}/agent",
+        allow_insecure_agent=True,
     )
 
 
@@ -1146,7 +1285,8 @@ def test_controller_urls_derive_from_the_ingress_url(
     """
     arrange: Ingress supplies the application's base URL, with and without a trailing slash.
     act: Run update-status.
-    assert: The pushed URLs are the same either way, with no double slashes in their paths.
+    assert: The pushed URLs are the same either way, with no double slashes in their paths,
+        and a TLS base URL leaves the insecure-agent escape hatch off.
     """
     with patch.object(GarmCharm, "_base_url", new_callable=PropertyMock, return_value=base_url):
         ctx.run(ctx.on.update_status(), _state())
@@ -1155,7 +1295,83 @@ def test_controller_urls_derive_from_the_ingress_url(
         metadata_url="https://garm.example.com/api/v1/metadata",
         callback_url="https://garm.example.com/api/v1/callbacks",
         webhook_url="https://garm.example.com/webhooks",
+        agent_url="https://garm.example.com/agent",
+        allow_insecure_agent=False,
     )
+
+
+def test_agent_tools_are_published_from_the_workload_container(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A ready charm.
+    act: Run update-status.
+    assert: The agent binaries are published through the authenticated client and the workload
+        container that carries them, and entities are then told agent mode is available.
+    """
+    ctx.run(ctx.on.update_status(), _state())
+
+    assert garm_api.agent_tools.call_args[0][0] is garm_api.auth_client
+    assert garm_api.agent_tools.call_args[0][1].name == "app"
+    garm_api.entity.assert_called_once_with(garm_api.auth_client, True)
+
+
+def test_agent_mode_is_left_unknown_when_the_binaries_are_unavailable(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A ready charm whose workload rock ships no agent binaries, as it does when the
+        charm is upgraded ahead of its resource.
+    act: Run update-status.
+    assert: The reconcile still completes and reports active, with agent mode left unknown
+        rather than forced off — and the scalesets still converge.
+    """
+    garm_api.agent_tools.side_effect = AgentToolsError("no manifest")
+
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    garm_api.entity.assert_called_once_with(garm_api.auth_client, None)
+    garm_api.scaleset.return_value.reconcile.assert_called_once()
+    assert out.unit_status == ops.ActiveStatus()
+
+
+def test_a_failed_agent_tools_upload_stops_the_reconcile(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A ready charm whose agent-binary upload GARM rejects.
+    act: Run update-status.
+    assert: No entity is reconciled and the charm waits, so agent mode is never switched on
+        against an object store that lacks a binary — which would have GARM hand runners a
+        github.com download URL.
+    """
+    garm_api.agent_tools.side_effect = GarmApiError("upload rejected")
+
+    out = ctx.run(ctx.on.update_status(), _state())
+
+    garm_api.entity.assert_not_called()
+    assert out.unit_status == ops.WaitingStatus("GARM sync failed")
+
+
+@pytest.mark.parametrize(
+    "databag_value, expected",
+    [("true", True), ("false", False), (None, False)],
+    ids=["enabled", "disabled", "absent"],
+)
+def test_remote_shell_follows_the_configurator_databag(
+    ctx: Context, garm_api: _GarmApiMocks, databag_value: str | None, expected: bool
+):
+    """
+    arrange: A configurator unit publishing enable_shell as true, as false, or not at all — the
+        last being an older configurator that predates the option.
+    act: Run update-status.
+    assert: The scaleset spec carries the requested setting, defaulting to off.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+    if databag_value is not None:
+        data["enable_shell"] = databag_value
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
+    assert [spec.enable_shell for spec in specs] == [expected]
 
 
 # --- Event wiring -------------------------------------------------------------------------

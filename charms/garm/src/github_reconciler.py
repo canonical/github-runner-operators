@@ -67,8 +67,8 @@ class GithubReconciler:
             cred = observed[spec.name]
             if not self._is_charm_managed(cred):
                 logger.warning(
-                    "Skipping GitHub credential '%s': the name is already used by a credential "
-                    "this charm does not manage",
+                    "Skipping GitHub credential record in GARM database: name='%s'; the name is "
+                    "already used by a credential this charm does not manage",
                     spec.name,
                 )
                 continue
@@ -80,7 +80,12 @@ class GithubReconciler:
                 and cred.id is not None
                 and cred.description == MANAGED_CREDENTIAL_DESCRIPTION
             ):
-                logger.info("Deleting orphaned GitHub credential '%s' (id=%s)", name, cred.id)
+                logger.info(
+                    "Deleting orphaned GitHub credential record from GARM database: "
+                    "name='%s', id=%s",
+                    name,
+                    cred.id,
+                )
                 try:
                     self._client.delete_credentials(cred.id)
                 except GarmApiError as exc:
@@ -88,8 +93,8 @@ class GithubReconciler:
                     # The entity reconciler removes the orphaned entity in this same pass, so the
                     # credential becomes deletable on the next reconcile — don't abort this one.
                     logger.warning(
-                        "Could not delete GitHub credential '%s' (still referenced; will retry):"
-                        " %s",
+                        "Could not delete GitHub credential record from GARM database: "
+                        "name='%s' (still referenced; will retry): %s",
                         name,
                         exc,
                     )
@@ -106,7 +111,7 @@ class GithubReconciler:
                 private_key_bytes=base64.b64encode(spec.private_key.encode()).decode("utf-8"),
             ),
         )
-        logger.info("Creating GitHub credential '%s'", spec.name)
+        logger.info("Creating GitHub credential record in GARM database: name='%s'", spec.name)
         self._client.create_credentials(params)
 
     def _maybe_update_credential(self, observed, spec: CredentialSpec) -> None:
@@ -114,11 +119,15 @@ class GithubReconciler:
         # app secrets are not returned by the list API, so key rotation cannot be
         # detected from REST state — that is an accepted limitation.
         if not self._credential_needs_update(observed, spec):
-            logger.debug("GitHub credential '%s' is up to date", spec.name)
+            logger.debug(
+                "GitHub credential record is up to date in GARM database: name='%s'", spec.name
+            )
             return
         if observed.id is None:
             logger.warning(
-                "Cannot update GitHub credential '%s': observed id is missing", spec.name
+                "Cannot update GitHub credential record in GARM database: name='%s'; observed id "
+                "is missing",
+                spec.name,
             )
             return
         params = UpdateGithubCredentialsParams(
@@ -129,7 +138,11 @@ class GithubReconciler:
                 private_key_bytes=base64.b64encode(spec.private_key.encode()).decode("utf-8"),
             ),
         )
-        logger.info("Updating GitHub credential '%s' (id=%s)", spec.name, observed.id)
+        logger.info(
+            "Updating GitHub credential record in GARM database: name='%s', id=%s",
+            spec.name,
+            observed.id,
+        )
         self._client.update_credentials(observed.id, params)
 
     @staticmethod

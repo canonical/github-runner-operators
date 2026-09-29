@@ -39,11 +39,12 @@ class CreatePoolParams(BaseModel):
     os_type: Optional[StrictStr] = None
     priority: Optional[StrictInt] = None
     provider_name: Optional[StrictStr] = None
+    proxy_id: Optional[StrictInt] = Field(default=None, description="ProxyID is the ID of the proxy definition runners in this pool will use.")
     runner_bootstrap_timeout: Optional[StrictInt] = None
     runner_prefix: Optional[StrictStr] = None
     tags: Optional[List[StrictStr]] = None
     template_id: Optional[StrictInt] = None
-    __properties: ClassVar[List[str]] = ["enable_shell", "enabled", "extra_specs", "flavor", "github-runner-group", "image", "max_runners", "min_idle_runners", "os_arch", "os_type", "priority", "provider_name", "runner_bootstrap_timeout", "runner_prefix", "tags", "template_id"]
+    __properties: ClassVar[List[str]] = ["enable_shell", "enabled", "extra_specs", "flavor", "github-runner-group", "image", "max_runners", "min_idle_runners", "os_arch", "os_type", "priority", "provider_name", "proxy_id", "runner_bootstrap_timeout", "runner_prefix", "tags", "template_id"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -108,6 +109,7 @@ class CreatePoolParams(BaseModel):
             "os_type": obj.get("os_type"),
             "priority": obj.get("priority"),
             "provider_name": obj.get("provider_name"),
+            "proxy_id": obj.get("proxy_id"),
             "runner_bootstrap_timeout": obj.get("runner_bootstrap_timeout"),
             "runner_prefix": obj.get("runner_prefix"),
             "tags": obj.get("tags"),

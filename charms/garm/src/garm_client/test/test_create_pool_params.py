@@ -47,6 +47,7 @@ class TestCreatePoolParams(unittest.TestCase):
                 os_type = '',
                 priority = 56,
                 provider_name = '',
+                proxy_id = 56,
                 runner_bootstrap_timeout = 56,
                 runner_prefix = '',
                 tags = [

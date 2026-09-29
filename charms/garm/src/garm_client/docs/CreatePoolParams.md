@@ -17,6 +17,7 @@ Name | Type | Description | Notes
 **os_type** | **str** |  | [optional] 
 **priority** | **int** |  | [optional] 
 **provider_name** | **str** |  | [optional] 
+**proxy_id** | **int** | ProxyID is the ID of the proxy definition runners in this pool will use. | [optional] 
 **runner_bootstrap_timeout** | **int** |  | [optional] 
 **runner_prefix** | **str** |  | [optional] 
 **tags** | **List[str]** |  | [optional] 

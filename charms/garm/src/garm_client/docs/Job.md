@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **conclusion** | **str** | Conclusion is the outcome of the job. Possible values: \&quot;success\&quot;, \&quot;failure\&quot;, \&quot;neutral\&quot;, \&quot;cancelled\&quot;, \&quot;skipped\&quot;, \&quot;timed_out\&quot;, \&quot;action_required\&quot; | [optional] 
 **created_at** | **datetime** |  | [optional] 
 **enterprise_id** | **UUID** |  | [optional] 
+**forge_instance_id** | **UUID** |  | [optional] 
 **id** | **int** | ID is the ID of the job. | [optional] 
 **labels** | **List[str]** |  | [optional] 
 **locked_by** | **UUID** |  | [optional] 

@@ -106,10 +106,27 @@ Class | Method | HTTP request | Description
 *EnterprisesApi* | [**update_enterprise**](garm_client/docs/EnterprisesApi.md#update_enterprise) | **PUT** /enterprises/{enterpriseID} | Update enterprise with the given parameters.
 *EnterprisesApi* | [**update_enterprise_pool**](garm_client/docs/EnterprisesApi.md#update_enterprise_pool) | **PUT** /enterprises/{enterpriseID}/pools/{poolID} | Update enterprise pool with the parameters given.
 *FirstRunApi* | [**first_run**](garm_client/docs/FirstRunApi.md#first_run) | **POST** /first-run | Initialize the first run of the controller.
+*ForgeInstancesApi* | [**create_forge_instance**](garm_client/docs/ForgeInstancesApi.md#create_forge_instance) | **POST** /forge-instances | Create forge instance with the given parameters.
+*ForgeInstancesApi* | [**create_forge_instance_pool**](garm_client/docs/ForgeInstancesApi.md#create_forge_instance_pool) | **POST** /forge-instances/{forgeInstanceID}/pools | Create forge instance pool with the parameters given.
+*ForgeInstancesApi* | [**delete_forge_instance**](garm_client/docs/ForgeInstancesApi.md#delete_forge_instance) | **DELETE** /forge-instances/{forgeInstanceID} | Delete forge instance by ID.
+*ForgeInstancesApi* | [**delete_forge_instance_pool**](garm_client/docs/ForgeInstancesApi.md#delete_forge_instance_pool) | **DELETE** /forge-instances/{forgeInstanceID}/pools/{poolID} | Delete forge instance pool by ID.
+*ForgeInstancesApi* | [**get_forge_instance**](garm_client/docs/ForgeInstancesApi.md#get_forge_instance) | **GET** /forge-instances/{forgeInstanceID} | Get forge instance by ID.
+*ForgeInstancesApi* | [**get_forge_instance_pool**](garm_client/docs/ForgeInstancesApi.md#get_forge_instance_pool) | **GET** /forge-instances/{forgeInstanceID}/pools/{poolID} | Get forge instance pool by ID.
+*ForgeInstancesApi* | [**get_forge_instance_webhook_info**](garm_client/docs/ForgeInstancesApi.md#get_forge_instance_webhook_info) | **GET** /forge-instances/{forgeInstanceID}/webhook | Get information about the GARM installed webhook on a forge instance.
+*ForgeInstancesApi* | [**install_forge_instance_webhook**](garm_client/docs/ForgeInstancesApi.md#install_forge_instance_webhook) | **POST** /forge-instances/{forgeInstanceID}/webhook | 
+*ForgeInstancesApi* | [**list_forge_instance_instances**](garm_client/docs/ForgeInstancesApi.md#list_forge_instance_instances) | **GET** /forge-instances/{forgeInstanceID}/instances | List forge instance runner instances.
+*ForgeInstancesApi* | [**list_forge_instance_pools**](garm_client/docs/ForgeInstancesApi.md#list_forge_instance_pools) | **GET** /forge-instances/{forgeInstanceID}/pools | List forge instance pools.
+*ForgeInstancesApi* | [**list_forge_instances**](garm_client/docs/ForgeInstancesApi.md#list_forge_instances) | **GET** /forge-instances | List all forge instances.
+*ForgeInstancesApi* | [**uninstall_forge_instance_webhook**](garm_client/docs/ForgeInstancesApi.md#uninstall_forge_instance_webhook) | **DELETE** /forge-instances/{forgeInstanceID}/webhook | Uninstall forge instance webhook.
+*ForgeInstancesApi* | [**update_forge_instance**](garm_client/docs/ForgeInstancesApi.md#update_forge_instance) | **PUT** /forge-instances/{forgeInstanceID} | Update forge instance with the given parameters.
+*ForgeInstancesApi* | [**update_forge_instance_pool**](garm_client/docs/ForgeInstancesApi.md#update_forge_instance_pool) | **PUT** /forge-instances/{forgeInstanceID}/pools/{poolID} | Update forge instance pool with the parameters given.
+*HooksApi* | [**get_forge_instance_webhook_info**](garm_client/docs/HooksApi.md#get_forge_instance_webhook_info) | **GET** /forge-instances/{forgeInstanceID}/webhook | Get information about the GARM installed webhook on a forge instance.
 *HooksApi* | [**get_org_webhook_info**](garm_client/docs/HooksApi.md#get_org_webhook_info) | **GET** /organizations/{orgID}/webhook | Get information about the GARM installed webhook on an organization.
 *HooksApi* | [**get_repo_webhook_info**](garm_client/docs/HooksApi.md#get_repo_webhook_info) | **GET** /repositories/{repoID}/webhook | Get information about the GARM installed webhook on a repository.
+*HooksApi* | [**install_forge_instance_webhook**](garm_client/docs/HooksApi.md#install_forge_instance_webhook) | **POST** /forge-instances/{forgeInstanceID}/webhook | 
 *HooksApi* | [**install_org_webhook**](garm_client/docs/HooksApi.md#install_org_webhook) | **POST** /organizations/{orgID}/webhook | 
 *HooksApi* | [**install_repo_webhook**](garm_client/docs/HooksApi.md#install_repo_webhook) | **POST** /repositories/{repoID}/webhook | 
+*HooksApi* | [**uninstall_forge_instance_webhook**](garm_client/docs/HooksApi.md#uninstall_forge_instance_webhook) | **DELETE** /forge-instances/{forgeInstanceID}/webhook | Uninstall forge instance webhook.
 *HooksApi* | [**uninstall_org_webhook**](garm_client/docs/HooksApi.md#uninstall_org_webhook) | **DELETE** /organizations/{orgID}/webhook | Uninstall organization webhook.
 *HooksApi* | [**uninstall_repo_webhook**](garm_client/docs/HooksApi.md#uninstall_repo_webhook) | **DELETE** /repositories/{repoID}/webhook | Uninstall organization webhook.
 *InstancesApi* | [**delete_instance**](garm_client/docs/InstancesApi.md#delete_instance) | **DELETE** /instances/{instanceName} | Delete runner instance by name.
@@ -144,25 +161,35 @@ Class | Method | HTTP request | Description
 *OrganizationsApi* | [**update_org**](garm_client/docs/OrganizationsApi.md#update_org) | **PUT** /organizations/{orgID} | Update organization with the parameters given.
 *OrganizationsApi* | [**update_org_pool**](garm_client/docs/OrganizationsApi.md#update_org_pool) | **PUT** /organizations/{orgID}/pools/{poolID} | Update organization pool with the parameters given.
 *PoolsApi* | [**create_enterprise_pool**](garm_client/docs/PoolsApi.md#create_enterprise_pool) | **POST** /enterprises/{enterpriseID}/pools | Create enterprise pool with the parameters given.
+*PoolsApi* | [**create_forge_instance_pool**](garm_client/docs/PoolsApi.md#create_forge_instance_pool) | **POST** /forge-instances/{forgeInstanceID}/pools | Create forge instance pool with the parameters given.
 *PoolsApi* | [**create_org_pool**](garm_client/docs/PoolsApi.md#create_org_pool) | **POST** /organizations/{orgID}/pools | Create organization pool with the parameters given.
 *PoolsApi* | [**create_repo_pool**](garm_client/docs/PoolsApi.md#create_repo_pool) | **POST** /repositories/{repoID}/pools | Create repository pool with the parameters given.
 *PoolsApi* | [**delete_enterprise_pool**](garm_client/docs/PoolsApi.md#delete_enterprise_pool) | **DELETE** /enterprises/{enterpriseID}/pools/{poolID} | Delete enterprise pool by ID.
+*PoolsApi* | [**delete_forge_instance_pool**](garm_client/docs/PoolsApi.md#delete_forge_instance_pool) | **DELETE** /forge-instances/{forgeInstanceID}/pools/{poolID} | Delete forge instance pool by ID.
 *PoolsApi* | [**delete_org_pool**](garm_client/docs/PoolsApi.md#delete_org_pool) | **DELETE** /organizations/{orgID}/pools/{poolID} | Delete organization pool by ID.
 *PoolsApi* | [**delete_pool**](garm_client/docs/PoolsApi.md#delete_pool) | **DELETE** /pools/{poolID} | Delete pool by ID.
 *PoolsApi* | [**delete_repo_pool**](garm_client/docs/PoolsApi.md#delete_repo_pool) | **DELETE** /repositories/{repoID}/pools/{poolID} | Delete repository pool by ID.
 *PoolsApi* | [**get_enterprise_pool**](garm_client/docs/PoolsApi.md#get_enterprise_pool) | **GET** /enterprises/{enterpriseID}/pools/{poolID} | Get enterprise pool by ID.
+*PoolsApi* | [**get_forge_instance_pool**](garm_client/docs/PoolsApi.md#get_forge_instance_pool) | **GET** /forge-instances/{forgeInstanceID}/pools/{poolID} | Get forge instance pool by ID.
 *PoolsApi* | [**get_org_pool**](garm_client/docs/PoolsApi.md#get_org_pool) | **GET** /organizations/{orgID}/pools/{poolID} | Get organization pool by ID.
 *PoolsApi* | [**get_pool**](garm_client/docs/PoolsApi.md#get_pool) | **GET** /pools/{poolID} | Get pool by ID.
 *PoolsApi* | [**get_repo_pool**](garm_client/docs/PoolsApi.md#get_repo_pool) | **GET** /repositories/{repoID}/pools/{poolID} | Get repository pool by ID.
 *PoolsApi* | [**list_enterprise_pools**](garm_client/docs/PoolsApi.md#list_enterprise_pools) | **GET** /enterprises/{enterpriseID}/pools | List enterprise pools.
+*PoolsApi* | [**list_forge_instance_pools**](garm_client/docs/PoolsApi.md#list_forge_instance_pools) | **GET** /forge-instances/{forgeInstanceID}/pools | List forge instance pools.
 *PoolsApi* | [**list_org_pools**](garm_client/docs/PoolsApi.md#list_org_pools) | **GET** /organizations/{orgID}/pools | List organization pools.
 *PoolsApi* | [**list_pools**](garm_client/docs/PoolsApi.md#list_pools) | **GET** /pools | List all pools.
 *PoolsApi* | [**list_repo_pools**](garm_client/docs/PoolsApi.md#list_repo_pools) | **GET** /repositories/{repoID}/pools | List repository pools.
 *PoolsApi* | [**update_enterprise_pool**](garm_client/docs/PoolsApi.md#update_enterprise_pool) | **PUT** /enterprises/{enterpriseID}/pools/{poolID} | Update enterprise pool with the parameters given.
+*PoolsApi* | [**update_forge_instance_pool**](garm_client/docs/PoolsApi.md#update_forge_instance_pool) | **PUT** /forge-instances/{forgeInstanceID}/pools/{poolID} | Update forge instance pool with the parameters given.
 *PoolsApi* | [**update_org_pool**](garm_client/docs/PoolsApi.md#update_org_pool) | **PUT** /organizations/{orgID}/pools/{poolID} | Update organization pool with the parameters given.
 *PoolsApi* | [**update_pool**](garm_client/docs/PoolsApi.md#update_pool) | **PUT** /pools/{poolID} | Update pool by ID.
 *PoolsApi* | [**update_repo_pool**](garm_client/docs/PoolsApi.md#update_repo_pool) | **PUT** /repositories/{repoID}/pools/{poolID} | Update repository pool with the parameters given.
 *ProvidersApi* | [**list_providers**](garm_client/docs/ProvidersApi.md#list_providers) | **GET** /providers | List all providers.
+*ProxiesApi* | [**create_proxy**](garm_client/docs/ProxiesApi.md#create_proxy) | **POST** /proxies | Create proxy with the parameters given.
+*ProxiesApi* | [**delete_proxy**](garm_client/docs/ProxiesApi.md#delete_proxy) | **DELETE** /proxies/{proxyID} | Delete proxy by ID.
+*ProxiesApi* | [**get_proxy**](garm_client/docs/ProxiesApi.md#get_proxy) | **GET** /proxies/{proxyID} | Get proxy by ID.
+*ProxiesApi* | [**list_proxies**](garm_client/docs/ProxiesApi.md#list_proxies) | **GET** /proxies | List proxies.
+*ProxiesApi* | [**update_proxy**](garm_client/docs/ProxiesApi.md#update_proxy) | **PUT** /proxies/{proxyID} | Update proxy with the parameters given.
 *RepositoriesApi* | [**create_repo**](garm_client/docs/RepositoriesApi.md#create_repo) | **POST** /repositories | Create repository with the parameters given.
 *RepositoriesApi* | [**create_repo_pool**](garm_client/docs/RepositoriesApi.md#create_repo_pool) | **POST** /repositories/{repoID}/pools | Create repository pool with the parameters given.
 *RepositoriesApi* | [**create_repo_scale_set**](garm_client/docs/RepositoriesApi.md#create_repo_scale_set) | **POST** /repositories/{repoID}/scalesets | Create repository scale set with the parameters given.
@@ -196,6 +223,7 @@ Class | Method | HTTP request | Description
 *TemplatesApi* | [**restore_templates**](garm_client/docs/TemplatesApi.md#restore_templates) | **POST** /templates/restore | Create template with the parameters given.
 *TemplatesApi* | [**update_template**](garm_client/docs/TemplatesApi.md#update_template) | **PUT** /templates/{templateID} | Update template with the parameters given.
 *ToolsApi* | [**admin_garm_agent_list**](garm_client/docs/ToolsApi.md#admin_garm_agent_list) | **GET** /tools/garm-agent | List GARM agent tools for admin users.
+*ToolsApi* | [**list_garm_agent_releases**](garm_client/docs/ToolsApi.md#list_garm_agent_releases) | **GET** /tools/garm-agent/releases | List the garm-agent releases available at the controller&#39;s releases URL,
 *ToolsApi* | [**upload_garm_agent_tool**](garm_client/docs/ToolsApi.md#upload_garm_agent_tool) | **POST** /tools/garm-agent | Upload a GARM agent tool binary.
 
 
@@ -207,6 +235,7 @@ Class | Method | HTTP request | Description
  - [ControllerInfo](garm_client/docs/ControllerInfo.md)
  - [CreateEnterpriseParams](garm_client/docs/CreateEnterpriseParams.md)
  - [CreateFileObjectParams](garm_client/docs/CreateFileObjectParams.md)
+ - [CreateForgeInstanceParams](garm_client/docs/CreateForgeInstanceParams.md)
  - [CreateGARMToolParams](garm_client/docs/CreateGARMToolParams.md)
  - [CreateGiteaCredentialsParams](garm_client/docs/CreateGiteaCredentialsParams.md)
  - [CreateGiteaEndpointParams](garm_client/docs/CreateGiteaEndpointParams.md)
@@ -214,6 +243,7 @@ Class | Method | HTTP request | Description
  - [CreateGithubEndpointParams](garm_client/docs/CreateGithubEndpointParams.md)
  - [CreateOrgParams](garm_client/docs/CreateOrgParams.md)
  - [CreatePoolParams](garm_client/docs/CreatePoolParams.md)
+ - [CreateProxyParams](garm_client/docs/CreateProxyParams.md)
  - [CreateRepoParams](garm_client/docs/CreateRepoParams.md)
  - [CreateScaleSetParams](garm_client/docs/CreateScaleSetParams.md)
  - [CreateTemplateParams](garm_client/docs/CreateTemplateParams.md)
@@ -225,6 +255,9 @@ Class | Method | HTTP request | Description
  - [ForgeCredentials](garm_client/docs/ForgeCredentials.md)
  - [ForgeEndpoint](garm_client/docs/ForgeEndpoint.md)
  - [ForgeEntity](garm_client/docs/ForgeEntity.md)
+ - [ForgeInstance](garm_client/docs/ForgeInstance.md)
+ - [GARMAgentRelease](garm_client/docs/GARMAgentRelease.md)
+ - [GARMAgentReleaseAsset](garm_client/docs/GARMAgentReleaseAsset.md)
  - [GARMAgentTool](garm_client/docs/GARMAgentTool.md)
  - [GARMAgentToolsPaginatedResponse](garm_client/docs/GARMAgentToolsPaginatedResponse.md)
  - [GARMAgentToolsPaginatedResponseResultsInner](garm_client/docs/GARMAgentToolsPaginatedResponseResultsInner.md)
@@ -244,6 +277,7 @@ Class | Method | HTTP request | Description
  - [Pool](garm_client/docs/Pool.md)
  - [PoolManagerStatus](garm_client/docs/PoolManagerStatus.md)
  - [Provider](garm_client/docs/Provider.md)
+ - [Proxy](garm_client/docs/Proxy.md)
  - [Repository](garm_client/docs/Repository.md)
  - [RestoreTemplateRequest](garm_client/docs/RestoreTemplateRequest.md)
  - [RunnerApplicationDownload](garm_client/docs/RunnerApplicationDownload.md)
@@ -260,6 +294,7 @@ Class | Method | HTTP request | Description
  - [UpdateGithubCredentialsParams](garm_client/docs/UpdateGithubCredentialsParams.md)
  - [UpdateGithubEndpointParams](garm_client/docs/UpdateGithubEndpointParams.md)
  - [UpdatePoolParams](garm_client/docs/UpdatePoolParams.md)
+ - [UpdateProxyParams](garm_client/docs/UpdateProxyParams.md)
  - [UpdateScaleSetParams](garm_client/docs/UpdateScaleSetParams.md)
  - [UpdateTemplateParams](garm_client/docs/UpdateTemplateParams.md)
  - [User](garm_client/docs/User.md)

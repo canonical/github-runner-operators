@@ -19,6 +19,7 @@ Name | Type | Description | Notes
 **os_arch** | **str** |  | [optional] 
 **os_type** | **str** |  | [optional] 
 **provider_name** | **str** |  | [optional] 
+**proxy_id** | **int** | ProxyID is the ID of the proxy definition runners in this scale set will use. | [optional] 
 **runner_bootstrap_timeout** | **int** |  | [optional] 
 **runner_prefix** | **str** |  | [optional] 
 **scale_set_id** | **int** |  | [optional] 

@@ -4,6 +4,7 @@
 """Unit tests for the GitHub reconciler."""
 
 import base64
+import logging
 from unittest.mock import MagicMock
 
 from garm_api import GarmApiError
@@ -57,15 +58,18 @@ def test_no_create_or_delete_when_empty():
     client.delete_credentials.assert_not_called()
 
 
-def test_create_credential_when_missing():
+def test_create_credential_when_missing(caplog):
     """
     arrange: A reconciler whose client reports no existing credentials.
     act: Reconcile a single desired App credential spec.
-    assert: create_credentials is called once with the spec's app auth fields.
+    assert: The GARM credential record is logged and created with the spec's app auth fields.
     """
     client = _mock_client(credentials=[])
     reconciler = GithubReconciler(client)
-    reconciler.reconcile([_cred_spec()])
+    with caplog.at_level(logging.INFO):
+        reconciler.reconcile([_cred_spec()])
+
+    assert "Creating GitHub credential record in GARM database: name='my-cred'" in caplog.messages
     client.create_credentials.assert_called_once()
     params = client.create_credentials.call_args[0][0]
     assert params.name == "my-cred"
@@ -76,16 +80,22 @@ def test_create_credential_when_missing():
     assert params.app.private_key_bytes == base64.b64encode(b"-----PEM-----").decode("utf-8")
 
 
-def test_update_adoptable_credential_when_description_changed():
+def test_update_adoptable_credential_when_description_changed(caplog):
     """
     arrange: A client reporting a credential with no description (unclaimed, so adoptable).
     act: Reconcile a desired credential carrying the managed description.
-    assert: update_credentials is called once for that credential id.
+    assert: The GARM credential record update is logged and issued for that credential id.
     """
     existing = {"name": "my-cred", "id": 7, "description": None}
     client = _mock_client(credentials=[existing])
     reconciler = GithubReconciler(client)
-    reconciler.reconcile([_cred_spec(description=MANAGED_CREDENTIAL_DESCRIPTION)])
+    with caplog.at_level(logging.INFO):
+        reconciler.reconcile([_cred_spec(description=MANAGED_CREDENTIAL_DESCRIPTION)])
+
+    assert (
+        "Updating GitHub credential record in GARM database: name='my-cred', id=7"
+        in caplog.messages
+    )
     client.update_credentials.assert_called_once()
     assert client.update_credentials.call_args[0][0] == 7
 
@@ -118,16 +128,22 @@ def test_no_update_credential_when_unchanged():
     client.create_credentials.assert_not_called()
 
 
-def test_delete_managed_orphan_credential():
+def test_delete_managed_orphan_credential(caplog):
     """
     arrange: A client reporting a managed credential that is absent from the desired set.
     act: Reconcile with no desired credentials.
-    assert: delete_credentials is called once with the orphan's id.
+    assert: The orphaned GARM credential record deletion is logged and issued with its id.
     """
     existing = {"name": "stale-cred", "id": 42, "description": MANAGED_CREDENTIAL_DESCRIPTION}
     client = _mock_client(credentials=[existing])
     reconciler = GithubReconciler(client)
-    reconciler.reconcile([])
+    with caplog.at_level(logging.INFO):
+        reconciler.reconcile([])
+
+    assert (
+        "Deleting orphaned GitHub credential record from GARM database: "
+        "name='stale-cred', id=42" in caplog.messages
+    )
     client.delete_credentials.assert_called_once_with(42)
 
 

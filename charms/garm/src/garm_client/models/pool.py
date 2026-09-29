@@ -39,6 +39,7 @@ class Pool(BaseModel):
     enterprise_name: Optional[StrictStr] = None
     extra_specs: Optional[Dict[str, Any]] = Field(default=None, description="ExtraSpecs is an opaque raw json that gets sent to the provider as part of the bootstrap params for instances. It can contain any kind of data needed by providers. The contents of this field means nothing to garm itself. We don't act on the information in this field at all. We only validate that it's a proper json.")
     flavor: Optional[StrictStr] = None
+    forge_instance_id: Optional[StrictStr] = None
     generation: Optional[StrictInt] = Field(default=None, description="Generation holds the numeric generation of the pool. This number will be incremented, every time certain settings of the pool, which may influence how runners are created (flavor, specs, image) are changed. When a runner is created, this generation will be copied to the runners as well. That way if some settings diverge, we can target those runners to be recreated.")
     github_runner_group: Optional[StrictStr] = Field(default=None, description="GithubRunnerGroup is the github runner group in which the runners will be added. The runner group must be created by someone with access to the enterprise.", alias="github-runner-group")
     id: Optional[StrictStr] = None
@@ -52,6 +53,8 @@ class Pool(BaseModel):
     os_type: Optional[StrictStr] = None
     priority: Optional[StrictInt] = Field(default=None, description="Priority is the priority of the pool. The higher the number, the higher the priority. When fetching matching pools for a set of tags, the result will be sorted in descending order of priority.")
     provider_name: Optional[StrictStr] = None
+    proxy_id: Optional[StrictInt] = Field(default=None, description="ProxyID is the ID of the proxy definition that will be used by runners spawned in this pool. Runners will use the proxy settings to reach back to GARM, the forge and any other resources they need during setup.")
+    proxy_name: Optional[StrictStr] = None
     repo_id: Optional[StrictStr] = None
     repo_name: Optional[StrictStr] = None
     runner_bootstrap_timeout: Optional[StrictInt] = None
@@ -60,7 +63,7 @@ class Pool(BaseModel):
     template_id: Optional[StrictInt] = None
     template_name: Optional[StrictStr] = None
     updated_at: Optional[datetime] = None
-    __properties: ClassVar[List[str]] = ["created_at", "enable_shell", "enabled", "endpoint", "enterprise_id", "enterprise_name", "extra_specs", "flavor", "generation", "github-runner-group", "id", "image", "instances", "max_runners", "min_idle_runners", "org_id", "org_name", "os_arch", "os_type", "priority", "provider_name", "repo_id", "repo_name", "runner_bootstrap_timeout", "runner_prefix", "tags", "template_id", "template_name", "updated_at"]
+    __properties: ClassVar[List[str]] = ["created_at", "enable_shell", "enabled", "endpoint", "enterprise_id", "enterprise_name", "extra_specs", "flavor", "forge_instance_id", "generation", "github-runner-group", "id", "image", "instances", "max_runners", "min_idle_runners", "org_id", "org_name", "os_arch", "os_type", "priority", "provider_name", "proxy_id", "proxy_name", "repo_id", "repo_name", "runner_bootstrap_timeout", "runner_prefix", "tags", "template_id", "template_name", "updated_at"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -138,6 +141,7 @@ class Pool(BaseModel):
             "enterprise_name": obj.get("enterprise_name"),
             "extra_specs": obj.get("extra_specs"),
             "flavor": obj.get("flavor"),
+            "forge_instance_id": obj.get("forge_instance_id"),
             "generation": obj.get("generation"),
             "github-runner-group": obj.get("github-runner-group"),
             "id": obj.get("id"),
@@ -151,6 +155,8 @@ class Pool(BaseModel):
             "os_type": obj.get("os_type"),
             "priority": obj.get("priority"),
             "provider_name": obj.get("provider_name"),
+            "proxy_id": obj.get("proxy_id"),
+            "proxy_name": obj.get("proxy_name"),
             "repo_id": obj.get("repo_id"),
             "repo_name": obj.get("repo_name"),
             "runner_bootstrap_timeout": obj.get("runner_bootstrap_timeout"),

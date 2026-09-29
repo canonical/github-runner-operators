@@ -27,6 +27,7 @@ class UpdateScaleSetParams(BaseModel):
     """
     UpdateScaleSetParams
     """ # noqa: E501
+    disable_update: Optional[StrictBool] = None
     enable_shell: Optional[StrictBool] = None
     enabled: Optional[StrictBool] = None
     extended_state: Optional[StrictStr] = None
@@ -38,12 +39,13 @@ class UpdateScaleSetParams(BaseModel):
     name: Optional[StrictStr] = None
     os_arch: Optional[StrictStr] = None
     os_type: Optional[StrictStr] = None
+    proxy_id: Optional[StrictInt] = Field(default=None, description="ProxyID is the ID of the proxy definition runners in this scale set will use. Setting it to 0 removes the proxy from the scale set.")
     runner_bootstrap_timeout: Optional[StrictInt] = None
     runner_group: Optional[StrictStr] = Field(default=None, description="GithubRunnerGroup is the github runner group in which the runners of this pool will be added to. The runner group must be created by someone with access to the enterprise.")
     runner_prefix: Optional[StrictStr] = None
     state: Optional[StrictStr] = None
     template_id: Optional[StrictInt] = None
-    __properties: ClassVar[List[str]] = ["enable_shell", "enabled", "extended_state", "extra_specs", "flavor", "image", "max_runners", "min_idle_runners", "name", "os_arch", "os_type", "runner_bootstrap_timeout", "runner_group", "runner_prefix", "state", "template_id"]
+    __properties: ClassVar[List[str]] = ["disable_update", "enable_shell", "enabled", "extended_state", "extra_specs", "flavor", "image", "max_runners", "min_idle_runners", "name", "os_arch", "os_type", "proxy_id", "runner_bootstrap_timeout", "runner_group", "runner_prefix", "state", "template_id"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -96,6 +98,7 @@ class UpdateScaleSetParams(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "disable_update": obj.get("disable_update"),
             "enable_shell": obj.get("enable_shell"),
             "enabled": obj.get("enabled"),
             "extended_state": obj.get("extended_state"),
@@ -107,6 +110,7 @@ class UpdateScaleSetParams(BaseModel):
             "name": obj.get("name"),
             "os_arch": obj.get("os_arch"),
             "os_type": obj.get("os_type"),
+            "proxy_id": obj.get("proxy_id"),
             "runner_bootstrap_timeout": obj.get("runner_bootstrap_timeout"),
             "runner_group": obj.get("runner_group"),
             "runner_prefix": obj.get("runner_prefix"),

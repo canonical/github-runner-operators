@@ -6,6 +6,7 @@ garm_client/api/credentials_api.py
 garm_client/api/endpoints_api.py
 garm_client/api/enterprises_api.py
 garm_client/api/first_run_api.py
+garm_client/api/forge_instances_api.py
 garm_client/api/hooks_api.py
 garm_client/api/instances_api.py
 garm_client/api/jobs_api.py
@@ -15,6 +16,7 @@ garm_client/api/objects_api.py
 garm_client/api/organizations_api.py
 garm_client/api/pools_api.py
 garm_client/api/providers_api.py
+garm_client/api/proxies_api.py
 garm_client/api/repositories_api.py
 garm_client/api/scalesets_api.py
 garm_client/api/templates_api.py
@@ -30,6 +32,7 @@ garm_client/docs/ControllerInfo.md
 garm_client/docs/ControllerInfoApi.md
 garm_client/docs/CreateEnterpriseParams.md
 garm_client/docs/CreateFileObjectParams.md
+garm_client/docs/CreateForgeInstanceParams.md
 garm_client/docs/CreateGARMToolParams.md
 garm_client/docs/CreateGiteaCredentialsParams.md
 garm_client/docs/CreateGiteaEndpointParams.md
@@ -37,6 +40,7 @@ garm_client/docs/CreateGithubCredentialsParams.md
 garm_client/docs/CreateGithubEndpointParams.md
 garm_client/docs/CreateOrgParams.md
 garm_client/docs/CreatePoolParams.md
+garm_client/docs/CreateProxyParams.md
 garm_client/docs/CreateRepoParams.md
 garm_client/docs/CreateScaleSetParams.md
 garm_client/docs/CreateTemplateParams.md
@@ -52,6 +56,10 @@ garm_client/docs/FirstRunApi.md
 garm_client/docs/ForgeCredentials.md
 garm_client/docs/ForgeEndpoint.md
 garm_client/docs/ForgeEntity.md
+garm_client/docs/ForgeInstance.md
+garm_client/docs/ForgeInstancesApi.md
+garm_client/docs/GARMAgentRelease.md
+garm_client/docs/GARMAgentReleaseAsset.md
 garm_client/docs/GARMAgentTool.md
 garm_client/docs/GARMAgentToolsPaginatedResponse.md
 garm_client/docs/GARMAgentToolsPaginatedResponseResultsInner.md
@@ -80,6 +88,8 @@ garm_client/docs/PoolManagerStatus.md
 garm_client/docs/PoolsApi.md
 garm_client/docs/Provider.md
 garm_client/docs/ProvidersApi.md
+garm_client/docs/ProxiesApi.md
+garm_client/docs/Proxy.md
 garm_client/docs/RepositoriesApi.md
 garm_client/docs/Repository.md
 garm_client/docs/RestoreTemplateRequest.md
@@ -100,6 +110,7 @@ garm_client/docs/UpdateGiteaEndpointParams.md
 garm_client/docs/UpdateGithubCredentialsParams.md
 garm_client/docs/UpdateGithubEndpointParams.md
 garm_client/docs/UpdatePoolParams.md
+garm_client/docs/UpdateProxyParams.md
 garm_client/docs/UpdateScaleSetParams.md
 garm_client/docs/UpdateTemplateParams.md
 garm_client/docs/User.md
@@ -111,6 +122,7 @@ garm_client/models/api_error_response.py
 garm_client/models/controller_info.py
 garm_client/models/create_enterprise_params.py
 garm_client/models/create_file_object_params.py
+garm_client/models/create_forge_instance_params.py
 garm_client/models/create_garm_tool_params.py
 garm_client/models/create_gitea_credentials_params.py
 garm_client/models/create_gitea_endpoint_params.py
@@ -118,6 +130,7 @@ garm_client/models/create_github_credentials_params.py
 garm_client/models/create_github_endpoint_params.py
 garm_client/models/create_org_params.py
 garm_client/models/create_pool_params.py
+garm_client/models/create_proxy_params.py
 garm_client/models/create_repo_params.py
 garm_client/models/create_scale_set_params.py
 garm_client/models/create_template_params.py
@@ -129,6 +142,9 @@ garm_client/models/file_object_paginated_response_results_inner.py
 garm_client/models/forge_credentials.py
 garm_client/models/forge_endpoint.py
 garm_client/models/forge_entity.py
+garm_client/models/forge_instance.py
+garm_client/models/garm_agent_release.py
+garm_client/models/garm_agent_release_asset.py
 garm_client/models/garm_agent_tool.py
 garm_client/models/garm_agent_tools_paginated_response.py
 garm_client/models/garm_agent_tools_paginated_response_results_inner.py
@@ -148,6 +164,7 @@ garm_client/models/password_login_params.py
 garm_client/models/pool.py
 garm_client/models/pool_manager_status.py
 garm_client/models/provider.py
+garm_client/models/proxy.py
 garm_client/models/repository.py
 garm_client/models/restore_template_request.py
 garm_client/models/runner_application_download.py
@@ -164,6 +181,7 @@ garm_client/models/update_gitea_endpoint_params.py
 garm_client/models/update_github_credentials_params.py
 garm_client/models/update_github_endpoint_params.py
 garm_client/models/update_pool_params.py
+garm_client/models/update_proxy_params.py
 garm_client/models/update_scale_set_params.py
 garm_client/models/update_template_params.py
 garm_client/models/user.py
@@ -177,6 +195,7 @@ garm_client/test/test_controller_info.py
 garm_client/test/test_controller_info_api.py
 garm_client/test/test_create_enterprise_params.py
 garm_client/test/test_create_file_object_params.py
+garm_client/test/test_create_forge_instance_params.py
 garm_client/test/test_create_garm_tool_params.py
 garm_client/test/test_create_gitea_credentials_params.py
 garm_client/test/test_create_gitea_endpoint_params.py
@@ -184,6 +203,7 @@ garm_client/test/test_create_github_credentials_params.py
 garm_client/test/test_create_github_endpoint_params.py
 garm_client/test/test_create_org_params.py
 garm_client/test/test_create_pool_params.py
+garm_client/test/test_create_proxy_params.py
 garm_client/test/test_create_repo_params.py
 garm_client/test/test_create_scale_set_params.py
 garm_client/test/test_create_template_params.py
@@ -199,6 +219,10 @@ garm_client/test/test_first_run_api.py
 garm_client/test/test_forge_credentials.py
 garm_client/test/test_forge_endpoint.py
 garm_client/test/test_forge_entity.py
+garm_client/test/test_forge_instance.py
+garm_client/test/test_forge_instances_api.py
+garm_client/test/test_garm_agent_release.py
+garm_client/test/test_garm_agent_release_asset.py
 garm_client/test/test_garm_agent_tool.py
 garm_client/test/test_garm_agent_tools_paginated_response.py
 garm_client/test/test_garm_agent_tools_paginated_response_results_inner.py
@@ -227,6 +251,8 @@ garm_client/test/test_pool_manager_status.py
 garm_client/test/test_pools_api.py
 garm_client/test/test_provider.py
 garm_client/test/test_providers_api.py
+garm_client/test/test_proxies_api.py
+garm_client/test/test_proxy.py
 garm_client/test/test_repositories_api.py
 garm_client/test/test_repository.py
 garm_client/test/test_restore_template_request.py
@@ -247,6 +273,7 @@ garm_client/test/test_update_gitea_endpoint_params.py
 garm_client/test/test_update_github_credentials_params.py
 garm_client/test/test_update_github_endpoint_params.py
 garm_client/test/test_update_pool_params.py
+garm_client/test/test_update_proxy_params.py
 garm_client/test/test_update_scale_set_params.py
 garm_client/test/test_update_template_params.py
 garm_client/test/test_user.py

@@ -18,6 +18,7 @@ import paas_charm.go
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
+from agent_tools import AgentToolsError, ensure_agent_tools
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
@@ -496,12 +497,13 @@ class GarmCharm(paas_charm.go.Charm):
     def _get_configurator_provider_configs(
         self,
     ) -> list[dict[str, str]]:
-        """Read OpenStack provider configs from all Configurator units.
+        """Read OpenStack provider configs from all Configurator applications.
 
-        Each Configurator unit writes its provider config to unit-level
-        relation data on the ``garm-configurator`` endpoint. This method
-        collects all such configs, keyed by unit name for TOML provider
-        naming.
+        Each Configurator application is expected to have one unit, which
+        writes its provider config to unit-level relation data on the
+        ``garm-configurator`` endpoint. If an application has multiple units,
+        its first unit by name is used. This method collects one config from
+        each application, keyed by unit name for TOML provider naming.
 
         Passwords stored as Juju secret URIs are resolved at this point
         so that the plaintext value is available for the provider's
@@ -512,13 +514,33 @@ class GarmCharm(paas_charm.go.Charm):
             (auth_url, username, password, project_name, etc.) plus a
             ``unit_name`` key for the provider's TOML name.
         """
-        relation = self.model.get_relation(GARM_CONFIGURATOR_RELATION_NAME)
-        if relation is None:
+        relations = sorted(
+            self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []),
+            key=lambda relation: relation.id,
+        )
+        if not relations:
             logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
         configs: list[dict[str, str]] = []
-        for unit in sorted(relation.units, key=lambda unit: unit.name):
+        for relation in relations:
+            units = sorted(relation.units, key=lambda unit: unit.name)
+            if not units:
+                logger.warning(
+                    "GARM configurator application has no units: relation_id=%d",
+                    relation.id,
+                )
+                return []
+            if len(units) > 1:
+                logger.warning(
+                    "GARM configurator application has multiple units; using first unit: "
+                    "relation_id=%d unit_count=%d unit=%s",
+                    relation.id,
+                    len(units),
+                    units[0].name,
+                )
+
+            unit = units[0]
             data = relation.data[unit]
             # Only include units that have sent the full provider config
             if "openstack_auth_url" not in data:
@@ -547,7 +569,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         logger.info(
             "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
-            len(relation.units),
+            sum(len(relation.units) for relation in relations),
             len(configs),
         )
         return configs
@@ -691,6 +713,7 @@ class GarmCharm(paas_charm.go.Charm):
             entity_name=entity_name,
             labels=[label.strip() for label in data.get("labels", "").split(",") if label.strip()],
             runner_group=data.get("runner_group", ""),
+            enable_shell=data.get("enable_shell", "") == "true",
             pre_install_scripts=_parse_pre_install_scripts(data.get("pre_install_scripts", "")),
             template_id=template_id,
             runner_config=RunnerConfig.from_databag(data),
@@ -801,10 +824,14 @@ class GarmCharm(paas_charm.go.Charm):
             # ``urls_required`` until the controller URLs are set; org/repo entities reference a
             # credential by name; and scalesets are created under a registered entity. So a single
             # authenticated client configures the URLs and reconciles credentials, then entities,
-            # then scalesets — each dependency before its dependants.
+            # then scalesets — each dependency before its dependants. The garm-agent binaries are
+            # published before the entities that switch agent mode on, because an entity in agent
+            # mode and no matching binary stored makes GARM fall back to handing the runner a
+            # github.com download URL.
             self._ensure_controller_urls(auth_client)
+            agent_mode = self._ensure_agent_tools(auth_client)
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
-            EntityReconciler(auth_client).reconcile(charm_state.desired_entities)
+            EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
             replacing = ScalesetReconciler(auth_client).reconcile(
                 self._build_desired_scalesets(template_id)
@@ -843,7 +870,33 @@ class GarmCharm(paas_charm.go.Charm):
             metadata_url=f"{base}/api/v1/metadata",
             callback_url=f"{base}/api/v1/callbacks",
             webhook_url=f"{base}/webhooks",
+            agent_url=f"{base}/agent",
+            allow_insecure_agent=not base.startswith("https://"),
         )
+
+    def _ensure_agent_tools(self, auth_client: GarmAuthenticatedClient) -> bool | None:
+        """Publish the rock's garm-agent binaries to GARM.
+
+        Args:
+            auth_client: Authenticated GARM API client.
+
+        Returns:
+            True once every architecture GARM can serve is published, so agent mode is
+            safe to enable. None when the binaries could not be read at all, which leaves
+            agent mode as it stands rather than flapping it off and on again.
+
+        Raises:
+            GarmApiError: If GARM rejects the upload. The caller waits and retries, which
+                keeps agent mode off on a fresh deployment and unchanged on an existing
+                one, rather than enabling it against a store that lacks a binary.
+        """
+        try:
+            version = ensure_agent_tools(auth_client, self.unit.get_container(CONTAINER_NAME))
+        except AgentToolsError as exc:
+            logger.warning("garm-agent binaries unavailable in the workload: %s", exc)
+            return None
+        logger.info("GARM agent mode enabled with garm-agent %s from the rock", version)
+        return True
 
 
 def _scaleset_replacement_status(replacing: list[ScalesetProgress]) -> str:

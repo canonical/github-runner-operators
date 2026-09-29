@@ -137,6 +137,7 @@ class ScalesetSpec:
     os_type: str = "linux"
     labels: list[str] = field(default_factory=list)
     runner_group: str = "Default"
+    enable_shell: bool = False
     pre_install_scripts: dict[str, str] = field(default_factory=dict)
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
@@ -1042,6 +1043,7 @@ class ScalesetReconciler:
                 "enabled": True,
                 "labels": sorted(spec.labels),
                 "github_runner_group": spec.runner_group or None,
+                "enable_shell": spec.enable_shell,
                 "extra_specs": _effective_extra_specs(spec) or None,
                 "template_id": spec.template_id,
             }
@@ -1097,6 +1099,7 @@ class ScalesetReconciler:
             max_runners=spec.max_runners,
             enabled=True,
             runner_group=spec.runner_group or None,
+            enable_shell=spec.enable_shell,
             extra_specs=extra_specs,
             template_id=spec.template_id,
         )
@@ -1124,6 +1127,7 @@ class ScalesetReconciler:
             or observed.min_idle_runners != spec.min_idle_runners
             or observed.enabled is not True
             or observed.github_runner_group != (spec.runner_group or None)
+            or bool(observed.enable_shell) != spec.enable_shell
             or observed_extra.get("pre_install_scripts", {})
             != desired_extra.get("pre_install_scripts", {})
             or bool(observed_extra.get("disable_updates"))

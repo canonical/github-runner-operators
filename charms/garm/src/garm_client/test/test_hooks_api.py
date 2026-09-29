@@ -26,6 +26,13 @@ class TestHooksApi(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_get_forge_instance_webhook_info(self) -> None:
+        """Test case for get_forge_instance_webhook_info
+
+        Get information about the GARM installed webhook on a forge instance.
+        """
+        pass
+
     def test_get_org_webhook_info(self) -> None:
         """Test case for get_org_webhook_info
 
@@ -40,6 +47,12 @@ class TestHooksApi(unittest.TestCase):
         """
         pass
 
+    def test_install_forge_instance_webhook(self) -> None:
+        """Test case for install_forge_instance_webhook
+
+        """
+        pass
+
     def test_install_org_webhook(self) -> None:
         """Test case for install_org_webhook
 
@@ -49,6 +62,13 @@ class TestHooksApi(unittest.TestCase):
     def test_install_repo_webhook(self) -> None:
         """Test case for install_repo_webhook
 
+        """
+        pass
+
+    def test_uninstall_forge_instance_webhook(self) -> None:
+        """Test case for uninstall_forge_instance_webhook
+
+        Uninstall forge instance webhook.
         """
         pass
 

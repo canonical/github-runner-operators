@@ -3,6 +3,7 @@
 
 """Unit tests for GarmConfiguratorCharm."""
 
+import dataclasses
 import json
 
 import ops
@@ -46,18 +47,181 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
     }
 
 
-def test_charm_waiting_with_valid_config_no_relation():
+def test_charm_blocked_with_valid_config_no_image_source():
     """
     arrange: All configs are valid but no image builder relation.
     act: Run config-changed.
-    assert: Unit status is Waiting — image builder relation is required.
+    assert: Unit is blocked until an image is configured or an image builder is integrated.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+    assert out.unit_status == ops.BlockedStatus("Missing image config or image builder relation")
+
+
+def test_configured_image_is_published_without_image_relation():
+    """
+    arrange: A stable image name is configured and only the GARM relation is joined.
+    act: Run config-changed.
+    assert: The charm is ready and publishes the complete payload with the stable image name.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    garm_out = out.get_relation(garm_relation.id)
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert "image" not in garm_out.local_unit_data
+    assert garm_out.local_unit_data["image_id"] == "runner-noble-amd64"
+    assert garm_out.local_unit_data["openstack_auth_url"] == (
+        "https://keystone.example.com:5000/v3"
+    )
+    assert garm_out.local_unit_data["github_app_id"] == "99999"
+
+
+def test_configured_image_takes_precedence_without_disabling_image_relation():
+    """
+    arrange: A stable image is configured and the legacy image relation provides a UUID.
+    act: Run config-changed.
+    assert: GARM receives the stable name, the relation receives credentials, and status reports
+        that the configured image overrides the builder.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready; configured image overrides image builder")
+    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == ("runner-noble-amd64")
+    assert out.get_relation(image_relation.id).local_unit_data["project_name"] == "myproject"
+
+
+def test_blank_configured_image_falls_back_to_image_relation():
+    """
+    arrange: The image config is blank and the legacy image relation provides a UUID.
+    act: Run config-changed.
+    assert: GARM receives the related UUID, preserving existing deployments.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "   "
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+
+
+def test_clearing_configured_image_falls_back_to_image_relation():
+    """
+    arrange: A configured image takes precedence over a related legacy image UUID.
+    act: Clear the image config while the image builder relation remains.
+    assert: The charm stays ready and republishes the related UUID to GARM.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=True,
+    )
+    configured = ctx.run(ctx.on.config_changed(), state)
+    cleared_config = dict(config)
+    cleared_config["image"] = ""
+
+    cleared = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(configured, config=cleared_config),
+    )
+
+    assert cleared.unit_status == ops.ActiveStatus("Ready")
+    assert cleared.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+
+
+def test_clearing_configured_image_without_relation_withdraws_only_image():
+    """
+    arrange: A configured image has published a complete GARM relation payload.
+    act: Clear the image config while no image builder relation exists.
+    assert: The charm blocks and withdraws only the image, retaining credentials so GARM
+        can remove the old scale set.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+    configured = ctx.run(ctx.on.config_changed(), state)
+    cleared_config = dict(config)
+    cleared_config["image"] = ""
+
+    cleared = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(configured, config=cleared_config),
+    )
+
+    garm_out = cleared.get_relation(garm_relation.id)
+    assert cleared.unit_status == ops.BlockedStatus(
+        "Missing image config or image builder relation"
+    )
+    assert "image_id" not in garm_out.local_unit_data
+    assert garm_out.local_unit_data["openstack_auth_url"] == (
+        "https://keystone.example.com:5000/v3"
+    )
+    assert "openstack_password_secret_uri" in garm_out.local_unit_data
+    assert "github_private_key_secret_uri" in garm_out.local_unit_data
+    relation_id = garm_relation.id
+    relation_secrets = {
+        secret.label: secret for secret in cleared.secrets if secret.label is not None
+    }
+    assert relation_id in relation_secrets["configurator-password"].remote_grants
+    assert relation_id in relation_secrets["configurator-github-key"].remote_grants
 
 
 # Represents a missing config value in parameterized tests below
@@ -233,16 +397,17 @@ def test_charm_not_blocked_with_http_auth_url():
     """
     arrange: openstack-auth-url uses http:// (not https://).
     act: Run config-changed.
-    assert: Unit status is not Blocked — http:// is a valid scheme.
+    assert: Unit is ready because http:// is a valid scheme.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
     config["openstack-auth-url"] = "http://keystone.local:5000/v3"
+    config["image"] = "runner-noble-amd64"
     state = State(config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
-    assert not isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status == ops.ActiveStatus("Ready")
 
 
 def test_charm_blocked_github_app_private_key_secret_missing_value_key():
@@ -410,7 +575,7 @@ def test_status_waiting_when_image_relation_has_no_uuid():
     """
     arrange: Valid config, image relation joined, but provider has not set an image UUID yet.
     act: relation_changed fires (no UUID in remote data).
-    assert: Unit status is Waiting.
+    assert: Unit waits specifically for the connected image builder.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -444,12 +609,12 @@ def test_status_active_when_image_uuid_is_present():
     assert out.unit_status == ops.ActiveStatus("Ready")
 
 
-def test_status_waiting_on_relation_broken():
+def test_status_blocked_on_relation_broken():
     """
     arrange: Valid config and the image relation being torn down.
     act: relation_broken fires.
-    assert: Unit status is Waiting — ops excludes the breaking relation from model.relations,
-        so the charm correctly reflects that it has no image builder connected.
+    assert: Unit is blocked because ops excludes the breaking relation from model.relations,
+        leaving no configured or related image source.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -461,7 +626,7 @@ def test_status_waiting_on_relation_broken():
         relations=[image_relation],
     )
     out = ctx.run(ctx.on.relation_broken(image_relation), state)
-    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
+    assert out.unit_status == ops.BlockedStatus("Missing image config or image builder relation")
 
 
 def test_garm_configurator_relation_data_reflects_charm_state():
@@ -500,22 +665,6 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     }
     for key, value in expected_relation_data.items():
         assert rel_out.local_unit_data[key] == value
-
-
-def test_garm_configurator_no_error_when_no_image_relation():
-    """
-    arrange: Valid config with no image builder relation.
-    act: Run config-changed.
-    assert: Status is waiting for image builder relation.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
-
-    out = ctx.run(ctx.on.config_changed(), state)
-
-    assert out.unit_status == ops.WaitingStatus("Waiting for image builder relation")
 
 
 def test_reconcile_writes_full_config_to_garm_relation():
@@ -701,7 +850,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         pytest.param(
             "aproxy-exclude-addresses",
             "10.0.0.1,not-an-ip",
-            "aproxy-exclude-addresses must be a comma-separated list of IPv4 addresses or CIDRs",
+            "aproxy-exclude-addresses must be a comma-separated list of IPv4 addresses, CIDRs, or ranges",
             id="aproxy-exclude-addresses-non-ip",
         ),
         pytest.param(
@@ -709,6 +858,12 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
             "2001:db8::1",
             "aproxy-exclude-addresses only supports IPv4",
             id="aproxy-exclude-addresses-ipv6",
+        ),
+        pytest.param(
+            "aproxy-exclude-addresses",
+            "10.0.0.8-10.0.0.1",
+            "aproxy-exclude-addresses must use ascending address ranges",
+            id="aproxy-exclude-addresses-inverted-range",
         ),
         pytest.param(
             "runner-http-proxy",
@@ -772,7 +927,9 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     config = _valid_config(secret, pk_secret)
     config["dockerhub-mirror"] = "https://mirror.example.com"
     config["runner-http-proxy"] = "http://proxy.example.com:3128"
-    config["aproxy-exclude-addresses"] = "10.0.0.1,192.168.0.0/16"
+    config["aproxy-exclude-addresses"] = (
+        "10.0.0.1,10.0.1.42/16,10.0.0.0-10.141.167.255,192.168.0.0/16"
+    )
     config["aproxy-redirect-ports"] = "80,443,8000-9000"
     config["otel-collector-endpoint"] = "http://otel.example.com:4317"
     config["pre-job-script"] = "  echo start  "
@@ -788,7 +945,10 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     rel_out = out.get_relation(garm_relation.id)
     assert rel_out.local_unit_data["dockerhub_mirror"] == "https://mirror.example.com"
     assert rel_out.local_unit_data["runner_http_proxy"] == "http://proxy.example.com:3128"
-    assert rel_out.local_unit_data["aproxy_exclude_addresses"] == "10.0.0.1,192.168.0.0/16"
+    assert (
+        rel_out.local_unit_data["aproxy_exclude_addresses"]
+        == "10.0.0.1,10.0.1.42/16,10.0.0.0-10.141.167.255,192.168.0.0/16"
+    )
     assert rel_out.local_unit_data["aproxy_redirect_ports"] == "80,443,8000-9000"
     assert rel_out.local_unit_data["otel_collector_endpoint"] == "http://otel.example.com:4317"
     assert rel_out.local_unit_data["pre_job_script"] == "echo start"
@@ -822,3 +982,30 @@ def test_runner_config_fields_absent_when_unset():
         "pre_job_script",
     ):
         assert rel_out.local_unit_data.get(key, "") == ""
+
+
+@pytest.mark.parametrize(
+    "configured, expected",
+    [(True, "true"), (False, "false"), (None, "true")],
+    ids=["enabled", "disabled", "default"],
+)
+def test_enable_shell_written_to_garm_configurator_relation(configured, expected):
+    """
+    arrange: Valid config with enable-shell set on, off, or left at its default.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: The databag carries the setting as a lowercase boolean string, which is how the
+        garm charm parses it onto the scaleset; the default is on, so an operator gets a
+        usable shell without extra configuration, and setting it false is what turns it off.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    if configured is not None:
+        config["enable-shell"] = configured
+    garm_relation = _make_garm_configurator_relation()
+    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.get_relation(garm_relation.id).local_unit_data["enable_shell"] == expected

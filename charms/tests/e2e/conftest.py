@@ -7,11 +7,17 @@ Reuses credential-agnostic fixtures from integration conftest:
 ``postgresql``, ``garm_app_deployed``, ``garm_app``.
 """
 
+import base64
+import hashlib
+import io
 import logging
 import os
+import pathlib
 import re
+import tarfile
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Iterator
 
 import jubilant
@@ -25,7 +31,6 @@ import requests
 from tests.integration.conftest import (  # noqa: F401
     _collect_debug_info,
     _deploy_configurator,
-    _deploy_image_builder,
     _garm_login,
     _get_garm_address,
     deploy_garm_app_no_integration_fixture,
@@ -49,7 +54,26 @@ logger = logging.getLogger(__name__)
 GARM_API_PORT = 8080
 SCALESET_DRAIN_TIMEOUT = 10 * 60
 TRAEFIK_CHANNEL = "latest/stable"
+CA_APP_NAME = "self-signed-certificates"
+# Not latest/stable: that revision is a 2025 leftover still on the v3
+# tls-certificates library, whose provider only reads CSRs from the *unit*
+# databag. traefik publishes to the *app* databag over v4, so the pair relates
+# cleanly, reports no error, and simply never issues a certificate.
+CA_CHANNEL = "1/stable"
 E2E_TUNNEL_LOCAL_PORT = 18080
+E2E_TUNNEL_LOCAL_TLS_PORT = 18443
+
+# The rock ships the GARM server only, so the client comes from an upstream
+# release. Pinned, with its published digest, so a new release cannot change the
+# test underneath it. The tag need not match the commit garm-rockcraft.yaml pins:
+# the shell wire protocol (GARM's workers/websocket/agent/messaging) is identical
+# between the two, so this client drives that server.
+GARM_CLI_VERSION = "v0.2.1"
+GARM_CLI_URL = (
+    f"https://github.com/cloudbase/garm/releases/download/{GARM_CLI_VERSION}"
+    "/garm-cli-linux-amd64.tgz"
+)
+GARM_CLI_SHA256 = "983fa54557f3f5ce3aa1eeb2387499f5f823d14512a0559ba888667bc3b3e88e"
 
 
 @pytest.fixture(scope="module", name="openstack_credentials")
@@ -93,18 +117,43 @@ def deploy_traefik_fixture(juju: jubilant.Juju) -> str:
     return app_name
 
 
+@pytest.fixture(scope="module", name="certificate_authority")
+def deploy_certificate_authority_fixture(juju: jubilant.Juju) -> str:
+    """Deploy a self-signed CA to put the ingress -- and so the agent -- on TLS.
+
+    garm-agent disables its own remote shell whenever the agent URL is not https
+    (``config.Validate()`` in garm-agent v0.1.1), silently rather than by failing.
+    A plain-http ingress therefore yields a deployment where agent mode works and
+    ``has_shell`` is false forever, which no test can distinguish from a bug. The
+    CA is what makes the shell reachable at all.
+
+    Returns:
+        The CA application name.
+    """
+    juju.deploy(CA_APP_NAME, channel=CA_CHANNEL)
+    juju.wait(
+        lambda status: jubilant.all_active(status, CA_APP_NAME),
+        error=lambda status: jubilant.any_error(status, CA_APP_NAME),
+        timeout=10 * 60,
+        delay=10,
+    )
+    return CA_APP_NAME
+
+
 @pytest.fixture(scope="module", name="garm_with_ingress")
 def integrate_garm_ingress_fixture(
     juju: jubilant.Juju,
     garm_app: str,
     traefik: str,
+    certificate_authority: str,
 ) -> str:
-    """Relate GARM to traefik so its controller URLs become routable.
+    """Relate GARM to traefik, on TLS, so its controller URLs become routable.
 
     Args:
         juju: Juju client for the model GARM is deployed in.
         garm_app: Name of the deployed GARM application.
         traefik: Name of the deployed traefik application.
+        certificate_authority: Name of the deployed CA application.
 
     Returns:
         The GARM application name.
@@ -121,7 +170,62 @@ def integrate_garm_ingress_fixture(
         timeout=10 * 60,
         delay=10,
     )
+
+    # Related only now, never before the ingress relation: traefik derives its
+    # certificate requests from the endpoints it currently proxies, so with
+    # nothing behind it there is no CSR to sign and the relation settles idle.
+    juju.integrate(f"{traefik}:certificates", certificate_authority)
+    # Waiting for `active` alone would race: traefik goes active, and advertises
+    # https URLs, while its status still reads "Certificate not available yet".
+    # GARM would then derive https URLs no VM can complete a handshake against.
+    juju.wait(
+        lambda status: _traefik_serving_scheme(status, traefik) == "https",
+        error=lambda status: jubilant.any_error(status, traefik, certificate_authority),
+        timeout=10 * 60,
+        delay=10,
+    )
     return garm_app
+
+
+def _traefik_serving_scheme(status: jubilant.Status, traefik: str) -> str | None:
+    """Read the scheme traefik reports serving on, once it has a certificate.
+
+    Args:
+        status: Juju status for the model traefik is deployed in.
+        traefik: Name of the deployed traefik application.
+
+    Returns:
+        The scheme of the advertised address, or None if it advertises none yet.
+    """
+    serving = re.search(r"(?P<scheme>https?)://", status.apps[traefik].app_status.message)
+    return serving.group("scheme") if serving else None
+
+
+def _trust_ingress_ca(juju: jubilant.Juju, garm_app: str, certificate_authority: str) -> None:
+    """Hand the ingress CA to GARM so runner VMs trust the callback URLs.
+
+    GARM writes ``ca_cert_bundle`` into every instance's cloud-init as a trusted
+    CA, which is what lets a VM complete the handshake against the self-signed
+    ingress. The charm does not manage this yet, so the suite sets it directly;
+    when the charm learns to feed its ingress CA to the controller this becomes
+    redundant and should be deleted.
+
+    Args:
+        juju: Juju client for the model GARM is deployed in.
+        garm_app: Name of the deployed GARM application.
+        certificate_authority: Name of the deployed CA application.
+    """
+    ca_certificate = juju.run(f"{certificate_authority}/0", "get-ca-certificate").results[
+        "ca-certificate"
+    ]
+    address = _get_garm_address(juju, garm_app)
+    response = requests.put(
+        f"http://{address}:{GARM_API_PORT}/api/v1/controller",
+        headers={"Authorization": f"Bearer {_garm_login(juju, address)}"},
+        json={"ca_cert_bundle": base64.b64encode(ca_certificate.encode()).decode()},
+        timeout=30,
+    )
+    response.raise_for_status()
 
 
 def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik: str) -> None:
@@ -162,36 +266,19 @@ def assert_controller_urls_routable(juju: jubilant.Juju, garm_app: str, traefik:
     )
 
 
-@pytest.fixture(scope="module", name="image_builder_stub")
-def deploy_image_builder_stub_fixture(juju: jubilant.Juju) -> str:
-    """Deploy any-charm as a stub image builder publishing the tenant's real image.
-
-    The same stub the integration suite deploys; what differs is the image name it
-    publishes over the relation -- one that exists on the tenant, so the provider
-    can actually boot it.
-    """
-    image_name = required_env("E2E_RUNNER_IMAGE_NAME")
-    return _deploy_image_builder(
-        juju=juju,
-        app_name="image-builder",
-        image_id=image_name,
-        tags="x64,noble",
-    )
-
-
 @pytest.fixture(scope="module", name="e2e_scaleset")
 def deploy_e2e_scaleset_fixture(
     juju: jubilant.Juju,
     garm_with_ingress: str,
     traefik: str,
+    certificate_authority: str,
     openstack_credentials: dict[str, str],
-    image_builder_stub: str,
     garm_configurator_charm_file: str,
 ) -> Iterator[str]:
     """Deploy garm-configurator with real tenant values and a unique run label.
 
     Creates Juju secrets for the password and private key, deploys the configurator,
-    integrates with the image builder and GARM, and waits for the scaleset to register.
+    configures a stable image name, integrates with GARM, and waits for the scaleset to register.
     Returns the unique runner label that runners will register with.
     """
     app_name = "garm-configurator"
@@ -200,14 +287,13 @@ def deploy_e2e_scaleset_fixture(
     # which is 50 fixed characters before the name starts, and Nova rejects tags
     # longer than 60. Reported upstream at
     # https://github.com/cloudbase/garm-provider-openstack/issues/34; until it is
-    # fixed the name has to fit. The last six digits of the run id keep the label
-    # unique across reruns, and the workflow serialises the suite repository-wide,
-    # so no two scale sets are ever live at once.
+    # fixed the name has to fit. A six-character digest of the run ID and attempt
+    # keeps the label unique across reruns, and the workflow serialises the suite
+    # repository-wide, so no two scale sets are ever live at once.
     # The promotion pipeline unsets GITHUB_RUN_ID to stop opcli's spread prepare
     # waiting on build artifacts it never produces, so the label needs a fallback
     # for when it is absent.
-    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
-    label = f"e2e-{run_id[-6:]}"
+    label = _e2e_label()
     garm_app = garm_with_ingress
     creds = openstack_credentials
     repo = required_env(GITHUB_REPOSITORY_ENV_VAR)
@@ -242,11 +328,16 @@ def deploy_e2e_scaleset_fixture(
         "github-app-private-key": private_key_secret,
         "name": label,
         "labels": label,
+        "image": required_env("E2E_RUNNER_IMAGE_NAME"),
         "flavor": os.environ.get("E2E_OPENSTACK_FLAVOR", "m1.small"),
         "os-arch": "amd64",
-        "min-idle-runner": "1",
+        "min-idle-runner": "0",
         "max-runner": "1",
         "repo": repo,
+        # Exercised by test_garm_agent_shell, and harmless to the workflow run:
+        # the agent runs whenever the entity has agent mode on, and this only
+        # decides whether GARM will relay a PTY over the websocket it opens.
+        "enable-shell": "true",
     }
     if runner_http_proxy:
         config_values["runner-http-proxy"] = runner_http_proxy
@@ -291,20 +382,18 @@ def deploy_e2e_scaleset_fixture(
         secret_uris=[password_secret, private_key_secret],
     )
 
-    # Integrate with image builder first
-    juju.integrate(app_name, image_builder_stub)
     try:
         juju.wait(
             lambda status: jubilant.all_active(status, app_name),
             error=lambda status: jubilant.any_error(status, app_name),
-            timeout=6 * 60,
+            timeout=5 * 60,
             delay=10,
         )
     except (TimeoutError, jubilant.WaitError):
         _collect_debug_info(juju, app_name)
         raise
 
-    # Then integrate with GARM. This is what starts the workload: until provider configs
+    # Integrate with GARM. This is what starts the workload: until provider configs
     # arrive from the configurator, the charm's restart() returns before starting it.
     juju.integrate(app_name, garm_app)
     try:
@@ -315,6 +404,7 @@ def deploy_e2e_scaleset_fixture(
             delay=10,
         )
     except (TimeoutError, jubilant.WaitError):
+        _collect_debug_info(juju, app_name)
         _collect_debug_info(juju, garm_app)
         raise
 
@@ -322,7 +412,21 @@ def deploy_e2e_scaleset_fixture(
     # moment GARM is serving and still before any runner has been asked for: a VM that
     # boots against an unroutable callback URL never reports back, and the failure
     # surfaces much later as a runner that simply never registers.
+    _trust_ingress_ca(juju, garm_app, certificate_authority)
     assert_controller_urls_routable(juju, garm_app, traefik)
+
+    # Only now ask for a runner, with both the CA and the controller URLs known good.
+    juju.config(app_name, {"min-idle-runner": "1"})
+    try:
+        juju.wait(
+            lambda status: jubilant.all_active(status, app_name, garm_app),
+            error=lambda status: jubilant.any_error(status, app_name),
+            timeout=6 * 60,
+            delay=10,
+        )
+    except (TimeoutError, jubilant.WaitError):
+        _collect_debug_info(juju, garm_app)
+        raise
 
     yield label
 
@@ -332,6 +436,14 @@ def deploy_e2e_scaleset_fixture(
         _drain_and_delete_scaleset(juju, garm_app, label)
     except (requests.RequestException, ValueError, KeyError) as exc:
         logger.warning("Best-effort scale set teardown did not complete: %s", exc)
+
+
+def _e2e_label() -> str:
+    """Return a provider-safe scale-set label unique to this workflow attempt."""
+    run_id = os.environ.get("GITHUB_RUN_ID") or uuid.uuid4().hex
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT") or "1"
+    suffix = hashlib.sha256(f"{run_id}:{run_attempt}".encode()).hexdigest()[:6]
+    return f"e2e-{suffix}"
 
 
 def _drain_and_delete_scaleset(juju: jubilant.Juju, garm_app: str, label: str) -> None:
@@ -456,14 +568,18 @@ def _force_remove_instance(
 def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> str:
     """Render the pre-install script that tunnels GARM traffic back over SSH.
 
-    The runner VM cannot reach the host's :80 (the security group on the
+    The runner VM cannot reach the host's :443 (the security group on the
     private-endpoint host admits only tcp/22), yet GARM bakes its metadata and
-    callback URLs -- plain http to the host -- into the user data it hands the
+    callback URLs -- pointing at the host -- into the user data it hands the
     provider. Pre-install scripts run before GARM's install wrapper, so this
     script opens an SSH connection back to the host on the one open port, binds
-    a local forward to the host's :80, and installs an nftables redirect that
-    steers locally-generated traffic for that host into the tunnel. The URLs
+    local forwards to the host's :80 and :443, and installs an nftables redirect
+    that steers locally-generated traffic for that host into the tunnel. The URLs
     GARM generated then work verbatim, with no controller reconfiguration.
+
+    Both ports are forwarded because the scheme is not the script's to know:
+    the ingress serves https once it has a certificate, and the agent websocket
+    requires it, but a deployment without a CA still uses :80.
 
     Args:
         target: The host serving GARM (the load-balancer/traefik address).
@@ -474,6 +590,7 @@ def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> 
         A bash script for the configurator's pre-install-scripts config.
     """
     return f"""#!/bin/bash
+
 # GARM E2E callback tunnel. Delivered as a pre-install script so it runs before
 # GARM's install wrapper, whose first action is fetching the install script
 # from the metadata URL on the host this tunnel reaches.
@@ -482,6 +599,7 @@ log() {{ echo "[e2e-tunnel] $*"; }}
 TARGET='{target}'
 SSH_USER='{user}'
 LOCAL_PORT={E2E_TUNNEL_LOCAL_PORT}
+LOCAL_TLS_PORT={E2E_TUNNEL_LOCAL_TLS_PORT}
 KEY_FILE=/root/.ssh/garm-e2e-tunnel
 # The nft ruleset below needs the VM's own primary address as the DNAT target,
 # resolved the same way the aproxy bootstrap does it.
@@ -499,7 +617,7 @@ printf '%s' '{private_key_b64}' | base64 -d > "$KEY_FILE"
 
 # The host key is not pinned: the keypair this tunnel uses is ephemeral,
 # per CI run, and restricted to port forwarding, so a hijacked tunnel gives
-# an attacker nothing but the ability to reach the host's :80.
+# an attacker nothing but the ability to reach the host's :80 and :443.
 for attempt in $(seq 1 30); do
     if ssh -f -N \\
         -o StrictHostKeyChecking=no \\
@@ -510,8 +628,9 @@ for attempt in $(seq 1 30); do
         -o ConnectTimeout=10 \\
         -i "$KEY_FILE" \\
         -L "${{DEFAULT_IPV4}}:$LOCAL_PORT:$TARGET:80" \\
+        -L "${{DEFAULT_IPV4}}:$LOCAL_TLS_PORT:$TARGET:443" \\
         "$SSH_USER@$TARGET"; then
-        log "tunnel up on $DEFAULT_IPV4:$LOCAL_PORT after $attempt attempt(s)"
+        log "tunnel up on $DEFAULT_IPV4:$LOCAL_PORT,$LOCAL_TLS_PORT after $attempt attempt(s)"
         break
     fi
     if [ "$attempt" -eq 30 ]; then
@@ -521,16 +640,101 @@ for attempt in $(seq 1 30); do
     sleep 5
 done
 
-# Steer locally-generated GARM traffic (metadata and callback, both plain
-# http) into the tunnel. The aproxy ruleset excludes this address, so its DNAT
-# does not claim these packets first.
+# Steer locally-generated GARM traffic (metadata, callback and the agent
+# websocket) into the tunnel. The aproxy ruleset excludes this address, so its
+# DNAT does not claim these packets first. Redirecting to a different local
+# port is transparent to TLS: the certificate is checked against the host in
+# the URL, which is unchanged, and traefik still terminates it.
 nft -f - <<NFT
 table ip garm-e2e-tunnel {{
     chain output {{
         type nat hook output priority -100; policy accept;
         ip daddr $TARGET tcp dport 80 counter dnat to $DEFAULT_IPV4:$LOCAL_PORT
+        ip daddr $TARGET tcp dport 443 counter dnat to $DEFAULT_IPV4:$LOCAL_TLS_PORT
     }}
 }}
 NFT
-log "redirecting $TARGET:80 to $DEFAULT_IPV4:$LOCAL_PORT"
+log "redirecting $TARGET:80 to $DEFAULT_IPV4:$LOCAL_PORT and :443 to $DEFAULT_IPV4:$LOCAL_TLS_PORT"
 """
+
+
+@dataclass(frozen=True)
+class GarmCli:
+    """A garm-cli already pointed at the deployed GARM as an administrator.
+
+    Attributes:
+        binary: Path to the extracted executable.
+        env: Environment selecting its isolated profile, for subprocess or exec.
+    """
+
+    binary: pathlib.Path
+    env: dict[str, str]
+
+
+@pytest.fixture(scope="module", name="garm_cli")
+def garm_cli_fixture(
+    tmp_path_factory: pytest.TempPathFactory,
+    juju: jubilant.Juju,
+    garm_with_ingress: str,
+) -> GarmCli:
+    """Fetch the pinned garm-cli and give it an admin profile for the deployed GARM.
+
+    Args:
+        tmp_path_factory: pytest factory for the directory holding the binary and profile.
+        juju: Juju client for the model GARM is deployed in.
+        garm_with_ingress: Name of the deployed GARM application.
+
+    Returns:
+        The client and the environment that selects its profile.
+    """
+    root = tmp_path_factory.mktemp("garm-cli")
+    binary = _download_garm_cli(root)
+    address = _get_garm_address(juju, garm_with_ingress)
+
+    # Written directly rather than through `garm-cli profile add`, whose only
+    # password option on this release is -p, and argv is readable by every
+    # process on the host. Reusing the JWT the suite already mints keeps the
+    # admin password off the command line; `bearer_token` is the pinned
+    # release's own on-disk field name.
+    home = root / "home"
+    config_dir = home / ".local" / "share" / "garm-cli"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        'active_manager = "e2e"\n'
+        "\n"
+        "[[manager]]\n"
+        '  name = "e2e"\n'
+        f'  base_url = "http://{address}:{GARM_API_PORT}"\n'
+        f'  bearer_token = "{_garm_login(juju, address)}"\n',
+        encoding="utf-8",
+    )
+    return GarmCli(binary=binary, env={**os.environ, "HOME": str(home)})
+
+
+def _download_garm_cli(root: pathlib.Path) -> pathlib.Path:
+    """Download the pinned garm-cli release and extract its single executable.
+
+    Args:
+        root: Directory to extract into.
+
+    Returns:
+        Path to the extracted executable.
+    """
+    logger.info("Downloading garm-cli %s from %s", GARM_CLI_VERSION, GARM_CLI_URL)
+    response = requests.get(GARM_CLI_URL, timeout=300)
+    response.raise_for_status()
+    digest = hashlib.sha256(response.content).hexdigest()
+    assert digest == GARM_CLI_SHA256, (
+        f"Expected garm-cli {GARM_CLI_VERSION} to have sha256 {GARM_CLI_SHA256}, "
+        f"got {digest}"
+    )
+
+    binary = root / "garm-cli"
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+        # Named member rather than extractall: the archive holds exactly this one
+        # file, and reading it explicitly sidesteps the tarfile extraction filters.
+        member = archive.extractfile("garm-cli")
+        assert member is not None, f"{GARM_CLI_URL} does not contain a garm-cli file"
+        binary.write_bytes(member.read())
+    binary.chmod(0o755)
+    return binary

@@ -3,11 +3,12 @@
 
 """State of the GARM configurator charm."""
 
+import ipaddress
+
 import ops
 from pydantic import (
     BaseModel,
     HttpUrl,
-    IPvAnyNetwork,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
@@ -31,12 +32,14 @@ GITHUB_APP_PRIVATE_KEY_CONFIG_NAME = "github-app-private-key"  # nosec
 SCALESET_NAME_CONFIG_NAME = "name"
 SCALESET_FLAVOR_CONFIG_NAME = "flavor"
 SCALESET_OS_ARCH_CONFIG_NAME = "os-arch"
+SCALESET_IMAGE_CONFIG_NAME = "image"
 SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME = "min-idle-runner"
 SCALESET_MAX_RUNNER_CONFIG_NAME = "max-runner"
 SCALESET_LABELS_CONFIG_NAME = "labels"
 SCALESET_REPO_CONFIG_NAME = "repo"
 SCALESET_ORG_CONFIG_NAME = "org"
 SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
+SCALESET_ENABLE_SHELL_CONFIG_NAME = "enable-shell"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
 
 DOCKERHUB_MIRROR_CONFIG_NAME = "dockerhub-mirror"
@@ -47,7 +50,6 @@ OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
-_IP_NETWORK_ADAPTER: TypeAdapter[IPvAnyNetwork] = TypeAdapter(IPvAnyNetwork)
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
@@ -225,6 +227,7 @@ class ScalesetConfig(BaseModel):
         repo: Repository to register runners to.
         org: Organization to register runners to.
         runner_group: Runner group for org registration.
+        enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
     """
 
@@ -237,6 +240,7 @@ class ScalesetConfig(BaseModel):
     repo: str | None = None
     org: str | None = None
     runner_group: str = "Default"
+    enable_shell: bool = False
     pre_install_scripts: str | None = None
 
     @classmethod
@@ -279,10 +283,8 @@ class ScalesetConfig(BaseModel):
                 f"{SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME}"
             )
 
-        repo = charm.config.get(SCALESET_REPO_CONFIG_NAME)
-        repo = str(repo).strip() if repo else None
-        org = charm.config.get(SCALESET_ORG_CONFIG_NAME)
-        org = str(org).strip() if org else None
+        repo = _get_optional_string_config(charm, SCALESET_REPO_CONFIG_NAME)
+        org = _get_optional_string_config(charm, SCALESET_ORG_CONFIG_NAME)
         runner_group = str(charm.config.get(SCALESET_RUNNER_GROUP_CONFIG_NAME, "Default")).strip()
 
         if repo and org:
@@ -300,7 +302,6 @@ class ScalesetConfig(BaseModel):
         labels = str(labels).strip() if labels else ""
         pre_install_scripts = charm.config.get(SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME)
         pre_install_scripts = str(pre_install_scripts) if pre_install_scripts else None
-
         return cls(
             name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
             flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
@@ -311,8 +312,35 @@ class ScalesetConfig(BaseModel):
             repo=repo,
             org=org,
             runner_group=runner_group,
+            enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
         )
+
+
+def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
+    """Return a stripped optional string configuration value."""
+    value = charm.config.get(key)
+    return (str(value).strip() if value else "") or None
+
+
+def _ipv4_exclude_token_error(token: str) -> str | None:
+    """Return the validation error category for an aproxy exclusion token."""
+    endpoints = token.split("-")
+    if len(endpoints) == 1:
+        try:
+            network = ipaddress.ip_network(token, strict=False)
+        except ValueError:
+            return "invalid"
+        return None if network.version == 4 else "ipv4"
+    if len(endpoints) != 2:
+        return "invalid"
+    try:
+        start, end = (ipaddress.ip_address(endpoint) for endpoint in endpoints)
+    except ValueError:
+        return "invalid"
+    if start.version != 4 or end.version != 4:
+        return "ipv4"
+    return None if start <= end else "range"
 
 
 class RunnerConfig(BaseModel):
@@ -321,7 +349,7 @@ class RunnerConfig(BaseModel):
     Attributes:
         dockerhub_mirror: Optional Docker registry mirror URL.
         runner_http_proxy: HTTP proxy address for aproxy to forward to.
-        aproxy_exclude_addresses: Comma-separated IPs/CIDRs excluded from aproxy forwarding.
+        aproxy_exclude_addresses: Comma-separated IPv4 addresses, CIDRs, or ranges excluded from aproxy forwarding.
         aproxy_redirect_ports: Comma-separated ports or N-M ranges forwarded to aproxy.
         otel_collector_endpoint: OTEL exporter address for the otel-collector.
         pre_job_script: Bash snippet appended to the runner pre-job script.
@@ -368,25 +396,28 @@ class RunnerConfig(BaseModel):
     @field_validator("aproxy_exclude_addresses")
     @classmethod
     def _validate_ipv4_list(cls, value: str | None) -> str | None:
-        """Require a comma-separated list of IPv4 addresses/CIDRs; normalise spacing."""
+        """Require comma-separated IPv4 addresses, CIDRs, or address ranges."""
         if value is None:
             return None
         tokens = [token.strip() for token in value.split(",")]
         for token in tokens:
-            # The values are rendered into an nft IPv4 (table ip) ruleset, so a
-            # hostname or IPv6 address would validate here but fail at runtime.
-            try:
-                network = _IP_NETWORK_ADAPTER.validate_python(token)
-            except ValidationError as exc:
-                raise ValueError(
-                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
-                    f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
-                ) from exc
-            if network.version != 4:
-                raise ValueError(
-                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
-                    f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
-                )
+            error = _ipv4_exclude_token_error(token)
+            if error:
+                messages = {
+                    "ipv4": (
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses, "
+                        f"CIDRs, or ranges (the aproxy nft ruleset is IPv4-only); got: {token!r}"
+                    ),
+                    "range": (
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must use ascending address "
+                        f"ranges; got: {token!r}"
+                    ),
+                    "invalid": (
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
+                        f"of IPv4 addresses, CIDRs, or ranges; got invalid token: {token!r}"
+                    ),
+                }
+                raise ValueError(messages[error])
         return ",".join(tokens)
 
     @field_validator("aproxy_redirect_ports")
@@ -470,7 +501,9 @@ class CharmState:
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
         runner_config: Optional runner-level configuration.
-        image_id: OpenStack image UUID received from the image builder relation, or None.
+        image: OpenStack image name or ID from config or the image builder relation.
+        image_relation: The image builder relation, when connected.
+        image_overrides_builder: Whether configured image takes precedence over the builder.
     """
 
     def __init__(
@@ -480,7 +513,9 @@ class CharmState:
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
         runner_config: RunnerConfig,
-        image_id: str | None,
+        image: str | None,
+        image_relation: ops.Relation | None,
+        image_overrides_builder: bool,
     ) -> None:
         """Initialize the charm state.
 
@@ -489,13 +524,17 @@ class CharmState:
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
             runner_config: The optional runner configuration.
-            image_id: The OpenStack image UUID from the image builder relation.
+            image: The OpenStack image name or ID from config or the image builder relation.
+            image_relation: The image builder relation, when connected.
+            image_overrides_builder: Whether configured image takes precedence over the builder.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
         self.runner_config = runner_config
-        self.image_id = image_id
+        self.image = image
+        self.image_relation = image_relation
+        self.image_overrides_builder = image_overrides_builder
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -514,26 +553,29 @@ class CharmState:
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
-        image_id = _get_image_id_from_relation(charm)
+        image_relation = charm.model.get_relation(IMAGE_RELATION_NAME)
+        configured_image = _get_optional_string_config(charm, SCALESET_IMAGE_CONFIG_NAME)
+        related_image = _get_image_id_from_relation(image_relation)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
             runner_config=runner_config,
-            image_id=image_id,
+            image=configured_image or related_image,
+            image_relation=image_relation,
+            image_overrides_builder=bool(configured_image and image_relation),
         )
 
 
-def _get_image_id_from_relation(charm: ops.CharmBase) -> str | None:
+def _get_image_id_from_relation(relation: ops.Relation | None) -> str | None:
     """Return the OpenStack image UUID from the image builder relation, if available.
 
     Args:
-        charm: The charm instance.
+        relation: The image builder relation, when connected.
 
     Returns:
-        The image UUID string, or None if the relation is absent or no UUID has been set yet.
+        The related image UUID, or None if the relation has not published one.
     """
-    relation = charm.model.get_relation(IMAGE_RELATION_NAME)
     if relation is None:
         return None
     for unit in relation.units:

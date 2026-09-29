@@ -14,13 +14,17 @@ actions/
   enable-log-forwarding/    # GitHub Action: enable log forwarding on runners
 
 charms/
+  garm/                     # Juju charm: GARM
+  garm-configurator/        # Juju charm: GARM Configurator
   planner-operator/         # Juju charm: GitHub runner planner
     cos_custom/
       grafana_dashboards/   # Grafana dashboards for the planner charm
+  tests/                    # Shared charm tests (unit, integration, e2e)
   webhook-gateway-operator/ # Juju charm: GitHub webhook gateway
 
 cmd/
   planner/                  # Application entry point: planner
+  waiting-p80-report/       # Application entry point: p80 job waiting time report
   webhook-gateway/          # Application entry point: webhook gateway
 
 internal/                   # Shared Go packages
@@ -28,13 +32,22 @@ internal/                   # Shared Go packages
 docs/                       # Documentation
 
 runner_grafana_dashboards/  # Grafana dashboards for runner VM host metrics
+
+scripts/                    # Repository maintenance scripts (e.g. AGENTS.md check)
 ```
 
 ## Charms
 
-This repository contains two charms — the **planner-operator** and the
-**webhook-gateway-operator**. See
-[Charms](https://canonical.com/juju/docs/github-runner-charms/latest/reference/charms/)
+This repository contains four charms, representing two different architectures:
+
+The planner architecture, which is no longer in active development,
+is implemented by the **planner-operator** and the **webhook-gateway-operator** charms.
+
+The other architecture is based on
+[GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) and is implemented by
+the **garm** and **garm-configurator** charms.
+
+See [Charms](https://canonical.com/juju/docs/github-runner-charms/latest/reference/charms/)
 in the documentation for their roles and integrations.
 
 ### Charmhub

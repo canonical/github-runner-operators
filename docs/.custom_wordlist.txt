@@ -92,3 +92,5 @@ tmate
 [Rr]eplan(s|ned|ning)?
 URI(s)?
 teardown
+[Ww]ebsocket(s)?
+checksum(s)?

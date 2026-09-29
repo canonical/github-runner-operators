@@ -31,19 +31,21 @@ class ControllerInfo(BaseModel):
     ControllerInfo
     """ # noqa: E501
     agent_url: Optional[StrictStr] = Field(default=None, description="AgentURL is the URL where the GARM agent will connect. If set behind a reverse proxy, this URL must be configured to allow websocket connections.")
+    allow_insecure_garm_agent: Optional[StrictBool] = Field(default=None, description="AllowInsecureGARMAgent configures deployed garm-agents with force_insecure enabled, permitting them to connect back to GARM over plain http/ws when GARM itself does not use TLS. The agent token is sent in plain text; meant for local development and testing only.")
     ca_cert_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = Field(default=None, description="CACertBundle holds a certificate bundle meant to validate the certificate used by GARM itself. This can be just the root certificate that can validate the GARM TLS certificate, a chain or multiple root CAs.")
-    cached_garm_agent_release_fetched_at: Optional[datetime] = Field(default=None, description="CachedGARMAgentReleaseFetchedAt is the timestamp when the release data was last fetched from GARMAgentReleasesURL")
+    cached_garm_agent_release_fetched_at: Optional[datetime] = Field(default=None, description="CachedGARMAgentReleaseFetchedAt is the timestamp when the release index was last fetched from GARMAgentReleasesURL")
     callback_url: Optional[StrictStr] = Field(default=None, description="CallbackURL is the URL where instances can send updates back to the controller. This URL is used by instances to send status updates back to the controller. The URL itself may be made available to instances via a reverse proxy or a load balancer. That means that the user is responsible for telling GARM what the public URL is, by setting this field.")
     controller_id: Optional[UUID] = Field(default=None, description="ControllerID is the unique ID of this controller. This ID gets generated automatically on controller init.")
     controller_webhook_url: Optional[StrictStr] = Field(default=None, description="ControllerWebhookURL is the controller specific URL where webhooks will be received. This field holds the WebhookURL defined above to which we append the ControllerID. Functionally it is the same as WebhookURL, but it allows us to safely manage webhooks from GARM without accidentally removing webhooks from other services or GARM controllers.")
     enable_agent_tools_sync: Optional[StrictBool] = Field(default=None, description="SyncGARMAgentTools enables or disables automatic sync of garm-agent tools.")
     garm_agent_releases_url: Optional[StrictStr] = Field(default=None, description="GARMAgentReleasesURL is the URL from where GARM can fetch garm-agent binaries. This URL must have an API response compatible with the github releases API. The default value for this field is: https://api.github.com/repos/cloudbase/garm-agent/releases")
+    garm_agent_version: Optional[StrictStr] = Field(default=None, description="GARMAgentVersion is the garm-agent version the controller uses. Empty or \"latest\" tracks the newest stable release available at GARMAgentReleasesURL. A specific semver version pins the release that gets cached and (when SyncGARMAgentTools is enabled) downloaded, for operators who want to stick with a known good agent version.")
     hostname: Optional[StrictStr] = Field(default=None, description="Hostname is the hostname of the machine that runs this controller. In the future, this field will be migrated to a separate table that will keep track of each the controller nodes that are part of a cluster. This will happen when we implement controller scale-out capability.")
     metadata_url: Optional[StrictStr] = Field(default=None, description="MetadataURL is the public metadata URL of the GARM instance. This URL is used by instances to fetch information they need to set themselves up. The URL itself may be made available to runners via a reverse proxy or a load balancer. That means that the user is responsible for telling GARM what the public URL is, by setting this field.")
     minimum_job_age_backoff: Optional[StrictInt] = Field(default=None, description="MinimumJobAgeBackoff is the minimum time in seconds that a job must be in queued state before GARM will attempt to allocate a runner for it. When set to a non zero value, GARM will ignore the job until the job's age is greater than this value. When using the min_idle_runners feature of a pool, this gives enough time for potential idle runners to pick up the job before GARM attempts to allocate a new runner, thus avoiding the need to potentially scale down runners later.")
     version: Optional[StrictStr] = Field(default=None, description="Version is the version of the GARM controller.")
     webhook_url: Optional[StrictStr] = Field(default=None, description="WebhookURL is the base URL where the controller will receive webhooks from github. When webhook management is used, this URL is used as a base to which the controller UUID is appended and which will receive the webhooks. The URL itself may be made available to instances via a reverse proxy or a load balancer. That means that the user is responsible for telling GARM what the public URL is, by setting this field.")
-    __properties: ClassVar[List[str]] = ["agent_url", "ca_cert_bundle", "cached_garm_agent_release_fetched_at", "callback_url", "controller_id", "controller_webhook_url", "enable_agent_tools_sync", "garm_agent_releases_url", "hostname", "metadata_url", "minimum_job_age_backoff", "version", "webhook_url"]
+    __properties: ClassVar[List[str]] = ["agent_url", "allow_insecure_garm_agent", "ca_cert_bundle", "cached_garm_agent_release_fetched_at", "callback_url", "controller_id", "controller_webhook_url", "enable_agent_tools_sync", "garm_agent_releases_url", "garm_agent_version", "hostname", "metadata_url", "minimum_job_age_backoff", "version", "webhook_url"]
 
     @field_validator('ca_cert_bundle')
     def ca_cert_bundle_validate_regular_expression(cls, value):
@@ -110,6 +112,7 @@ class ControllerInfo(BaseModel):
 
         _obj = cls.model_validate({
             "agent_url": obj.get("agent_url"),
+            "allow_insecure_garm_agent": obj.get("allow_insecure_garm_agent"),
             "ca_cert_bundle": obj.get("ca_cert_bundle"),
             "cached_garm_agent_release_fetched_at": obj.get("cached_garm_agent_release_fetched_at"),
             "callback_url": obj.get("callback_url"),
@@ -117,6 +120,7 @@ class ControllerInfo(BaseModel):
             "controller_webhook_url": obj.get("controller_webhook_url"),
             "enable_agent_tools_sync": obj.get("enable_agent_tools_sync"),
             "garm_agent_releases_url": obj.get("garm_agent_releases_url"),
+            "garm_agent_version": obj.get("garm_agent_version"),
             "hostname": obj.get("hostname"),
             "metadata_url": obj.get("metadata_url"),
             "minimum_job_age_backoff": obj.get("minimum_job_age_backoff"),

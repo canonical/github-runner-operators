@@ -40,6 +40,7 @@ class TestJob(unittest.TestCase):
                 conclusion = '',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 enterprise_id = '',
+                forge_instance_id = '',
                 id = 56,
                 labels = [
                     ''
