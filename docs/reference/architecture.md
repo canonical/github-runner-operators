@@ -1,13 +1,13 @@
 # Architecture overview
 
-The GitHub runner deployment will utilize charms to manage the GitHub self-hosted runners. The GARM charm uses the [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) to manage the runners with the GARM configurator charm providing the configuration for the runners. In addition, the PostgreSQL charm is used to store the state of the GARM.
+The GitHub runner deployment utilizes charms to manage the GitHub self-hosted runners. The GARM charm uses the [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) to manage the runners, with the GARM configurator charm providing the configuration for the runners. In addition, the PostgreSQL charm is used to store the state of the GARM.
 
 ## High-level overview of the deployment
 
 ```mermaid
 flowchart TD
-  G(["GARM charm"]) --> PG[("PostgreSQL")]
-  GC(["GARM configurator charms"]) -->|many-to-one| G
+  G(["GARM charm"]) --> PG[("PostgreSQL charm")]
+  GC(["GARM configurator charm(s)"]) -->|many-to-one| G
   G -->|GitHub API| GH["GitHub"]
   G -->|OpenStack API| OS["OpenStack"]
   OS -->|Spawns multiple| RUN["Runner VMs"]
@@ -15,9 +15,9 @@ flowchart TD
   COS(["OpenTelemetry Collector charm"]) -->|scrapes metrics| G
 ```
 
-There can be multiple GARM configurator charms providing configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset. 
+Multiple GARM configurator charms can provide configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset. 
 
-## Components
+The diagram above contains the following components:
 
 - GARM charm: Operates a [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) instance which manages GitHub Scalesets. The Scaleset is a GitHub feature for managing a set of Self-hosted runners.
 - GARM configurator charm: Provides configuration of a single GitHub scaleset to the GARM charm. Multiple GARM configurator charms can be related to a single GARM charm.
@@ -26,7 +26,7 @@ There can be multiple GARM configurator charms providing configuration to a sing
 
 ## Ingress
 
-- The GARM charm services it REST API of GARM on the 8080 port. The spawned runners will need to call back to GARM on this port as part of the runner spawning process.
+The GARM charm services ingress using the REST API of GARM on the 8080 port. The spawned runners must call back to GARM on this port as part of the runner spawning process.
 
 ## Observability
 
