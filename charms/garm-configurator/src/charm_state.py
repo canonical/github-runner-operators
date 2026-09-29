@@ -3,11 +3,12 @@
 
 """State of the GARM configurator charm."""
 
+import ipaddress
+
 import ops
 from pydantic import (
     BaseModel,
     HttpUrl,
-    IPvAnyNetwork,
     TypeAdapter,
     ValidationError,
     ValidationInfo,
@@ -48,7 +49,6 @@ OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
-_IP_NETWORK_ADAPTER: TypeAdapter[IPvAnyNetwork] = TypeAdapter(IPvAnyNetwork)
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
@@ -319,13 +319,33 @@ class ScalesetConfig(BaseModel):
         )
 
 
+def _ipv4_exclude_token_error(token: str) -> str | None:
+    """Return the validation error category for an aproxy exclusion token."""
+    endpoints = token.split("-")
+    if len(endpoints) == 1:
+        try:
+            network = ipaddress.ip_network(token, strict=False)
+        except ValueError:
+            return "invalid"
+        return None if network.version == 4 else "ipv4"
+    if len(endpoints) != 2:
+        return "invalid"
+    try:
+        start, end = (ipaddress.ip_address(endpoint) for endpoint in endpoints)
+    except ValueError:
+        return "invalid"
+    if start.version != 4 or end.version != 4:
+        return "ipv4"
+    return None if start <= end else "range"
+
+
 class RunnerConfig(BaseModel):
     """Optional runner-level configuration forwarded to the GARM scaleset.
 
     Attributes:
         dockerhub_mirror: Optional Docker registry mirror URL.
         runner_http_proxy: HTTP proxy address for aproxy to forward to.
-        aproxy_exclude_addresses: Comma-separated IPs/CIDRs excluded from aproxy forwarding.
+        aproxy_exclude_addresses: Comma-separated IPv4 addresses, CIDRs, or ranges excluded from aproxy forwarding.
         aproxy_redirect_ports: Comma-separated ports or N-M ranges forwarded to aproxy.
         otel_collector_endpoint: OTEL exporter address for the otel-collector.
         pre_job_script: Bash snippet appended to the runner pre-job script.
@@ -372,25 +392,28 @@ class RunnerConfig(BaseModel):
     @field_validator("aproxy_exclude_addresses")
     @classmethod
     def _validate_ipv4_list(cls, value: str | None) -> str | None:
-        """Require a comma-separated list of IPv4 addresses/CIDRs; normalise spacing."""
+        """Require comma-separated IPv4 addresses, CIDRs, or address ranges."""
         if value is None:
             return None
         tokens = [token.strip() for token in value.split(",")]
         for token in tokens:
-            # The values are rendered into an nft IPv4 (table ip) ruleset, so a
-            # hostname or IPv6 address would validate here but fail at runtime.
-            try:
-                network = _IP_NETWORK_ADAPTER.validate_python(token)
-            except ValidationError as exc:
-                raise ValueError(
-                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
-                    f"of IPv4 addresses or CIDRs; got invalid token: {token!r}"
-                ) from exc
-            if network.version != 4:
-                raise ValueError(
-                    f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses or "
-                    f"CIDRs (the aproxy nft ruleset is IPv4-only); got: {token!r}"
-                )
+            error = _ipv4_exclude_token_error(token)
+            if error:
+                messages = {
+                    "ipv4": (
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} only supports IPv4 addresses, "
+                        f"CIDRs, or ranges (the aproxy nft ruleset is IPv4-only); got: {token!r}"
+                    ),
+                    "range": (
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must use ascending address "
+                        f"ranges; got: {token!r}"
+                    ),
+                    "invalid": (
+                        f"{APROXY_EXCLUDE_ADDRESSES_CONFIG_NAME} must be a comma-separated list "
+                        f"of IPv4 addresses, CIDRs, or ranges; got invalid token: {token!r}"
+                    ),
+                }
+                raise ValueError(messages[error])
         return ",".join(tokens)
 
     @field_validator("aproxy_redirect_ports")

@@ -701,7 +701,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         pytest.param(
             "aproxy-exclude-addresses",
             "10.0.0.1,not-an-ip",
-            "aproxy-exclude-addresses must be a comma-separated list of IPv4 addresses or CIDRs",
+            "aproxy-exclude-addresses must be a comma-separated list of IPv4 addresses, CIDRs, or ranges",
             id="aproxy-exclude-addresses-non-ip",
         ),
         pytest.param(
@@ -709,6 +709,12 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
             "2001:db8::1",
             "aproxy-exclude-addresses only supports IPv4",
             id="aproxy-exclude-addresses-ipv6",
+        ),
+        pytest.param(
+            "aproxy-exclude-addresses",
+            "10.0.0.8-10.0.0.1",
+            "aproxy-exclude-addresses must use ascending address ranges",
+            id="aproxy-exclude-addresses-inverted-range",
         ),
         pytest.param(
             "runner-http-proxy",
@@ -772,7 +778,9 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     config = _valid_config(secret, pk_secret)
     config["dockerhub-mirror"] = "https://mirror.example.com"
     config["runner-http-proxy"] = "http://proxy.example.com:3128"
-    config["aproxy-exclude-addresses"] = "10.0.0.1,192.168.0.0/16"
+    config["aproxy-exclude-addresses"] = (
+        "10.0.0.1,10.0.1.42/16,10.0.0.0-10.141.167.255,192.168.0.0/16"
+    )
     config["aproxy-redirect-ports"] = "80,443,8000-9000"
     config["otel-collector-endpoint"] = "http://otel.example.com:4317"
     config["pre-job-script"] = "  echo start  "
@@ -788,7 +796,10 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     rel_out = out.get_relation(garm_relation.id)
     assert rel_out.local_unit_data["dockerhub_mirror"] == "https://mirror.example.com"
     assert rel_out.local_unit_data["runner_http_proxy"] == "http://proxy.example.com:3128"
-    assert rel_out.local_unit_data["aproxy_exclude_addresses"] == "10.0.0.1,192.168.0.0/16"
+    assert (
+        rel_out.local_unit_data["aproxy_exclude_addresses"]
+        == "10.0.0.1,10.0.1.42/16,10.0.0.0-10.141.167.255,192.168.0.0/16"
+    )
     assert rel_out.local_unit_data["aproxy_redirect_ports"] == "80,443,8000-9000"
     assert rel_out.local_unit_data["otel_collector_endpoint"] == "http://otel.example.com:4317"
     assert rel_out.local_unit_data["pre_job_script"] == "echo start"

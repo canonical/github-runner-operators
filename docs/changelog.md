@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-09-24
+
+- `garm-configurator`: accept IPv4 address ranges in `aproxy-exclude-addresses`, in addition to individual addresses and CIDR networks.
+
 ## 2026-09-23
 
 - Add a GARM architecture overview that documents the GARM, GARM configurator, PostgreSQL, OpenStack, and observability integrations, along with the runner provisioning flow.
