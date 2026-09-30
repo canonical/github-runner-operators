@@ -1,6 +1,8 @@
 .. meta::
    :description: Review reference information for GARM and the GARM configurator.
 
+.. _reference_index:
+
 Reference
 =========
 

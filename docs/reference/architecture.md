@@ -1,3 +1,5 @@
+(reference_charm_architecture)=
+
 # Architecture overview
 
 The GitHub runner deployment utilizes charms to manage the GitHub self-hosted runners. The GARM charm uses the [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) to manage the runners, with the GARM configurator charm providing the configuration for the runners. In addition, the PostgreSQL charm is used to store the state of the GARM.

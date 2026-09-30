@@ -1,6 +1,8 @@
 .. meta::
    :description: Follow how-to guides for operating GARM and the GARM configurator.
 
+.. _how_to_index:
+
 How-to guides
 =============
 

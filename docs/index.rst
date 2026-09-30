@@ -31,9 +31,9 @@ In this documentation
     * - Get started
       - :doc:`Deploy GARM and configure a runner scale set <tutorial/garm>`
     * - Operations
-      - :doc:`Retrieve GARM administrator credentials <how-to/retrieve-garm-credentials>`
-    * - Reference
-      - :doc:`Architecture overview <reference/architecture>` | :doc:`Charm reference <reference/charms>`
+      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
+    * - Design
+      - :ref:`Architecture overview <reference_charm_architecture>` | :ref:`Charm reference <reference_charm_reference>`
     * - Releases
       - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_ | :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
 
@@ -42,9 +42,10 @@ How this documentation is organized
 
 This documentation uses the `Diátaxis documentation structure <https://diataxis.fr/>`_.
 
-- The :doc:`tutorial <tutorial/garm>` takes you step-by-step through deploying GARM and configuring a runner scale set.
-- The :doc:`Retrieve GARM administrator credentials <how-to/retrieve-garm-credentials>` how-to guide covers a focused operational task.
-- The :doc:`explanation <explanation/charm-release-and-promotion>` section includes background and context about the GARM charm release process.
+- :ref:`Tutorial <tutorial_index>` takes you step-by-step through deploying GARM and configuring a runner scale set.
+- :ref:`How-to guides <how_to_index>` assume you have basic familiarity with the GitHub runner charms. They cover setup, configuration, customization, maintenance, and development tasks.
+- :ref:`Reference <reference_index>` provides technical details about charm actions, configuration, relations, and integrations.
+- :ref:`Explanation <explanation_index>` includes topic overviews, architecture, background, context, and design discussion for the GitHub runner charms.
 
 Contributing to this documentation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -52,7 +53,7 @@ Contributing to this documentation
 Documentation is an important part of the GARM charms project. We welcome
 community contributions, suggestions, fixes, and constructive feedback on the
 GARM and `garm-configurator` documentation.
-See the :doc:`How to contribute <how-to/contribute>` guide for more information.
+See the :ref:`How to contribute <how_to_contribute>` guide for more information.
 
 If you find a missing or incorrect topic, `open an issue on GitHub <https://github.com/canonical/github-runner-operators/issues>`_.
 
@@ -76,13 +77,13 @@ Get involved
 - `Report an issue <https://github.com/canonical/github-runner-operators/issues>`_
 - `Get support <https://discourse.charmhub.io/>`_
 - `Join our online chat <https://matrix.to/#/#charmhub-charmdev:ubuntu.com>`_
-- :doc:`Contribute <how-to/contribute>`
+- :ref:`Contribute <how_to_contribute>`
 
 Releases
 ^^^^^^^^
 
 - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_
-- :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
+- :ref:`Charm release and promotion process <release_process>`
 
 For questions, suggestions, or support, use the project issue tracker or one
 of the community channels listed above.

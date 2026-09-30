@@ -1,3 +1,11 @@
+---
+myst:
+  html_meta:
+    "description lang=en": "Reference information for the GARM and garm-configurator Juju charms."
+---
+
+(reference_charm_reference)=
+
 # Charm reference
 
 This page describes the two Juju charms that make up the GARM deployment.
