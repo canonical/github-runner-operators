@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-09-30
+
+- `garm`: fail the job when the configured `pre-job-script` exits with a non-zero code. Previously the failure was only logged and the workflow still ran.
+
 ## 2026-09-24
 
 - `garm-configurator`: accept IPv4 address ranges in `aproxy-exclude-addresses`, in addition to individual addresses and CIDR networks.

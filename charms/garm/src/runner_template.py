@@ -278,8 +278,9 @@ def _heredoc_delimiter(content: str, base: str) -> str:
 def _render_custom_pre_job_script(script: str) -> str:
     """Render the custom pre-job script block.
 
-    Writes the operator script to a temp file, runs it, and removes it — a
-    failure is logged but never aborts the job.
+    Writes the operator script to a temp file, runs it, and removes it. A
+    failure exits the hook with the script's exit code, so the runner fails
+    the job instead of running the workflow.
 
     Args:
         script: The operator-provided pre-job-script content, inserted verbatim
