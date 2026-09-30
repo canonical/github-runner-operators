@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    "description lang=en": "Learn how to retrieve GARM admin credentials for your deployment of the GARM charms."
+---
+
 (how_to_retrieve_garm_credentials)=
 
 # How to retrieve GARM admin credentials

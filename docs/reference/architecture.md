@@ -1,4 +1,10 @@
-(reference_charm_architecture)=
+---
+myst:
+  html_meta:
+    "description lang=en": "Reference information for the GARM charms deployment architecture."
+---
+
+(reference_charm_architecture_deployment)=
 
 # Architecture overview
 

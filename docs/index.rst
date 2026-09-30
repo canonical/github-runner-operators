@@ -13,8 +13,8 @@ GARM charms
 GARM (GitHub Actions Runner Manager) deploys and manages self-hosted GitHub
 Actions runners. This project provides two Juju charms:
 
-* the `garm` charm, which deploys and operates GARM;
-* the `garm-configurator` charm, which configures runner scale sets for GARM.
+* the ``garm`` charm, which deploys and operates GARM;
+* the ``garm-configurator`` charm, which configures runner scale sets for GARM.
 
 Together, these charms let platform engineers and site reliability engineers
 deploy GARM on Kubernetes, connect it to GitHub, and configure the runner
@@ -33,7 +33,7 @@ In this documentation
     * - Operations
       - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
     * - Design
-      - :ref:`Architecture overview <reference_charm_architecture>` | :ref:`Charm reference <reference_charm_reference>`
+      - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
     * - Releases
       - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_ | :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
 
@@ -52,7 +52,7 @@ Contributing to this documentation
 
 Documentation is an important part of the GARM charms project. We welcome
 community contributions, suggestions, fixes, and constructive feedback on the
-GARM and `garm-configurator` documentation.
+GARM and ``garm-configurator`` documentation.
 See the :ref:`How to contribute <how_to_contribute>` guide for more information.
 
 If you find a missing or incorrect topic, `open an issue on GitHub <https://github.com/canonical/github-runner-operators/issues>`_.
@@ -61,7 +61,7 @@ If you find a missing or incorrect topic, `open an issue on GitHub <https://gith
 Project and community
 ---------------------
 
-GARM and `garm-configurator` are open-source Juju charms maintained in the
+The ``garm`` and ``garm-configurator`` charms are open-source Juju charms maintained in the
 `github-runner-operators repository <https://github.com/canonical/github-runner-operators>`_.
 The project welcomes community contributions, suggestions, fixes, and
 constructive feedback.
@@ -99,5 +99,10 @@ of the community channels listed above.
     Tutorial <tutorial/index>
     How-to guides <how-to/index>
     Reference <reference/index>
-    Contribute <how-to/contribute>
     Explanation <explanation/index>
+
+.. toctree::
+    :hidden:
+    :maxdepth: 1
+
+    Contribute <how-to/contribute>

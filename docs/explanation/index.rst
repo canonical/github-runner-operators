@@ -1,3 +1,6 @@
+.. meta::
+   :description: Explanation material explaining key concepts about the GitHub runner charms.
+
 .. _explanation_index:
 
 Explanation
