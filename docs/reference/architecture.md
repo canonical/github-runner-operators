@@ -17,7 +17,7 @@ flowchart TD
   COS(["OpenTelemetry Collector charm"]) -->|scrapes metrics| G
 ```
 
-Multiple GARM configurator charms can provide configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset. 
+Multiple GARM configurator charms can provide configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset.
 
 The diagram above contains the following components:
 
