@@ -150,6 +150,8 @@ config:
       type: string
       description: |
         Optional bash script appended to the end of the runner pre-job script.
+        If the script exits with a non-zero code, the job fails and the workflow
+        steps do not run.
 
 requires:
   image:
