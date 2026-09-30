@@ -6,65 +6,78 @@ myst:
 
 (reference_charm_reference)=
 
-# Charm reference
+# Charms
 
-This page describes the two Juju charms that make up the GARM deployment.
+This page describes the GARM and GARM configurator charms. The relevant information for a minimal deployment is provided here.
 
-## `garm` charm
+## GARM charm
 
-The `garm` charm deploys and manages GARM on Kubernetes. GARM provides the
-API and coordinates GitHub runner scale sets.
-
-### Integrations
-
-Required integrations:
-
-- `postgresql`: provides storage for GARM state.
-- `garm-configurator`: provides runner scale set and provider configuration
-  through the `garm_configurator_v0` interface.
-
-Optional integrations:
-
-- `debug-ssh`: provides debug SSH access.
+The GARM charm deploys and manages the [GARM](https://github.com/cloudbase/garm) service for managing GitHub self-hosted
+runners.
 
 ### Actions
 
-- `get-credentials`: displays the generated GARM administrator credentials.
+There is no mandatory action for GARM charm to function.
 
-### Service endpoints
+```{seealso}
+[Actions for GARM charm](https://charmhub.io/garm/actions)
+```
 
-GARM serves its API and Prometheus metrics on port `8080`.
+### Configurations
 
-## `garm-configurator` charm
+The credentials to access GitHub API are required for GARM charm to function. The GARM charm  supports only 
+GitHub App authentication. See `app-secret-key` and `app-secret-key-id` configurations for more details.
 
-The `garm-configurator` charm stores the configuration for one GARM runner
-scale set and shares it with the `garm` charm.
+```{seealso}
+[Configurations for GARM charm](https://charmhub.io/garm/configurations)
+```
 
 ### Integrations
 
-Required integrations:
+The GARM charm must be integrated with a PostgreSQL charm, and at least one GARM configurator charm.
+The PostgreSQL charm is for storing runner and job states, while GARM configurator charms provider the configuration for
+a single set GitHub self-hosted runners.
 
-- `image`: provides a runner image through the `github_runner_image_v0`
-  interface.
+The GARM charm supports integration with COS (Canonical Observability Stack). See [observe your charm with COS lite](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/).
 
-Provided integrations:
+```{seealso}
+[Integrations for GARM charm](https://charmhub.io/garm/integrations)
+```
 
-- `garm-configurator`: provides configuration to the `garm` charm through the
-  `garm_configurator_v0` interface.
+## GARM configurator charm
 
-### Configuration
+The GARM configurator charm provides a set of configurations of GitHub runner scaleset to the GARM charm. Multiple GARM configurator charms can be integrated to a single GARM charm, with each instance of GARM configurator charm representing a single GitHub runner scaleset in GARM.
 
-The configuration options fall into these groups:
+Currently, the GARM charm and GARM configurator charm only support the [GARM OpenStack provider](https://github.com/cloudbase/garm-provider-openstack).
 
-- **GitHub:** App ID, installation ID, private key, repository or organization,
-  and runner group.
-- **OpenStack:** authentication URL, user, password secret, project, domains,
-  region, and network.
-- **Scale set:** name, flavor, architecture, minimum idle runners, maximum
-  runners, and labels.
-- **Runner behavior:** shell access, pre-install scripts, Docker registry
-  mirror, HTTP proxy, proxy exclusions and redirects, OpenTelemetry endpoint,
-  and pre-job script.
+### Actions
 
-The `openstack-password` and `github-app-private-key` options are Juju secret
-references. Do not provide those credentials as plain-text configuration.
+The GARM configurator charm has no actions.
+
+### Configurations
+
+The GARM configurator charm has all the relevant configuration for the GARM scaleset. The `architecture` configuration to specify the CPU architecture of the runner is mandatory. The OpenStack credentials are required for the GARM OpenStack provider to function: 
+
+* `openstack-auth-url`
+* `openstack-password` 
+* `openstack-project-domain-name`
+* `openstack-project-name`
+* `openstack-user-domain-name`
+* `openstack-user-name`
+
+While the remaining configurations are optional or have defaults, it is recommended to review all the configurations for this charm.
+
+```{seealso}
+[Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations)
+```
+
+### Integrations
+
+The GARM configurator charm needs to be integrated with a GARM charm and a 
+[GitHub image builder charm](https://charmhub.io/github-runner-image-builder).
+The GARM charm manages the GitHub self-hosted runners according to the configuration on the GARM configurator charm.
+The GitHub image builder charm is for building images for the GitHub self-hosted runners.
+
+```{seealso}
+[Integrations for GARM configurator charm](https://charmhub.io/garm-configurator/integrations)
+```

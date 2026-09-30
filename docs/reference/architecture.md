@@ -17,12 +17,12 @@ flowchart TD
   COS(["OpenTelemetry Collector charm"]) -->|scrapes metrics| G
 ```
 
-Multiple GARM configurator charms can provide configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset.
+Multiple GARM configurator charms can provide configuration to a single GARM charm. Each GARM configurator charm manages the configuration for a single GitHub scaleset. 
 
 The diagram above contains the following components:
 
 - GARM charm: Operates a [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) instance which manages GitHub Scalesets. The Scaleset is a GitHub feature for managing a set of Self-hosted runners.
-- GARM configurator charm: Provides configuration of a single GitHub scaleset to the GARM charm. Multiple GARM configurator charms can be related to a single GARM charm.
+- GARM configurator charm: Provides configuration of a single GitHub scaleset to the GARM charm. Multiple GARM configurator charms can be integrated to a single GARM charm.
 - PostgreSQL charm: Provides a PostgreSQL database for the GARM charm to store its state.
 - OpenStack: The substrate where the runner VMs are spawned.
 - OpenTelemetry Collector charm: Scapes the metrics from the GARM charm and sends them to COS.
