@@ -14,6 +14,7 @@ permissions:
 jobs:
   tics:
     name: TICS
+    if: github.ref == 'refs/heads/main'
     runs-on: self-hosted-linux-amd64-noble-tiobe
     services:
       postgres:
@@ -59,7 +60,6 @@ jobs:
           "$(go env GOPATH)/bin/gocover-cobertura" < /tmp/cov/go.out > /tmp/cov/go.xml
 
       - name: Charm unit tests with coverage
-        if: ${{ !cancelled() }}
         run: |
           mkdir -p /tmp/cov
           for c in garm garm-configurator planner-operator webhook-gateway-operator; do
@@ -67,7 +67,6 @@ jobs:
           done
 
       - name: Merge coverage
-        if: ${{ !cancelled() }}
         run: |
           dotnet tool update --global dotnet-reportgenerator-globaltool
           rm -rf .coverage
@@ -75,7 +74,6 @@ jobs:
           mv .coverage/Cobertura.xml .coverage/cobertura.xml
 
       - name: TICS GitHub Action
-        if: ${{ !cancelled() }}
         uses: tiobe/tics-github-action@v3
         with:
           mode: qserver
