@@ -350,6 +350,4 @@ For a full teardown of Juju and Canonical Kubernetes, see
 
 - [Retrieve GARM admin credentials](../how-to/retrieve-garm-credentials.md) to use the GARM API or
   `garm-cli`.
-- [Enable log forwarding](../how-to/enable-log-forwarding.md) to send GARM logs to a log
-  aggregator.
 - Learn more about the available [relation endpoints](../reference/charms.md) for the charms.

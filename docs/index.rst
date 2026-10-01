@@ -1,69 +1,108 @@
-GitHub runner operators
-=======================
+.. meta::
+   :description: Deploy and operate GARM and the GARM configurator with Juju.
 
-GitHub runner operators are a set of Juju charms that operate self-hosted
-GitHub Actions runners. The product receives GitHub webhooks, routes job events
-through a message broker, and exposes a planner API that coordinates runner
-capacity and job lifecycle data.
+.. vale Canonical.007-Headings-sentence-case = NO
 
-This repository ships two primary charms:
+.. _index:
 
-- GitHub runner webhook gateway: a web service that validates GitHub webhook signatures and forwards workflow job events to an AMQP-compatible message broker.
-- GitHub runner planner: a REST API service that consumes workflow job events, records job state in PostgreSQL, and manages runner flavors and auth tokens for downstream runner integrations.
+GARM charms
+===========
 
-This product is intended for platform engineers, site reliability engineers, and GitHub organization
-administrators who need reliable, observable, and policy-driven control of
-self-hosted runners at scale.
+.. vale Canonical.007-Headings-sentence-case = YES
 
-The project has the following core dependencies and integrations:
+GARM (GitHub Actions Runner Manager) deploys and manages self-hosted GitHub
+Actions runners. This project provides two Juju charms:
 
-- AMQP message broker: required by both charms for moving webhook events from the gateway to the planner. RabbitMQ is the expected broker.
-- PostgreSQL: required by the planner to persist job and flavor data.
-- Tracing and metrics: both charms can emit OpenTelemetry data and Prometheus metrics so that Grafana dashboards and tracing backends can be used for observability.
-- `GitHub runner charm <https://github.com/canonical/github-runner-operator>`_: consumes the planner relation to retrieve auth tokens and desired flavor configuration.
+* the ``garm`` charm, which deploys and operates GARM;
+* the ``garm-configurator`` charm, which configures runner scale sets for GARM.
 
-GitHub sends workflow job webhooks to the webhook gateway. The gateway validates
-and forwards events to the broker. The planner consumes those events, stores job
-state, and exposes APIs and relations that allow the GitHub runner charm to
-provision the right runners for each job.
-
+Together, these charms let platform engineers and site reliability engineers
+deploy GARM on Kubernetes, connect it to GitHub, and configure the runner
+capacity required by their workflows.
 
 In this documentation
 ---------------------
 
-.. grid:: 1 1 2 2
+.. list-table::
+    :header-rows: 1
 
-    .. grid-item-card:: Tutorial
-        :link: /tutorial/index
-        :link-type: doc
+    * -
+      -
+    * - Get started
+      - :doc:`Deploy GARM and configure a runner scale set <tutorial/garm>`
+    * - Operations
+      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
+    * - Design
+      - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
+    * - Releases
+      - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_ | :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
 
-        **Get started** - use webhook gateway and planner charms.
+How this documentation is organized
+------------------------------------
 
-    .. grid-item-card:: How-to guides
-        :link: /how-to/index
-        :link-type: doc
+This documentation uses the `Diátaxis documentation structure <https://diataxis.fr/>`_.
 
-        **Step-by-step guides** - learn key operations and customization.
+- :ref:`Tutorial <tutorial_index>` takes you step-by-step through deploying GARM and configuring a runner scale set.
+- :ref:`How-to guides <how_to_index>` assume you have basic familiarity with the GitHub runner charms. They cover setup, configuration, customization, maintenance, and development tasks.
+- :ref:`Reference <reference_index>` provides technical details about charm actions, configuration, relations, and integrations.
+- :ref:`Explanation <explanation_index>` includes topic overviews, architecture, background, context, and design discussion for the GitHub runner charms.
 
-.. grid:: 1 1 2 2
+Contributing to this documentation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    .. grid-item-card:: Reference
-        :link: /reference/index
-        :link-type: doc
+Documentation is an important part of the GARM charms project. We welcome
+community contributions, suggestions, fixes, and constructive feedback on the
+GARM and ``garm-configurator`` documentation.
+See the :ref:`How to contribute <how_to_contribute>` guide for more information.
 
-        **Technical information** - review the topics relevant to GitHub Runner Operators.
+If you find a missing or incorrect topic, `open an issue on GitHub <https://github.com/canonical/github-runner-operators/issues>`_.
 
-    .. grid-item-card:: Explanation
-        :link: /explanation/index
-        :link-type: doc
 
-        **Concepts** - understand the design and architecture of the GitHub Runner Operators.
+Project and community
+---------------------
+
+The ``garm`` and ``garm-configurator`` charms are open-source Juju charms maintained in the
+`github-runner-operators repository <https://github.com/canonical/github-runner-operators>`_.
+The project welcomes community contributions, suggestions, fixes, and
+constructive feedback.
+
+Governance and policies
+^^^^^^^^^^^^^^^^^^^^^^^
+
+- `Code of conduct <https://ubuntu.com/community/code-of-conduct>`_
+
+Get involved
+^^^^^^^^^^^^
+
+- `Report an issue <https://github.com/canonical/github-runner-operators/issues>`_
+- `Get support <https://discourse.charmhub.io/>`_
+- `Join our online chat <https://matrix.to/#/#charmhub-charmdev:ubuntu.com>`_
+- :ref:`Contribute <how_to_contribute>`
+
+Releases
+^^^^^^^^
+
+- `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_
+- :ref:`Charm release and promotion process <release_process>`
+
+For questions, suggestions, or support, use the project issue tracker or one
+of the community channels listed above.
+
+
+.. vale Canonical.013-Spell-out-numbers-below-10 = NO
+.. vale Canonical.500-Repeated-words = NO
 
 .. toctree::
     :hidden:
-    :maxdepth: 2
+    :maxdepth: 1
 
-    Tutorials <tutorial/index>
+    Tutorial <tutorial/index>
     How-to guides <how-to/index>
     Reference <reference/index>
     Explanation <explanation/index>
+
+.. toctree::
+    :hidden:
+    :maxdepth: 1
+
+    Contribute <how-to/contribute>
