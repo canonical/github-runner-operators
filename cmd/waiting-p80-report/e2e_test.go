@@ -23,14 +23,18 @@ import (
 const testSchema = "waiting_p80_e2e"
 
 // withSearchPath returns a copy of dsn with search_path set to the given schema
-// via the libpq options parameter, so all connections from that DSN resolve
-// unqualified table names against the isolated schema.
+// as a startup runtime parameter, so all connections from that DSN resolve
+// unqualified table names against the isolated schema. pgx sends unrecognized
+// query parameters as startup runtime parameters (per pgconn.Config.RuntimeParams,
+// which documents search_path as an example), avoiding the libpq "options"
+// string whose space is encoded as "+" and, since pgx v5.11.0, no longer decoded
+// back to a space.
 func withSearchPath(t *testing.T, dsn, schema string) string {
 	t.Helper()
 	u, err := url.Parse(dsn)
 	require.NoError(t, err)
 	q := u.Query()
-	q.Set("options", "-c search_path="+schema)
+	q.Set("search_path", schema)
 	u.RawQuery = q.Encode()
 	return u.String()
 }
