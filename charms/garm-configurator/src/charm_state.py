@@ -33,6 +33,7 @@ SCALESET_NAME_CONFIG_NAME = "name"
 SCALESET_FLAVOR_CONFIG_NAME = "flavor"
 SCALESET_OS_ARCH_CONFIG_NAME = "os-arch"
 SCALESET_IMAGE_CONFIG_NAME = "image"
+SCALESET_IMAGE_VISIBILITY_CONFIG_NAME = "image-visibility"
 SCALESET_MIN_IDLE_RUNNER_CONFIG_NAME = "min-idle-runner"
 SCALESET_MAX_RUNNER_CONFIG_NAME = "max-runner"
 SCALESET_LABELS_CONFIG_NAME = "labels"
@@ -50,6 +51,9 @@ OTEL_COLLECTOR_ENDPOINT_CONFIG_NAME = "otel-collector-endpoint"
 PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
+
+# The visibilities garm-provider-openstack accepts for an image lookup.
+IMAGE_VISIBILITIES = ("public", "private", "shared", "community", "all")
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
@@ -229,6 +233,7 @@ class ScalesetConfig(BaseModel):
         runner_group: Runner group for org registration.
         enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
+        image_visibility: Glance visibility the provider searches when resolving an image name.
     """
 
     name: str
@@ -242,6 +247,7 @@ class ScalesetConfig(BaseModel):
     runner_group: str = "Default"
     enable_shell: bool = False
     pre_install_scripts: str | None = None
+    image_visibility: str | None = None
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ScalesetConfig":
@@ -302,6 +308,14 @@ class ScalesetConfig(BaseModel):
         labels = str(labels).strip() if labels else ""
         pre_install_scripts = charm.config.get(SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME)
         pre_install_scripts = str(pre_install_scripts) if pre_install_scripts else None
+        image_visibility = _get_optional_string_config(
+            charm, SCALESET_IMAGE_VISIBILITY_CONFIG_NAME
+        )
+        if image_visibility is not None and image_visibility not in IMAGE_VISIBILITIES:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_IMAGE_VISIBILITY_CONFIG_NAME} must be one of: "
+                f"{', '.join(IMAGE_VISIBILITIES)}"
+            )
         return cls(
             name=str(charm.config.get(SCALESET_NAME_CONFIG_NAME)).strip(),
             flavor=str(charm.config.get(SCALESET_FLAVOR_CONFIG_NAME)).strip(),
@@ -314,6 +328,7 @@ class ScalesetConfig(BaseModel):
             runner_group=runner_group,
             enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
+            image_visibility=image_visibility,
         )
 
 

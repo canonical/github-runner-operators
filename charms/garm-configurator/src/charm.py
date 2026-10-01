@@ -133,8 +133,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """Publish scaleset configuration to the garm-configurator relation.
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
-        flavor, arch, runner counts, labels, runner group, remote-shell toggle,
-        and pre-install scripts) to the relation. The ``image_id`` wire field
+        image visibility, flavor, arch, runner counts, labels, runner group,
+        remote-shell toggle, and pre-install scripts) to the relation. The ``image_id`` wire field
         carries either an OpenStack image name or ID for compatibility.
         The optional ``org`` and ``repo`` fields are included only when set.
 
@@ -160,6 +160,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
             "image_id": state.image or "",
+            "image_visibility": state.scaleset_config.image_visibility or "",
             "flavor": state.scaleset_config.flavor,
             "os_arch": state.scaleset_config.os_arch,
             "min_idle_runner": str(state.scaleset_config.min_idle_runner),

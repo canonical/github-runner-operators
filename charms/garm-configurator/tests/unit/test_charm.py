@@ -316,6 +316,11 @@ _MISSING_CONFIG_SENTINEL = object()
             "repo and org are mutually exclusive",
             id="repo-and-org-both-set",
         ),
+        pytest.param(
+            {"image-visibility": "everyone"},
+            "image-visibility must be one of: public, private, shared, community, all",
+            id="invalid-image-visibility",
+        ),
     ],
 )
 def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: str):
@@ -1009,3 +1014,31 @@ def test_enable_shell_written_to_garm_configurator_relation(configured, expected
     out = ctx.run(ctx.on.config_changed(), state)
 
     assert out.get_relation(garm_relation.id).local_unit_data["enable_shell"] == expected
+
+
+@pytest.mark.parametrize(
+    "configured, expected",
+    [("private", "private"), (" all ", "all"), (None, "")],
+    ids=["private", "stripped", "unset"],
+)
+def test_image_visibility_written_to_garm_configurator_relation(configured, expected):
+    """
+    arrange: Valid config with image-visibility set, padded with whitespace, or unset.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: The databag carries the stripped visibility, or an empty string when unset so
+        the garm charm leaves the provider's default (public) in place.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    if configured is not None:
+        config["image-visibility"] = configured
+    garm_relation = _make_garm_configurator_relation()
+    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.get_relation(garm_relation.id).local_unit_data.get("image_visibility", "") == (
+        expected
+    )

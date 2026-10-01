@@ -717,6 +717,7 @@ class GarmCharm(paas_charm.go.Charm):
             pre_install_scripts=_parse_pre_install_scripts(data.get("pre_install_scripts", "")),
             template_id=template_id,
             runner_config=RunnerConfig.from_databag(data),
+            image_visibility=data.get("image_visibility", "").strip(),
         )
 
     def _build_desired_credentials(self) -> list[CredentialSpec]:
