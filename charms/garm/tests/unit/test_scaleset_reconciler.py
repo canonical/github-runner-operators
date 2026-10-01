@@ -252,6 +252,7 @@ def _spec(
     pre_install_scripts=None,
     template_id=None,
     runner_config=None,
+    image_visibility="",
 ):
     return ScalesetSpec(
         name=name,
@@ -269,6 +270,7 @@ def _spec(
         pre_install_scripts=pre_install_scripts or {},
         template_id=template_id,
         runner_config=runner_config or RunnerConfig(),
+        image_visibility=image_visibility,
     )
 
 
@@ -1255,6 +1257,62 @@ def test_update_clears_extra_specs_with_empty_dict_when_proxy_removed():
     assert len(client.updated) == 1
     _, params = client.updated[0]
     assert params.extra_specs == {}
+
+
+def test_create_sends_image_visibility_as_an_extra_spec():
+    """
+    arrange: A spec whose image is private to the provider's project.
+    act: Reconcile a create.
+    assert: The extra_specs ask the provider to search private images, since it otherwise
+        resolves an image name among public images only.
+    """
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(client, [_spec(image_visibility="private")])
+
+    _, _, params = client.created[0]
+    assert params.extra_specs == {"image_visibility": "private"}
+
+
+@pytest.mark.parametrize(
+    "observed_extra, desired, expected_extra",
+    [
+        ({}, "private", {"image_visibility": "private"}),
+        ({"image_visibility": "public"}, "private", {"image_visibility": "private"}),
+        ({"image_visibility": "private"}, "", {}),
+    ],
+    ids=["set", "changed", "cleared"],
+)
+def test_update_converges_image_visibility(observed_extra, desired, expected_extra):
+    """
+    arrange: An existing scaleset whose image_visibility differs from the spec's.
+    act: Reconcile the spec.
+    assert: One update brings the extra_specs to the desired visibility, clearing it with an
+        explicit empty dict when the spec no longer sets one.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=observed_extra)],
+    )
+    _reconcile(client, [_spec(image_visibility=desired)])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.extra_specs == expected_extra
+
+
+def test_no_update_when_image_visibility_already_matches():
+    """
+    arrange: An existing scaleset already carrying the spec's image_visibility.
+    act: Reconcile the spec.
+    assert: No update is issued.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs={"image_visibility": "private"})],
+    )
+    _reconcile(client, [_spec(image_visibility="private")])
+
+    assert client.updated == []
 
 
 class _FakeTemplate:

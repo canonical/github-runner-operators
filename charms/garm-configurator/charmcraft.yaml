@@ -85,6 +85,13 @@ config:
         the image is read from the image relation for backwards compatibility.
         If neither source provides an image, GARM removes this configurator's
         scale set and its runners.
+    image-visibility:
+      type: string
+      description: |
+        Optional Glance visibility used when the OpenStack provider looks up an image
+        by name: public, private, shared, community, or all. When unset, the provider
+        searches public images only, so a private image needs "private". It has no
+        effect when the image is an ID.
     min-idle-runner:
       type: int
       default: 0

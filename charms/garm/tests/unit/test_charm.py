@@ -1374,6 +1374,29 @@ def test_remote_shell_follows_the_configurator_databag(
     assert [spec.enable_shell for spec in specs] == [expected]
 
 
+@pytest.mark.parametrize(
+    "databag_value, expected",
+    [("private", "private"), ("", ""), (None, "")],
+    ids=["private", "empty", "absent"],
+)
+def test_image_visibility_follows_the_configurator_databag(
+    ctx: Context, garm_api: _GarmApiMocks, databag_value: str | None, expected: str
+):
+    """
+    arrange: A configurator unit publishing image_visibility, an empty value, or nothing — the
+        last being an older configurator that predates the option.
+    act: Run update-status.
+    assert: The scaleset spec carries the visibility, or none so the provider default applies.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+    if databag_value is not None:
+        data["image_visibility"] = databag_value
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
+    assert [spec.image_visibility for spec in specs] == [expected]
+
+
 # --- Event wiring -------------------------------------------------------------------------
 
 
