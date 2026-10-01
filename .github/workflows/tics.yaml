@@ -1,0 +1,88 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: TICS
+
+on:
+  schedule:
+    - cron: "0 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tics:
+    name: TICS
+    if: github.ref == 'refs/heads/main'
+    runs-on: self-hosted-linux-amd64-noble-tiobe
+    services:
+      postgres:
+        image: postgres:16.15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install linters and Python dependencies
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          pip install tox flake8 pylint
+          for c in garm garm-configurator planner-operator webhook-gateway-operator; do
+            pip install -r charms/$c/requirements.txt
+          done
+
+      - name: Go tests with coverage
+        env:
+          POSTGRESQL_DB_CONNECT_STRING: postgres://postgres:postgres@localhost:5432/postgres
+        run: |
+          mkdir -p /tmp/cov
+          go test -count=1 -tags=integration -coverprofile=/tmp/cov/go.out ./internal/... ./cmd/waiting-p80-report/...
+          go install github.com/boumenot/gocover-cobertura@latest
+          "$(go env GOPATH)/bin/gocover-cobertura" < /tmp/cov/go.out > /tmp/cov/go.xml
+
+      - name: Charm unit tests with coverage
+        run: |
+          mkdir -p /tmp/cov
+          for c in garm garm-configurator planner-operator webhook-gateway-operator; do
+            (cd charms/$c && tox -c tox.toml -e unit && .tox/unit/bin/coverage xml -o /tmp/cov/$c.xml && rm -rf .tox .coverage)
+          done
+
+      - name: Merge coverage
+        run: |
+          dotnet tool update --global dotnet-reportgenerator-globaltool
+          rm -rf .coverage
+          ~/.dotnet/tools/reportgenerator -reports:"/tmp/cov/*.xml" -targetdir:.coverage -reporttypes:Cobertura
+          mv .coverage/Cobertura.xml .coverage/cobertura.xml
+
+      - name: TICS GitHub Action
+        uses: tiobe/tics-github-action@v3
+        with:
+          mode: qserver
+          project: github-runner-operators
+          branchdir: ${{ github.workspace }}
+          viewerUrl: https://canonical.tiobe.com/tiobeweb/TICS/api/cfg?name=GoProjects
+          ticsAuthToken: ${{ secrets.TICSAUTHTOKEN }}
+          installTics: true
+
+concurrency:
+  group: tics
+  cancel-in-progress: false
