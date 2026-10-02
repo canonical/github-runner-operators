@@ -19,3 +19,9 @@ jobs:
     secrets:
       CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
 
+
+  secscan:
+    needs: publish
+    permissions:
+      contents: read
+    uses: ./.github/workflows/secscan.yaml # zizmor: ignore[self-repository] "$/" syntax is not supported by actionlint
