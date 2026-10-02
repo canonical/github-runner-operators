@@ -14,6 +14,7 @@ import sys
 
 import yaml
 
+MANIFEST = pathlib.Path(".github/sbomber-manifest.yaml")
 STATEFILE = pathlib.Path("scanner/.statefile.yaml")
 REPORTS = pathlib.Path("scanner/reports")
 EXCLUSIONS = pathlib.Path(".github/secscan-exclusions")
@@ -22,8 +23,19 @@ EXCLUSIONS = pathlib.Path(".github/secscan-exclusions")
 def main() -> int:
     state = yaml.safe_load(STATEFILE.read_text())
     REPORTS.mkdir(parents=True, exist_ok=True)
+    artifacts = state.get("artifacts") or []
     failed = False
-    for artifact in state.get("artifacts", []):
+    if not artifacts:
+        print("::error::sbomber statefile has no artifacts; prepare or submit failed, re-run the job.")
+        failed = True
+    # A dropped artifact would otherwise go unscanned and pass silently.
+    expected = [a["name"] for a in yaml.safe_load(MANIFEST.read_text())["artifacts"]]
+    present = {a["name"] for a in artifacts}
+    for name in expected:
+        if name not in present:
+            print(f"::error::{name}: missing from the sbomber statefile; it was not scanned, re-run the job.")
+            failed = True
+    for artifact in artifacts:
         name = artifact["name"]
         token = ((artifact.get("processing") or {}).get("secscan") or {}).get("token")
         if not token:

@@ -19,7 +19,6 @@ jobs:
     secrets:
       CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
 
-
   secscan:
     needs: publish
     permissions:
