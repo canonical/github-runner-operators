@@ -35,6 +35,7 @@ The Go layout follows the [community Go project layout](https://github.com/golan
 - **GARM end-to-end test** (root `tox.ini`) — `tox -e garm-e2e`. Runs against a real OpenStack tenant from `garm_e2e.yaml`, is manually dispatched, one run at a time repository-wide, and is **not** a merge gate. See `CONTRIBUTING.md` §"GARM E2E".
 - **Shared test-support unit tests** (root `tox.ini`) — `tox -e charms-tests-unit`. Model-free tests for the helpers under `charms/tests/` (dispatch/credential helpers, the diagnostic redactor). A merge gate, unlike the suites that consume those helpers.
 - **`actions/` Python** — `tox -e actions-lint`, `tox -e actions-static`, `tox -e actions-unit`.
+- **secscan gate** — `tox -e secscan-gate-unit`. Unit tests for `.github/scripts/secscan_gate.py` using a fake `secscan-client`.
 - **Go** — `go test ./...`.
 - `charmcraft pack` — build a charm (run from the charm dir; not wired into tox).
 - **Docs spellcheck** — CI runs Vale over `docs/` with `Canonical.000-US-spellcheck` at **error** level, so an unknown technical term (e.g. `deserialize`) fails the build. Add project-specific terms — regex forms like `[Dd]eserializ(e|es|ed|ing|ation)` are supported — to `docs/.custom_wordlist.txt` (the docs `Makefile` appends it to the Canonical accept vocabulary); verify with `make -C docs spellcheck` before pushing a `docs/` change.
