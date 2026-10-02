@@ -52,6 +52,10 @@ jobs:
           for c in garm garm-configurator planner-operator webhook-gateway-operator; do
             pip install -r charms/$c/requirements.txt
           done
+          # Test-only imports, so pylint can resolve them in the analysed test files
+          # and the vendored data_platform_libs (optional psycopg import).
+          pip install pytest "ops-scenario==8.8.2" "psycopg[binary]" \
+            -r charms/tests/integration/requirements.txt
 
       - name: Go tests with coverage
         env:
