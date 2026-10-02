@@ -55,7 +55,8 @@ jobs:
         run: |
           ./sbomber prepare ../.github/sbomber-manifest.yaml
           ./sbomber submit
-          ./sbomber poll --wait --timeout 60
+          # --timeout is per artifact and the 7 are awaited sequentially; keep 7 x timeout under the job timeout.
+          ./sbomber poll --wait --timeout 15
       - name: Download reports
         if: always()
         working-directory: scanner

@@ -31,10 +31,11 @@ resources with Canonical's secscan service (Trivy), using
 after every publish to edge, weekly, and on demand, and fails when it finds a CVE that is
 not excluded.
 
-When it fails, maintainers download the `secscan-reports` artifact and either fix the
-issue or open a draft [GitHub security advisory](../../security/advisories/new) recording
-the CVE, its severity and the remediation plan. A CVE accepted as a false positive or
-acceptable risk is added to `.github/secscan-exclusions/<artifact>.txt` with a
+When it fails, maintainers download the `secscan-reports` artifact. For each artifact it
+contains `<artifact>.result.txt`, the authoritative verdict and CVE IDs, alongside the
+detailed report downloaded by sbomber. They either fix the issue or open a draft
+[GitHub security advisory](../../security/advisories/new) recording the CVE, its severity
+and the remediation plan. A CVE accepted as a false positive or acceptable risk is added to `.github/secscan-exclusions/<artifact>.txt` with a
 justification comment and a link to its advisory. High or critical exclusions need
 security team approval. The SSDLC cycle is set in the manifest's `ssdlc_params` and must
 be bumped each cycle.
