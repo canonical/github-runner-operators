@@ -1,0 +1,72 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# Scans the published GARM-stack charms and their OCI resources with Canonical secscan
+# (via sbomber) to meet SEC0025. Called after each publish to edge, and run weekly.
+name: Secscan
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - .github/workflows/secscan.yaml
+      - .github/sbomber-manifest.yaml
+      - .github/scripts/secscan_gate.py
+      - .github/secscan-exclusions/**
+
+permissions: {}
+
+jobs:
+  secscan:
+    name: Secscan charms and images
+    # Fork PRs must never reach private-endpoint runners.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-medium]
+    permissions:
+      contents: read
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: canonical/sbomber
+          ref: 2b11503a3d840abadc50a9c14a7f0cc56e8b8096
+          path: scanner
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Install tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q python3-apt skopeo
+          sudo snap install juju --channel=3.6/stable
+          sudo snap install canonical-secscan-client
+          sudo snap connect canonical-secscan-client:home system:home
+          mkdir -p "$HOME/snap/canonical-secscan-client/common"
+          echo "SECSCAN_DIR=$HOME/snap/canonical-secscan-client/common" >> "$GITHUB_ENV"
+          echo "NO_PROXY=${NO_PROXY:+$NO_PROXY,}.internal" >> "$GITHUB_ENV"
+          echo "no_proxy=${no_proxy:+$no_proxy,}.internal" >> "$GITHUB_ENV"
+      - name: Prepare, submit and wait
+        working-directory: scanner
+        run: |
+          ./sbomber prepare ../.github/sbomber-manifest.yaml
+          ./sbomber submit
+          # --timeout is per artifact and the 7 are awaited sequentially; keep 7 x timeout under the job timeout.
+          ./sbomber poll --wait --timeout 15
+      - name: Download reports
+        if: always()
+        working-directory: scanner
+        run: ./sbomber download
+      - name: Gate on findings
+        run: scanner/.venv/bin/python .github/scripts/secscan_gate.py
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: secscan-reports
+          path: scanner/reports/
+          if-no-files-found: warn
