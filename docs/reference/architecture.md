@@ -41,3 +41,11 @@ The GARM charm services ingress using the REST API of GARM on the 8080 port. The
 
 The GARM charm exposes Prometheus metrics that can be scraped by a monitoring stack and visualized in Grafana dashboards.
 The logs of the GARM charm are ingested by Loki to the dashboard.
+
+## Security boundaries
+
+The charms control configuration, Juju secret references, relation data, and GARM reconciliation. The deployment environment controls the external ingress, network exposure, PostgreSQL service, OpenStack tenant, GitHub permissions, and observability storage.
+
+The GARM workload serves its API and metrics on port 8080. The workload does not terminate TLS, so external deployments need a TLS-terminating ingress and a restricted network path. GARM metrics are not authenticated by the application and should be reachable only by the monitoring system.
+
+See [Security in the GARM charms](../explanation/security.md) for the charm-level security posture and [How to secure GARM and the GARM configurator](../how-to/secure-garm.md) for operator actions.

@@ -34,6 +34,8 @@ In this documentation
       - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
     * - Design
       - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
+    * - Security
+      - :ref:`Security in the GARM charms <explanation_security>` | :ref:`How to secure GARM <how_to_secure_garm>`
     * - Releases
       - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_ | :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
 
