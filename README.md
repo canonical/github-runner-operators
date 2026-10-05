@@ -59,16 +59,24 @@ in the documentation for their roles and integrations.
 | `github-runner-planner` | https://charmhub.io/github-runner-planner |
 | `github-runner-webhook-gateway` | https://charmhub.io/github-runner-webhook-gateway |
 
+## Get started
+
+For the currently developed GARM architecture, start with the in-repository
+[tutorial](docs/tutorial/garm.md). For per-charm roles and integrations, see
+[Charms](docs/reference/charms.md). Contributors should use the repository layout above
+to find the relevant component; documentation contributor commands are listed below.
+
 ## Documentation
 
-Our documentation is stored in the `docs` directory
-and can be viewed at https://canonical.com/juju/docs/github-runner-charms/.
-It is based on the Canonical Sphinx Stack
-and hosted on [Read the Docs](https://about.readthedocs.com/).
-In structuring, the documentation employs the [Diátaxis](https://diataxis.fr/) approach.
+Our documentation is stored in the `docs` directory and
+can be viewed at https://canonical.com/juju/docs/github-runner-charms/.
+It is based on the Canonical Sphinx Stack and hosted on
+[Read the Docs](https://about.readthedocs.com/). In structuring, the
+documentation employs the [Diátaxis](https://diataxis.fr/) approach.
 
 You may open a pull request with your documentation changes, or you can
-[file a bug](https://github.com/canonical/github-runner-operators/issues) to provide constructive feedback or suggestions.
+[file a bug](https://github.com/canonical/github-runner-operators/issues) to
+provide constructive feedback or suggestions.
 
 To run the documentation locally before submitting your changes:
 
@@ -77,8 +85,8 @@ cd docs
 make run
 ```
 
-GitHub runs automatic checks on the documentation
-to verify spelling, validate links and style guide compliance.
+GitHub runs automatic checks on the documentation to verify spelling,
+validate links and style guide compliance.
 
 You can (and should) run the same checks locally:
 
@@ -88,3 +96,17 @@ make linkcheck
 make vale
 make lint-md
 ```
+
+## Project and community
+
+The GitHub runner operators project is a member of the Ubuntu family. It is an open source project that warmly welcomes community projects, contributions, suggestions, fixes, and constructive feedback.
+
+* [Code of conduct](https://ubuntu.com/community/code-of-conduct)
+* [Get support](https://discourse.charmhub.io/)
+* [Issues](https://github.com/canonical/github-runner-operators/issues)
+* [Matrix](https://matrix.to/#/#charmhub-charmdev:ubuntu.com)
+* [Contribute](https://github.com/canonical/github-runner-operators/blob/main/CONTRIBUTING.md)
+
+## Licensing and trademark
+
+See [`LICENSE`](LICENSE).
