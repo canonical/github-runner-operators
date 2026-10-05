@@ -4,7 +4,7 @@
 name: garm
 base: bare
 build-base: ubuntu@24.04
-version: "0.1"
+version: "0.2"
 summary: GARM — GitHub Actions Runner Manager
 description: |
   ROCK image containing the GARM binary, the OpenStack provider binary, and
@@ -17,12 +17,12 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # 2026/09/04: Pin to commit with the scale set pseudo pool ID fix (PR #866,
+    # 2026/10/05: Pin x/crypto v0.57.0, retaining the pseudo pool ID fix (PR #866,
     # merged post-v0.2.1). Without it, OpenStack scale set names over 10 chars
     # produce a garm-pool-id server tag that exceeds Nova's 60-char tag limit,
     # failing every instance creation (cloudbase/garm-provider-openstack#34).
     # Switch to source-tag once v0.2.2+ is released.
-    source-commit: e03045fc5861a903f72cb04ff37327b19a0d1e20
+    source-commit: 840558b5b6e26eb1a833e45a63777f5ea3ae60d1
     source-depth: 1
     build-snaps:
       - go/1.26/stable
@@ -55,6 +55,10 @@ parts:
       - CGO_ENABLED: "0"
     override-build: |
       cd "$CRAFT_PART_SRC"
+      # v0.1.5 is unpatched; upstream main also changes the OpenStack SDK.
+      go get golang.org/x/crypto@v0.57.0
+      go mod tidy
+      go mod vendor
       go build -o bin/garm-provider-openstack .
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
@@ -73,6 +77,10 @@ parts:
     override-build: |
       cd "$CRAFT_PART_SRC"
       VERSION=$(git describe --tags --match='v[0-9]*' --always)
+      # v0.1.1 and upstream main still use vulnerable x/crypto v0.53.0.
+      go get golang.org/x/crypto@v0.57.0
+      go mod tidy
+      go mod vendor
       AGENT_DIR="$CRAFT_PART_INSTALL/opt/garm-agent"
       ARCHES="amd64 arm64"
       for arch in $ARCHES; do

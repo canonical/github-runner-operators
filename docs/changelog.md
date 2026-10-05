@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-05
+
+- `garm`: update GARM and the provider and agent build dependencies to include patched `golang.org/x/crypto`, retaining the scale set pool ID fix.
+
 ## 2026-10-01
 
 - `garm-configurator`: add the optional `image-visibility` configuration, which the `garm` charm passes to the OpenStack provider as the scale set's `image_visibility` extra spec. The provider resolves an image name among public images only by default, so a scale set whose image is private to its OpenStack project never boots a runner; set `image-visibility` to `private` for such an image. It accepts `public`, `private`, `shared`, `community`, or `all`, and has no effect when `image` is an image ID. Existing scale sets are unchanged while it is unset.
