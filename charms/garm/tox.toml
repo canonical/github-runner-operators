@@ -37,13 +37,7 @@ commands = [["pyright"]]
 
 [env.unit]
 description = "Run unit tests"
-deps = [
-  "pytest",
-  "coverage[toml]",
-  "ops-scenario==8.8.3",
-  "tomli; python_version < '3.11'",
-  "-r requirements.txt",
-]
+deps = ["-r test-requirements.txt", "-r requirements.txt"]
 commands = [
   [
     "coverage",

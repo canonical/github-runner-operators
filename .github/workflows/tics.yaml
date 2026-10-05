@@ -49,13 +49,13 @@ jobs:
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
           pip install tox flake8 pylint
+          # Test dependencies too, so pylint can resolve imports in the analysed test files.
           for c in garm garm-configurator planner-operator webhook-gateway-operator; do
-            pip install -r charms/$c/requirements.txt
+            pip install -r charms/$c/requirements.txt -r charms/$c/test-requirements.txt
           done
-          # Test-only imports, so pylint can resolve them in the analysed test files
-          # and the vendored data_platform_libs (optional psycopg import).
-          pip install pytest "ops-scenario==8.8.2" "psycopg[binary]" \
-            -r charms/tests/integration/requirements.txt
+          pip install -r charms/tests/integration/requirements.txt
+          # Optional import in the vendored data_platform_libs charm library
+          pip install "psycopg[binary]"
 
       - name: Go tests with coverage
         env:

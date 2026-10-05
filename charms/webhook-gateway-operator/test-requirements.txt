@@ -1,0 +1,4 @@
+pytest
+pytest-custom-exit-code
+coverage[toml]
+ops[testing]

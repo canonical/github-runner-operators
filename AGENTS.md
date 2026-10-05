@@ -30,7 +30,7 @@ The Go layout follows the [community Go project layout](https://github.com/golan
 
 ## Build & test
 
-- **Per-charm Python checks** — from the charm directory, `tox -c tox.toml` (envs `fmt`, `lint`, `complexity`, `static`, `unit`, `coverage-report`; ruff, codespell, pyright, pytest+coverage). CI runs these per charm via `tox -c tox.toml`.
+- **Per-charm Python checks** — from the charm directory, `tox -c tox.toml` (envs `fmt`, `lint`, `complexity`, `static`, `unit`, `coverage-report`; ruff, codespell, pyright, pytest+coverage). CI runs these per charm via `tox -c tox.toml`. Unit-test dependencies live in each charm's `test-requirements.txt`, which the TICS workflow also installs, so add new test imports there, not inline in `tox.toml`.
 - **Integration tests** (root `tox.ini`) — `tox -e <charm>-integration` (`garm`, `webhook-gateway`, `planner`, `garm-configurator`) or `tox -e charms-integration` for all. Requires a live Juju model (jubilant + pytest-operator).
 - **GARM end-to-end test** (root `tox.ini`) — `tox -e garm-e2e`. Runs against a real OpenStack tenant from `garm_e2e.yaml`, is manually dispatched, one run at a time repository-wide, and is **not** a merge gate. See `CONTRIBUTING.md` §"GARM E2E".
 - **Shared test-support unit tests** (root `tox.ini`) — `tox -e charms-tests-unit`. Model-free tests for the helpers under `charms/tests/` (dispatch/credential helpers, the diagnostic redactor). A merge gate, unlike the suites that consume those helpers.
