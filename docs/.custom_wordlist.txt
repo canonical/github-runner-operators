@@ -103,3 +103,7 @@ datasource
 filelog
 OTel
 stdout
+Sigma
+pySigma
+SecOps
+LogQL
