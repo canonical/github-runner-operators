@@ -49,6 +49,7 @@ from garm_client.models.update_entity_params import UpdateEntityParams
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 from garm_client.models.update_template_params import UpdateTemplateParams
+from security_log import owasp_log
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,12 @@ class GarmApiClient:
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         logger.info("GARM first-run initialisation complete for user '%s'", username)
+        owasp_log.user_created(
+            userid="system",
+            newuserid=username,
+            attributes="role=admin",
+            description=f"GARM first-run provisioned admin user '{username}'",
+        )
 
     def login(self, username: str, password: str) -> str:
         """Authenticate with GARM and return a JWT token.

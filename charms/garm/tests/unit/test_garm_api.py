@@ -913,3 +913,18 @@ def test_upload_agent_tool_raises_on_api_error():
             client.upload_agent_tool(
                 name="n", description="d", os_arch="amd64", version="v1", content=b""
             )
+
+
+def test_first_run_emits_user_created():
+    """
+    arrange: GarmApiClient with a stubbed FirstRunApi and a patched owasp_log.
+    act: Call first_run with an admin username.
+    assert: user_created is emitted naming the new admin, so the account creation is auditable.
+    """
+    client = GarmApiClient(BASE_URL)
+    with _stub_api_client(client):
+        with patch("garm_api.FirstRunApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.first_run.return_value = MagicMock()
+            client.first_run("admin", "pass", "email@example.com", "Admin")
+    mock_log.user_created.assert_called_once()
+    assert mock_log.user_created.call_args.kwargs["newuserid"] == "admin"
