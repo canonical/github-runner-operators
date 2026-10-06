@@ -530,7 +530,7 @@ class GarmCharm(paas_charm.go.Charm):
                     "GARM configurator application has no units: relation_id=%d",
                     relation.id,
                 )
-                return []
+                continue
             if len(units) > 1:
                 logger.warning(
                     "GARM configurator application has multiple units; using first unit: "
