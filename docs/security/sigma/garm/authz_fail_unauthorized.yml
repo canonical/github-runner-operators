@@ -1,0 +1,16 @@
+title: GARM Unauthorized API Access (401)
+id: 7f1d9c20-4e6a-4b2f-9a3d-0c1e2f3a4b5c
+status: experimental
+description: Detects a 401 authorization rejection from the GARM admin API.
+author: Canonical Security
+logsource:
+  category: application
+  product: canonical.garm
+detection:
+  selection:
+    owasp_event.event|startswith: 'authz_fail'
+    owasp_event.level: 'CRITICAL'
+  condition: selection
+falsepositives:
+  - Expired admin JWT during a legitimate reconcile
+level: high

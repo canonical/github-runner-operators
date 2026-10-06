@@ -1,0 +1,15 @@
+title: GARM Application Teardown
+id: 4d5e6f70-8192-43a4-b5c6-d7e8f9a0b1c2
+status: experimental
+description: Detects GARM application teardown / resource-drain before removal.
+author: Canonical Security
+logsource:
+  category: application
+  product: canonical.garm
+detection:
+  selection:
+    owasp_event.event|startswith: 'sys_shutdown'
+  condition: selection
+falsepositives:
+  - Planned application removal or scale-in
+level: medium
