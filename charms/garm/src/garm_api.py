@@ -238,17 +238,13 @@ class GarmApiClient:
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                owasp_log.authn_login_fail(
-                    userid=username, description="GARM admin login failed"
-                )
+                owasp_log.authn_login_fail(userid=username, description="GARM admin login failed")
                 raise GarmApiError(f"GARM login failed ({exc.status}): {exc.body}") from exc
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         if not response.token:
             raise GarmApiError("GARM login returned empty token")
-        owasp_log.authn_login_success(
-            userid=username, description="GARM admin login succeeded"
-        )
+        owasp_log.authn_login_success(userid=username, description="GARM admin login succeeded")
         owasp_log.authn_token_created(
             userid=username,
             entitlements=["jwt"],
@@ -521,7 +517,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 owasp_log.authn_token_created(
                     userid="garm-admin",
-                    entitlements=["forge-credential", created.name],
+                    entitlements=["forge-credential", created.name or ""],
                     description=f"GARM forge credential '{created.name}' registered",
                 )
                 return created

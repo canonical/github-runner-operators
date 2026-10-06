@@ -1051,7 +1051,10 @@ def test_create_org_emits_authz_admin():
     params = MagicMock()
     params.name = "my-org"
     with _stub_api_client(client):
-        with patch("garm_api.OrganizationsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+        with (
+            patch("garm_api.OrganizationsApi") as MockApi,
+            patch("garm_api.owasp_log") as mock_log,
+        ):
             MockApi.return_value.create_org.return_value = MagicMock()
             client.create_org(params)
     mock_log.authz_admin.assert_called_once()
@@ -1071,3 +1074,45 @@ def test_delete_scaleset_emits_authz_admin():
             client.delete_scaleset(3)
     mock_log.authz_admin.assert_called_once()
     assert "delete_scaleset" in mock_log.authz_admin.call_args.kwargs["admin_activity"]
+
+
+@pytest.mark.parametrize(
+    "api_class, call",
+    [
+        ("OrganizationsApi", lambda c: c.update_org("org-1", MagicMock())),
+        ("OrganizationsApi", lambda c: c.delete_org("org-1")),
+        ("RepositoriesApi", lambda c: c.create_repo(MagicMock(name="r"))),
+        ("RepositoriesApi", lambda c: c.update_repo("repo-1", MagicMock())),
+        ("RepositoriesApi", lambda c: c.delete_repo("repo-1")),
+        ("OrganizationsApi", lambda c: c.create_org_scaleset("org-1", MagicMock())),
+        ("RepositoriesApi", lambda c: c.create_repo_scaleset("repo-1", MagicMock())),
+        ("ScalesetsApi", lambda c: c.update_scaleset(4, MagicMock())),
+        ("TemplatesApi", lambda c: c.create_template("tmpl", b"#!/bin/sh")),
+        ("TemplatesApi", lambda c: c.update_template(4, b"#!/bin/sh")),
+        ("TemplatesApi", lambda c: c.delete_template(4)),
+    ],
+    ids=[
+        "update_org",
+        "delete_org",
+        "create_repo",
+        "update_repo",
+        "delete_repo",
+        "create_org_scaleset",
+        "create_repo_scaleset",
+        "update_scaleset",
+        "create_template",
+        "update_template",
+        "delete_template",
+    ],
+)
+def test_privileged_mutations_emit_authz_admin(api_class, call):
+    """
+    arrange: GarmAuthenticatedClient with the relevant generated API stubbed, owasp_log patched.
+    act: Invoke each privileged resource mutation.
+    assert: authz_admin fires exactly once, so every GARM admin mutation is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_class}"), patch("garm_api.owasp_log") as mock_log:
+            call(client)
+    mock_log.authz_admin.assert_called_once()
