@@ -1495,3 +1495,16 @@ def test_on_remove_emits_sys_shutdown(ctx: Context, garm_api: _GarmApiMocks):
     with patch("charm.GarmResourceCleanup"), patch("charm.owasp_log") as mock_log:
         ctx.run(ctx.on.remove(), _state(secrets=_owned_secrets(), planned_units=0))
     mock_log.sys_shutdown.assert_called_once()
+
+
+def test_log_forwarder_is_instantiated(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: The go-framework-provided LogForwarder patched so we can observe its construction.
+    act: Run any hook so the charm __init__ executes.
+    assert: A LogForwarder is wired on the framework's 'logging' relation, so the security
+        events the charm forwards can reach Loki without the charm declaring its own forwarder.
+    """
+    with patch("charms.loki_k8s.v1.loki_push_api.LogForwarder") as forwarder_cls:
+        ctx.run(ctx.on.update_status(), _state())
+    forwarder_cls.assert_called_once()
+    assert forwarder_cls.call_args.kwargs["relation_name"] == "logging"
