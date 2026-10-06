@@ -49,7 +49,7 @@ from garm_client.models.update_entity_params import UpdateEntityParams
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 from garm_client.models.update_template_params import UpdateTemplateParams
-from security_log import owasp_log
+from security_log import APPID, owasp_log
 
 logger = logging.getLogger(__name__)
 
@@ -509,10 +509,16 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return CredentialsApi(api_client=client).create_credentials(
+                created = CredentialsApi(api_client=client).create_credentials(
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authn_token_created(
+                    userid="garm-admin",
+                    entitlements=["forge-credential", created.name],
+                    description=f"GARM forge credential '{created.name}' registered",
+                )
+                return created
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to create credential ({exc.status}): {exc.body}"
@@ -537,11 +543,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return CredentialsApi(api_client=client).update_credentials(
+                updated = CredentialsApi(api_client=client).update_credentials(
                     id=cred_id,
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authn_token_revoked(
+                    userid="garm-admin",
+                    tokenid=str(cred_id),
+                    description=f"GARM forge credential {cred_id} updated/rotated",
+                )
+                return updated
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to update credential {cred_id} ({exc.status}): {exc.body}"
@@ -563,6 +575,10 @@ class GarmAuthenticatedClient(GarmApiClient):
                 CredentialsApi(api_client=client).delete_credentials(
                     id=cred_id,
                     _request_timeout=_REQUEST_TIMEOUT,
+                )
+                owasp_log.authn_token_delete(
+                    appid=APPID,
+                    description=f"GARM forge credential {cred_id} deleted",
                 )
             except ApiException as exc:
                 raise GarmApiError(

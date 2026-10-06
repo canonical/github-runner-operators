@@ -994,3 +994,47 @@ def test_raise_resource_api_error_no_authz_fail_on_404():
         with pytest.raises(GarmNotFoundError):
             _raise_resource_api_error("missing", ApiException(status=404))
     mock_log.authz_fail.assert_not_called()
+
+
+def test_create_credentials_emits_token_created():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning a named credential, owasp_log patched.
+    act: Call create_credentials().
+    assert: authn_token_created fires, so forge-credential registration is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_result = MagicMock()
+    mock_result.name = "ghcreds"
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.create_credentials.return_value = mock_result
+            client.create_credentials(MagicMock())
+    mock_log.authn_token_created.assert_called_once()
+
+
+def test_update_credentials_emits_token_revoked():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning a credential, owasp_log patched.
+    act: Call update_credentials(5, params).
+    assert: authn_token_revoked fires with the credential id, so rotation is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.update_credentials.return_value = MagicMock()
+            client.update_credentials(5, MagicMock())
+    mock_log.authn_token_revoked.assert_called_once()
+    assert mock_log.authn_token_revoked.call_args.kwargs["tokenid"] == "5"
+
+
+def test_delete_credentials_emits_token_delete():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi, owasp_log patched.
+    act: Call delete_credentials(5).
+    assert: authn_token_delete fires, so credential removal is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            client.delete_credentials(5)
+    mock_log.authn_token_delete.assert_called_once()
