@@ -928,3 +928,41 @@ def test_first_run_emits_user_created():
             client.first_run("admin", "pass", "email@example.com", "Admin")
     mock_log.user_created.assert_called_once()
     assert mock_log.user_created.call_args.kwargs["newuserid"] == "admin"
+
+
+def test_login_emits_success_and_token_created():
+    """
+    arrange: GarmApiClient whose LoginApi returns a token, with owasp_log patched.
+    act: Call login("admin", "password").
+    assert: Both authn_login_success and authn_token_created fire for the admin, so a
+        successful auth and the JWT issuance are both auditable.
+    """
+    client = GarmApiClient(BASE_URL)
+    mock_result = MagicMock()
+    mock_result.token = "test-jwt-token"
+    with _stub_api_client(client):
+        with patch("garm_api.LoginApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.login.return_value = mock_result
+            client.login("admin", "password")
+    mock_log.authn_login_success.assert_called_once_with(
+        userid="admin", description="GARM admin login succeeded"
+    )
+    mock_log.authn_token_created.assert_called_once()
+    assert mock_log.authn_token_created.call_args.kwargs["userid"] == "admin"
+
+
+def test_login_emits_login_fail_on_api_error():
+    """
+    arrange: GarmApiClient whose LoginApi raises ApiException(401), owasp_log patched.
+    act: Call login("admin", "wrong") expecting it to raise.
+    assert: authn_login_fail is emitted for the admin before the error propagates.
+    """
+    client = GarmApiClient(BASE_URL)
+    with _stub_api_client(client):
+        with patch("garm_api.LoginApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.login.side_effect = ApiException(status=401)
+            with pytest.raises(GarmApiError):
+                client.login("admin", "wrong")
+    mock_log.authn_login_fail.assert_called_once_with(
+        userid="admin", description="GARM admin login failed"
+    )
