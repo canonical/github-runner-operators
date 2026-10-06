@@ -61,10 +61,11 @@ in the documentation for their roles and integrations.
 
 ## Get started
 
-For the currently developed GARM architecture, start with the in-repository
-[tutorial](docs/tutorial/garm.md). For per-charm roles and integrations, see
-[Charms](docs/reference/charms.md). Contributors should use the repository layout above
-to find the relevant component; documentation contributor commands are listed below.
+For the current GARM architecture, start with
+[tutorial](docs/tutorial/garm.md). 
+
+For per-charm roles and integrations, see
+[Charms](docs/reference/charms.md). 
 
 ## Documentation
 
@@ -99,7 +100,8 @@ make lint-md
 
 ## Project and community
 
-The GitHub runner operators project is a member of the Ubuntu family. It is an open source project that warmly welcomes community projects, contributions, suggestions, fixes, and constructive feedback.
+The GitHub runner operators project is a member of the Ubuntu family. It is an open source
+project that warmly welcomes community projects, contributions, suggestions, fixes, and constructive feedback.
 
 * [Code of conduct](https://ubuntu.com/community/code-of-conduct)
 * [Get support](https://discourse.charmhub.io/)
