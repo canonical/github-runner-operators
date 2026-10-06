@@ -387,7 +387,7 @@ class GarmAuthenticatedClient(GarmApiClient):
         with self._api_client() as client:
             api = TemplatesApi(api_client=client)
             try:
-                return api.create_template(
+                tmpl = api.create_template(
                     body=CreateTemplateParams(
                         name=name,
                         description=description,
@@ -397,6 +397,12 @@ class GarmAuthenticatedClient(GarmApiClient):
                     ),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"create_template:{name}",
+                    description=f"GARM runner template '{name}' created",
+                )
+                return tmpl
             except ApiException as exc:
                 raise GarmApiError(
                     f"GARM create_template failed ({exc.status}): {exc.body}"
@@ -779,10 +785,16 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return OrganizationsApi(api_client=client).create_org(
+                org = OrganizationsApi(api_client=client).create_org(
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"create_org:{params.name}",
+                    description=f"GARM organization '{params.name}' created",
+                )
+                return org
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to create organization ({exc.status}): {exc.body}"
@@ -805,11 +817,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return OrganizationsApi(api_client=client).update_org(
+                org = OrganizationsApi(api_client=client).update_org(
                     org_id=org_id,
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"update_org:{org_id}",
+                    description=f"GARM organization {org_id} updated",
+                )
+                return org
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to update organization {org_id} ({exc.status}): {exc.body}"
@@ -832,6 +850,11 @@ class GarmAuthenticatedClient(GarmApiClient):
                     org_id=org_id,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"delete_org:{org_id}",
+                    description=f"GARM organization {org_id} deleted",
+                )
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to delete organization {org_id} ({exc.status}): {exc.body}"
@@ -853,10 +876,16 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return RepositoriesApi(api_client=client).create_repo(
+                repo = RepositoriesApi(api_client=client).create_repo(
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"create_repo:{params.name}",
+                    description=f"GARM repository '{params.name}' created",
+                )
+                return repo
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to create repository ({exc.status}): {exc.body}"
@@ -879,11 +908,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return RepositoriesApi(api_client=client).update_repo(
+                repo = RepositoriesApi(api_client=client).update_repo(
                     repo_id=repo_id,
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"update_repo:{repo_id}",
+                    description=f"GARM repository {repo_id} updated",
+                )
+                return repo
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to update repository {repo_id} ({exc.status}): {exc.body}"
@@ -905,6 +940,11 @@ class GarmAuthenticatedClient(GarmApiClient):
                 RepositoriesApi(api_client=client).delete_repo(
                     repo_id=repo_id,
                     _request_timeout=_REQUEST_TIMEOUT,
+                )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"delete_repo:{repo_id}",
+                    description=f"GARM repository {repo_id} deleted",
                 )
             except ApiException as exc:
                 raise GarmApiError(
@@ -928,11 +968,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return OrganizationsApi(api_client=client).create_org_scale_set(
+                scaleset = OrganizationsApi(api_client=client).create_org_scale_set(
                     org_id=org_id,
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"create_org_scaleset:{org_id}",
+                    description=f"GARM scaleset created under organization {org_id}",
+                )
+                return scaleset
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to create org scaleset ({exc.status}): {exc.body}"
@@ -955,11 +1001,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return RepositoriesApi(api_client=client).create_repo_scale_set(
+                scaleset = RepositoriesApi(api_client=client).create_repo_scale_set(
                     repo_id=repo_id,
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"create_repo_scaleset:{repo_id}",
+                    description=f"GARM scaleset created under repository {repo_id}",
+                )
+                return scaleset
             except ApiException as exc:
                 raise GarmApiError(
                     f"Failed to create repo scaleset ({exc.status}): {exc.body}"
@@ -985,11 +1037,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         """
         with self._api_client() as client:
             try:
-                return ScalesetsApi(api_client=client).update_scale_set(
+                scaleset = ScalesetsApi(api_client=client).update_scale_set(
                     scaleset_id=str(scaleset_id),
                     body=params,
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"update_scaleset:{scaleset_id}",
+                    description=f"GARM scaleset {scaleset_id} updated",
+                )
+                return scaleset
             except ApiException as exc:
                 _raise_resource_api_error(
                     f"Failed to update scaleset {scaleset_id} ({exc.status}): {exc.body}", exc
@@ -1013,11 +1071,17 @@ class GarmAuthenticatedClient(GarmApiClient):
         with self._api_client() as client:
             api = TemplatesApi(api_client=client)
             try:
-                return api.update_template(
+                tmpl = api.update_template(
                     template_id=template_id,
                     body=UpdateTemplateParams(data=base64.b64encode(data).decode("utf-8")),
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"update_template:{template_id}",
+                    description=f"GARM runner template {template_id} updated",
+                )
+                return tmpl
             except ApiException as exc:
                 raise GarmApiError(
                     f"GARM update_template({template_id}) failed ({exc.status}): {exc.body}"
@@ -1038,6 +1102,11 @@ class GarmAuthenticatedClient(GarmApiClient):
             api = TemplatesApi(api_client=client)
             try:
                 api.delete_template(template_id=template_id, _request_timeout=_REQUEST_TIMEOUT)
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"delete_template:{template_id}",
+                    description=f"GARM runner template {template_id} deleted",
+                )
             except ApiException as exc:
                 raise GarmApiError(
                     f"GARM delete_template({template_id}) failed ({exc.status}): {exc.body}"
@@ -1059,6 +1128,11 @@ class GarmAuthenticatedClient(GarmApiClient):
                 ScalesetsApi(api_client=client).delete_scale_set(
                     scaleset_id=str(scaleset_id),
                     _request_timeout=_REQUEST_TIMEOUT,
+                )
+                owasp_log.authz_admin(
+                    userid="garm-admin",
+                    admin_activity=f"delete_scaleset:{scaleset_id}",
+                    description=f"GARM scaleset {scaleset_id} deleted",
                 )
             except ApiException as exc:
                 _raise_resource_api_error(

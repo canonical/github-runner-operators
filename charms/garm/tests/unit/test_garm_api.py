@@ -530,6 +530,7 @@ def test_create_credentials_returns_credentials():
     client = GarmAuthenticatedClient(BASE_URL, "token")
     mock_result = MagicMock()
     mock_result.id = 7
+    mock_result.name = "ghcreds"
     with _stub_api_client(client):
         with patch("garm_api.CredentialsApi") as MockApi:
             MockApi.return_value.create_credentials.return_value = mock_result
@@ -1038,3 +1039,35 @@ def test_delete_credentials_emits_token_delete():
         with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
             client.delete_credentials(5)
     mock_log.authn_token_delete.assert_called_once()
+
+
+def test_create_org_emits_authz_admin():
+    """
+    arrange: GarmAuthenticatedClient with a stubbed OrganizationsApi, owasp_log patched.
+    act: Call create_org(params).
+    assert: authz_admin fires describing the org creation, auditing privileged admin activity.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    params = MagicMock()
+    params.name = "my-org"
+    with _stub_api_client(client):
+        with patch("garm_api.OrganizationsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.create_org.return_value = MagicMock()
+            client.create_org(params)
+    mock_log.authz_admin.assert_called_once()
+    assert "create_org" in mock_log.authz_admin.call_args.kwargs["admin_activity"]
+
+
+def test_delete_scaleset_emits_authz_admin():
+    """
+    arrange: GarmAuthenticatedClient with a stubbed ScalesetsApi, owasp_log patched.
+    act: Call delete_scaleset(3).
+    assert: authz_admin fires describing the scaleset deletion.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    with _stub_api_client(client):
+        with patch("garm_api.ScalesetsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.delete_scale_set.return_value = None
+            client.delete_scaleset(3)
+    mock_log.authz_admin.assert_called_once()
+    assert "delete_scaleset" in mock_log.authz_admin.call_args.kwargs["admin_activity"]
