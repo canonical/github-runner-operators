@@ -1166,6 +1166,11 @@ def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
             error_type: type[GarmApiError] = GarmNotFoundError
         case 401:
             error_type = GarmUnauthorizedError
+            owasp_log.authz_fail(
+                userid="garm-admin",
+                resource=message,
+                description="GARM returned 401 Unauthorized",
+            )
         case _:
             error_type = GarmApiError
     raise error_type(message) from exc

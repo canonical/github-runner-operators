@@ -966,3 +966,31 @@ def test_login_emits_login_fail_on_api_error():
     mock_log.authn_login_fail.assert_called_once_with(
         userid="admin", description="GARM admin login failed"
     )
+
+
+def test_raise_resource_api_error_emits_authz_fail_on_401():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_resource_api_error with an ApiException(401), expecting GarmUnauthorizedError.
+    assert: authz_fail (CRITICAL in owasp-logger) is emitted, so unauthorized API access is audited.
+    """
+    from garm_api import _raise_resource_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmUnauthorizedError):
+            _raise_resource_api_error("update org failed", ApiException(status=401))
+    mock_log.authz_fail.assert_called_once()
+
+
+def test_raise_resource_api_error_no_authz_fail_on_404():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_resource_api_error with an ApiException(404), expecting GarmNotFoundError.
+    assert: authz_fail is NOT emitted - a 404 is not an authorization rejection.
+    """
+    from garm_api import _raise_resource_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmNotFoundError):
+            _raise_resource_api_error("missing", ApiException(status=404))
+    mock_log.authz_fail.assert_not_called()
