@@ -499,14 +499,20 @@ def test_scaleset_with_label_longer_than_64_characters(
     original_interval = juju.cli("model-config", "update-status-hook-interval").strip()
     juju.cli("model-config", "update-status-hook-interval=10s")
     try:
-        juju.config(
-            configurator_with_image, values={"labels": f"{original_labels},{long_label}"}
-        )
-        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
-        long_label_scaleset = _wait_for_scaleset_with_label(base_url, token, long_label)
-
-        juju.config(configurator_with_image, values={"labels": original_labels})
-        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+        try:
+            juju.config(
+                configurator_with_image,
+                values={"labels": f"{original_labels},{long_label}"},
+            )
+            _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+            long_label_scaleset = _wait_for_scaleset_with_label(
+                base_url, token, long_label
+            )
+        finally:
+            # The fixture is module-scoped, so a failure above must not leave the long
+            # label configured for the tests that follow.
+            juju.config(configurator_with_image, values={"labels": original_labels})
+            _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
         _wait_for_single_generation(
             base_url, token, _SCALESET_TEST_NAME, long_label_scaleset["name"]
         )
