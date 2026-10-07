@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-07
+
+- `garm`: bump the GARM workload so that scale set labels longer than 64 characters work on PostgreSQL. GARM stored labels in a `varchar(64)` column, so such a label failed with `value too long for type character varying(64)`; the column is now `varchar(255)`, and GARM migrates existing databases on startup.
+
 ## 2026-09-17
 
 - `garm`: run runners in GARM agent mode. The `garm` rock now builds the `garm-agent` binary for every architecture GARM can serve, and the charm publishes those binaries to GARM and switches agent mode on for each registered organization and repository. GARM serves the agent to each runner from its own store, so no runner and no GARM unit ever downloads an agent binary from github.com. The charm re-publishes a binary only when its checksum differs from the one already stored, so an agent upgrade shipped in a new rock revision costs one upload and no downtime. Existing deployments gain agent mode on upgrade with no operator action.
