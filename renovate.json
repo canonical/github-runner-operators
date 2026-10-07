@@ -26,17 +26,6 @@
       "depNameTemplate": "canonical/charm-ci",
       "packageNameTemplate": "https://github.com/canonical/charm-ci",
       "datasourceTemplate": "git-tags"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/(^|/)tox\\.toml$/"
-      ],
-      "matchStrings": [
-        "\"ops-scenario==(?<currentValue>[^\"]+)\""
-      ],
-      "depNameTemplate": "ops-scenario",
-      "datasourceTemplate": "pypi"
     }
   ],
   "packageRules": [
@@ -64,7 +53,7 @@
     },
     {
       "groupName": "ops",
-      "description": "Bump ops (requirements.txt) together with the ops-scenario test pin (charms/*/tox.toml), since each ops-scenario release depends on one exact ops release and a lone bump of either leaves the unit env unresolvable.",
+      "description": "Bump ops (requirements.txt) together with the ops-scenario test pin (charms/*/test-requirements.txt), since each ops-scenario release depends on one exact ops release and a lone bump of either leaves the unit env unresolvable.",
       "matchPackageNames": [
         "ops",
         "ops-scenario"
