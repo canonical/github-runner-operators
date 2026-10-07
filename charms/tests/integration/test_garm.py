@@ -471,6 +471,62 @@ def test_label_change_replaces_the_scaleset_and_removes_the_predecessor(
         juju.cli("model-config", f"update-status-hook-interval={original_interval}")
 
 
+def test_scaleset_with_label_longer_than_64_characters(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+    fake_github_api_url: str,
+):
+    """
+    arrange: A GARM backed by PostgreSQL with a converged scaleset (the preceding test
+        leaves it on a single generation).
+    act: Configure a label of 80 characters, beyond the 64 that GARM's tags.name column
+        used to hold.
+    assert: The replacement scaleset is created carrying the full label, so a label that
+        SQLite would store but PostgreSQL rejected (SQLSTATE 22001) is accepted.
+    """
+    long_label = "l" * 80
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+
+    original_interval = juju.cli("model-config", "update-status-hook-interval").strip()
+    juju.cli("model-config", "update-status-hook-interval=10s")
+    try:
+        juju.config(
+            configurator_with_image, values={"labels": f"jammy,x64,{long_label}"}
+        )
+        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+        _wait_for_scaleset_with_label(base_url, token, long_label)
+    finally:
+        juju.cli("model-config", f"update-status-hook-interval={original_interval}")
+
+
+@retry(
+    retry=retry_if_exception_type(
+        (AssertionError, requests.exceptions.RequestException)
+    ),
+    wait=wait_exponential(multiplier=1, min=5, max=20),
+    stop=stop_after_attempt(30),
+)
+def _wait_for_scaleset_with_label(base_url: str, token: str, label: str) -> dict:
+    """Wait until an enabled scaleset carries *label*.
+
+    Args:
+        base_url: GARM API base URL.
+        token: JWT token for authentication.
+        label: Label the scaleset must carry in full.
+
+    Returns:
+        The scaleset carrying the label.
+    """
+    for scaleset in _list_scalesets(base_url, token):
+        tag_names = [tag.get("name") for tag in scaleset.get("tags") or []]
+        if label in tag_names and scaleset.get("enabled") is True:
+            return scaleset
+    raise AssertionError(f"No enabled scaleset carries the {len(label)}-character label")
+
+
 @retry(
     retry=retry_if_exception_type(
         (AssertionError, requests.exceptions.RequestException)
