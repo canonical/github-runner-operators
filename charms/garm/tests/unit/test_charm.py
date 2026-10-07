@@ -480,6 +480,52 @@ def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api
     assert second.unit_status == ops.ActiveStatus()
 
 
+@pytest.mark.parametrize("empty_relation_id", [1, 3, 5], ids=["first", "middle", "last"])
+def test_unitless_configurator_does_not_block_healthy_applications(
+    ctx: Context, garm_api: _GarmApiMocks, empty_relation_id: int
+):
+    """
+    arrange: Two healthy configurators and a unit-less relation sorted before, between, or after.
+    act: Reconcile the GARM charm.
+    assert: Both healthy providers and scalesets reconcile despite the unit-less application.
+    """
+    relations = [
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            id=relation_id,
+            remote_app_name=f"configurator-{name}",
+            remote_units_data={
+                0: {
+                    **_PROVIDER_UNIT_DATA,
+                    **_SCALESET_UNIT_DATA,
+                    "name": f"scaleset-{name}",
+                    "provider_name": f"configurator-{name}-0",
+                }
+            },
+        )
+        for relation_id, name in [(2, "a"), (4, "b")]
+    ]
+    relations.append(
+        Relation(
+            endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+            id=empty_relation_id,
+            remote_app_name="configurator-empty",
+            remote_units_data={},
+        )
+    )
+
+    out = ctx.run(ctx.on.update_status(), _state(configurator_relations=relations))
+
+    providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
+    assert [provider["unit_name"] for provider in providers] == [
+        "configurator-a-0",
+        "configurator-b-0",
+    ]
+    scalesets = garm_api.scaleset.return_value.reconcile.call_args.args[0]
+    assert [scaleset.name for scaleset in scalesets] == ["scaleset-a", "scaleset-b"]
+    assert out.unit_status == ops.ActiveStatus()
+
+
 def test_workload_is_not_configured_without_postgresql_data(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A postgresql relation that has not published connection data yet.
