@@ -101,3 +101,5 @@ SIEM
 Grafana
 datasource
 filelog
+OTel
+stdout

@@ -44,8 +44,22 @@ juju integrate garm:logging loki:logging
 
 Then generate a security event (for example, run the `get-credentials` action) and
 confirm the `owasp_event.type="security"` / `owasp_event.appid="canonical.garm"`
-line reaches Loki (query in Grafana/Loki). Security events emitted from the charm
-hook process are delivered to `juju-log`; confirm on your deployment topology that
-they are forwarded, and if charm-process lines are not captured by the workload log
-forwarder, route the events to a workload-container file sink and add an
-OpenTelemetry Collector `filelog` receiver per the `owasp-logger` documentation.
+line reaches Loki (query in Grafana/Loki).
+
+Two log origins reach Loki by different paths:
+
+- **Workload logs** (the GARM Go application) are written to the workload's standard
+  output and picked up by the `go-framework` `LogForwarder` over the `logging`
+  relation. This mirrors the OTel wiring the sibling 12-factor charms use, where
+  `_create_app()` sets `OTEL_LOGS_EXPORTER="console"` so logs land on stdout for the
+  forwarder to collect (see `charms/planner-operator/src/charm.py` and
+  `charms/webhook-gateway-operator/src/charm.py`).
+- **Charm-hook logs** (`sys_startup`, `sys_shutdown`, and the `get-credentials`
+  action, all emitted from the charm's Python hook process in `charm.py`) are
+  delivered to `juju-log`. Confirm on your deployment topology that these are
+  forwarded; if charm-process lines are not captured by the workload log forwarder,
+  route the events to a file sink and add an OpenTelemetry Collector `filelog`
+  receiver that exports to your OTLP endpoint. The `enable-log-forwarding` GitHub
+  Action in this repository (`actions/enable-log-forwarding/`) implements exactly
+  that `filelog`-receiver-to-OTLP pattern for runner-host files and can be used as a
+  reference configuration.
