@@ -478,26 +478,38 @@ def test_scaleset_with_label_longer_than_64_characters(
     fake_github_api_url: str,
 ):
     """
-    arrange: A GARM backed by PostgreSQL with a converged scaleset (the preceding test
-        leaves it on a single generation).
+    arrange: GARM backed by PostgreSQL, reconciling against the mock GitHub API.
     act: Configure a label of 80 characters, beyond the 64 that GARM's tags.name column
         used to hold.
     assert: The replacement scaleset is created carrying the full label, so a label that
-        SQLite would store but PostgreSQL rejected (SQLSTATE 22001) is accepted.
+        SQLite would store but PostgreSQL rejected (SQLSTATE 22001) is accepted. The
+        original labels are restored afterwards, leaving later tests a single generation.
     """
     long_label = "l" * 80
     address = _get_garm_address(juju, configurator_garm)
     base_url = _garm_api_base_url(address)
     token = _garm_first_run(juju, address)
+    _detach_synced_credential(base_url, token)
+    _point_github_endpoint_at_mock(base_url, token, fake_github_api_url)
+    _restore_system_templates(base_url, token)
+    original_labels = str(juju.config(configurator_with_image)["labels"])
 
+    # The changeover spans several reconciles, so drive update-status rather than waiting
+    # out the model's default interval.
     original_interval = juju.cli("model-config", "update-status-hook-interval").strip()
     juju.cli("model-config", "update-status-hook-interval=10s")
     try:
         juju.config(
-            configurator_with_image, values={"labels": f"jammy,x64,{long_label}"}
+            configurator_with_image, values={"labels": f"{original_labels},{long_label}"}
         )
         _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
-        _wait_for_scaleset_with_label(base_url, token, long_label)
+        long_label_scaleset = _wait_for_scaleset_with_label(base_url, token, long_label)
+
+        juju.config(configurator_with_image, values={"labels": original_labels})
+        _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+        _wait_for_single_generation(
+            base_url, token, _SCALESET_TEST_NAME, long_label_scaleset["name"]
+        )
     finally:
         juju.cli("model-config", f"update-status-hook-interval={original_interval}")
 
