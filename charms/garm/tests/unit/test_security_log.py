@@ -5,6 +5,7 @@
 
 import json
 import logging
+from datetime import datetime
 
 from security_log import APPID, owasp_log
 
@@ -31,3 +32,17 @@ def test_emits_owasp_envelope(caplog):
     assert record["type"] == "security"
     assert record["event"] == "authn_login_success:admin"
     assert record["level"] == "INFO"
+
+
+def test_timestamp_is_utc_rendered(caplog):
+    """
+    arrange: Capture logs at INFO on the owasp-logger logger.
+    act: Emit a security event.
+    assert: The datetime is RFC3339 UTC ('Z'-suffixed), so entries are UTC-aligned
+        regardless of the host timezone.
+    """
+    with caplog.at_level(logging.INFO):
+        owasp_log.authn_login_success(userid="admin", description="test")
+    record = json.loads(caplog.records[-1].getMessage())["owasp_event"]
+    assert record["datetime"].endswith("Z")
+    datetime.fromisoformat(record["datetime"].replace("Z", "+00:00"))
