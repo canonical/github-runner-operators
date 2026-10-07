@@ -2,11 +2,59 @@
 # See LICENSE file for licensing details.
 """Model-free regression tests for E2E runner discovery."""
 
+import pathlib
 from unittest.mock import Mock
 
 import pytest
+import yaml
 from tests.e2e import conftest as fixtures
 from tests.e2e import test_garm_e2e as e2e
+
+
+def test_e2e_label_is_unique_per_workflow_attempt(monkeypatch):
+    """
+    arrange: Two attempts of the same GitHub Actions workflow run.
+    act: Generate the E2E scale-set label for each attempt.
+    assert: Labels differ and stay within the OpenStack provider's 10-character limit.
+    """
+    monkeypatch.setenv("GITHUB_RUN_ID", "35945417480")
+
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    first_attempt = fixtures._e2e_label()
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    second_attempt = fixtures._e2e_label()
+
+    assert first_attempt != second_attempt
+    assert len(first_attempt) <= 10
+    assert len(second_attempt) <= 10
+
+
+def test_e2e_label_treats_empty_workflow_attempt_as_first_attempt(monkeypatch):
+    """
+    arrange: Spread exports an empty workflow attempt for a local run with a run ID.
+    act: Generate labels with an empty attempt and with the documented default of one.
+    assert: Both labels match, so an exported empty value does not bypass the default.
+    """
+    monkeypatch.setenv("GITHUB_RUN_ID", "35945417480")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "")
+    empty_attempt = fixtures._e2e_label()
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+
+    assert empty_attempt == fixtures._e2e_label()
+
+
+def test_spread_forwards_workflow_attempt_to_e2e_pytest():
+    """
+    arrange: The spread configuration used by the GARM E2E workflow.
+    act: Parse its host environment and E2E pytest environment template.
+    assert: GITHUB_RUN_ATTEMPT crosses both boundaries so retries get a new label.
+    """
+    repository_root = pathlib.Path(__file__).parents[3]
+    spread = yaml.safe_load((repository_root / "spread.yaml").read_text())
+    e2e_suite = spread["integration-suites"]["charms/tests/e2e/"]
+
+    assert "GITHUB_RUN_ATTEMPT" in spread["environment"]
+    assert "GITHUB_RUN_ATTEMPT=" in e2e_suite["pytest-environment-template"]
 
 
 @pytest.mark.parametrize("name", ["e2e-f624f0", "e2e-f624f0-d0f3c26d"])

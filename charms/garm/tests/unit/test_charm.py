@@ -1214,6 +1214,41 @@ def test_scaleset_is_built_from_relation_data(ctx: Context, garm_api: _GarmApiMo
     assert scaleset.template_id == _TEMPLATE_ID
 
 
+def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A downgraded configurator withdraws image_id while a stale image key remains.
+    act: Run update-status.
+    assert: GARM ignores the stale key and removes the scale set.
+    """
+    scaleset_data = {**_SCALESET_UNIT_DATA, "image": "stable-image"}
+    scaleset_data.pop("image_id")
+    data = {**_PROVIDER_UNIT_DATA, **scaleset_data}
+
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
+
+
+def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator publishes complete provider data and a scale-set payload without an
+        image, representing withdrawal of its previous image reference.
+    act: Run update-status.
+    assert: GARM remains provider-ready and reconciles an empty scale-set list, removing the old
+        scale set instead of waiting for configurator data.
+    """
+    scaleset_data = {**_SCALESET_UNIT_DATA}
+    scaleset_data.pop("image_id")
+
+    out = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **scaleset_data}}),
+    )
+
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
+    assert out.unit_status == ops.ActiveStatus()
+
+
 # --- Controller URLs ----------------------------------------------------------------------
 
 
@@ -1337,6 +1372,29 @@ def test_remote_shell_follows_the_configurator_databag(
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
     assert [spec.enable_shell for spec in specs] == [expected]
+
+
+@pytest.mark.parametrize(
+    "databag_value, expected",
+    [("private", "private"), ("", ""), (None, "")],
+    ids=["private", "empty", "absent"],
+)
+def test_image_visibility_follows_the_configurator_databag(
+    ctx: Context, garm_api: _GarmApiMocks, databag_value: str | None, expected: str
+):
+    """
+    arrange: A configurator unit publishing image_visibility, an empty value, or nothing — the
+        last being an older configurator that predates the option.
+    act: Run update-status.
+    assert: The scaleset spec carries the visibility, or none so the provider default applies.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+    if databag_value is not None:
+        data["image_visibility"] = databag_value
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
+    assert [spec.image_visibility for spec in specs] == [expected]
 
 
 # --- Event wiring -------------------------------------------------------------------------

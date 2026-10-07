@@ -141,6 +141,7 @@ class ScalesetSpec:
     pre_install_scripts: dict[str, str] = field(default_factory=dict)
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
+    image_visibility: str = ""
 
 
 class ScalesetReconciler:
@@ -1132,6 +1133,7 @@ class ScalesetReconciler:
             != desired_extra.get("pre_install_scripts", {})
             or bool(observed_extra.get("disable_updates"))
             != bool(desired_extra.get("disable_updates"))
+            or observed_extra.get("image_visibility") != desired_extra.get("image_visibility")
             or (observed.template_id or 0) != template_id
         )
 
@@ -1303,8 +1305,9 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
     """Build the scaleset extra_specs a spec should produce.
 
     Single source of truth for create, update, and drift detection: combines the
-    operator-supplied pre-install scripts with the charm's aproxy bootstrap and
-    the ``disable_updates`` flag when a runner proxy is configured.
+    operator-supplied pre-install scripts with the charm's aproxy bootstrap, the
+    ``disable_updates`` flag when a runner proxy is configured, and the image
+    visibility the provider searches when resolving an image name.
 
     Args:
         spec: The desired scaleset.
@@ -1329,4 +1332,6 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
             name: base64.b64encode(content.encode("utf-8")).decode("utf-8")
             for name, content in scripts.items()
         }
+    if spec.image_visibility:
+        extra_specs["image_visibility"] = spec.image_visibility
     return extra_specs

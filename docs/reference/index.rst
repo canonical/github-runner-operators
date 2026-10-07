@@ -1,14 +1,16 @@
+.. meta::
+   :description: Review reference information for GARM and the GARM configurator.
+
+.. _reference_index:
+
 Reference
 =========
 
-The following documents contain technical information for topics relevant to the GitHub Runner Operators.
-
-Contents
---------
+The following documents describe the architecture and Juju charm interfaces
+for GARM and the GARM configurator.
 
 .. toctree::
    :maxdepth: 1
 
-   architecture
-   charms
-   grafana-dashboards
+   Architecture overview <architecture>
+   Charm reference <charms>
