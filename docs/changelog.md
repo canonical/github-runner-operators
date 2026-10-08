@@ -12,6 +12,10 @@ Each revision is versioned by the date of the revision.
 
 - `garm`: bump the GARM workload so that scale set labels longer than 64 characters work on PostgreSQL. GARM stored labels in a `varchar(64)` column, so such a label failed with `value too long for type character varying(64)`; the column is now `varchar(255)`, and GARM migrates existing databases on startup.
 
+## 2026-10-06
+
+- `garm`: emit OWASP-structured security events (authentication, authorization, system, and user lifecycle) for the charm-managed GARM operations. Adds a `docs/security/README-security-logs-viewer.md` guide for granting read-only access to the security feed.
+
 ## 2026-10-05
 
 - `garm`: update GARM and the provider and agent build dependencies to include patched `golang.org/x/crypto`, retaining the scale set pool ID fix.

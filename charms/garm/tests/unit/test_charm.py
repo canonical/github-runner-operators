@@ -1459,9 +1459,6 @@ def test_every_observed_event_reconciles(
     garm_api.auth.from_login.assert_called_once()
 
 
-# --- OWASP security events ----------------------------------------------------------------
-
-
 def test_maybe_first_run_emits_sys_startup(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A leader whose GARM reports itself uninitialised, with owasp_log patched.

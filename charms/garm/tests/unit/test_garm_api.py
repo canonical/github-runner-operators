@@ -969,6 +969,27 @@ def test_login_emits_login_fail_on_api_error():
     )
 
 
+def test_login_emits_login_fail_on_empty_token():
+    """
+    arrange: GarmApiClient whose LoginApi returns a response with an empty token, owasp_log
+        patched.
+    act: Call login("admin", "password") expecting it to raise.
+    assert: authn_login_fail is emitted, so a successful-looking response that yields no token
+        still leaves an audit record.
+    """
+    client = GarmApiClient(BASE_URL)
+    mock_result = MagicMock()
+    mock_result.token = ""
+    with _stub_api_client(client):
+        with patch("garm_api.LoginApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.login.return_value = mock_result
+            with pytest.raises(GarmApiError, match="token"):
+                client.login("admin", "password")
+    mock_log.authn_login_fail.assert_called_once_with(
+        userid="admin", description="GARM login returned an empty token"
+    )
+
+
 def test_raise_resource_api_error_emits_authz_fail_on_401():
     """
     arrange: owasp_log patched.
@@ -1039,6 +1060,7 @@ def test_delete_credentials_emits_token_delete():
         with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
             client.delete_credentials(5)
     mock_log.authn_token_delete.assert_called_once()
+    assert mock_log.authn_token_delete.call_args.kwargs["appid"] == "forge-credential-5"
 
 
 def test_create_org_emits_authz_admin():

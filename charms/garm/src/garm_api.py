@@ -49,13 +49,17 @@ from garm_client.models.update_entity_params import UpdateEntityParams
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 from garm_client.models.update_template_params import UpdateTemplateParams
-from security_log import APPID, owasp_log
+from security_log import owasp_log
 
 logger = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT = 30
 _UPLOAD_TIMEOUT = 300  # agent binaries are ~8MB each and stream into the database
 _TOOL_PAGE_SIZE = 100
+# The charm authenticates to GARM as the single built-in admin account, so there is no
+# per-end-user identity at this layer: every GARM mutation the charm performs is attributed
+# to this fixed operational actor in the OWASP audit trail.
+_GARM_ADMIN_ACTOR = "garm-admin"
 # GARM only serves linux runners in this charm; windows agents are not built by the rock.
 _AGENT_OS_TYPE = "linux"
 _READINESS_POLL_INTERVAL = 1  # seconds between retries
@@ -243,6 +247,9 @@ class GarmApiClient:
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         if not response.token:
+            owasp_log.authn_login_fail(
+                userid=username, description="GARM login returned an empty token"
+            )
             raise GarmApiError("GARM login returned empty token")
         owasp_log.authn_login_success(userid=username, description="GARM admin login succeeded")
         owasp_log.authn_token_created(
@@ -394,7 +401,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"create_template:{name}",
                     description=f"GARM runner template '{name}' created",
                 )
@@ -516,7 +523,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authn_token_created(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     entitlements=["forge-credential", created.name or ""],
                     description=f"GARM forge credential '{created.name}' registered",
                 )
@@ -551,7 +558,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authn_token_revoked(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     tokenid=str(cred_id),
                     description=f"GARM forge credential {cred_id} updated/rotated",
                 )
@@ -579,7 +586,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authn_token_delete(
-                    appid=APPID,
+                    appid=f"forge-credential-{cred_id}",
                     description=f"GARM forge credential {cred_id} deleted",
                 )
             except ApiException as exc:
@@ -786,7 +793,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"create_org:{params.name}",
                     description=f"GARM organization '{params.name}' created",
                 )
@@ -819,7 +826,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"update_org:{org_id}",
                     description=f"GARM organization {org_id} updated",
                 )
@@ -847,7 +854,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"delete_org:{org_id}",
                     description=f"GARM organization {org_id} deleted",
                 )
@@ -877,7 +884,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"create_repo:{params.name}",
                     description=f"GARM repository '{params.name}' created",
                 )
@@ -910,7 +917,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"update_repo:{repo_id}",
                     description=f"GARM repository {repo_id} updated",
                 )
@@ -938,7 +945,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"delete_repo:{repo_id}",
                     description=f"GARM repository {repo_id} deleted",
                 )
@@ -970,7 +977,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"create_org_scaleset:{org_id}",
                     description=f"GARM scaleset created under organization {org_id}",
                 )
@@ -1003,7 +1010,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"create_repo_scaleset:{repo_id}",
                     description=f"GARM scaleset created under repository {repo_id}",
                 )
@@ -1039,7 +1046,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"update_scaleset:{scaleset_id}",
                     description=f"GARM scaleset {scaleset_id} updated",
                 )
@@ -1073,7 +1080,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"update_template:{template_id}",
                     description=f"GARM runner template {template_id} updated",
                 )
@@ -1099,7 +1106,7 @@ class GarmAuthenticatedClient(GarmApiClient):
             try:
                 api.delete_template(template_id=template_id, _request_timeout=_REQUEST_TIMEOUT)
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"delete_template:{template_id}",
                     description=f"GARM runner template {template_id} deleted",
                 )
@@ -1126,7 +1133,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
                 owasp_log.authz_admin(
-                    userid="garm-admin",
+                    userid=_GARM_ADMIN_ACTOR,
                     admin_activity=f"delete_scaleset:{scaleset_id}",
                     description=f"GARM scaleset {scaleset_id} deleted",
                 )
@@ -1253,7 +1260,7 @@ def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
         case 401:
             error_type = GarmUnauthorizedError
             owasp_log.authz_fail(
-                userid="garm-admin",
+                userid=_GARM_ADMIN_ACTOR,
                 resource=message,
                 description="GARM returned 401 Unauthorized",
             )
