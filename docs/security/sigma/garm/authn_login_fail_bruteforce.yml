@@ -2,7 +2,7 @@ title: GARM High-Frequency Admin Login Failures
 id: 1c2d3e4f-5061-4728-9394-a5b6c7d8e9f0
 status: experimental
 description: Detects repeated failed GARM admin logins in a short window (possible brute force).
-author: Canonical Security
+author: Canonical
 logsource:
   category: application
   product: canonical.garm
@@ -23,7 +23,7 @@ correlation:
   rules:
     - 1c2d3e4f-5061-4728-9394-a5b6c7d8e9f0
   group-by:
-    - owasp_event.appid
+    - owasp_event.event
   timespan: 5m
   condition:
     gte: 5

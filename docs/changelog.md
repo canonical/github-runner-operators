@@ -15,6 +15,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-10-06
 
 - `garm`: emit OWASP-structured security events (authentication, authorization, system, and user lifecycle) for the charm-managed GARM operations. Adds a `docs/how-to/access-security-logs.md` guide for granting read-only access to the security feed.
+- `garm`: add vendor-neutral Sigma detection rules for the GARM security events under `docs/security/sigma/garm/`, with a `tox -e sigma-lint` validation environment.
 
 ## 2026-10-05
 

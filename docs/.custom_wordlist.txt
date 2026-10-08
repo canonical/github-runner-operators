@@ -105,5 +105,4 @@ OTel
 stdout
 Sigma
 pySigma
-SecOps
 LogQL

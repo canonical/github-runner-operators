@@ -40,9 +40,9 @@ backend that supports correlation (Loki/LogQL, Elasticsearch). Check your conver
 | `authn_login_fail_bruteforce.yml` | `authn_login_fail` | Burst of failed admin logins (brute force) |
 | `credential_removed.yml` | `authn_token_delete` | Deletion of a stored forge credential |
 | `admin_credentials_disclosed.yml` | `authz_admin` | `get-credentials` action disclosing admin credentials |
-| `unexpected_shutdown.yml` | `sys_shutdown` | Application teardown / resource drain before removal |
+| `application_teardown.yml` | `sys_shutdown` | Planned application teardown / resource drain before removal (audit) |
 
 ## Lifecycle
 
 Rules are version-controlled and updated/validated/merged with the product release
-cycle. SecOps pulls validated rules directly from this directory.
+cycle. Consumers pull validated rules directly from this directory.
