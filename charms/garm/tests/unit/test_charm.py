@@ -1459,6 +1459,35 @@ def test_every_observed_event_reconciles(
     garm_api.auth.from_login.assert_called_once()
 
 
+def test_forwards_security_events_to_configurator_otlp_endpoint(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A configurator unit that advertises an otel_collector_endpoint, OTLP forwarding
+        setup patched.
+    act: Run update-status so the charm initialises.
+    assert: configure_otlp_forwarding is called with that endpoint, so charm-hook security
+        events reach the collector that already forwards runner-host logs.
+    """
+    unit_data = {
+        0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "otel_collector_endpoint": "otel:4317"}
+    }
+    with patch("charm.configure_otlp_forwarding") as mock_configure:
+        ctx.run(ctx.on.update_status(), _state(configurator_units_data=unit_data))
+    mock_configure.assert_called_with("otel:4317")
+
+
+def test_security_event_forwarding_noop_without_endpoint(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator relation with no otel_collector_endpoint, OTLP forwarding patched.
+    act: Run update-status so the charm initialises.
+    assert: configure_otlp_forwarding is called with '', so no exporter is started.
+    """
+    with patch("charm.configure_otlp_forwarding") as mock_configure:
+        ctx.run(ctx.on.update_status(), _state())
+    mock_configure.assert_called_with("")
+
+
 def test_maybe_first_run_emits_sys_startup(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A leader whose GARM reports itself uninitialised, with owasp_log patched.

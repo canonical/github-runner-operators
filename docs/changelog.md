@@ -16,6 +16,7 @@ Each revision is versioned by the date of the revision.
 
 - `garm`: emit OWASP-structured security events (authentication, authorization, system, and user lifecycle) for the charm-managed GARM operations. Adds a `docs/security/README-security-logs-viewer.md` guide for granting read-only access to the security feed.
 - `garm`: add vendor-neutral Sigma detection rules for the GARM security events under `docs/security/sigma/garm/`, with a `tox -e sigma-lint` validation environment.
+- `garm`: forward charm-hook security events to the OTLP collector advertised by the garm-configurator relation, so charm-process events reach the observability stack alongside the workload logs.
 
 ## 2026-10-05
 

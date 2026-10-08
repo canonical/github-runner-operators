@@ -39,7 +39,7 @@ from github_reconciler import (
 )
 from resource_cleanup import GarmCleanupError, GarmResourceCleanup
 from scaleset_reconciler import Handover, ScalesetProgress, ScalesetReconciler, ScalesetSpec
-from security_log import owasp_log
+from security_log import configure_otlp_forwarding, owasp_log
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,25 @@ class GarmCharm(paas_charm.go.Charm):
         )
         self.framework.observe(self.on.update_status, self._reconcile)
         self.framework.observe(self.on.remove, self._on_remove)
+        self._configure_security_log_forwarding()
+
+    def _configure_security_log_forwarding(self) -> None:
+        """Forward charm-emitted OWASP security events to the configured OTLP collector.
+
+        Charm-hook security events never reach the workload's Loki forwarder, so route them to
+        the OTLP collector that the garm-configurator relation already advertises for runner-host
+        log forwarding.
+        """
+        configure_otlp_forwarding(self._otel_collector_endpoint())
+
+    def _otel_collector_endpoint(self) -> str:
+        """Return the OTLP collector endpoint from the garm-configurator relation, or ''."""
+        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
+            for unit in sorted(relation.units, key=lambda unit: unit.name):
+                endpoint = RunnerConfig.from_databag(relation.data[unit]).otel_collector_endpoint
+                if endpoint:
+                    return endpoint
+        return ""
 
     @block_if_invalid_data
     def _reconcile(self, _: ops.EventBase) -> None:

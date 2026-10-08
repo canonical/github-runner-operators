@@ -51,10 +51,13 @@ Two log origins reach Loki by different paths:
 
 - **Charm-hook logs** (`sys_startup`, `sys_shutdown`, and the `get-credentials`
   action, all emitted from the charm's Python hook process) go to `juju-log`, which
-  the workload `LogForwarder` does not capture. Forward these to your OTLP collector
-  with a `filelog`-to-OTLP pipeline; the `enable-log-forwarding` GitHub Action
-  (`actions/enable-log-forwarding/`) implements exactly that pattern for runner-host
-  logs and serves as the reference configuration.
+  the workload `LogForwarder` does not capture. When the garm-configurator relation
+  advertises an `otel_collector_endpoint`, the charm attaches an OpenTelemetry
+  handler (`configure_otlp_forwarding`, defined in `security_log.py` and called from
+  `charm.py`) that exports these events over OTLP/gRPC to that collector, which
+  forwards them on to Loki. The
+  `enable-log-forwarding` GitHub Action (`actions/enable-log-forwarding/`) sets up
+  the equivalent `filelog`-to-OTLP forwarding for runner-host logs.
 
 To verify, generate a security event (for example, run the `get-credentials`
 action) and confirm the record reaches Loki:
