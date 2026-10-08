@@ -1018,6 +1018,36 @@ def test_raise_resource_api_error_no_authz_fail_on_404():
     mock_log.authz_fail.assert_not_called()
 
 
+def test_raise_api_error_emits_authz_fail_on_401_but_raises_flat_error():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_api_error with an ApiException(401).
+    assert: authz_fail is emitted and a flat GarmApiError (not GarmUnauthorizedError) is raised, so
+        the privileged mutation paths keep their existing exception type while still being audited.
+    """
+    from garm_api import _raise_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmApiError) as exc_info:
+            _raise_api_error("create org failed", ApiException(status=401))
+    assert not isinstance(exc_info.value, GarmUnauthorizedError)
+    mock_log.authz_fail.assert_called_once()
+
+
+def test_raise_api_error_no_authz_fail_on_500():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_api_error with an ApiException(500).
+    assert: authz_fail is NOT emitted - only a 401 is an authorization rejection.
+    """
+    from garm_api import _raise_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmApiError):
+            _raise_api_error("boom", ApiException(status=500))
+    mock_log.authz_fail.assert_not_called()
+
+
 def test_create_credentials_emits_token_created():
     """
     arrange: GarmAuthenticatedClient with CredentialsApi returning a named credential, owasp_log patched.
@@ -1138,3 +1168,68 @@ def test_privileged_mutations_emit_authz_admin(api_class, call):
         with patch(f"garm_api.{api_class}"), patch("garm_api.owasp_log") as mock_log:
             call(client)
     mock_log.authz_admin.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "api_class, method, call",
+    [
+        ("OrganizationsApi", "create_org", lambda c: c.create_org(MagicMock(name="o"))),
+        ("OrganizationsApi", "update_org", lambda c: c.update_org("org-1", MagicMock())),
+        ("OrganizationsApi", "delete_org", lambda c: c.delete_org("org-1")),
+        ("RepositoriesApi", "create_repo", lambda c: c.create_repo(MagicMock(name="r"))),
+        ("RepositoriesApi", "update_repo", lambda c: c.update_repo("repo-1", MagicMock())),
+        ("RepositoriesApi", "delete_repo", lambda c: c.delete_repo("repo-1")),
+        (
+            "OrganizationsApi",
+            "create_org_scale_set",
+            lambda c: c.create_org_scaleset("org-1", MagicMock()),
+        ),
+        (
+            "RepositoriesApi",
+            "create_repo_scale_set",
+            lambda c: c.create_repo_scaleset("repo-1", MagicMock()),
+        ),
+        ("CredentialsApi", "create_credentials", lambda c: c.create_credentials(MagicMock())),
+        ("CredentialsApi", "update_credentials", lambda c: c.update_credentials(1, MagicMock())),
+        ("CredentialsApi", "delete_credentials", lambda c: c.delete_credentials(1)),
+        ("TemplatesApi", "create_template", lambda c: c.create_template("tmpl", b"#!/bin/sh")),
+        ("TemplatesApi", "update_template", lambda c: c.update_template(4, b"#!/bin/sh")),
+        ("TemplatesApi", "delete_template", lambda c: c.delete_template(4)),
+        (
+            "ControllerApi",
+            "update_controller",
+            lambda c: c.update_controller("m", "c", "w", "a", False),
+        ),
+    ],
+    ids=[
+        "create_org",
+        "update_org",
+        "delete_org",
+        "create_repo",
+        "update_repo",
+        "delete_repo",
+        "create_org_scaleset",
+        "create_repo_scaleset",
+        "create_credentials",
+        "update_credentials",
+        "delete_credentials",
+        "create_template",
+        "update_template",
+        "delete_template",
+        "update_controller",
+    ],
+)
+def test_privileged_mutations_emit_authz_fail_on_401(api_class, method, call):
+    """
+    arrange: GarmAuthenticatedClient whose generated API raises ApiException(401), owasp_log patched.
+    act: Invoke each privileged mutation that catches ApiException directly.
+    assert: authz_fail fires and a GarmApiError is raised, so a 401 on these paths (not just the
+        scaleset/instance paths) is audited as an unauthorized access attempt.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_class}") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            getattr(MockApi.return_value, method).side_effect = ApiException(status=401)
+            with pytest.raises(GarmApiError):
+                call(client)
+    mock_log.authz_fail.assert_called_once()

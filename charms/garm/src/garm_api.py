@@ -407,9 +407,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return tmpl
             except ApiException as exc:
-                raise GarmApiError(
-                    f"GARM create_template failed ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"GARM create_template failed ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -452,9 +450,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                     _request_timeout=_REQUEST_TIMEOUT,
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update controller ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"Failed to update controller ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -529,9 +525,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return created
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to create credential ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"Failed to create credential ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -564,9 +558,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return updated
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update credential {cred_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to update credential {cred_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -590,9 +584,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     description=f"GARM forge credential {cred_id} deleted",
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete credential {cred_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to delete credential {cred_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -799,9 +793,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return org
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to create organization ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"Failed to create organization ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -832,9 +824,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return org
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update organization {org_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to update organization {org_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -859,9 +851,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     description=f"GARM organization {org_id} deleted",
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete organization {org_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to delete organization {org_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -890,9 +882,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return repo
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to create repository ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"Failed to create repository ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -923,9 +913,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return repo
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to update repository {repo_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to update repository {repo_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -950,9 +940,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     description=f"GARM repository {repo_id} deleted",
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to delete repository {repo_id} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to delete repository {repo_id} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -983,9 +973,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return scaleset
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to create org scaleset ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"Failed to create org scaleset ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -1016,9 +1004,7 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return scaleset
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to create repo scaleset ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(f"Failed to create repo scaleset ({exc.status}): {exc.body}", exc)
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -1086,9 +1072,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                 )
                 return tmpl
             except ApiException as exc:
-                raise GarmApiError(
-                    f"GARM update_template({template_id}) failed ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"GARM update_template({template_id}) failed ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -1111,9 +1097,9 @@ class GarmAuthenticatedClient(GarmApiClient):
                     description=f"GARM runner template {template_id} deleted",
                 )
             except ApiException as exc:
-                raise GarmApiError(
-                    f"GARM delete_template({template_id}) failed ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"GARM delete_template({template_id}) failed ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
 
@@ -1227,14 +1213,51 @@ class GarmAuthenticatedClient(GarmApiClient):
                     response_data=response, response_types_map={"200": "FileObject"}
                 ).data
             except ApiException as exc:
-                raise GarmApiError(
-                    f"Failed to upload garm-agent tool {name} ({exc.status}): {exc.body}"
-                ) from exc
+                _raise_api_error(
+                    f"Failed to upload garm-agent tool {name} ({exc.status}): {exc.body}", exc
+                )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc
         if not isinstance(created, FileObject):
             raise GarmApiError(f"GARM returned no object metadata for {name}")
         return created
+
+
+def _log_authz_fail_on_401(message: str, exc: ApiException) -> None:
+    """Emit an OWASP ``authz_fail`` event when GARM rejects a call with 401.
+
+    Both raise helpers route their 401 handling here so there is a single emission
+    point for the AUTHZ audit trail, regardless of which wrapper the caller raises.
+
+    Args:
+        message: Human-readable description of the failed call, used as the resource.
+        exc: The generated client's exception, whose status selects the behaviour.
+    """
+    if exc.status == 401:
+        owasp_log.authz_fail(
+            userid=_GARM_ADMIN_ACTOR,
+            resource=message,
+            description="GARM returned 401 Unauthorized",
+        )
+
+
+def _raise_api_error(message: str, exc: ApiException) -> NoReturn:
+    """Log an OWASP ``authz_fail`` on a 401, then raise the flat ``GarmApiError``.
+
+    Privileged mutation paths need the AUTHZ audit trail on a 401 but, unlike
+    ``_raise_resource_api_error``, must keep raising the flat ``GarmApiError`` type so
+    callers that treat ``GarmNotFoundError``/``GarmUnauthorizedError`` specially are
+    unaffected.
+
+    Args:
+        message: Human-readable description of the failed call.
+        exc: The generated client's exception.
+
+    Raises:
+        GarmApiError: Always.
+    """
+    _log_authz_fail_on_401(message, exc)
+    raise GarmApiError(message) from exc
 
 
 def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
@@ -1259,11 +1282,7 @@ def _raise_resource_api_error(message: str, exc: ApiException) -> NoReturn:
             error_type: type[GarmApiError] = GarmNotFoundError
         case 401:
             error_type = GarmUnauthorizedError
-            owasp_log.authz_fail(
-                userid=_GARM_ADMIN_ACTOR,
-                resource=message,
-                description="GARM returned 401 Unauthorized",
-            )
+            _log_authz_fail_on_401(message, exc)
         case _:
             error_type = GarmApiError
     raise error_type(message) from exc

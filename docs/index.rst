@@ -104,5 +104,12 @@ of the community channels listed above.
 .. toctree::
     :hidden:
     :maxdepth: 1
+    :caption: Security
+
+    Security logs viewer <security/README-security-logs-viewer>
+
+.. toctree::
+    :hidden:
+    :maxdepth: 1
 
     Contribute <how-to/contribute>
