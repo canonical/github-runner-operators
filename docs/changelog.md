@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-08
+
+- `garm`: set `XDG_RUNTIME_DIR` for runner jobs. Runners start without a login session, so tools that keep per-user state there, such as `skopeo login`, `podman` and `buildah`, failed with `mkdir /run/containers: permission denied`.
+
 ## 2026-10-07
 
 - `garm`: bump the GARM workload so that scale set labels longer than 64 characters work on PostgreSQL. GARM stored labels in a `varchar(64)` column, so such a label failed with `value too long for type character varying(64)`; the column is now `varchar(255)`, and GARM migrates existing databases on startup.

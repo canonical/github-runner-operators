@@ -9,12 +9,22 @@ import typing
 
 from charm_state import SSHDebugInfo
 from garm_api import GarmApiError, GarmAuthenticatedClient
-from runner_paths import RUNNER_ENV_PATH, prepend_after_shebang
+from runner_paths import RUNNER_ENV_PATH, RUNNER_USER, prepend_after_shebang
 
 logger = logging.getLogger(__name__)
 
 GARM_BASE_TEMPLATE_NAME: typing.Final[str] = "github_linux"
 GARM_CHARMED_TEMPLATE_NAME: typing.Final[str] = "github_linux_charmed"
+
+# GARM's agent mode starts the runner from a system service with no login session,
+# so jobs get no XDG_RUNTIME_DIR and tools keeping per-user state there (skopeo,
+# podman, buildah) fall back to root-owned /run/containers. Lingering keeps
+# /run/user/<uid> alive without a session; the .env entry exports it to every job.
+_RUNNER_RUNTIME_DIR_SNIPPET: typing.Final[str] = f"""\
+sudo loginctl enable-linger {RUNNER_USER} || true
+mkdir -p $(dirname {RUNNER_ENV_PATH})
+echo "XDG_RUNTIME_DIR=/run/user/$(id -u {RUNNER_USER})" >> {RUNNER_ENV_PATH}
+"""
 
 
 class CharmedTemplateError(Exception):
@@ -28,10 +38,9 @@ def apply_charmed_template(
     """Create or update the charmed runner install template and return its id.
 
     Derives ``github_linux_charmed`` from the built-in ``github_linux`` base by
-    prepending shell snippets. The debug-ssh snippet (tmate env vars) is added
-    only when connections are present; with none the charmed template is still
-    maintained as a snippet-free copy of the base so scalesets can reference it
-    unconditionally (future snippets attach the same way).
+    prepending shell snippets. The runner runtime-directory setup is always added;
+    the debug-ssh snippet (tmate env vars) only when connections are present.
+    Scalesets reference the charmed template unconditionally.
 
     Args:
         client: Authenticated GARM API client.
@@ -119,9 +128,7 @@ def _build_charmed_template_data(
 
     # GARM returns the template body as a base64-encoded string.
     base_script = base64.b64decode(base_template.data).decode("utf-8")
-    snippet = build_tmate_env_snippet(connections)
-    if not snippet:
-        return base_script.encode("utf-8")
+    snippet = _RUNNER_RUNTIME_DIR_SNIPPET + build_tmate_env_snippet(connections)
     return prepend_after_shebang(base_script, snippet).encode("utf-8")
 
 

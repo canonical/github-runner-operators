@@ -11,6 +11,7 @@ import pytest
 import garm_template
 from charm_state import SSHDebugInfo
 from garm_api import GarmApiError
+from runner_paths import RUNNER_ENV_PATH
 
 _CONN = SSHDebugInfo(host="h", port=10022, rsa_fingerprint="rsa-fp", ed25519_fingerprint="ed-fp")
 
@@ -244,6 +245,29 @@ def test_build_charmed_template_data_prepends_snippet_after_shebang():
     assert f"TMATE_SERVER_RSA_FINGERPRINT={_CONN.rsa_fingerprint}" in decoded
     assert f"TMATE_SERVER_ED25519_FINGERPRINT={_CONN.ed25519_fingerprint}" in decoded
     assert "echo hello" in decoded
+
+
+def test_build_charmed_template_data_sets_up_runner_runtime_dir():
+    """
+    arrange: get_template returns a base script; no debug-ssh connections.
+    act: Call _build_charmed_template_data().
+    assert: The runner user gets lingering and XDG_RUNTIME_DIR in the runner .env, so
+        jobs of a runner started without a login session can use tools that keep
+        per-user state there (skopeo/podman login), and it precedes the base body.
+    """
+    client = MagicMock()
+    base_script = "#!/bin/bash\necho hello\n"
+    template = MagicMock()
+    template.data = base64.b64encode(base_script.encode()).decode()
+    client.get_template.return_value = template
+
+    result = garm_template._build_charmed_template_data(client, 1, [])
+
+    decoded = result.decode()
+    assert decoded.startswith("#!/bin/bash\n")
+    assert "sudo loginctl enable-linger runner" in decoded
+    assert f'XDG_RUNTIME_DIR=/run/user/$(id -u runner)" >> {RUNNER_ENV_PATH}' in decoded
+    assert decoded.index("enable-linger") < decoded.index("echo hello")
 
 
 _PATCHED = b"patched-data"
