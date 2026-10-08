@@ -107,6 +107,7 @@ of the community channels listed above.
     :caption: Security
 
     Security logs viewer <security/README-security-logs-viewer>
+    Sigma detection rules <security/sigma/garm/README>
 
 .. toctree::
     :hidden:
