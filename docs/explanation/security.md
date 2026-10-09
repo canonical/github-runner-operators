@@ -121,6 +121,13 @@ promotion gates. See the {ref}`release and promotion process <release_process>`.
 Report security issues through the repository's
 [security policy](https://github.com/canonical/github-runner-operators/blob/main/SECURITY.md).
 
+## Related information
+
+- {ref}`Security reference <reference_security>`
+- {ref}`How to secure GARM <how_to_secure_garm>`
+- {ref}`Architecture overview <reference_charm_architecture_deployment>`
+- {ref}`Charm reference <reference_charm_reference>`
+
 ## External product security documentation
 
 The deployment also depends on the following products. Follow their security
@@ -155,10 +162,3 @@ Upstream GARM does not currently publish a standalone security or hardening
 guide. These references cover security-relevant configuration and credential
 controls; this page documents the security posture and operating
 responsibilities of the Canonical GARM charms and their deployment.
-
-## Related information
-
-- {ref}`Security reference <reference_security>`
-- {ref}`How to secure GARM <how_to_secure_garm>`
-- {ref}`Architecture overview <reference_charm_architecture_deployment>`
-- {ref}`Charm reference <reference_charm_reference>`
