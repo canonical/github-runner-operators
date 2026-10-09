@@ -50,15 +50,21 @@ Two log origins reach Loki by different paths:
   ```
 
 - **Charm-hook logs** (`sys_startup`, `sys_shutdown`, and the `get-credentials`
-  action, all emitted from the charm's Python hook process) go to `juju-log`, which
-  the workload `LogForwarder` does not capture. Forward these to your OTLP collector
-  with a `filelog`-to-OTLP pipeline; the `enable-log-forwarding` GitHub Action
-  (`actions/enable-log-forwarding/`) implements exactly that pattern for runner-host
-  logs and serves as the reference configuration.
+  action, all emitted from the charm's Python hook process) are written to
+  `juju-log`, which Juju forwards to the Juju controller. Their onward handling,
+  retention, and forwarding is therefore the responsibility of the Juju controller
+  operator rather than this charm.
 
-To verify, generate a security event (for example, run the `get-credentials`
-action) and confirm the record reaches Loki:
+To verify the workload path, generate a workload-origin security event and confirm
+the record reaches Loki:
 
 ```
 {juju_application="garm"} | json | owasp_event_appid="canonical.garm" | owasp_event_type="security"
+```
+
+Charm-hook security events (for example, from running the `get-credentials` action)
+are visible on the controller with `juju debug-log`:
+
+```
+juju debug-log --include unit-garm-0 | grep owasp_event
 ```
