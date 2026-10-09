@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-07
+
+- `garm`: bump the GARM workload so that scale set labels longer than 64 characters work on PostgreSQL. GARM stored labels in a `varchar(64)` column, so such a label failed with `value too long for type character varying(64)`; the column is now `varchar(255)`, and GARM migrates existing databases on startup.
+
+## 2026-10-05
+
+- `garm`: update GARM and the provider and agent build dependencies to include patched `golang.org/x/crypto`, retaining the scale set pool ID fix.
+
 ## 2026-10-01
 
 - Documentation: add a security overview and secure-operation guide for the GARM and GARM configurator charms, and document security-sensitive charm reference information.
