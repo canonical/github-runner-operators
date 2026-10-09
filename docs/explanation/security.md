@@ -22,7 +22,7 @@ implementation of external services.
 
 In this documentation, "deployment" means the arrangement described in the
 {ref}`architecture overview <reference_charm_architecture_deployment>`: the
-GARM and GARM configurator charms, PostgreSQL, the deployment network, and the
+GARM and GARM configurator charms, PostgreSQL charm, the deployment network, and the
 external GitHub and OpenStack services they use.
 
 The deployment has these main boundaries:
