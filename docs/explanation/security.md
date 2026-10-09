@@ -121,6 +121,41 @@ promotion gates. See the {ref}`release and promotion process <release_process>`.
 Report security issues through the repository's
 [security policy](https://github.com/canonical/github-runner-operators/blob/main/SECURITY.md).
 
+## External product security documentation
+
+The deployment also depends on the following products. Follow their security
+guidance in addition to the charm controls above.
+
+### Juju and Canonical Kubernetes
+
+- [Juju security](https://documentation.ubuntu.com/juju/latest/explanation/juju-security/)
+- [Canonical Kubernetes charm security](https://documentation.ubuntu.com/canonical-kubernetes/release-1.35/charm/explanation/security/)
+
+### PostgreSQL and OpenStack
+
+- [Charmed PostgreSQL security hardening](https://canonical.com/data/postgresql/docs/latest/explanation/security-hardening/overview)
+- [Canonical OpenStack service endpoint encryption](https://canonical.com/openstack/docs/latest/explanation/service-endpoint-encryption/)
+- [OpenStack Security Guide](https://docs.openstack.org/security-guide/)
+
+### GitHub Actions and GitHub Apps
+
+- [GitHub Actions secure use](https://docs.github.com/en/actions/reference/security/secure-use)
+- [Self-hosted runners](https://docs.github.com/en/actions/concepts/runners/self-hosted-runners)
+- [Managing access to self-hosted runners using groups](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access)
+- [GitHub App best practices](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/best-practices-for-creating-a-github-app)
+- [Managing private keys for GitHub Apps](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps)
+- [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app)
+
+### GARM application
+
+- [GARM API TLS configuration](https://github.com/cloudbase/garm/blob/main/doc/configuration.md#apiservertls)
+- [GARM credentials security](https://github.com/cloudbase/garm/blob/main/doc/credentials.md#security)
+
+Upstream GARM does not currently publish a standalone security or hardening
+guide. These references cover security-relevant configuration and credential
+controls; this page documents the security posture and operating
+responsibilities of the Canonical GARM charms and their deployment.
+
 ## Related information
 
 - {ref}`Security reference <reference_security>`
