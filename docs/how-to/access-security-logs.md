@@ -1,4 +1,12 @@
-# Security Logs Viewer — read-only access to garm security events
+---
+myst:
+  html_meta:
+    "description lang=en": "Learn how to grant and use read-only access to the GARM charm's OWASP security event feed."
+---
+
+(how_to_access_security_logs)=
+
+# How to access GARM security logs
 
 The `garm` charm emits OWASP-structured security events and forwards them to Loki
 over the `logging` (`loki_push_api`) relation that the `go-framework` charmcraft

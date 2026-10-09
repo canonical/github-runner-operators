@@ -31,7 +31,7 @@ In this documentation
     * - Get started
       - :doc:`Deploy GARM and configure a runner scale set <tutorial/garm>`
     * - Operations
-      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
+      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>` | :ref:`Access security logs <how_to_access_security_logs>`
     * - Design
       - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
     * - Releases
@@ -100,13 +100,6 @@ of the community channels listed above.
     How-to guides <how-to/index>
     Reference <reference/index>
     Explanation <explanation/index>
-
-.. toctree::
-    :hidden:
-    :maxdepth: 1
-    :caption: Security
-
-    Security logs viewer <security/README-security-logs-viewer>
 
 .. toctree::
     :hidden:
