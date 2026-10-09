@@ -9,19 +9,20 @@ myst:
 # How to secure GARM and the GARM configurator
 
 Use this guide to apply the charm-level security recommendations before using
-GARM for production workloads.
+GARM for production workloads. It covers TLS-protected ingress, metrics access,
+remote-shell settings, Juju secrets, and trusted script configuration.
 
 ## What you'll need
 
-- A deployed ``garm`` application and at least one ``garm-configurator``
-  application.
+- A deployed ``garm`` application and at least one integrated
+  ``garm-configurator`` application.
 - Permission to change Juju application configuration.
 - A deployment ingress that can provide HTTPS for externally reachable GARM
   traffic.
 - Juju secret values for the GitHub App and OpenStack credentials.
 
 This guide covers charm settings and assumptions. Follow the platform's
-canonical documentation for ingress, Juju access control, PostgreSQL, and
+Canonical documentation for ingress, Juju access control, PostgreSQL, and
 OpenStack hardening.
 
 ## Protect the GARM endpoint
@@ -63,7 +64,7 @@ juju run garm/0 get-credentials
 ```
 
 For the complete first-deployment secret flow, see the
-[deployment tutorial](../tutorial/garm.md).
+{ref}`deployment tutorial <tutorial_garm>`.
 
 ## Review trusted script settings
 
@@ -93,7 +94,8 @@ relation problem before relying on the deployment.
 
 ## Related information
 
-- [Security in the GARM charms](../explanation/security.md)
-- [Charm reference](../reference/charms.md)
-- [How to retrieve GARM admin credentials](retrieve-garm-credentials.md)
-- [Release and promotion process](../explanation/charm-release-and-promotion.md)
+- {ref}`Security overview <explanation_security>`
+- {ref}`Security reference <reference_security>`
+- {ref}`Charm reference <reference_charm_reference>`
+- {ref}`How to retrieve GARM admin credentials <how_to_retrieve_garm_credentials>`
+- {ref}`Release and promotion process <release_process>`

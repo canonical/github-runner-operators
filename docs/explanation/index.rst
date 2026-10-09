@@ -6,7 +6,8 @@
 Explanation
 ===========
 
-The following documents explain the security posture and release process for
+The following documents explain the security posture, responsibilities, and
+release process for
 the GitHub runner charms.
 
 .. toctree::

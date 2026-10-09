@@ -14,9 +14,16 @@ their trust boundaries, and the actions expected from an operator.
 
 It does not replace the security documentation for Juju, Kubernetes,
 PostgreSQL, OpenStack, GitHub, or the GARM application. Those systems own the
-security controls that they provide.
+security controls that they provide. The statements here describe charm behavior
+that is evidenced in this repository; they do not make claims about the security
+implementation of external services.
 
 ## Security boundaries
+
+In this documentation, "deployment" means the arrangement described in the
+{ref}`architecture overview <reference_charm_architecture_deployment>`: the
+GARM and GARM configurator charms, PostgreSQL, the deployment network, and the
+external GitHub and OpenStack services they use.
 
 The deployment has these main boundaries:
 
@@ -26,9 +33,9 @@ The deployment has these main boundaries:
 - GARM communicates with GitHub and OpenStack and manages runner VMs.
 - The GARM API and metrics endpoint are exposed through the deployment network.
 
-See the [architecture overview](../reference/architecture.md) for the
-component relationships and the [charm reference](../reference/charms.md) for
-interfaces and security-sensitive options.
+See the {ref}`architecture overview <reference_charm_architecture_deployment>`
+for the component relationships and the {ref}`security reference <reference_security>`
+for interfaces and security-sensitive options.
 
 ## Controls provided by the charms
 
@@ -85,17 +92,17 @@ includes them in the workload configuration.
   application and exchanged capability without assuming that the integration
   provides security controls automatically.
 
-Use the [secure-operation how-to](../how-to/secure-garm.md) to apply the
+Use the {ref}`secure-operation how-to <how_to_secure_garm>` to apply the
 operator-facing recommendations.
 
 ## Data and observability
 
-GARM stores operational state in PostgreSQL. Charm configuration and relation
+GARM stores its operational state in PostgreSQL. Charm configuration and relation
 data include scale-set settings, repository or organization targets, provider
 settings, and references to secrets.
 
 The GARM workload provides logs and metrics for configured observability
-integrations. The repository does not establish that an external observability
+relations. The repository does not establish that an external observability
 service provides retention, redaction, or alerting. Apply the observability
 controls required by the deployment and do not treat the metrics endpoint as
 an administrative API.
@@ -109,14 +116,14 @@ retried after the reported problem is resolved. Verify resource cleanup and
 credential revocation as part of the deployment's removal process.
 
 Releases move through Charmhub risk levels with automated testing and human
-promotion gates. See the [release and promotion process](charm-release-and-promotion.md).
+promotion gates. See the {ref}`release and promotion process <release_process>`.
 
 Report security issues through the repository's
 [security policy](https://github.com/canonical/github-runner-operators/blob/main/SECURITY.md).
 
-## Evidence boundary
+## Related information
 
-This documentation describes charm behavior that is evidenced in this
-repository. It does not make unsupported claims about GARM's internal
-authorization, cryptographic algorithms, database encryption, log retention,
-or the security implementation of external services.
+- {ref}`Security reference <reference_security>`
+- {ref}`How to secure GARM <how_to_secure_garm>`
+- {ref}`Architecture overview <reference_charm_architecture_deployment>`
+- {ref}`Charm reference <reference_charm_reference>`
