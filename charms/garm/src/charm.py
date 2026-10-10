@@ -527,7 +527,7 @@ class GarmCharm(paas_charm.go.Charm):
             units = sorted(relation.units, key=lambda unit: unit.name)
             if not units:
                 logger.warning(
-                    "GARM configurator application has no units: relation_id=%d",
+                    "GARM configurator application has no units; skipping: relation_id=%d",
                     relation.id,
                 )
                 continue
