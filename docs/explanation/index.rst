@@ -6,10 +6,12 @@
 Explanation
 ===========
 
-The following document explains the release and promotion process for the
-GitHub runner charms.
+The following documents explain the security posture, responsibilities, and
+release process for
+the GitHub runner charms.
 
 .. toctree::
    :maxdepth: 1
 
+   Security in the GARM charms <security>
    Charm release and promotion process <charm-release-and-promotion>

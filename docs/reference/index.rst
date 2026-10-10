@@ -14,3 +14,4 @@ for GARM and the GARM configurator.
 
    Architecture overview <architecture>
    Charm reference <charms>
+   Security reference <security>
