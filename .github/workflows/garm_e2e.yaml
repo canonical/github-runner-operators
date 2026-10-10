@@ -71,7 +71,7 @@ jobs:
   # its revision input, so a run pinning just one of them still builds the other.
   build:
     if: inputs.garm-revision == '' || inputs.garm-configurator-revision == ''
-    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.1
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.2
     permissions:
       contents: read
       packages: write
