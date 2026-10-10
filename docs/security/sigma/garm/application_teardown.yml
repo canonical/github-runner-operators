@@ -1,0 +1,18 @@
+title: GARM Application Teardown Audit
+id: 4d5e6f70-8192-43a4-b5c6-d7e8f9a0b1c2
+status: experimental
+description: >-
+  Audit record of GARM application teardown. The charm emits sys_shutdown only
+  from the removal handler, so this rule tracks the planned removal/resource-drain
+  lifecycle event; it is an audit trail rather than an anomaly alert.
+author: Canonical
+logsource:
+  category: application
+  product: canonical.garm
+detection:
+  selection:
+    owasp_event.event|startswith: 'sys_shutdown'
+  condition: selection
+falsepositives:
+  - None; sys_shutdown is only emitted on a deliberate application removal
+level: informational
