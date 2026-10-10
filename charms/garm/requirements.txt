@@ -7,3 +7,4 @@ urllib3==2.8.0
 python-dateutil==2.9.0.post0
 pydantic==2.13.5
 typing-extensions==4.16.0
+owasp-logger==0.1.6

@@ -1457,3 +1457,51 @@ def test_every_observed_event_reconciles(
     ctx.run(event(ctx, state), state)
 
     garm_api.auth.from_login.assert_called_once()
+
+
+def test_maybe_first_run_emits_sys_startup(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A leader whose GARM reports itself uninitialised, with owasp_log patched.
+    act: Run update-status so the first-run path completes.
+    assert: sys_startup is emitted once, marking the one-time GARM initialisation.
+    """
+    garm_api.client.return_value.is_initialized.return_value = False
+    with patch("charm.owasp_log") as mock_log:
+        ctx.run(ctx.on.update_status(), _state())
+    mock_log.sys_startup.assert_called_once()
+
+
+def test_get_credentials_action_emits_authz_admin(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A leader whose admin-credentials secret exists, with owasp_log patched.
+    act: Run the get-credentials action.
+    assert: authz_admin is emitted for the privileged disclosure, so it is auditable.
+    """
+    with patch("charm.owasp_log") as mock_log:
+        ctx.run(ctx.on.action("get-credentials"), _state(secrets=_owned_secrets()))
+    mock_log.authz_admin.assert_called_once()
+    assert mock_log.authz_admin.call_args.kwargs["admin_activity"] == "get_credentials"
+
+
+def test_on_remove_emits_sys_shutdown(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A ready leader with zero planned units and an initialised GARM, owasp_log patched.
+    act: Emit the application remove event.
+    assert: sys_shutdown is emitted, marking application teardown.
+    """
+    with patch("charm.GarmResourceCleanup"), patch("charm.owasp_log") as mock_log:
+        ctx.run(ctx.on.remove(), _state(secrets=_owned_secrets(), planned_units=0))
+    mock_log.sys_shutdown.assert_called_once()
+
+
+def test_log_forwarder_is_instantiated(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: The go-framework-provided LogForwarder patched so we can observe its construction.
+    act: Run any hook so the charm __init__ executes.
+    assert: A LogForwarder is wired on the framework's 'logging' relation, so the security
+        events the charm forwards can reach Loki without the charm declaring its own forwarder.
+    """
+    with patch("charms.loki_k8s.v1.loki_push_api.LogForwarder") as forwarder_cls:
+        ctx.run(ctx.on.update_status(), _state())
+    forwarder_cls.assert_called_once()
+    assert forwarder_cls.call_args.kwargs["relation_name"] == "logging"

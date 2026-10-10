@@ -94,3 +94,12 @@ URI(s)?
 teardown
 [Ww]ebsocket(s)?
 checksum(s)?
+Loki
+RBAC
+SSDLC
+SIEM
+Grafana
+datasource
+filelog
+OTel
+stdout
