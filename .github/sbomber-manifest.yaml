@@ -1,0 +1,43 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# Artifacts scanned by .github/workflows/secscan.yaml (SEC0025). Names must match the
+# files in .github/secscan-exclusions/.
+clients:
+  secscan: {}
+
+artifacts:
+  - name: garm
+    type: charm
+    channel: latest/edge
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
+  - name: garm-configurator
+    type: charm
+    channel: latest/edge
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
+  - name: github-runner-planner
+    type: charm
+    channel: latest/edge
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
+  - name: github-runner-webhook-gateway
+    type: charm
+    channel: latest/edge
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
+  - name: garm-app-image
+    type: rock
+    charm: garm
+    channel: latest/edge
+    charm_resource: app-image
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
+  - name: github-runner-planner-app-image
+    type: rock
+    charm: github-runner-planner
+    channel: latest/edge
+    charm_resource: app-image
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
+  - name: github-runner-webhook-gateway-app-image
+    type: rock
+    charm: github-runner-webhook-gateway
+    channel: latest/edge
+    charm_resource: app-image
+    ssdlc_params: { name: github-runner, version: "", channel: edge, cycle: "26.10" }
