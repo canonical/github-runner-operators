@@ -49,4 +49,4 @@ The charms control configuration, Juju secret references, relation data, and GAR
 The GARM workload serves its API and metrics on port 8080. The workload does not terminate TLS, so external deployments need a TLS-terminating ingress and a restricted network path. GARM metrics are not authenticated by the application and should be reachable only by the monitoring system.
 
 See the {ref}`security overview <explanation_security>` for the charm-level security posture and the
-{ref}`secure-operation how-to <how_to_secure_garm>` for operator actions.
+{ref}`security how-to guide <how_to_secure_garm>` for operator actions.

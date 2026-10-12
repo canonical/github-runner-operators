@@ -13,5 +13,5 @@ the GitHub runner charms.
 .. toctree::
    :maxdepth: 1
 
-   Security in the GARM charms <security>
+   Security <security>
    Charm release and promotion process <charm-release-and-promotion>

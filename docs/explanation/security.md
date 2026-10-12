@@ -6,7 +6,7 @@ myst:
 
 (explanation_security)=
 
-# Security in the GARM charms
+# Security
 
 This page describes the security posture of the ``garm`` and
 ``garm-configurator`` charms. It focuses on controls implemented by the charms,
@@ -20,7 +20,7 @@ implementation of external services.
 
 ## Security boundaries
 
-In this documentation, "deployment" means the arrangement described in the
+In this page, "deployment" means the arrangement described in the
 {ref}`architecture overview <reference_charm_architecture_deployment>`: the
 GARM and GARM configurator charms, PostgreSQL charm, the deployment network, and the
 external GitHub and OpenStack services they use.
@@ -41,7 +41,7 @@ for interfaces and security-sensitive options.
 
 The charms provide these controls:
 
-- Credentials are stored in Juju secrets rather than ordinary charm
+- Credentials are stored in {ref}`Juju secrets <juju:secret>` rather than ordinary charm
   configuration where the charm supports secret configuration.
 - The configurator sends secret references over the GARM relation for the
   GitHub App private key and OpenStack password.
@@ -92,7 +92,7 @@ includes them in the workload configuration.
   application and exchanged capability without assuming that the integration
   provides security controls automatically.
 
-Use the {ref}`secure-operation how-to <how_to_secure_garm>` to apply the
+Use the {ref}`security how-to guide <how_to_secure_garm>` to apply the
 operator-facing recommendations.
 
 ## Data and observability
@@ -128,14 +128,12 @@ Report security issues through the repository's
 - {ref}`Architecture overview <reference_charm_architecture_deployment>`
 - {ref}`Charm reference <reference_charm_reference>`
 
-## External product security documentation
-
 The deployment also depends on the following products. Follow their security
 guidance in addition to the charm controls above.
 
 ### Juju and Canonical Kubernetes
 
-- [Juju security](https://documentation.ubuntu.com/juju/latest/explanation/juju-security/)
+- {ref}`Juju security <juju:juju-security>`
 - [Canonical Kubernetes charm security](https://documentation.ubuntu.com/canonical-kubernetes/release-1.35/charm/explanation/security/)
 
 ### PostgreSQL and OpenStack
@@ -158,7 +156,7 @@ guidance in addition to the charm controls above.
 - [GARM API TLS configuration](https://github.com/cloudbase/garm/blob/main/doc/configuration.md#apiservertls)
 - [GARM credentials security](https://github.com/cloudbase/garm/blob/main/doc/credentials.md#security)
 
-Upstream GARM does not currently publish a standalone security or hardening
+The upstream GARM documentation does not currently publish a standalone security or hardening
 guide. These references cover security-relevant configuration and credential
 controls; this page documents the security posture and operating
 responsibilities of the Canonical GARM charms and their deployment.

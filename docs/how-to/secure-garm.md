@@ -68,13 +68,23 @@ For the complete first-deployment secret flow, see the
 
 ## Review trusted script settings
 
-Treat these options as trusted shell-code inputs:
+The GARM configurator passes two operator-supplied bash scripts to each runner:
 
-- ``pre-install-scripts``;
-- ``pre-job-script``.
+- ``pre-install-scripts``: a script that runs on the runner VM before the runner
+  is installed.
+- ``pre-job-script``: a script appended to the runner pre-job script, so it runs
+  before each job. If it exits with a non-zero code, the job fails and the
+  workflow steps do not run.
 
-Review every change before applying it. Clear an option when it is no longer
-needed:
+Both are trusted shell code. Review every value before you apply it.
+
+Set a pre-job script:
+
+```bash
+juju config garm-configurator pre-job-script="echo 'runner prepared'"
+```
+
+Clear the options when they are no longer needed:
 
 ```bash
 juju config garm-configurator pre-install-scripts="" pre-job-script=""
@@ -92,7 +102,7 @@ juju status
 A failed or blocked status requires resolving the reported configuration or
 relation problem before relying on the deployment.
 
-## Related information
+## Read more
 
 - {ref}`Security overview <explanation_security>`
 - {ref}`Security reference <reference_security>`
