@@ -14,7 +14,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-10-06
 
-- `garm`: emit OWASP-structured security events (authentication, authorization, system, and user lifecycle) for the charm-managed GARM operations. Adds a `docs/how-to/access-security-logs.md` guide for granting read-only access to the security feed.
+- `garm`: emit OWASP-structured security events (authentication, authorization, system, and user lifecycle) for the charm-managed GARM operations. Adds a `docs/reference/security-logs.md` reference page describing the security event feed and read-only access to it.
 - `garm`: add vendor-neutral Sigma detection rules for the GARM security events under `docs/security/sigma/garm/`, with a `tox -e sigma-lint` validation environment.
 
 ## 2026-10-05
@@ -23,6 +23,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-10-01
 
+- Documentation: add a security overview and secure-operation guide for the GARM and GARM configurator charms, and document security-sensitive charm reference information.
 - `garm-configurator`: add the optional `image-visibility` configuration, which the `garm` charm passes to the OpenStack provider as the scale set's `image_visibility` extra spec. The provider resolves an image name among public images only by default, so a scale set whose image is private to its OpenStack project never boots a runner; set `image-visibility` to `private` for such an image. It accepts `public`, `private`, `shared`, `community`, or `all`, and has no effect when `image` is an image ID. Existing scale sets are unchanged while it is unset.
 
 ## 2026-09-30
