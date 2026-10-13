@@ -44,5 +44,5 @@ backend that supports correlation (Loki/LogQL, Elasticsearch). Check your conver
 
 ## Lifecycle
 
-Rules are version-controlled and updated/validated/merged with the product release
+Rules are version-controlled, updated, validated, and merged with the product release
 cycle. Consumers pull validated rules directly from this directory.
