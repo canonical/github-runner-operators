@@ -9,8 +9,8 @@ myst:
 # How to access GARM security logs
 
 The `garm` charm emits OWASP-structured security events and forwards them to Loki
-over the `logging` (`loki_push_api`) relation that the `go-framework` charmcraft
-extension provides. Each event is a JSON object nested under an `owasp_event` key,
+over the `logging` (`loki_push_api`) relation provided by the `go-framework` Charmcraft
+extension. Each event is a JSON object nested under an `owasp_event` key,
 carrying `type: "security"` and `appid: "canonical.garm"`. To satisfy
 least-privilege, read access to these events is decoupled from Juju
 operational rights.
