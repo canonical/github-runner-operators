@@ -18,6 +18,7 @@ freefont
 Furo
 Garm
 GitHub
+github
 GPG
 Grafana
 gyre
