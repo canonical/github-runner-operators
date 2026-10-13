@@ -14,7 +14,7 @@ import uuid
 import jubilant
 import pytest
 import requests
-from tests.e2e.conftest import GarmCli
+from tests.e2e.conftest import GarmCli, RunnerConsoles
 from tests.integration.conftest import (
     _collect_debug_info,
     _garm_login,
@@ -61,6 +61,7 @@ def test_garm_agent_shell(
     garm_with_ingress: str,
     e2e_scaleset: str,
     garm_cli: GarmCli,
+    runner_consoles: RunnerConsoles,
 ):
     """
     arrange: The E2E scale set deployed with enable-shell, holding a registered runner
@@ -73,7 +74,9 @@ def test_garm_agent_shell(
         over that websocket in both directions.
     """
     _skip_unless_agent_url_is_tls(juju, garm_with_ingress)
-    instance = _wait_for_runner_online(juju, garm_with_ingress, e2e_scaleset)
+    instance = _wait_for_runner_online(
+        juju, garm_with_ingress, e2e_scaleset, runner_consoles
+    )
     runner_name = instance["name"]
     _wait_for_shell_capability(juju, garm_with_ingress, runner_name)
     # The terminal echoes the command as typed, so a plain marker would be found
@@ -89,7 +92,12 @@ def test_garm_agent_shell(
     logger.info("Agent shell on %s executed a command successfully", runner_name)
 
 
-def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str):
+def test_garm_e2e(
+    juju: jubilant.Juju,
+    garm_with_ingress: str,
+    e2e_scaleset: str,
+    runner_consoles: RunnerConsoles,
+):
     """
     arrange: GARM deployed with postgresql + traefik ingress; garm-configurator holding real
         ProdStack credentials, a stable runner-image name, and a unique run label;
@@ -109,7 +117,7 @@ def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str
     ref = os.environ.get("GITHUB_HEAD_REF") or required_env("GITHUB_REF_NAME")
 
     # Wait for runner VM to spawn and register before dispatching
-    _wait_for_runner_online(juju, garm_with_ingress, label)
+    _wait_for_runner_online(juju, garm_with_ingress, label, runner_consoles)
 
     github_client = create_github_app_client(E2E_APP_ENV)
 
@@ -174,6 +182,7 @@ def _wait_for_runner_online(
     juju: jubilant.Juju,
     garm_app: str,
     runner_label: str,
+    consoles: RunnerConsoles,
     timeout: int = 25 * 60,
     poll_interval: int = 15,
 ) -> dict:
@@ -183,6 +192,7 @@ def _wait_for_runner_online(
         juju: Juju client for the model GARM is deployed in.
         garm_app: Name of the deployed GARM application.
         runner_label: Unique runner label configured by the E2E fixture.
+        consoles: Recorder for the consoles of the VMs that never register.
         timeout: Seconds to wait before failing the test.
         poll_interval: Seconds between polls.
 
@@ -232,6 +242,7 @@ def _wait_for_runner_online(
                 )
                 instances_response.raise_for_status()
                 instances = instances_response.json() or []
+                consoles.record(instances)
                 summary = sorted(
                     f"{i.get('name')}: status={i.get('status')} "
                     f"runner_status={i.get('runner_status')}"
@@ -269,8 +280,8 @@ def _wait_for_runner_online(
     # URL. An empty last observation means no instance was found for the label;
     # pending_create means the provider never picked one up; running with a
     # pending runner_status means the VM booted but its bootstrap never called
-    # back, with GARM's own logs -- collected next, through the sentinel
-    # redactor -- carrying the reason.
+    # back, with the VM consoles and GARM's own logs -- logged next, through the
+    # sentinel redactor -- carrying the reason.
     if last_instances:
         logger.error(
             "Last instances observed for runner label %s (possibly reaped by GARM's "
@@ -284,6 +295,7 @@ def _wait_for_runner_online(
         )
     else:
         logger.error("No instance was ever observed for runner label %s", runner_label)
+    consoles.log()
     _collect_debug_info(juju, garm_app)
     pytest.fail(
         f"No runner serving label {runner_label!r} reached a registered state "

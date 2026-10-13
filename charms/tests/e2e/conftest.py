@@ -30,9 +30,11 @@ import requests
 # suite (e.g. charms/tests/integration) is collected in the same session.
 from tests.integration.conftest import (  # noqa: F401
     _collect_debug_info,
+    _credential_sentinels,
     _deploy_configurator,
     _garm_login,
     _get_garm_address,
+    _redact_sentinels,
     deploy_garm_app_no_integration_fixture,
     deploy_postgresql_server_fixture,
     garm_app_image_fixture,
@@ -62,6 +64,17 @@ CA_APP_NAME = "self-signed-certificates"
 CA_CHANNEL = "1/stable"
 E2E_TUNNEL_LOCAL_PORT = 18080
 E2E_TUNNEL_LOCAL_TLS_PORT = 18443
+CONSOLE_REFRESH_INTERVAL = 60
+# Enough to reach back past the cloud-init final stage, where the tunnel and the
+# GARM install wrapper log, without replaying the whole kernel boot.
+CONSOLE_LINES = 300
+# The console lands in a public log, and with boot debug on GARM's install script
+# traces the instance's callback JWT and the tokens it hands curl and config.sh.
+# Group 1 is kept, so the redaction marker shows which value went.
+CONSOLE_SECRET_PATTERNS = (
+    re.compile(r"()eyJ[\w-]+\.[\w-]+\.[\w-]+"),
+    re.compile(r"(?i)(bearer\s+|--token\s+|token[\"']?\s*[=:]\s*[\"']?)[^\s\"']+"),
+)
 
 # The rock ships the GARM server only, so the client comes from an upstream
 # release. Pinned, with its published digest, so a new release cannot change the
@@ -656,6 +669,140 @@ table ip garm-e2e-tunnel {{
 NFT
 log "redirecting $TARGET:80 to $DEFAULT_IPV4:$LOCAL_PORT and :443 to $DEFAULT_IPV4:$LOCAL_TLS_PORT"
 """
+
+
+@pytest.fixture(name="runner_consoles")
+def runner_consoles_fixture(openstack_credentials: dict[str, str]) -> "RunnerConsoles":
+    """Console recorder for the runner VMs a single test waits on."""
+    return RunnerConsoles(openstack_credentials)
+
+
+class RunnerConsoles:
+    """Serial-console snapshots of runner VMs, logged when none of them registers.
+
+    A VM whose bootstrap never calls back leaves no trace in GARM: only its console
+    shows whether the tunnel came up and how far cloud-init got. GARM's
+    bootstrap-timeout reaper deletes such a VM before the wait for it gives up, so
+    consoles are read while the VMs run and only logged once the wait has failed.
+    """
+
+    def __init__(
+        self,
+        credentials: dict[str, str],
+        refresh_interval: float = CONSOLE_REFRESH_INTERVAL,
+    ):
+        """Initialize the recorder.
+
+        Args:
+            credentials: OpenStack credentials, as the openstack_credentials fixture
+                returns them.
+            refresh_interval: Minimum seconds between two reads of the same console.
+        """
+        self._credentials = credentials
+        self._refresh_interval = refresh_interval
+        self._session: tuple[str, str] | None = None
+        self._snapshots: dict[str, str] = {}
+        self._read_at: dict[str, float] = {}
+
+    def record(self, instances: list[dict]) -> None:
+        """Snapshot the console of every running instance not read recently.
+
+        Never raises: a failed read is logged and retried on a later call.
+
+        Args:
+            instances: Instance payloads as returned by the GARM API.
+        """
+        now = time.monotonic()
+        for instance in instances:
+            name, server_id = instance.get("name"), instance.get("provider_id")
+            if not name or not server_id or instance.get("status") != "running":
+                continue
+            read_at = self._read_at.get(name)
+            if read_at is not None and now - read_at < self._refresh_interval:
+                continue
+            self._read_at[name] = now
+            try:
+                self._snapshots[name] = self._read_console(server_id)
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                logger.warning("Could not read the console of runner VM %s: %s", name, exc)
+
+    def log(self) -> None:
+        """Log the latest snapshot of every recorded console, redacted."""
+        if not self._snapshots:
+            logger.error("No runner VM console was captured")
+            return
+        sentinels = _credential_sentinels()
+        for name, output in self._snapshots.items():
+            redacted = _redact_sentinels(output, sentinels)
+            for pattern in CONSOLE_SECRET_PATTERNS:
+                redacted = pattern.sub(r"\1[REDACTED]", redacted)
+            logger.error(
+                "Last %d console lines of runner VM %s:\n%s", CONSOLE_LINES, name, redacted
+            )
+
+    def _read_console(self, server_id: str) -> str:
+        """Return the tail of one server's console output."""
+        if self._session is None:
+            self._session = self._authenticate()
+        token, compute_url = self._session
+        response = requests.post(
+            f"{compute_url}/servers/{server_id}/action",
+            json={"os-getConsoleOutput": {"length": CONSOLE_LINES}},
+            headers={"X-Auth-Token": token},
+            timeout=30,
+        )
+        if response.status_code == 401:
+            # The wait outlives a Keystone token; authenticate again on the next read.
+            self._session = None
+        response.raise_for_status()
+        return response.json()["output"]
+
+    def _authenticate(self) -> tuple[str, str]:
+        """Return a Keystone token and the public compute endpoint of the region."""
+        creds = self._credentials
+        auth_url = creds["auth_url"].rstrip("/")
+        if not auth_url.endswith("/v3"):
+            auth_url = f"{auth_url}/v3"
+        response = requests.post(
+            f"{auth_url}/auth/tokens",
+            json={
+                "auth": {
+                    "identity": {
+                        "methods": ["password"],
+                        "password": {
+                            "user": {
+                                "name": creds["username"],
+                                "domain": {"name": creds["user_domain_name"]},
+                                "password": creds["password"],
+                            }
+                        },
+                    },
+                    "scope": {
+                        "project": {
+                            "name": creds["project_name"],
+                            "domain": {"name": creds["project_domain_name"]},
+                        }
+                    },
+                }
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        token = response.headers["X-Subject-Token"]
+        compute_url = next(
+            (
+                endpoint["url"]
+                for service in response.json()["token"]["catalog"]
+                if service.get("type") == "compute"
+                for endpoint in service.get("endpoints", [])
+                if endpoint.get("interface") == "public"
+                and endpoint.get("region_id") == creds["region_name"]
+            ),
+            None,
+        )
+        if compute_url is None:
+            raise ValueError(f"no public compute endpoint in region {creds['region_name']}")
+        return token, compute_url.rstrip("/")
 
 
 @dataclass(frozen=True)

@@ -86,7 +86,7 @@ def test_runner_polling_resolves_enabled_scaleset_by_label(monkeypatch, name):
     monkeypatch.setattr(e2e.time, "sleep", Mock())
     monkeypatch.setattr(e2e, "_collect_debug_info", Mock())
 
-    e2e._wait_for_runner_online(Mock(), "garm", label, timeout=10)
+    e2e._wait_for_runner_online(Mock(), "garm", label, Mock(), timeout=10)
 
     assert [call.args[0] for call in get.call_args_list] == [
         "http://garm:8080/api/v1/scalesets",
