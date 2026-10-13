@@ -71,7 +71,7 @@ jobs:
   # its revision input, so a run pinning just one of them still builds the other.
   build:
     if: inputs.garm-revision == '' || inputs.garm-configurator-revision == ''
-    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.1
+    uses: canonical/charm-ci/.github/workflows/build-artifacts.yml@v1.0.2
     permissions:
       contents: read
       packages: write
@@ -106,10 +106,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.15"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.0
 
       - name: Set up tmate session (self-hosted)
         if: runner.debug == 1 && runner.environment == 'self-hosted'
