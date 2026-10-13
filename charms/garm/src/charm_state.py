@@ -155,7 +155,7 @@ def _valid_ipv4_exclude_token(token: str) -> bool:
         start, end = (ipaddress.ip_address(endpoint) for endpoint in endpoints)
     except ValueError:
         return False
-    return start.version == 4 and end.version == 4 and start <= end
+    return start.version == 4 and end.version == 4 and int(start) <= int(end)
 
 
 def _valid_ipv4_tokens(spec: str) -> list[str]:
