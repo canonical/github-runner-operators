@@ -50,7 +50,7 @@ Two log origins reach Loki by different paths:
 
 - **Workload logs** (the GARM Go application) are written to the workload's standard
   output and collected by the `go-framework` `LogForwarder` over the `logging`
-  relation. Relate the charm to Loki to activate this path:
+  relation. Integrate the charm to Loki to activate this path:
 
   ```
   juju deploy loki-k8s --channel=1/stable loki
