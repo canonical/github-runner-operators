@@ -11,6 +11,7 @@ logsource:
   product: canonical.garm
 detection:
   selection:
+    owasp_event.appid: 'canonical.garm'
     owasp_event.event|startswith: 'sys_shutdown'
   condition: selection
 falsepositives:

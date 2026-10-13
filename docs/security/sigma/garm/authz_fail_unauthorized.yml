@@ -8,6 +8,7 @@ logsource:
   product: canonical.garm
 detection:
   selection:
+    owasp_event.appid: 'canonical.garm'
     owasp_event.event|startswith: 'authz_fail'
     owasp_event.level: 'CRITICAL'
   condition: selection

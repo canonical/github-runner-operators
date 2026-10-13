@@ -8,6 +8,7 @@ logsource:
   product: canonical.garm
 detection:
   selection:
+    owasp_event.appid: 'canonical.garm'
     owasp_event.event|startswith: 'authn_login_fail'
   condition: selection
 falsepositives:

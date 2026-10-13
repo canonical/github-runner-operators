@@ -1,8 +1,19 @@
+---
+myst:
+  html_meta:
+    "description lang=en": "Reference for the vendor-neutral Sigma detection rules that match the GARM charm's OWASP security events."
+---
+
+(reference_sigma_rules)=
+
 # GARM Sigma detection rules
 
 Vendor-neutral [Sigma](https://sigmahq.io) rules for the security events emitted by
 the `garm` charm (`appid: canonical.garm`, `type: security`). Author once here;
-convert to your SIEM's query language with `sigma-cli` / pySigma.
+convert to your SIEM's query language with `sigma-cli` / pySigma. The rule files
+live in the
+[`docs/security/sigma/garm`](https://github.com/canonical/github-runner-operators/tree/main/docs/security/sigma/garm)
+directory of this repository.
 
 ## Field mapping (OWASP → Sigma selectors)
 
@@ -13,7 +24,13 @@ The `owasp-logger` library emits each event as a JSON object **nested under an
 | --- | --- | --- |
 | `event` | `owasp_event.event` | `owasp_event.event\|startswith: 'authz_fail'` |
 | `level` | `owasp_event.level` | `owasp_event.level: 'CRITICAL'` |
-| `appid` | `owasp_event.appid` / `logsource.product` | `canonical.garm` |
+| `appid` | `owasp_event.appid` | `owasp_event.appid: 'canonical.garm'` |
+
+Every rule pins `owasp_event.appid: 'canonical.garm'` in its `selection` so that,
+once converted to a generic backend (LogQL, Elasticsearch), it matches only GARM
+events and not another application's events that share an event name or level.
+The `logsource.product` field is Sigma metadata and is not emitted as a backend
+field constraint, so it cannot serve that purpose on its own.
 
 The `event` value is a flat token of the form `<event_name>:<comma-separated-args>`
 (for example `authz_fail:garm-admin,<resource>` or
@@ -44,5 +61,5 @@ backend that supports correlation (Loki/LogQL, Elasticsearch). Check your conver
 
 ## Lifecycle
 
-Rules are version-controlled and updated/validated/merged with the product release
+Rules are version-controlled, updated, validated, and merged with the product release
 cycle. Consumers pull validated rules directly from this directory.
