@@ -31,11 +31,11 @@ In this documentation
     * - Get started
       - :doc:`Deploy GARM and configure a runner scale set <tutorial/garm>`
     * - Operations
-      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>` | :ref:`Access security logs <how_to_access_security_logs>`
+      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
     * - Design
       - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
     * - Security
-      - :ref:`Overview <explanation_security>` | :ref:`Reference <reference_security>` | :ref:`How to secure GARM <how_to_secure_garm>`
+      - :ref:`Overview <explanation_security>` | :ref:`Reference <reference_security>` | :ref:`Security event logging <reference_security_logs>` | :ref:`How to secure GARM <how_to_secure_garm>`
     * - Releases
       - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_ | :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
 
