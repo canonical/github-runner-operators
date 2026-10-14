@@ -2,9 +2,9 @@
 # See LICENSE file for licensing details.
 """Model-free tests for the E2E callback relay pre-install script.
 
-The script only ever runs inside a runner VM on the tenant, so a syntax error or a
-wrong redirect surfaces as a runner that never registers, half an hour into a live
-run -- never as a red test.
+The script only ever runs inside a runner VM on the tenant, so without these tests a
+syntax error or a wrong redirect would surface only as a runner that never registers,
+half an hour into a live run.
 """
 
 import re
