@@ -42,7 +42,11 @@ The `event` value is a flat token of the form `<event_name>:<comma-separated-arg
 ```bash
 pip install sigma-cli
 sigma check docs/security/sigma/garm/
-# Convert to Loki (LogQL), for example:
+```
+
+For example, convert to Loki (LogQL):
+
+```bash
 sigma convert -t loki docs/security/sigma/garm/authz_fail_unauthorized.yml
 ```
 
