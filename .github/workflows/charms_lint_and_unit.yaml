@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       charms: ${{ steps.filter.outputs.charms }}
+      sigma: ${{ steps.filter.outputs.sigma }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -23,6 +24,10 @@ jobs:
             charms:
               - 'charms/**'
               - 'internal/**'
+              - 'tox.ini'
+              - '.github/workflows/charms_lint_and_unit.yaml'
+            sigma:
+              - 'docs/security/sigma/**'
               - 'tox.ini'
               - '.github/workflows/charms_lint_and_unit.yaml'
 
@@ -77,3 +82,25 @@ jobs:
 
       - name: Run unit tests for charms/tests/
         run: tox -e charms-tests-unit
+
+  sigma-lint:
+    name: Sigma rules validation
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.sigma == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Validate Sigma detection rules
+        run: tox -e sigma-lint

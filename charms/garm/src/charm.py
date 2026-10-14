@@ -39,6 +39,7 @@ from github_reconciler import (
 )
 from resource_cleanup import GarmCleanupError, GarmResourceCleanup
 from scaleset_reconciler import Handover, ScalesetProgress, ScalesetReconciler, ScalesetSpec
+from security_log import owasp_log
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,10 @@ class GarmCharm(paas_charm.go.Charm):
 
         base_url = GARM_LOCAL_API_BASE_URL
         try:
+            owasp_log.sys_shutdown(
+                userid=username,
+                description="GARM application teardown: draining resources before removal",
+            )
             auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
             GarmResourceCleanup(auth_client).run()
         except GarmApiError as exc:
@@ -266,6 +271,11 @@ class GarmCharm(paas_charm.go.Charm):
         if credentials is None:
             event.fail("GARM admin credentials are not yet available")
             return
+        owasp_log.authz_admin(
+            userid=self.unit.name,
+            admin_activity="get_credentials",
+            description="GARM admin credentials disclosed via Juju action",
+        )
         event.set_results(credentials)
 
     @property
@@ -639,6 +649,10 @@ class GarmCharm(paas_charm.go.Charm):
                 password=password,
                 email=email,
                 full_name=full_name,
+            )
+            owasp_log.sys_startup(
+                userid=username,
+                description="GARM completed first-run initialisation",
             )
         except GarmApiError as exc:
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)

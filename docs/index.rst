@@ -35,7 +35,7 @@ In this documentation
     * - Design
       - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
     * - Security
-      - :ref:`Overview <explanation_security>` | :ref:`Reference <reference_security>` | :ref:`How to secure GARM <how_to_secure_garm>`
+      - :ref:`Overview <explanation_security>` | :ref:`Reference <reference_security>` | :ref:`Security event logging <reference_security_logs>` | :ref:`How to secure GARM <how_to_secure_garm>`
     * - Releases
       - `Changelog <https://github.com/canonical/github-runner-operators/blob/main/docs/changelog.md>`_ | :doc:`Charm release and promotion process <explanation/charm-release-and-promotion>`
 
