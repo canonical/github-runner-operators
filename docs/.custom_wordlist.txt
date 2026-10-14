@@ -25,6 +25,7 @@ Multipass
 otf
 plantuml
 PNG
+PRs
 Pygments
 pymarkdown
 QEMU
