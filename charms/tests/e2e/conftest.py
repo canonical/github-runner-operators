@@ -606,8 +606,9 @@ else
     log "ERROR: relay $RELAY:$RELAY_TLS_PORT unreachable; GARM traffic to $CALLBACK_HOST will fail"
 fi
 
-# The aproxy ruleset excludes the relay's address and these ports are not the
-# ones it intercepts, so its DNAT does not claim the redirected packets.
+# The redirect rewrites the destination port to one aproxy does not intercept
+# (it claims only :80 and :443), so its DNAT does not claim the redirected
+# packets, whether or not the relay's address is in its exclusion list.
 nft -f - <<NFT
 table ip garm-e2e-relay {{
     chain output {{

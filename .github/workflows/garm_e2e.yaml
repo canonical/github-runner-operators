@@ -415,9 +415,10 @@ jobs:
                -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
                -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR)
           for ATTEMPT in $(seq 1 36); do
-            "${SSH[@]}" "ubuntu@${RELAY}" true && break
+            "${SSH[@]}" "ubuntu@${RELAY}" true 2> "${RELAY_DIR}/ssh.err" && break
             if [ "$ATTEMPT" -eq 36 ]; then
-              echo "::error::This host cannot reach the relay at ${RELAY}:22."
+              cat "${RELAY_DIR}/ssh.err"
+              echo "::error::Could not open an SSH session to the relay at ${RELAY}:22. Likely causes: tcp/22 from this host is blocked, cloud-init did not install the key, or the image has no ubuntu user."
               exit 1
             fi
             sleep 10
