@@ -37,7 +37,7 @@ The `event` value is a flat token of the form `<event_name>:<comma-separated-arg
 `authz_admin:garm/0,get_credentials`), so rules match it with `startswith` /
 `contains`.
 
-## Validate & apply
+## Validate and apply
 
 ```bash
 pip install sigma-cli
