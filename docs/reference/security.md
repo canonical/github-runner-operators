@@ -53,6 +53,7 @@ Report security issues through the repository's
 ## Related information
 
 - {ref}`Security overview <explanation_security>`
+- {ref}`Security event logging <reference_security_logs>`
 - {ref}`How to secure GARM <how_to_secure_garm>`
 - {ref}`Architecture overview <reference_charm_architecture_deployment>`
 - {ref}`Charm reference <reference_charm_reference>`

@@ -530,6 +530,7 @@ def test_create_credentials_returns_credentials():
     client = GarmAuthenticatedClient(BASE_URL, "token")
     mock_result = MagicMock()
     mock_result.id = 7
+    mock_result.name = "ghcreds"
     with _stub_api_client(client):
         with patch("garm_api.CredentialsApi") as MockApi:
             MockApi.return_value.create_credentials.return_value = mock_result
@@ -913,3 +914,322 @@ def test_upload_agent_tool_raises_on_api_error():
             client.upload_agent_tool(
                 name="n", description="d", os_arch="amd64", version="v1", content=b""
             )
+
+
+def test_first_run_emits_user_created():
+    """
+    arrange: GarmApiClient with a stubbed FirstRunApi and a patched owasp_log.
+    act: Call first_run with an admin username.
+    assert: user_created is emitted naming the new admin, so the account creation is auditable.
+    """
+    client = GarmApiClient(BASE_URL)
+    with _stub_api_client(client):
+        with patch("garm_api.FirstRunApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.first_run.return_value = MagicMock()
+            client.first_run("admin", "pass", "email@example.com", "Admin")
+    mock_log.user_created.assert_called_once()
+    assert mock_log.user_created.call_args.kwargs["newuserid"] == "admin"
+
+
+def test_login_emits_success_and_token_created():
+    """
+    arrange: GarmApiClient whose LoginApi returns a token, with owasp_log patched.
+    act: Call login("admin", "password").
+    assert: Both authn_login_success and authn_token_created fire for the admin, so a
+        successful auth and the JWT issuance are both auditable.
+    """
+    client = GarmApiClient(BASE_URL)
+    mock_result = MagicMock()
+    mock_result.token = "test-jwt-token"
+    with _stub_api_client(client):
+        with patch("garm_api.LoginApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.login.return_value = mock_result
+            client.login("admin", "password")
+    mock_log.authn_login_success.assert_called_once_with(
+        userid="admin", description="GARM admin login succeeded"
+    )
+    mock_log.authn_token_created.assert_called_once()
+    assert mock_log.authn_token_created.call_args.kwargs["userid"] == "admin"
+
+
+def test_login_emits_login_fail_on_api_error():
+    """
+    arrange: GarmApiClient whose LoginApi raises ApiException(401), owasp_log patched.
+    act: Call login("admin", "wrong") expecting it to raise.
+    assert: authn_login_fail is emitted for the admin before the error propagates.
+    """
+    client = GarmApiClient(BASE_URL)
+    with _stub_api_client(client):
+        with patch("garm_api.LoginApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.login.side_effect = ApiException(status=401)
+            with pytest.raises(GarmApiError):
+                client.login("admin", "wrong")
+    mock_log.authn_login_fail.assert_called_once_with(
+        userid="admin", description="GARM admin login failed"
+    )
+
+
+def test_login_emits_login_fail_on_empty_token():
+    """
+    arrange: GarmApiClient whose LoginApi returns a response with an empty token, owasp_log
+        patched.
+    act: Call login("admin", "password") expecting it to raise.
+    assert: authn_login_fail is emitted, so a successful-looking response that yields no token
+        still leaves an audit record.
+    """
+    client = GarmApiClient(BASE_URL)
+    mock_result = MagicMock()
+    mock_result.token = ""
+    with _stub_api_client(client):
+        with patch("garm_api.LoginApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.login.return_value = mock_result
+            with pytest.raises(GarmApiError, match="token"):
+                client.login("admin", "password")
+    mock_log.authn_login_fail.assert_called_once_with(
+        userid="admin", description="GARM login returned an empty token"
+    )
+
+
+def test_raise_resource_api_error_emits_authz_fail_on_401():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_resource_api_error with an ApiException(401), expecting GarmUnauthorizedError.
+    assert: authz_fail (CRITICAL in owasp-logger) is emitted, so unauthorized API access is audited.
+    """
+    from garm_api import _raise_resource_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmUnauthorizedError):
+            _raise_resource_api_error("update org failed", ApiException(status=401))
+    mock_log.authz_fail.assert_called_once()
+
+
+def test_raise_resource_api_error_no_authz_fail_on_404():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_resource_api_error with an ApiException(404), expecting GarmNotFoundError.
+    assert: authz_fail is NOT emitted - a 404 is not an authorization rejection.
+    """
+    from garm_api import _raise_resource_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmNotFoundError):
+            _raise_resource_api_error("missing", ApiException(status=404))
+    mock_log.authz_fail.assert_not_called()
+
+
+def test_raise_api_error_emits_authz_fail_on_401_but_raises_flat_error():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_api_error with an ApiException(401).
+    assert: authz_fail is emitted and a flat GarmApiError (not GarmUnauthorizedError) is raised, so
+        the privileged mutation paths keep their existing exception type while still being audited.
+    """
+    from garm_api import _raise_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmApiError) as exc_info:
+            _raise_api_error("create org failed", ApiException(status=401))
+    assert not isinstance(exc_info.value, GarmUnauthorizedError)
+    mock_log.authz_fail.assert_called_once()
+
+
+def test_raise_api_error_no_authz_fail_on_500():
+    """
+    arrange: owasp_log patched.
+    act: Call _raise_api_error with an ApiException(500).
+    assert: authz_fail is NOT emitted - only a 401 is an authorization rejection.
+    """
+    from garm_api import _raise_api_error
+
+    with patch("garm_api.owasp_log") as mock_log:
+        with pytest.raises(GarmApiError):
+            _raise_api_error("boom", ApiException(status=500))
+    mock_log.authz_fail.assert_not_called()
+
+
+def test_create_credentials_emits_token_created():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning a named credential, owasp_log patched.
+    act: Call create_credentials().
+    assert: authn_token_created fires, so forge-credential registration is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    mock_result = MagicMock()
+    mock_result.name = "ghcreds"
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.create_credentials.return_value = mock_result
+            client.create_credentials(MagicMock())
+    mock_log.authn_token_created.assert_called_once()
+
+
+def test_update_credentials_emits_token_revoked():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi returning a credential, owasp_log patched.
+    act: Call update_credentials(5, params).
+    assert: authn_token_revoked fires with the credential id, so rotation is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.update_credentials.return_value = MagicMock()
+            client.update_credentials(5, MagicMock())
+    mock_log.authn_token_revoked.assert_called_once()
+    assert mock_log.authn_token_revoked.call_args.kwargs["tokenid"] == "5"
+
+
+def test_delete_credentials_emits_token_delete():
+    """
+    arrange: GarmAuthenticatedClient with CredentialsApi, owasp_log patched.
+    act: Call delete_credentials(5).
+    assert: authn_token_delete fires, so credential removal is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.CredentialsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            client.delete_credentials(5)
+    mock_log.authn_token_delete.assert_called_once()
+    assert mock_log.authn_token_delete.call_args.kwargs["appid"] == "forge-credential-5"
+
+
+def test_create_org_emits_authz_admin():
+    """
+    arrange: GarmAuthenticatedClient with a stubbed OrganizationsApi, owasp_log patched.
+    act: Call create_org(params).
+    assert: authz_admin fires describing the org creation, auditing privileged admin activity.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    params = MagicMock()
+    params.name = "my-org"
+    with _stub_api_client(client):
+        with (
+            patch("garm_api.OrganizationsApi") as MockApi,
+            patch("garm_api.owasp_log") as mock_log,
+        ):
+            MockApi.return_value.create_org.return_value = MagicMock()
+            client.create_org(params)
+    mock_log.authz_admin.assert_called_once()
+    assert "create_org" in mock_log.authz_admin.call_args.kwargs["admin_activity"]
+
+
+def test_delete_scaleset_emits_authz_admin():
+    """
+    arrange: GarmAuthenticatedClient with a stubbed ScalesetsApi, owasp_log patched.
+    act: Call delete_scaleset(3).
+    assert: authz_admin fires describing the scaleset deletion.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    with _stub_api_client(client):
+        with patch("garm_api.ScalesetsApi") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            MockApi.return_value.delete_scale_set.return_value = None
+            client.delete_scaleset(3)
+    mock_log.authz_admin.assert_called_once()
+    assert "delete_scaleset" in mock_log.authz_admin.call_args.kwargs["admin_activity"]
+
+
+@pytest.mark.parametrize(
+    "api_class, call",
+    [
+        ("OrganizationsApi", lambda c: c.update_org("org-1", MagicMock())),
+        ("OrganizationsApi", lambda c: c.delete_org("org-1")),
+        ("RepositoriesApi", lambda c: c.create_repo(MagicMock(name="r"))),
+        ("RepositoriesApi", lambda c: c.update_repo("repo-1", MagicMock())),
+        ("RepositoriesApi", lambda c: c.delete_repo("repo-1")),
+        ("OrganizationsApi", lambda c: c.create_org_scaleset("org-1", MagicMock())),
+        ("RepositoriesApi", lambda c: c.create_repo_scaleset("repo-1", MagicMock())),
+        ("ScalesetsApi", lambda c: c.update_scaleset(4, MagicMock())),
+        ("TemplatesApi", lambda c: c.create_template("tmpl", b"#!/bin/sh")),
+        ("TemplatesApi", lambda c: c.update_template(4, b"#!/bin/sh")),
+        ("TemplatesApi", lambda c: c.delete_template(4)),
+    ],
+    ids=[
+        "update_org",
+        "delete_org",
+        "create_repo",
+        "update_repo",
+        "delete_repo",
+        "create_org_scaleset",
+        "create_repo_scaleset",
+        "update_scaleset",
+        "create_template",
+        "update_template",
+        "delete_template",
+    ],
+)
+def test_privileged_mutations_emit_authz_admin(api_class, call):
+    """
+    arrange: GarmAuthenticatedClient with the relevant generated API stubbed, owasp_log patched.
+    act: Invoke each privileged resource mutation.
+    assert: authz_admin fires exactly once, so every GARM admin mutation is auditable.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_class}"), patch("garm_api.owasp_log") as mock_log:
+            call(client)
+    mock_log.authz_admin.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "api_class, method, call",
+    [
+        ("OrganizationsApi", "create_org", lambda c: c.create_org(MagicMock(name="o"))),
+        ("OrganizationsApi", "update_org", lambda c: c.update_org("org-1", MagicMock())),
+        ("OrganizationsApi", "delete_org", lambda c: c.delete_org("org-1")),
+        ("RepositoriesApi", "create_repo", lambda c: c.create_repo(MagicMock(name="r"))),
+        ("RepositoriesApi", "update_repo", lambda c: c.update_repo("repo-1", MagicMock())),
+        ("RepositoriesApi", "delete_repo", lambda c: c.delete_repo("repo-1")),
+        (
+            "OrganizationsApi",
+            "create_org_scale_set",
+            lambda c: c.create_org_scaleset("org-1", MagicMock()),
+        ),
+        (
+            "RepositoriesApi",
+            "create_repo_scale_set",
+            lambda c: c.create_repo_scaleset("repo-1", MagicMock()),
+        ),
+        ("CredentialsApi", "create_credentials", lambda c: c.create_credentials(MagicMock())),
+        ("CredentialsApi", "update_credentials", lambda c: c.update_credentials(1, MagicMock())),
+        ("CredentialsApi", "delete_credentials", lambda c: c.delete_credentials(1)),
+        ("TemplatesApi", "create_template", lambda c: c.create_template("tmpl", b"#!/bin/sh")),
+        ("TemplatesApi", "update_template", lambda c: c.update_template(4, b"#!/bin/sh")),
+        ("TemplatesApi", "delete_template", lambda c: c.delete_template(4)),
+        (
+            "ControllerApi",
+            "update_controller",
+            lambda c: c.update_controller("m", "c", "w", "a", False),
+        ),
+    ],
+    ids=[
+        "create_org",
+        "update_org",
+        "delete_org",
+        "create_repo",
+        "update_repo",
+        "delete_repo",
+        "create_org_scaleset",
+        "create_repo_scaleset",
+        "create_credentials",
+        "update_credentials",
+        "delete_credentials",
+        "create_template",
+        "update_template",
+        "delete_template",
+        "update_controller",
+    ],
+)
+def test_privileged_mutations_emit_authz_fail_on_401(api_class, method, call):
+    """
+    arrange: GarmAuthenticatedClient whose generated API raises ApiException(401), owasp_log patched.
+    act: Invoke each privileged mutation that catches ApiException directly.
+    assert: authz_fail fires and a GarmApiError is raised, so a 401 on these paths (not just the
+        scaleset/instance paths) is audited as an unauthorized access attempt.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "tok")
+    with _stub_api_client(client):
+        with patch(f"garm_api.{api_class}") as MockApi, patch("garm_api.owasp_log") as mock_log:
+            getattr(MockApi.return_value, method).side_effect = ApiException(status=401)
+            with pytest.raises(GarmApiError):
+                call(client)
+    mock_log.authz_fail.assert_called_once()
