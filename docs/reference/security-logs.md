@@ -66,7 +66,7 @@ Two log origins reach Loki by different paths:
   Loki. The feed is then queried on Loki with the log selector shown above.
 
 - **Charm-hook logs** (`sys_startup`, `sys_shutdown`, and the `get-credentials`
-  action, all emitted from the charm's Python hook process) are written to
+  action) emitted from the charm's Python hook process are written to
   `juju-log`, which Juju forwards to the Juju controller. Their onward handling,
   retention, and forwarding is therefore the responsibility of the Juju
   controller operator rather than this charm. On the controller, these events
