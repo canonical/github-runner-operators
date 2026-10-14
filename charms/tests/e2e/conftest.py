@@ -60,8 +60,9 @@ CA_APP_NAME = "self-signed-certificates"
 # databag. traefik publishes to the *app* databag over v4, so the pair relates
 # cleanly, reports no error, and simply never issues a certificate.
 CA_CHANNEL = "1/stable"
-E2E_TUNNEL_LOCAL_PORT = 18080
-E2E_TUNNEL_LOCAL_TLS_PORT = 18443
+# The ports the workflow's callback relay serves traefik's :80 and :443 on.
+E2E_RELAY_PORT = 18080
+E2E_RELAY_TLS_PORT = 18443
 
 # The rock ships the GARM server only, so the client comes from an upstream
 # release. Pinned, with its published digest, so a new release cannot change the
@@ -300,9 +301,8 @@ def deploy_e2e_scaleset_fixture(
 
     private_key_decoded = github_app_private_key(E2E_APP_ENV)
     runner_http_proxy = os.environ.get("E2E_RUNNER_HTTP_PROXY", "")
-    tunnel_key_b64 = os.environ.get("E2E_TUNNEL_PRIVATE_KEY", "").strip()
-    tunnel_target = os.environ.get("E2E_TUNNEL_TARGET", "").strip()
-    tunnel_user = os.environ.get("E2E_TUNNEL_USER", "").strip()
+    callback_host = os.environ.get("E2E_CALLBACK_HOST", "").strip()
+    relay = os.environ.get("E2E_CALLBACK_RELAY", "").strip()
 
     # Create secrets
     password_secret = juju.add_secret(
@@ -356,22 +356,21 @@ def deploy_e2e_scaleset_fixture(
         )
         config_values["aproxy-exclude-addresses"] = exclude_addresses
 
-    # The private-endpoint host's security group (github-runner-v1, managed by the
-    # legacy github-runner-operator charm) admits only ingress tcp/22, so the
-    # runner VM cannot reach traefik's :80 that the GARM metadata and callback
-    # URLs point at. A pre-install script opens an SSH connection back to the
-    # host on the one open port and tunnels those URLs through it. The workflow
-    # provides the ephemeral key; when it does not (local runs, other hosts with
-    # open networks), the tunnel is skipped and traffic goes direct.
-    if any((tunnel_key_b64, tunnel_target, tunnel_user)):
-        if not all((tunnel_key_b64, tunnel_target, tunnel_user)):
+    # The CI host admits no inbound traffic from the tenant, so a runner VM cannot
+    # reach traefik there, which GARM's metadata and callback URLs point at. The
+    # workflow runs a relay VM on the tenant that this host feeds over a reverse
+    # SSH tunnel, and a pre-install script steers the VM's GARM traffic to it.
+    # Without the workflow (local runs, hosts with open networks) there is no
+    # relay, and traffic goes direct.
+    if any((callback_host, relay)):
+        if not all((callback_host, relay)):
             logger.warning(
-                "Incomplete E2E tunnel configuration: E2E_TUNNEL_PRIVATE_KEY, "
-                "E2E_TUNNEL_TARGET and E2E_TUNNEL_USER must all be set; skipping the tunnel"
+                "Incomplete E2E relay configuration: E2E_CALLBACK_HOST and "
+                "E2E_CALLBACK_RELAY must both be set; skipping the relay"
             )
         else:
-            config_values["pre-install-scripts"] = _tunnel_pre_install_script(
-                target=tunnel_target, user=tunnel_user, private_key_b64=tunnel_key_b64
+            config_values["pre-install-scripts"] = _relay_pre_install_script(
+                callback_host=callback_host, relay=relay
             )
 
     _deploy_configurator(
@@ -565,96 +564,61 @@ def _force_remove_instance(
         )
 
 
-def _tunnel_pre_install_script(target: str, user: str, private_key_b64: str) -> str:
-    """Render the pre-install script that tunnels GARM traffic back over SSH.
+def _relay_pre_install_script(callback_host: str, relay: str) -> str:
+    """Render the pre-install script that steers GARM traffic to the callback relay.
 
-    The runner VM cannot reach the host's :443 (the security group on the
-    private-endpoint host admits only tcp/22), yet GARM bakes its metadata and
-    callback URLs -- pointing at the host -- into the user data it hands the
-    provider. Pre-install scripts run before GARM's install wrapper, so this
-    script opens an SSH connection back to the host on the one open port, binds
-    local forwards to the host's :80 and :443, and installs an nftables redirect
-    that steers locally-generated traffic for that host into the tunnel. The URLs
-    GARM generated then work verbatim, with no controller reconfiguration.
+    GARM bakes metadata and callback URLs pointing at the CI host into the user data
+    it hands the provider, and the runner VM cannot reach that host. Pre-install
+    scripts run before GARM's install wrapper, so this script installs an nftables
+    redirect that sends the VM's traffic for the host's :80 and :443 to the relay's
+    forwarded ports instead. The URLs GARM generated then work verbatim, and TLS is
+    unaffected: the certificate is checked against the host in the URL, which is
+    unchanged, and traefik behind the relay still terminates it.
 
-    Both ports are forwarded because the scheme is not the script's to know:
+    Both ports are redirected because the scheme is not the script's to know:
     the ingress serves https once it has a certificate, and the agent websocket
     requires it, but a deployment without a CA still uses :80.
 
     Args:
-        target: The host serving GARM (the load-balancer/traefik address).
-        user: The user the tunnel authenticates as on that host.
-        private_key_b64: Base64-encoded private key authorised for that user.
+        callback_host: The host serving GARM (the load-balancer/traefik address).
+        relay: The tenant address of the relay forwarding to that host.
 
     Returns:
         A bash script for the configurator's pre-install-scripts config.
     """
     return f"""#!/bin/bash
 
-# GARM E2E callback tunnel. Delivered as a pre-install script so it runs before
+# GARM E2E callback relay. Delivered as a pre-install script so it runs before
 # GARM's install wrapper, whose first action is fetching the install script
-# from the metadata URL on the host this tunnel reaches.
-log() {{ echo "[e2e-tunnel] $*"; }}
+# from the metadata URL on the host this redirect reaches.
+log() {{ echo "[e2e-relay] $*"; }}
 
-TARGET='{target}'
-SSH_USER='{user}'
-LOCAL_PORT={E2E_TUNNEL_LOCAL_PORT}
-LOCAL_TLS_PORT={E2E_TUNNEL_LOCAL_TLS_PORT}
-KEY_FILE=/root/.ssh/garm-e2e-tunnel
-# The nft ruleset below needs the VM's own primary address as the DNAT target,
-# resolved the same way the aproxy bootstrap does it.
-DEFAULT_IPV4=$(ip route get $(ip route show 0.0.0.0/0 | grep -oP 'via \\K\\S+') \\
-    | grep -oP 'src \\K\\S+')
+CALLBACK_HOST='{callback_host}'
+RELAY='{relay}'
+RELAY_PORT={E2E_RELAY_PORT}
+RELAY_TLS_PORT={E2E_RELAY_TLS_PORT}
 
-if ! command -v ssh >/dev/null 2>&1; then
-    log "ERROR: no ssh client on the image; GARM traffic to ${{TARGET}} will fail"
-    exit 0
+# Diagnostic only: an unreachable relay shows up here, on the VM console, rather
+# than as an install-script fetch that times out without saying where.
+if timeout 5 bash -c "</dev/tcp/$RELAY/$RELAY_TLS_PORT" 2>/dev/null; then
+    log "relay $RELAY:$RELAY_TLS_PORT reachable"
+else
+    log "ERROR: relay $RELAY:$RELAY_TLS_PORT unreachable; GARM traffic to $CALLBACK_HOST will fail"
 fi
 
-umask 077
-mkdir -p /root/.ssh
-printf '%s' '{private_key_b64}' | base64 -d > "$KEY_FILE"
-
-# The host key is not pinned: the keypair this tunnel uses is ephemeral,
-# per CI run, and restricted to port forwarding, so a hijacked tunnel gives
-# an attacker nothing but the ability to reach the host's :80 and :443.
-for attempt in $(seq 1 30); do
-    if ssh -f -N \\
-        -o StrictHostKeyChecking=no \\
-        -o UserKnownHostsFile=/dev/null \\
-        -o GlobalKnownHostsFile=/dev/null \\
-        -o ServerAliveInterval=30 \\
-        -o ExitOnForwardFailure=yes \\
-        -o ConnectTimeout=10 \\
-        -i "$KEY_FILE" \\
-        -L "${{DEFAULT_IPV4}}:$LOCAL_PORT:$TARGET:80" \\
-        -L "${{DEFAULT_IPV4}}:$LOCAL_TLS_PORT:$TARGET:443" \\
-        "$SSH_USER@$TARGET"; then
-        log "tunnel up on $DEFAULT_IPV4:$LOCAL_PORT,$LOCAL_TLS_PORT after $attempt attempt(s)"
-        break
-    fi
-    if [ "$attempt" -eq 30 ]; then
-        log "ERROR: tunnel never came up; GARM traffic to $TARGET will fail"
-        exit 0
-    fi
-    sleep 5
-done
-
-# Steer locally-generated GARM traffic (metadata, callback and the agent
-# websocket) into the tunnel. The aproxy ruleset excludes this address, so its
-# DNAT does not claim these packets first. Redirecting to a different local
-# port is transparent to TLS: the certificate is checked against the host in
-# the URL, which is unchanged, and traefik still terminates it.
+# The redirect rewrites the destination port to one aproxy does not intercept
+# (it claims only :80 and :443), so its DNAT does not claim the redirected
+# packets, whether or not the relay's address is in its exclusion list.
 nft -f - <<NFT
-table ip garm-e2e-tunnel {{
+table ip garm-e2e-relay {{
     chain output {{
         type nat hook output priority -100; policy accept;
-        ip daddr $TARGET tcp dport 80 counter dnat to $DEFAULT_IPV4:$LOCAL_PORT
-        ip daddr $TARGET tcp dport 443 counter dnat to $DEFAULT_IPV4:$LOCAL_TLS_PORT
+        ip daddr $CALLBACK_HOST tcp dport 80 counter dnat to $RELAY:$RELAY_PORT
+        ip daddr $CALLBACK_HOST tcp dport 443 counter dnat to $RELAY:$RELAY_TLS_PORT
     }}
 }}
 NFT
-log "redirecting $TARGET:80 to $DEFAULT_IPV4:$LOCAL_PORT and :443 to $DEFAULT_IPV4:$LOCAL_TLS_PORT"
+log "redirecting $CALLBACK_HOST:80 to $RELAY:$RELAY_PORT and :443 to $RELAY:$RELAY_TLS_PORT"
 """
 
 
