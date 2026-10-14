@@ -16,3 +16,4 @@ for GARM and the GARM configurator.
    Charm reference <charms>
    Security <security>
    Security event logging <security-logs>
+   Sigma detection rules <../security/sigma/garm/README>
