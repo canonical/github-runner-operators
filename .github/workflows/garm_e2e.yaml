@@ -381,7 +381,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          NAME="garm-e2e-relay-${GITHUB_RUN_ID}"
+          NAME="garm-e2e-relay-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           CALLBACK_HOST=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+')
           RELAY_DIR="${RUNNER_TEMP}/${NAME}"
           mkdir -p "$RELAY_DIR"
@@ -547,7 +547,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          NAME="garm-e2e-relay-${GITHUB_RUN_ID}"
+          NAME="garm-e2e-relay-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RELAY_DIR="${RUNNER_TEMP}/${NAME}"
           if [ -f "${RELAY_DIR}/tunnel.pid" ]; then
             kill -- "-$(cat "${RELAY_DIR}/tunnel.pid")" 2>/dev/null || true
