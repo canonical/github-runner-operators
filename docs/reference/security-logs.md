@@ -63,17 +63,10 @@ Two log origins reach Loki by different paths:
 - **Workload logs** (the GARM Go application) are written to the workload's
   standard output and collected by the `go-framework` `LogForwarder` over the
   `logging` relation. This path is active once the charm is integrated with
-  Loki:
-
-  ```
-  juju deploy loki-k8s --channel=1/stable loki
-  juju integrate garm:logging loki:logging
-  ```
-
-  The feed is then queried on Loki with the log selector shown above.
+  Loki. The feed is then queried on Loki with the log selector shown above.
 
 - **Charm-hook logs** (`sys_startup`, `sys_shutdown`, and the `get-credentials`
-  action, all emitted from the charm's Python hook process) are written to
+  action) emitted from the charm's Python hook process are written to
   `juju-log`, which Juju forwards to the Juju controller. Their onward handling,
   retention, and forwarding is therefore the responsibility of the Juju
   controller operator rather than this charm. On the controller, these events
