@@ -50,6 +50,7 @@ PDF
 plantuml
 PNG
 PR
+PRs
 Pygments
 pymarkdown
 pySigma
