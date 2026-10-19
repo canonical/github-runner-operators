@@ -84,6 +84,13 @@ LABEL_HASH_LENGTH = 8
 # GitHub's own limit on the System label GARM registers the scale set under.
 MAX_SCALESET_NAME_LENGTH = 64
 
+# GARM names each runner `<runner_prefix>-<id>` and never validates the prefix length.
+# The name becomes the OpenStack server name and so the runner's hostname, bounded to a
+# 63-character DNS label. The id is the base62 form of a shortid, or of a UUID when that
+# fails — at most 22 characters — which leaves 63 - 1 - 22 for the prefix.
+MAX_RUNNER_PREFIX_LENGTH = 40
+DEFAULT_RUNNER_PREFIX = "garm"
+
 # Past this, a runner a retired scaleset still reports cannot be doing a legitimate
 # job: these are self-hosted runners, bound by MAX_JOB_RUNTIME, not the six-hour cap
 # GitHub enforces on the runners it hosts itself. The margin absorbs reconcile
@@ -1047,6 +1054,7 @@ class ScalesetReconciler:
                 "enable_shell": spec.enable_shell,
                 "extra_specs": _effective_extra_specs(spec) or None,
                 "template_id": spec.template_id,
+                "runner_prefix": runner_prefix(spec.name),
             }
         )
 
@@ -1103,6 +1111,7 @@ class ScalesetReconciler:
             enable_shell=spec.enable_shell,
             extra_specs=extra_specs,
             template_id=spec.template_id,
+            runner_prefix=runner_prefix(spec.name),
         )
         # Send template_id when the scaleset has, or had, a custom template — a 0
         # value detaches it (reverts to the default); omit it otherwise so an
@@ -1135,6 +1144,7 @@ class ScalesetReconciler:
             != bool(desired_extra.get("disable_updates"))
             or observed_extra.get("image_visibility") != desired_extra.get("image_visibility")
             or (observed.template_id or 0) != template_id
+            or observed.runner_prefix != runner_prefix(spec.name)
         )
 
 
@@ -1169,6 +1179,22 @@ def _name_base(logical_name: str) -> str:
         return logical_name
     digest = hashlib.sha256(logical_name.encode("utf-8")).hexdigest()[:LABEL_HASH_LENGTH]
     return f"{logical_name[: limit - LABEL_HASH_LENGTH - 1]}-{digest}"
+
+
+def runner_prefix(logical_name: str) -> str:
+    """Return the prefix GARM names a scaleset's runners with.
+
+    Args:
+        logical_name: The scaleset name the operator configured.
+
+    Returns:
+        The name reduced to a hostname-safe form — lowercase alphanumerics joined by
+        single hyphens — truncated to ``MAX_RUNNER_PREFIX_LENGTH``. GARM's own default
+        prefix when nothing usable remains. Truncation needs no disambiguating hash:
+        GARM appends a random id to every runner name.
+    """
+    prefix = re.sub(r"[^a-z0-9]+", "-", logical_name.lower()).strip("-")
+    return prefix[:MAX_RUNNER_PREFIX_LENGTH].rstrip("-") or DEFAULT_RUNNER_PREFIX
 
 
 def _is_family_member(observed_name: str, logical_name: str) -> bool:

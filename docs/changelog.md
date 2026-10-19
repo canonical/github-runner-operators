@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-16
+
+- `garm`: name runners after their scale set (for example `my-scaleset-dvnyp5dm3sm`) instead of GARM's default `garm-<id>`. The prefix is the scale set name in lowercase, with every run of characters other than letters and digits replaced by a hyphen, and truncated to 40 characters so the runner name still fits a 63-character hostname. Existing scale sets are updated in place; runners created before the update keep their names.
+
+## 2026-10-15
+
+- `garm`: bump the GARM workload so that it starts on PostgreSQL databases created by older GARM versions. On such databases, the previous workload failed a startup migration with `operator does not exist: text = uuid` and GARM did not start; GARM now converts the affected columns to the expected types on startup.
+
 ## 2026-10-07
 
 - `garm`: bump the GARM workload so that scale set labels longer than 64 characters work on PostgreSQL. GARM stored labels in a `varchar(64)` column, so such a label failed with `value too long for type character varying(64)`; the column is now `varchar(255)`, and GARM migrates existing databases on startup.
