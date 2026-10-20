@@ -16,6 +16,7 @@ outbound tmate client on the runner; both are traffic the runner originates.
 import logging
 import typing
 
+import keystoneauth1.exceptions.base
 import openstack
 
 from charm_state import ProviderConfig, SecurityGroupRule
@@ -25,6 +26,14 @@ logger = logging.getLogger(__name__)
 SECURITY_GROUP_NAME_PREFIX = "garm-"
 SECURITY_GROUP_DESCRIPTION = (
     "Managed by the garm-configurator charm; its rules follow the security-group-rules option."
+)
+
+# What a reconcile can fail with: the SDK's own hierarchy for API responses, and
+# keystoneauth's for transport and authentication, which never reach the SDK's base class —
+# an unreachable Keystone is the case the blocked status exists for.
+OPENSTACK_ERRORS = (
+    openstack.exceptions.SDKException,
+    keystoneauth1.exceptions.base.ClientException,
 )
 
 # A rule's identity is the value of these fields, in this order. OpenStack assigns the id,
@@ -87,20 +96,16 @@ class SecurityGroupReconciler:
                 change. The caller reports it and retries on the next event, because a
                 rejected call says nothing about the group's final state.
         """
-        # Nothing here may crash the hook: every failure is reported and retried, so the
-        # next reconcile looks again either way.
         try:
             # The SDK's signature is narrower than the keyword arguments a connection
-            # accepts at runtime, so it is called through an opaque callable.
+            # accepts at runtime, so it is called through an opaque callable. Connection
+            # closes itself on exit.
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
-            connection = connect(**self._auth_fields())
-            try:
+            with connect(**self._auth_fields()) as connection:
                 group = self._ensure_group(connection=connection, name=name)
                 self._reconcile_rules(connection=connection, group=group, rules=rules)
                 return str(group.id)
-            finally:
-                connection.close()
-        except Exception as exc:
+        except OPENSTACK_ERRORS as exc:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
 
     def _auth_fields(self) -> dict[str, str]:
@@ -114,7 +119,6 @@ class SecurityGroupReconciler:
             "user_domain_name": config.user_domain_name,
             "project_domain_name": config.project_domain_name,
             "region_name": config.region_name,
-            "interface": "public",
         }
 
     def _ensure_group(self, connection: typing.Any, name: str) -> typing.Any:
@@ -202,7 +206,7 @@ class SecurityGroupReconciler:
             rules: The rules the group should hold.
         """
         observed = {
-            _get_observed_identity(rule=rule): rule
+            tuple(getattr(rule, field, None) for field in RULE_FIELDS): rule
             for rule in connection.network.security_group_rules(security_group_id=group.id)
         }
         desired: set[tuple] = set()
@@ -227,11 +231,6 @@ class SecurityGroupReconciler:
 def _get_identity(rule: SecurityGroupRule) -> tuple:
     """Return a configured rule's identity: the value of RULE_FIELDS, in order."""
     return tuple(rule.neutron_fields.get(field) for field in RULE_FIELDS)
-
-
-def _get_observed_identity(rule: typing.Any) -> tuple:
-    """Return the identity of a rule as OpenStack reports it."""
-    return tuple(getattr(rule, field, None) for field in RULE_FIELDS)
 
 
 def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:

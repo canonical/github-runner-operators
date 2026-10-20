@@ -201,7 +201,6 @@ def _assert_runner_uses_the_managed_security_group(
         user_domain_name=credentials["user_domain_name"],
         project_domain_name=credentials["project_domain_name"],
         region_name=credentials["region_name"],
-        interface="public",
     ) as connection:
         name = f"garm-{label}"
         group = connection.network.find_security_group(name, ignore_missing=True)

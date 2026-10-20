@@ -5,6 +5,7 @@
 
 import typing
 
+import keystoneauth1.exceptions.connection
 import openstack.exceptions
 import pytest
 
@@ -120,6 +121,12 @@ class _FakeConnection:
 
     def close(self):
         self.closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exception):
+        self.close()
 
 
 class _FakeSdk:
@@ -405,8 +412,8 @@ def test_authentication_uses_the_provider_config(sdk):
     """
     arrange: The charm state's provider credentials.
     act: Reconcile.
-    assert: The SDK is given those credentials, the configured region, and the public endpoint
-        interface.
+    assert: The SDK is given those credentials and the configured region, so the connection
+        resolves the same endpoints the provider does.
     """
     _reconciler(sdk, _FakeNetwork()).reconcile(name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE])
 
@@ -418,20 +425,32 @@ def test_authentication_uses_the_provider_config(sdk):
         "user_domain_name": "Default",
         "project_domain_name": "Default",
         "region_name": "RegionOne",
-        "interface": "public",
     }
 
 
-def test_openstack_failure_is_reported_as_a_single_line_reason(monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(openstack.exceptions.SDKException("neutron refused the request"), id="sdk"),
+        pytest.param(
+            keystoneauth1.exceptions.connection.ConnectFailure(
+                "keystone unreachable:\nconnection refused"
+            ),
+            id="keystoneauth",
+        ),
+    ],
+)
+def test_openstack_failure_is_reported_as_a_single_line_reason(monkeypatch, error):
     """
-    arrange: An OpenStack that cannot be reached.
+    arrange: An OpenStack failure, from the SDK's hierarchy or from keystoneauth's — an
+        unreachable Keystone never reaches the SDK's base class.
     act: Reconcile.
     assert: The error carries the whole reason on one line for the log, so debug-log shows what
         went wrong without a multi-line traceback.
     """
 
     def connect(**_auth_fields):
-        raise RuntimeError("keystone unreachable:\nconnection refused")
+        raise error
 
     monkeypatch.setattr("openstack_security_group.openstack.connect", connect)
 
@@ -440,4 +459,24 @@ def test_openstack_failure_is_reported_as_a_single_line_reason(monkeypatch):
             name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE]
         )
 
-    assert str(exc_info.value) == "keystone unreachable: connection refused"
+    assert str(exc_info.value) == " ".join(str(error).split())
+
+
+def test_an_unexpected_failure_is_not_hidden(monkeypatch):
+    """
+    arrange: A failure outside the SDK's and keystoneauth's hierarchies, as a bug in this code
+        would raise.
+    act: Reconcile.
+    assert: It propagates, so a programming error fails the hook loudly instead of being
+        reported as a blocked OpenStack reconcile the next event would retry.
+    """
+
+    def connect(**_auth_fields):
+        raise RuntimeError("a bug, not an OpenStack failure")
+
+    monkeypatch.setattr("openstack_security_group.openstack.connect", connect)
+
+    with pytest.raises(RuntimeError):
+        SecurityGroupReconciler(_provider_config()).reconcile(
+            name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE]
+        )

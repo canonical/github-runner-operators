@@ -1,3 +1,4 @@
+keystoneauth1==5.18.1
 openstacksdk==4.21.0
 ops==3.9.0
 pydantic==2.14.1
