@@ -191,7 +191,7 @@ class SecurityGroupReconciler:
                 name,
                 survivor.id,
             )
-            connection.network.delete_security_group(group.id)
+            _delete_unused_group(connection, group)
         return survivor
 
     def _reconcile_rules(
@@ -264,6 +264,25 @@ def _observed_rule_fields(rule: typing.Any) -> dict[str, object]:
 def _rule_identity(fields: dict[str, object]) -> tuple:
     """Return what distinguishes one rule from another."""
     return tuple(fields.get(field) for field in RULE_FIELDS)
+
+
+def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
+    """Delete a duplicate group, tolerating a port that attached it since the check.
+
+    The port check above and this delete cannot be atomic, so OpenStack can still answer
+    with a conflict. That is the same condition the check guards against, so it is logged
+    rather than raised: a group a port uses must not block the reconcile. Every other
+    failure — a refused permission, an unreachable API — still propagates.
+    """
+    try:
+        connection.network.delete_security_group(group.id)
+    except openstack.exceptions.ConflictException:
+        logger.warning(
+            "Could not delete security group %s (%s): a port attached it during the"
+            " reconcile. Leaving it in place",
+            group.name,
+            group.id,
+        )
 
 
 def _ports_using(connection: typing.Any, group_id: str) -> list[typing.Any]:

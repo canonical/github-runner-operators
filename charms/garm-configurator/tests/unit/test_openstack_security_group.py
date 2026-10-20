@@ -5,6 +5,7 @@
 
 import typing
 
+import openstack.exceptions
 import pytest
 
 from charm_state import ProviderConfig, SecurityGroupRule
@@ -370,6 +371,59 @@ def test_two_attached_duplicates_are_both_left_in_place():
     assert group_id == "sg-older"
     assert network.deleted_groups == []
     assert network.created_groups == []
+
+
+def test_a_port_attaching_during_the_reconcile_does_not_block():
+    """
+    arrange: An unused duplicate, and an OpenStack that reports a conflict because a port
+        attached it between the port check and the delete.
+    act: Reconcile.
+    assert: The reconcile still succeeds on the survivor and the duplicate is left in place,
+        so a race with a runner launch cannot block the unit.
+    """
+
+    class _Conflicts(_FakeNetwork):
+        def delete_security_group(self, group_id):
+            raise openstack.exceptions.ConflictException("Security Group in use")
+
+    network = _Conflicts(
+        [
+            _FakeGroup(GROUP_NAME, gid="sg-newer", created_at="2026-02-01T00:00:00Z"),
+            _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
+        ]
+    )
+    reconciler, _, _ = _reconciler(network)
+
+    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+
+    assert group_id == "sg-older"
+    assert network.deleted_groups == []
+
+
+def test_a_duplicate_delete_refused_for_another_reason_still_blocks():
+    """
+    arrange: An OpenStack that refuses the duplicate delete with a non-conflict error, such as
+        a missing permission.
+    act: Reconcile.
+    assert: The failure blocks the unit, because it will not resolve on its own.
+    """
+
+    class _Forbidden(_FakeNetwork):
+        def delete_security_group(self, group_id):
+            raise openstack.exceptions.ForbiddenException("Policy does not allow this request")
+
+    network = _Forbidden(
+        [
+            _FakeGroup(GROUP_NAME, gid="sg-newer", created_at="2026-02-01T00:00:00Z"),
+            _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
+        ]
+    )
+    reconciler, _, _ = _reconciler(network)
+
+    with pytest.raises(SecurityGroupReconcileError) as exc_info:
+        reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+
+    assert "Policy does not allow" in str(exc_info.value)
 
 
 def test_ports_are_only_listed_when_the_name_is_duplicated():
