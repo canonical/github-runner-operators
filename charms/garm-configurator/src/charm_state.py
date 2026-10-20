@@ -285,6 +285,19 @@ class SecurityGroupRule(BaseModel):
             return "IPv6"
         return "IPv4"
 
+    @property
+    def neutron_fields(self) -> dict[str, object]:
+        """This rule as OpenStack names its fields, for creating and comparing it."""
+        return {
+            "direction": self.direction,
+            "ethertype": self.ethertype,
+            # Neutron spells "every protocol" as a null protocol.
+            "protocol": None if self.protocol == "any" else self.protocol,
+            "port_range_min": self.port_min,
+            "port_range_max": self.port_max,
+            "remote_ip_prefix": self.remote_ip_prefix,
+        }
+
 
 class ScalesetConfig(BaseModel):
     """Scaleset configuration.

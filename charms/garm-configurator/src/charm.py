@@ -20,6 +20,7 @@ from openstack_security_group import (
     SecurityGroupReconcileError,
     SecurityGroupReconciler,
     security_group_name,
+    status_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             name = security_group_name(state.scaleset_config.name)
             logger.warning("Security group %s could not be reconciled: %s", name, e)
             self.unit.status = ops.BlockedStatus(
-                f"Security group {name} could not be reconciled: {e}"
+                f"Security group {name} could not be reconciled: {status_reason(e)}"
             )
             return
         self._configure_garm_relation(state, security_group_id or "")

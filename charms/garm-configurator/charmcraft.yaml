@@ -137,26 +137,18 @@ config:
       type: string
       default: '[{"direction": "egress", "remote_ip_prefix": "0.0.0.0/0"}, {"direction": "egress", "remote_ip_prefix": "::/0"}]'
       description: |
-        Optional JSON list of rules for the OpenStack security group the charm manages
-        for this scaleset's runners. Each rule takes:
-        "direction" ("ingress" or "egress", required), "protocol" ("tcp", "udp",
-        "icmp", "icmpv6", or "any", default "any"), "port_min" and "port_max"
-        (inclusive, 1-65535, tcp and udp only; "port_min" alone means that one port),
-        and "remote_ip_prefix" (a CIDR such as "10.0.0.0/8", default every address).
-        For example:
-        [{"direction": "ingress", "protocol": "tcp", "port_min": 22, "remote_ip_prefix": "10.0.0.0/8"}].
-        The charm creates a group named "garm-<name>" and keeps its rules equal to
-        this list, so rules added to the group by hand are removed. A list without an
-        egress rule is rejected, because OpenStack attaches this group instead of the
-        project's default group and a runner with no egress cannot reach GitHub. Set the
-        option to an empty list to manage no security group, which leaves the runners on
-        the project's default group and makes no OpenStack call. The group this charm
-        manages is never deleted: clearing this option, or removing the application,
-        leaves it in place for the operator to remove. OpenStack allows duplicate names,
-        so when several groups share it the charm keeps the one a port already attaches —
-        the one protecting live runners — or the oldest, and deletes the duplicates no
-        port uses. Requires OpenStack credentials allowed to create and delete security
-        groups and security group rules.
+        JSON list of rules for the OpenStack security group this charm manages for the
+        scaleset's runners. The charm keeps the group's rules equal to this list, so a
+        rule added by hand is removed. A rule takes: "direction" (required, "ingress" or
+        "egress"), "protocol" ("tcp", "udp", "icmp", "icmpv6", or "any", default "any"),
+        "port_min"/"port_max" (tcp and udp only), and "remote_ip_prefix" (a CIDR, default
+        every address), for example:
+        [{"direction": "ingress", "protocol": "tcp", "port_min": 22, "remote_ip_prefix": "10.0.0.0/8"}]
+        The default allows all egress and no ingress, which is what a runner needs to reach
+        GitHub. OpenStack attaches this group instead of the project's default group, so a
+        list without an egress rule is rejected. Set an empty list to manage no group.
+        Requires OpenStack credentials that may create and delete security groups and
+        their rules.
     dockerhub-mirror:
       type: string
       description: |

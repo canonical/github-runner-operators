@@ -14,27 +14,27 @@ from openstack_security_group import (
     SecurityGroupReconcileError,
     SecurityGroupReconciler,
     security_group_name,
+    status_reason,
 )
 
 SCALESET_NAME = "my-scaleset"
 GROUP_NAME = "garm-my-scaleset"
-RULE_ATTRIBUTES = (
-    "direction",
-    "ethertype",
-    "protocol",
-    "port_range_min",
-    "port_range_max",
-    "remote_ip_prefix",
-    "remote_group_id",
-    "remote_address_group_id",
-)
 
 
 class _FakeRule:
     """A security group rule as the SDK reports it."""
 
     def __init__(self, **fields):
-        for field in RULE_ATTRIBUTES:
+        for field in (
+            "direction",
+            "ethertype",
+            "protocol",
+            "port_range_min",
+            "port_range_max",
+            "remote_ip_prefix",
+            "remote_group_id",
+            "remote_address_group_id",
+        ):
             setattr(self, field, fields.get(field))
         # Fields OpenStack assigns, which a diff must ignore.
         self.id = fields.get("id", "rule-id")
@@ -124,6 +124,34 @@ class _FakeConnection:
         self.closed = True
 
 
+class _FakeSdk:
+    """The stubbed SDK entrypoint: the connection it hands out, and the auth it was given."""
+
+    def __init__(self, monkeypatch):
+        self.connection = _FakeConnection(_FakeNetwork())
+        self.auth = None
+
+        def connect(**auth_fields):
+            self.auth = auth_fields
+            return self.connection
+
+        monkeypatch.setattr("openstack_security_group.openstack.connect", connect)
+
+
+@pytest.fixture(name="sdk", autouse=True)
+def sdk_fixture(monkeypatch):
+    """Keep every test off the real OpenStack SDK entrypoint."""
+    return _FakeSdk(monkeypatch)
+
+
+def _reconciler(sdk, network=None):
+    """Build a reconciler whose stubbed connection serves *network*, when given."""
+    if network is not None:
+        sdk.connection.network = network
+        sdk.connection.closed = False
+    return SecurityGroupReconciler(_provider_config())
+
+
 def _provider_config():
     """Build the OpenStack credentials the reconciler authenticates with."""
     return ProviderConfig(
@@ -137,18 +165,6 @@ def _provider_config():
         network="external-net",
         provider_name="garm-configurator-0",
     )
-
-
-def _reconciler(network):
-    """Build a reconciler over *network*, plus the connection and auth arguments it used."""
-    connection = _FakeConnection(network)
-    calls: dict[str, typing.Any] = {}
-
-    def connect(**auth_fields):
-        calls["auth"] = auth_fields
-        return connection
-
-    return SecurityGroupReconciler(_provider_config(), connect=connect), connection, calls
 
 
 def _rule_fields(
@@ -189,7 +205,7 @@ def test_security_group_name_is_derived_from_the_scaleset_name():
     assert security_group_name(SCALESET_NAME) == GROUP_NAME
 
 
-def test_missing_group_is_created_with_the_configured_rules():
+def test_missing_group_is_created_with_the_configured_rules(sdk):
     """
     arrange: A project with no managed security group yet.
     act: Reconcile one ingress rule and one egress rule.
@@ -197,9 +213,8 @@ def test_missing_group_is_created_with_the_configured_rules():
         source of the group's rules.
     """
     network = _FakeNetwork()
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(
+    group_id = _reconciler(sdk, network).reconcile(
         GROUP_NAME,
         [
             SecurityGroupRule(
@@ -218,7 +233,7 @@ def test_missing_group_is_created_with_the_configured_rules():
     assert group_id == f"sg-{GROUP_NAME}"
 
 
-def test_duplicate_configured_rules_are_created_once():
+def test_duplicate_configured_rules_are_created_once(sdk):
     """
     arrange: Rules that list the same ingress rule twice.
     act: Reconcile the rules.
@@ -226,29 +241,30 @@ def test_duplicate_configured_rules_are_created_once():
         would then have to remove.
     """
     network = _FakeNetwork()
-    reconciler, _, _ = _reconciler(network)
 
-    reconciler.reconcile(GROUP_NAME, [SSH, SSH, EGRESS_ALL_V4_RULE])
+    _reconciler(sdk, network).reconcile(GROUP_NAME, [SSH, SSH, EGRESS_ALL_V4_RULE])
 
     assert network.created_rules == [SSH_INGRESS, EGRESS_ALL_V4]
 
 
-def test_existing_group_is_reused_and_its_matching_rules_are_left_alone():
+def test_existing_group_is_reused_and_its_matching_rules_are_left_alone(sdk):
     """
     arrange: A group that already holds the desired rules, with the ids OpenStack assigned.
     act: Reconcile the same rules again.
     assert: The existing group and its rules are kept, so reconciling unchanged configuration
         makes no change at all.
     """
-    group = _FakeGroup(
-        GROUP_NAME,
-        gid="sg-existing",
-        rules=[_stored_rule(**SSH_INGRESS), _stored_rule(**EGRESS_ALL_V4)],
+    network = _FakeNetwork(
+        [
+            _FakeGroup(
+                GROUP_NAME,
+                gid="sg-existing",
+                rules=[_stored_rule(**SSH_INGRESS), _stored_rule(**EGRESS_ALL_V4)],
+            )
+        ]
     )
-    network = _FakeNetwork([group])
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(GROUP_NAME, [SSH, EGRESS_ALL_V4_RULE])
+    group_id = _reconciler(sdk, network).reconcile(GROUP_NAME, [SSH, EGRESS_ALL_V4_RULE])
 
     assert group_id == "sg-existing"
     assert network.created_groups == []
@@ -256,55 +272,61 @@ def test_existing_group_is_reused_and_its_matching_rules_are_left_alone():
     assert network.deleted_rules == []
 
 
-def test_rules_no_longer_configured_are_deleted():
+def test_rules_no_longer_configured_are_deleted(sdk):
     """
     arrange: A group holding a rule the operator has since removed.
     act: Reconcile the remaining rules.
     assert: The stale rule is deleted, so the group matches the option exactly.
     """
-    group = _FakeGroup(
-        GROUP_NAME,
-        rules=[
-            _stored_rule(**SSH_INGRESS, rule_id=1),
-            _stored_rule(
-                **_rule_fields("ingress", protocol="tcp", port_min=8080, port_max=8080), rule_id=2
-            ),
-        ],
+    network = _FakeNetwork(
+        [
+            _FakeGroup(
+                GROUP_NAME,
+                rules=[
+                    _stored_rule(**SSH_INGRESS, rule_id=1),
+                    _stored_rule(
+                        **_rule_fields("ingress", protocol="tcp", port_min=8080, port_max=8080),
+                        rule_id=2,
+                    ),
+                ],
+            )
+        ]
     )
-    network = _FakeNetwork([group])
-    reconciler, _, _ = _reconciler(network)
 
-    reconciler.reconcile(GROUP_NAME, [SSH, EGRESS_ALL_V4_RULE])
+    _reconciler(sdk, network).reconcile(GROUP_NAME, [SSH, EGRESS_ALL_V4_RULE])
 
     assert network.deleted_rules == ["rule-2"]
     assert network.created_rules == [EGRESS_ALL_V4]
 
 
-def test_a_rule_added_by_hand_is_removed():
+def test_a_rule_added_by_hand_is_removed(sdk):
     """
     arrange: A group holding a rule the operator never configured, such as one added with the
         OpenStack CLI.
     act: Reconcile.
     assert: The rule is removed, because the option is the only source of the group's rules.
     """
-    group = _FakeGroup(
-        GROUP_NAME,
-        rules=[
-            _stored_rule(
-                **_rule_fields("ingress", protocol="tcp", port_min=3389, port_max=3389), rule_id=7
+    network = _FakeNetwork(
+        [
+            _FakeGroup(
+                GROUP_NAME,
+                rules=[
+                    _stored_rule(
+                        **_rule_fields("ingress", protocol="tcp", port_min=3389, port_max=3389),
+                        rule_id=7,
+                    )
+                ],
             )
-        ],
+        ]
     )
-    network = _FakeNetwork([group])
-    reconciler, _, _ = _reconciler(network)
 
-    reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert network.deleted_rules == ["rule-7"]
     assert network.created_rules == [EGRESS_ALL_V4]
 
 
-def test_duplicate_groups_keep_the_oldest_and_delete_the_rest():
+def test_duplicate_groups_keep_the_oldest_and_delete_the_rest(sdk):
     """
     arrange: Two groups sharing the managed name and no port attaching either, as a race
         between two configurators leaves.
@@ -318,16 +340,15 @@ def test_duplicate_groups_keep_the_oldest_and_delete_the_rest():
             _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
         ]
     )
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    group_id = _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert group_id == "sg-older"
     assert network.deleted_groups == ["sg-newer"]
     assert network.created_groups == []
 
 
-def test_duplicate_a_port_still_attaches_is_kept_rather_than_deleted():
+def test_duplicate_a_port_still_attaches_is_kept_rather_than_deleted(sdk):
     """
     arrange: Two groups sharing the managed name, with runners attached to the newer one.
     act: Reconcile.
@@ -342,15 +363,14 @@ def test_duplicate_a_port_still_attaches_is_kept_rather_than_deleted():
         ],
         ports=[_FakePort("sg-newer")],
     )
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    group_id = _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert group_id == "sg-newer"
     assert network.deleted_groups == ["sg-older"]
 
 
-def test_two_attached_duplicates_are_both_left_in_place():
+def test_two_attached_duplicates_are_both_left_in_place(sdk):
     """
     arrange: Two groups sharing the managed name, with a port attaching each.
     act: Reconcile.
@@ -364,16 +384,15 @@ def test_two_attached_duplicates_are_both_left_in_place():
         ],
         ports=[_FakePort("sg-newer"), _FakePort("sg-older")],
     )
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    group_id = _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert group_id == "sg-older"
     assert network.deleted_groups == []
     assert network.created_groups == []
 
 
-def test_a_port_attaching_during_the_reconcile_does_not_block():
+def test_a_port_attaching_during_the_reconcile_does_not_block(sdk):
     """
     arrange: An unused duplicate, and an OpenStack that reports a conflict because a port
         attached it between the port check and the delete.
@@ -392,15 +411,14 @@ def test_a_port_attaching_during_the_reconcile_does_not_block():
             _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
         ]
     )
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    group_id = _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert group_id == "sg-older"
     assert network.deleted_groups == []
 
 
-def test_a_duplicate_delete_refused_for_another_reason_still_blocks():
+def test_a_duplicate_delete_refused_for_another_reason_still_blocks(sdk):
     """
     arrange: An OpenStack that refuses the duplicate delete with a non-conflict error, such as
         a missing permission.
@@ -418,29 +436,27 @@ def test_a_duplicate_delete_refused_for_another_reason_still_blocks():
             _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
         ]
     )
-    reconciler, _, _ = _reconciler(network)
 
     with pytest.raises(SecurityGroupReconcileError) as exc_info:
-        reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+        _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert "Policy does not allow" in str(exc_info.value)
 
 
-def test_ports_are_only_listed_when_the_name_is_duplicated():
+def test_ports_are_only_listed_when_the_name_is_duplicated(sdk):
     """
     arrange: A single group with the managed name, the normal case.
     act: Reconcile.
     assert: No port listing happens, so a steady-state reconcile costs no extra API calls.
     """
     network = _FakeNetwork([_FakeGroup(GROUP_NAME, gid="sg-only")])
-    reconciler, _, _ = _reconciler(network)
 
-    reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert network.port_queries == []
 
 
-def test_port_filter_is_applied_locally_too():
+def test_port_filter_is_applied_locally_too(sdk):
     """
     arrange: An OpenStack that ignores the security group filter and returns every port.
     act: Reconcile a duplicated name.
@@ -455,39 +471,34 @@ def test_port_filter_is_applied_locally_too():
         ports=[_FakePort("some-other-group")],
         ignore_port_filter=True,
     )
-    reconciler, _, _ = _reconciler(network)
 
-    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    group_id = _reconciler(sdk, network).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert group_id == "sg-older"
     assert network.deleted_groups == ["sg-newer"]
 
 
-def test_connection_is_closed_after_a_successful_reconcile():
+def test_connection_is_closed_after_a_successful_reconcile(sdk):
     """
     arrange: A working connection.
     act: Reconcile.
     assert: The connection is closed, so repeated reconciles do not leak sessions.
     """
-    reconciler, connection, _ = _reconciler(_FakeNetwork())
+    _reconciler(sdk, _FakeNetwork()).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
-    reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
-
-    assert connection.closed is True
+    assert sdk.connection.closed is True
 
 
-def test_authentication_uses_the_provider_config():
+def test_authentication_uses_the_provider_config(sdk):
     """
     arrange: The charm state's provider credentials.
     act: Reconcile.
     assert: The SDK is given those credentials, the configured region, and the public endpoint
         interface.
     """
-    reconciler, _, calls = _reconciler(_FakeNetwork())
+    _reconciler(sdk, _FakeNetwork()).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
-    reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
-
-    assert calls["auth"] == {
+    assert sdk.auth == {
         "auth_url": "https://keystone.example.com:5000/v3",
         "username": "admin",
         "password": "s3cr3t",
@@ -499,39 +510,32 @@ def test_authentication_uses_the_provider_config():
     }
 
 
-def test_openstack_failure_is_reported_as_a_single_line_reason():
+def test_openstack_failure_is_reported_as_a_single_line_reason(monkeypatch):
     """
     arrange: An OpenStack that cannot be reached.
     act: Reconcile.
-    assert: A SecurityGroupReconcileError carries the reason on one line, so the Blocked
-        status the charm sets stays readable.
+    assert: The error carries the whole reason on one line for the log, so debug-log shows what
+        went wrong without a multi-line traceback.
     """
 
     def connect(**_auth_fields):
         raise RuntimeError("keystone unreachable:\nconnection refused")
 
-    reconciler = SecurityGroupReconciler(_provider_config(), connect=connect)
+    monkeypatch.setattr("openstack_security_group.openstack.connect", connect)
 
     with pytest.raises(SecurityGroupReconcileError) as exc_info:
-        reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+        SecurityGroupReconciler(_provider_config()).reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
     assert str(exc_info.value) == "keystone unreachable: connection refused"
 
 
-def test_openstack_failure_reason_is_bounded():
+def test_status_reason_is_bounded():
     """
-    arrange: An OpenStack call that fails with an over-long message.
-    act: Reconcile.
-    assert: The reported reason is truncated, so it cannot crowd out the rest of a status
-        message Juju shortens anyway.
+    arrange: A failure with a message far longer than a status line.
+    act: Render it for the unit status.
+    assert: The status text is truncated, so Juju shows the start of the reason rather than
+        cutting it at an arbitrary point.
     """
+    exc = SecurityGroupReconcileError("x" * (MAX_STATUS_REASON_LENGTH * 2))
 
-    def connect(**_auth_fields):
-        raise RuntimeError("x" * (MAX_STATUS_REASON_LENGTH * 2))
-
-    reconciler = SecurityGroupReconciler(_provider_config(), connect=connect)
-
-    with pytest.raises(SecurityGroupReconcileError) as exc_info:
-        reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
-
-    assert len(str(exc_info.value)) == MAX_STATUS_REASON_LENGTH + len("...")
+    assert len(status_reason(exc)) == MAX_STATUS_REASON_LENGTH + len("...")

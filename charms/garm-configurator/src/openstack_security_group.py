@@ -23,9 +23,9 @@ SECURITY_GROUP_DESCRIPTION = (
     "Managed by the garm-configurator charm; its rules follow the security-group-rules option."
 )
 
-# What identifies a rule. Everything else OpenStack reports about one — its id, tenant,
-# description — is either assigned by OpenStack or irrelevant to the desired state, so
-# comparing only these makes the diff immune to it.
+# A rule's identity is the value of these fields, in this order. OpenStack assigns the id,
+# tenant, and description itself, and reports the rest back exactly as configured, so two
+# rules with the same identity are the same rule.
 RULE_FIELDS = (
     "direction",
     "ethertype",
@@ -37,8 +37,9 @@ RULE_FIELDS = (
     "remote_address_group_id",
 )
 
-# Juju shows only the first line of a status message.
-MAX_STATUS_REASON_LENGTH = 200
+# Juju shows a status message on one short line, so the unit status keeps only this much of
+# a failure; the log line carries the rest.
+MAX_STATUS_REASON_LENGTH = 60
 
 
 class SecurityGroupReconcileError(Exception):
@@ -63,21 +64,13 @@ def security_group_name(scaleset_name: str) -> str:
 class SecurityGroupReconciler:
     """Creates and converges one charm-managed OpenStack security group."""
 
-    def __init__(
-        self,
-        provider_config: ProviderConfig,
-        connect: typing.Callable[..., typing.Any] | None = None,
-    ) -> None:
+    def __init__(self, provider_config: ProviderConfig) -> None:
         """Initialise the reconciler.
 
         Args:
             provider_config: The OpenStack credentials and region to reconcile in.
-            connect: The OpenStack SDK entrypoint, overridden by tests.
         """
         self._provider_config = provider_config
-        # Typed as an opaque callable: the SDK's own signature is narrower than the
-        # keyword arguments a connection takes, but is what must be called at runtime.
-        self._connect: typing.Callable[..., typing.Any] = connect or openstack.connect
 
     def reconcile(self, name: str, rules: list[SecurityGroupRule]) -> str:
         """Create the group if it is missing, then converge its rules.
@@ -97,7 +90,10 @@ class SecurityGroupReconciler:
         # Nothing here may crash the hook: every failure is reported and retried, so the
         # next reconcile looks again either way.
         try:
-            connection = self._connect(**self._auth_fields())
+            # The SDK's signature is narrower than the keyword arguments a connection
+            # accepts at runtime, so it is called through an opaque callable.
+            connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
+            connection = connect(**self._auth_fields())
             try:
                 group = self._ensure_group(connection, name)
                 self._reconcile_rules(connection, group, rules)
@@ -133,7 +129,8 @@ class SecurityGroupReconciler:
         """
         groups = sorted(
             (group for group in connection.network.security_groups() if group.name == name),
-            key=_age,
+            # Oldest first. An absent timestamp reads as oldest, which is only ever a tie-break.
+            key=lambda group: (str(group.created_at or ""), str(group.id)),
         )
         if not groups:
             logger.info("Creating security group %s", name)
@@ -145,17 +142,11 @@ class SecurityGroupReconciler:
     def _keep_one_group(
         self, connection: typing.Any, name: str, groups: list[typing.Any]
     ) -> typing.Any:
-        """Pick the group to converge and remove the duplicates nothing is using.
+        """Pick the group to converge and delete the duplicates nothing is using.
 
-        OpenStack allows duplicate names, so two configurators can each create one. The
-        survivor is the oldest group a port already attaches — the one protecting live
-        runners — or the oldest group when none is attached. Every configurator makes the
-        same choice, so the duplicates settle instead of deleting each other.
-
-        A duplicate a port still attaches is left alone rather than deleted: OpenStack
-        refuses that delete anyway, and trying it would block the reconcile over a group
-        this charm does not manage. The warning names it, so an operator can move the port
-        and remove the group.
+        The survivor is the oldest group a port already attaches, or the oldest when none
+        is, so two configurators racing to create one settle on the same group. A duplicate
+        a port attaches is left in place and logged: OpenStack refuses that delete anyway.
 
         Args:
             connection: The authenticated OpenStack connection.
@@ -200,23 +191,30 @@ class SecurityGroupReconciler:
         """Add the configured rules, then remove the ones no longer configured.
 
         Additions come first so the group never loses a rule the runners may still be
-        using — every runner of the scaleset carries this group.
+        using — every runner of the scaleset carries this group. A rule the operator lists
+        twice is added once.
 
         Args:
             connection: The authenticated OpenStack connection.
             group: The security group to converge.
             rules: The rules the group should hold.
         """
-        desired = _desired_rule_fields(rules)
         observed = {
-            _rule_identity(_observed_rule_fields(rule)): rule
+            _observed_identity(rule): rule
             for rule in connection.network.security_group_rules(security_group_id=group.id)
         }
-        for identity, fields in desired.items():
+        desired: set[tuple] = set()
+        for rule in rules:
+            identity = tuple(rule.neutron_fields.get(field) for field in RULE_FIELDS)
+            if identity in desired:
+                continue
+            desired.add(identity)
             if identity in observed:
                 continue
             logger.info("Adding rule %s to security group %s", identity, group.name)
-            connection.network.create_security_group_rule(security_group_id=group.id, **fields)
+            connection.network.create_security_group_rule(
+                security_group_id=group.id, **rule.neutron_fields
+            )
         for identity, rule in observed.items():
             if identity in desired:
                 continue
@@ -224,46 +222,9 @@ class SecurityGroupReconciler:
             connection.network.delete_security_group_rule(rule)
 
 
-def _desired_rule_fields(rules: list[SecurityGroupRule]) -> dict[tuple, dict[str, object]]:
-    """Return the fields to create for each rule, keyed by rule identity.
-
-    A rule the operator lists twice yields one entry, so the group does not collect
-    duplicate rules that the next reconcile would then have to remove.
-
-    Args:
-        rules: The rules the group should hold.
-
-    Returns:
-        The rule fields to create, keyed by identity.
-    """
-    desired: dict[tuple, dict[str, object]] = {}
-    for rule in rules:
-        fields = _rule_fields(rule)
-        desired.setdefault(_rule_identity(fields), fields)
-    return desired
-
-
-def _rule_fields(rule: SecurityGroupRule) -> dict[str, object]:
-    """Translate a configured rule into the fields OpenStack creates it from."""
-    return {
-        "direction": rule.direction,
-        "ethertype": rule.ethertype,
-        # Neutron spells "every protocol" as a null protocol.
-        "protocol": None if rule.protocol == "any" else rule.protocol,
-        "port_range_min": rule.port_min,
-        "port_range_max": rule.port_max,
-        "remote_ip_prefix": rule.remote_ip_prefix,
-    }
-
-
-def _observed_rule_fields(rule: typing.Any) -> dict[str, object]:
-    """Read the comparable fields of a rule as OpenStack reports it."""
-    return {field: getattr(rule, field, None) for field in RULE_FIELDS}
-
-
-def _rule_identity(fields: dict[str, object]) -> tuple:
-    """Return what distinguishes one rule from another."""
-    return tuple(fields.get(field) for field in RULE_FIELDS)
+def _observed_identity(rule: typing.Any) -> tuple:
+    """Return the identity of a rule as OpenStack reports it."""
+    return tuple(getattr(rule, field, None) for field in RULE_FIELDS)
 
 
 def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
@@ -298,15 +259,14 @@ def _ports_using(connection: typing.Any, group_id: str) -> list[typing.Any]:
     ]
 
 
-def _age(group: typing.Any) -> str:
-    """Return the sort key that puts the oldest security group first."""
-    created = getattr(group, "created_at", None)
-    return "" if created is None else str(created)
-
-
 def _reason(exc: Exception) -> str:
-    """Return a bounded, single-line reason for a status message."""
-    reason = " ".join(str(exc).split()) or type(exc).__name__
+    """Return the failure as one line, for the log."""
+    return " ".join(str(exc).split()) or type(exc).__name__
+
+
+def status_reason(exc: Exception) -> str:
+    """Return as much of the failure as a unit status can show, for the operator."""
+    reason = _reason(exc)
     if len(reason) > MAX_STATUS_REASON_LENGTH:
         reason = f"{reason[:MAX_STATUS_REASON_LENGTH]}..."
     return reason
