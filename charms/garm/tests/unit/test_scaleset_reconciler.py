@@ -1356,10 +1356,11 @@ def test_create_sends_the_configurator_security_group_as_an_extra_spec():
 
 def test_create_omits_security_groups_when_unmanaged():
     """
-    arrange: A spec from a configurator that manages no security group.
+    arrange: A spec from a configurator that publishes no security group id.
     act: Reconcile a create.
-    assert: No security_groups extra spec is sent, leaving Nova's default group in place, so
-        deployments predating the option are unchanged.
+    assert: No security_groups extra spec is sent, so the provider sets no groups on the
+        instance and Nova attaches the project's default group — the behaviour deployments
+        without the option rely on.
     """
     client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
     _reconcile(client, [_spec()])

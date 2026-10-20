@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-10-20
 
-- `garm-configurator`: add the optional `security-group-rules` configuration, which makes the charm create and maintain one OpenStack security group per scale set and publish its id to the `garm` charm, which passes it to the OpenStack provider so that every runner is attached to it. The group is named `garm-<name>` and its rules are kept equal to the configured list, so rules added to it by hand are removed. The charm allows all egress when no egress rule is listed, because OpenStack attaches this group instead of the project's default group and a runner that cannot reach GitHub never runs a job. The group is never deleted: clearing the option, or removing the application, leaves it in place for the operator to remove. A rule change reaches runners created after the next reconcile; a runner that already exists keeps the group it was launched with. Deployments that do not set the option are unchanged and keep the project's default security group.
+- `garm-configurator`: add the `security-group-rules` configuration, which makes the charm create and maintain one OpenStack security group (`garm-<name>`) per scale set and pass its id to the `garm` charm, so runners are attached to it. The default rules allow all egress and no ingress. The group is never deleted, and a rule change reaches only runners created after the next reconcile.
 
 ## 2026-10-16
 

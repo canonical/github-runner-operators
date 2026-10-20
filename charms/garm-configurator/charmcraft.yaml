@@ -135,6 +135,7 @@ config:
         to bash script to be run prior to runner installation.
     security-group-rules:
       type: string
+      default: '[{"direction": "egress", "remote_ip_prefix": "0.0.0.0/0"}, {"direction": "egress", "remote_ip_prefix": "::/0"}]'
       description: |
         Optional JSON list of rules for the OpenStack security group the charm manages
         for this scaleset's runners. Each rule takes:
@@ -148,10 +149,11 @@ config:
         this list, so rules added to the group by hand are removed. When no egress
         rule is listed the charm allows all egress, because OpenStack attaches this
         group instead of the project's default group and a runner that cannot reach
-        GitHub never runs a job. The group is never deleted: clearing this option, or
-        removing the application, leaves it in place for the operator to remove.
-        Requires OpenStack credentials allowed to create security groups and to create
-        and delete security group rules; it never deletes the group itself.
+        GitHub never runs a job. The group this charm manages is never deleted: clearing
+        this option, or removing the application, leaves it in place for the operator to
+        remove. A duplicate group that shares the name is deleted, keeping the oldest,
+        because OpenStack allows duplicate names. Requires OpenStack credentials allowed to
+        create and delete security groups and security group rules.
     dockerhub-mirror:
       type: string
       description: |
@@ -194,3 +196,8 @@ parts:
   charm:
     source: .
     plugin: charm
+    # charmcraft installs requirements.txt with --no-binary=:all:, so the OpenStack SDK's
+    # cryptography dependency is built from source and needs the OpenSSL headers.
+    build-packages:
+      - libssl-dev
+      - pkg-config

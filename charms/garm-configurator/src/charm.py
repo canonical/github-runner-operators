@@ -66,21 +66,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(e.msg)
             return
 
-        if not self._configure(state):
-            return
-        self._set_ready_status(state)
-
-    def _configure(self, state: CharmState) -> bool:
-        """Publish the resolved state, reconciling the scaleset's security group first.
-
-        Args:
-            state: Current resolved charm state.
-
-        Returns:
-            Whether the state was published. False means the unit is blocked on a security
-            group that could not be reconciled: the relations are then left untouched, so
-            GARM never acts on a group id the charm could not confirm.
-        """
         self._update_image_relation(state)
         try:
             security_group_id = self._ensure_security_group(state)
@@ -90,16 +75,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(
                 f"Security group {name} could not be reconciled: {e}"
             )
-            return False
-        self._configure_garm_relation(state, security_group_id or "")
-        return True
+            return
+        self._configure_garm_relation(state, security_group_id)
 
-    def _set_ready_status(self, state: CharmState) -> None:
-        """Report readiness, which depends on where the runner image came from.
-
-        Args:
-            state: Current resolved charm state.
-        """
         if state.image_overrides_builder:
             self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
         elif state.image is not None:
@@ -131,24 +109,21 @@ class GarmConfiguratorCharm(ops.CharmBase):
             }
         )
 
-    def _ensure_security_group(self, state: CharmState) -> str | None:
+    def _ensure_security_group(self, state: CharmState) -> str:
         """Reconcile the security group the scaleset's runners are attached to.
 
         Args:
             state: Current resolved charm state.
 
         Returns:
-            The id of the group, or None when the operator configured no rules — the
-            runners then keep the project's default security group.
+            The id of the group the runners are attached to.
 
         Raises:
             SecurityGroupReconcileError: If OpenStack could not be reconciled with.
         """
-        rules = state.scaleset_config.security_group_rules
-        if rules is None:
-            return None
         return SecurityGroupReconciler(state.provider_config).reconcile(
-            security_group_name(state.scaleset_config.name), rules
+            security_group_name(state.scaleset_config.name),
+            state.scaleset_config.security_group_rules,
         )
 
     def _ensure_relation_secret(

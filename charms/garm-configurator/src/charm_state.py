@@ -261,14 +261,15 @@ class SecurityGroupRule(BaseModel):
     @model_validator(mode="after")
     def _validate_ports(self) -> "SecurityGroupRule":
         """Reject a port range the protocol cannot carry, and fill in a single port."""
-        if self.port_min is None and self.port_max is None:
+        # A range needs a lower bound; Neutron has no "everything up to" form.
+        if self.port_max is not None and self.port_min is None:
+            raise ValueError("port_max requires port_min")
+        if self.port_min is None:
             return self
         if self.protocol not in ("tcp", "udp"):
             raise ValueError(
                 f"port_min and port_max require protocol tcp or udp, not {self.protocol}"
             )
-        if self.port_min is None:
-            raise ValueError("port_max requires port_min")
         port_max = self.port_min if self.port_max is None else self.port_max
         if not 1 <= self.port_min <= 65535 or not 1 <= port_max <= 65535:
             raise ValueError("port_min and port_max must be in 1..65535")
@@ -301,8 +302,7 @@ class ScalesetConfig(BaseModel):
         enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
         image_visibility: Glance visibility the provider searches when resolving an image name.
-        security_group_rules: Rules of the security group the charm manages for the runners,
-            or None to manage no security group.
+        security_group_rules: Rules of the security group the charm manages for the runners.
     """
 
     name: str
@@ -317,7 +317,7 @@ class ScalesetConfig(BaseModel):
     enable_shell: bool = False
     pre_install_scripts: str | None = None
     image_visibility: str | None = None
-    security_group_rules: list[SecurityGroupRule] | None = None
+    security_group_rules: list[SecurityGroupRule]
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ScalesetConfig":
@@ -403,25 +403,27 @@ class ScalesetConfig(BaseModel):
         )
 
 
-def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule] | None:
+def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule]:
     """Parse the optional security-group-rules JSON document.
 
     Args:
         charm: The charm instance.
 
     Raises:
-        CharmConfigInvalidError: If the value is not a JSON list of valid rules.
+        CharmConfigInvalidError: If the value is not a JSON list of valid rules, or lists no
+            egress rule.
 
     Returns:
-        The parsed rules, or None when the option is unset — the charm then manages no
-        security group, so runners keep the project's default one.
+        The parsed rules. The charmcraft default lists all egress, so the option is always
+        set in practice.
     """
     document = _get_optional_string_config(charm, SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME)
     if document is None:
-        return None
+        # Unset only if the charmcraft default is dropped from the metadata.
+        return []
     try:
         entries = json.loads(document)
-    except ValueError as exc:
+    except json.JSONDecodeError as exc:
         raise CharmConfigInvalidError(
             f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} must be a JSON list of rules"
         ) from exc
@@ -439,6 +441,12 @@ def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule]
                 f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} rule {index}: "
                 f"{_describe_rule_error(exc)}"
             ) from exc
+    if not any(rule.direction == "egress" for rule in rules):
+        raise CharmConfigInvalidError(
+            f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} needs at least one egress rule: "
+            f"OpenStack attaches this group instead of the project's default group, so a "
+            f"runner with no egress cannot reach GitHub"
+        )
     return rules
 
 

@@ -89,12 +89,14 @@ charm allows all egress for that reason.
 A rule change reaches new runners on the next reconcile. A runner that already exists keeps the
 group it was launched with until GARM replaces it.
 
-The charm never deletes the group. Clearing the option detaches it from the scale set and
-leaves it in place, as does removing the application, so an operator decides when to remove it.
+The charm never deletes the group it manages: clearing the option detaches it from the scale
+set and leaves it in place, as does removing the application, so an operator decides when to
+remove it. OpenStack allows duplicate group names, so when several groups share the managed
+name the charm keeps the oldest and deletes the others. A duplicate still referenced by a port
+cannot be deleted, and the charm reports that instead of converging on one of two groups.
 
-The OpenStack credentials need the `create_security_group`, `create_security_group_rule`, and
-`delete_security_group_rule` permissions. The charm does not delete security groups, so it does
-not need `delete_security_group`.
+The OpenStack credentials need the `create_security_group`, `delete_security_group`,
+`create_security_group_rule`, and `delete_security_group_rule` permissions.
 
 ### Integrations
 

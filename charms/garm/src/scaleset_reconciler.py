@@ -1365,8 +1365,10 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
     if spec.image_visibility:
         extra_specs["image_visibility"] = spec.image_visibility
     if spec.security_group_id:
-        # Nova attaches the groups it is given *instead of* the project's default
-        # group, which is why the configurator only publishes an id for a group it
-        # has already opened egress on.
+        # Nova attaches the groups it is given *instead of* the project's default group,
+        # which is why the configurator only publishes an id for a group it has already
+        # opened egress on. With no id the key is left out entirely, and the provider
+        # (garm-provider-openstack v0.1.5, provider/spec.go: `if len(spec.SecurityGroups)
+        # > 0`) then sets no groups on the instance, so Nova keeps the project's default.
         extra_specs["security_groups"] = [spec.security_group_id]
     return extra_specs
