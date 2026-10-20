@@ -8,6 +8,7 @@ import typing
 import keystoneauth1.exceptions.connection
 import openstack.exceptions
 import pytest
+from openstack.network.v2 import security_group_rule as sdk_rules
 
 from charm_state import ProviderConfig, SecurityGroupRule
 from openstack_security_group import (
@@ -18,26 +19,6 @@ from openstack_security_group import (
 
 SCALESET_NAME = "my-scaleset"
 GROUP_NAME = "garm-my-scaleset"
-
-
-class _FakeRule:
-    """A security group rule as the SDK reports it."""
-
-    def __init__(self, **fields):
-        for field in (
-            "direction",
-            "ethertype",
-            "protocol",
-            "port_range_min",
-            "port_range_max",
-            "remote_ip_prefix",
-            "remote_group_id",
-            "remote_address_group_id",
-        ):
-            setattr(self, field, fields.get(field))
-        # Fields OpenStack assigns, which a diff must ignore.
-        self.id = fields.get("id", "rule-id")
-        self.description = fields.get("description", "")
 
 
 class _FakeGroup:
@@ -97,19 +78,18 @@ class _FakeNetwork:
 
     def create_security_group_rule(self, security_group_id, **fields):
         self.created_rules.append(fields)
-        rule = _FakeRule(**fields)
+        rule = sdk_rules.SecurityGroupRule.new(**fields)
+        rule.id = f"rule-created-{len(self.created_rules)}"
         self._group(security_group_id).rules.append(rule)
         return rule
 
     def delete_security_group_rule(self, security_group_rule):
         self.deleted_rules.append(security_group_rule.id)
-        self._group_by_rule(security_group_rule).rules.remove(security_group_rule)
+        for group in self.groups:
+            group.rules = [rule for rule in group.rules if rule.id != security_group_rule.id]
 
     def _group(self, group_id):
         return next(group for group in self.groups if group.id == group_id)
-
-    def _group_by_rule(self, rule):
-        return next(group for group in self.groups if rule in group.rules)
 
 
 class _FakeConnection:
@@ -187,8 +167,16 @@ def _rule_fields(
 
 
 def _stored_rule(**fields):
-    """Build a rule as OpenStack reports it, with the id it assigned."""
-    return _FakeRule(id=f"rule-{fields.pop('rule_id', 99)}", **fields)
+    """Build a rule with the SDK's own resource, as OpenStack reports it.
+
+    Using the real class is the point: it is what names the ethertype ``ether_type``, and a
+    hand-rolled stand-in hidden the identity never matching, which rewrote the group on every
+    reconcile.
+    """
+    rule_id = fields.pop("rule_id", 99)
+    rule = sdk_rules.SecurityGroupRule.new(**fields)
+    rule.id = f"rule-{rule_id}"
+    return rule
 
 
 SSH = SecurityGroupRule(direction="ingress", protocol="tcp", port_min=22)
@@ -292,6 +280,52 @@ def test_rules_converge_to_the_configured_set(
     assert network.deleted_rules == expected_deleted
 
 
+def test_a_duplicate_identical_rule_is_removed(sdk):
+    """
+    arrange: A group holding the same rule twice, which Neutron accepts.
+    act: Reconcile that one rule.
+    assert: The surplus copy is deleted, so "the group holds exactly the configured rules" is
+        true rather than merely "it holds at least them".
+    """
+    network = _FakeNetwork(
+        [
+            _FakeGroup(
+                GROUP_NAME,
+                gid="sg-existing",
+                rules=[
+                    _stored_rule(**EGRESS_ALL_V4, rule_id=1),
+                    _stored_rule(**EGRESS_ALL_V4, rule_id=2),
+                ],
+            )
+        ]
+    )
+
+    _reconciler(sdk, network).reconcile(name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE])
+
+    assert network.created_rules == []
+    assert network.deleted_rules == ["rule-2"]
+
+
+def test_reconciling_unchanged_rules_makes_no_change(sdk):
+    """
+    arrange: A group that already holds the configured rule, built from the SDK's own resource
+        so the field names are the ones the API really returns.
+    act: Reconcile twice.
+    assert: Neither pass creates or deletes anything. Reading the ethertype under the wrong
+        attribute name would leave every rule looking new and rewrite the group on every event.
+    """
+    network = _FakeNetwork(
+        [_FakeGroup(GROUP_NAME, gid="sg-existing", rules=[_stored_rule(**EGRESS_ALL_V4)])]
+    )
+    reconciler = _reconciler(sdk, network)
+
+    reconciler.reconcile(name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE])
+    reconciler.reconcile(name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE])
+
+    assert network.created_rules == []
+    assert network.deleted_rules == []
+
+
 @pytest.mark.parametrize(
     "ports, delete_error, expected_group_id, expected_deleted, expected_error",
     [
@@ -318,9 +352,17 @@ def test_rules_converge_to_the_configured_set(
         pytest.param(
             [],
             openstack.exceptions.ForbiddenException("Policy does not allow this request"),
+            "sg-older",
+            [],
+            None,
+            id="delete-forbidden-is-tolerated",
+        ),
+        pytest.param(
+            [],
+            openstack.exceptions.NotFoundException("no such security group"),
             None,
             None,
-            "Policy does not allow",
+            "no such security group",
             id="delete-refused-for-another-reason",
         ),
     ],
@@ -334,7 +376,8 @@ def test_duplicate_groups_converge_on_one_group(
     act: Reconcile.
     assert: The charm keeps the group protecting live runners, or the oldest when none is
         attached, deletes only duplicates no port uses, and tolerates a port attaching during
-        the delete — while any other delete failure still blocks.
+        the delete or a role that may not delete groups — while any other delete failure still
+        blocks.
     """
     network = _FakeNetwork(
         [
@@ -425,6 +468,7 @@ def test_authentication_uses_the_provider_config(sdk):
         "user_domain_name": "Default",
         "project_domain_name": "Default",
         "region_name": "RegionOne",
+        "api_timeout": 30,
     }
 
 

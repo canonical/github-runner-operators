@@ -1220,6 +1220,61 @@ def test_an_empty_rule_list_manages_no_security_group(security_group_calls):
     assert security_group_calls == []
 
 
+def test_clearing_the_option_to_an_empty_string_blocks():
+    """
+    arrange: security-group-rules cleared to an empty string, which is how Juju sets a cleared
+        option.
+    act: Run config-changed.
+    assert: The unit blocks and names the way to opt out, so the isolation cannot disappear
+        silently behind an empty value.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["security-group-rules"] = ""
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.BlockedStatus(
+        "security-group-rules cannot be empty; use [] to manage no security group"
+    )
+
+
+def test_no_group_is_reconciled_without_a_garm_relation(security_group_calls):
+    """
+    arrange: A configurator integrated only with an image builder, as one supplying provider
+        credentials alone would be.
+    act: Run config-changed.
+    assert: No OpenStack call happens, so such a deployment does not take on a new failure mode
+        for an id nothing consumes.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[image_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready; configured image overrides image builder")
+    assert security_group_calls == []
+
+
 def test_security_group_failure_blocks_and_publishes_nothing(monkeypatch):
     """
     arrange: OpenStack refuses the reconcile.

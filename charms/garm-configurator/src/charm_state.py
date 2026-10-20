@@ -278,26 +278,6 @@ class SecurityGroupRule(BaseModel):
         self.port_max = port_max
         return self
 
-    @property
-    def ethertype(self) -> str:
-        """The ethertype the remote prefix implies, which Neutron defaults to IPv4."""
-        if self.remote_ip_prefix and ":" in self.remote_ip_prefix:
-            return "IPv6"
-        return "IPv4"
-
-    @property
-    def neutron_fields(self) -> dict[str, object]:
-        """This rule as OpenStack names its fields, for creating and comparing it."""
-        return {
-            "direction": self.direction,
-            "ethertype": self.ethertype,
-            # Neutron spells "every protocol" as a null protocol.
-            "protocol": None if self.protocol == "any" else self.protocol,
-            "port_range_min": self.port_min,
-            "port_range_max": self.port_max,
-            "remote_ip_prefix": self.remote_ip_prefix,
-        }
-
 
 class ScalesetConfig(BaseModel):
     """Scaleset configuration.
@@ -431,12 +411,20 @@ def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule]
         The parsed rules, empty when the operator opts out of managing a group. The
         charmcraft default lists all egress, so the group is managed unless it is cleared.
     """
-    document = _get_optional_string_config(charm, SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME)
-    if document is None:
+    configured = charm.config.get(SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME)
+    if configured is None:
         # Unset only if the charmcraft default is dropped from the metadata.
         return []
+    document = str(configured)
+    if not document.strip():
+        # Juju sets an empty string when the option is cleared, which would otherwise read as
+        # the opt-out and silently drop the isolation.
+        raise CharmConfigInvalidError(
+            f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} cannot be empty; "
+            f"use [] to manage no security group"
+        )
     try:
-        entries = json.loads(document)
+        entries = json.loads(document.strip())
     except json.JSONDecodeError as exc:
         raise CharmConfigInvalidError(
             f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} must be a JSON list of rules"

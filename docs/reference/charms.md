@@ -100,13 +100,18 @@ opts out where the configurator cannot reach the OpenStack API.
 
 The charm never deletes the group it manages: clearing the option detaches it from the scale
 set and leaves it in place, as does removing the application, so an operator decides when to
-remove it. OpenStack allows duplicate group names, so when several groups share the managed
+remove it. Renaming the scale set therefore leaves a `garm-<old name>` group behind, and
+repeated renames add up against the project's security group quota. OpenStack allows duplicate
+group names, so when several groups share the managed
 name the charm keeps the one a port already attaches, or the oldest when none does, and
 deletes the duplicates that no port uses. A duplicate that a port still attaches is left in
 place and reported in the log, so the charm never detaches a running runner's security group.
 
-The OpenStack credentials need the `create_security_group`, `delete_security_group`,
-`create_security_group_rule`, and `delete_security_group_rule` permissions.
+The OpenStack credentials need `create_security_group`, `delete_security_group`,
+`create_security_group_rule`, and `delete_security_group_rule`, plus read access to security
+groups, their rules, and ports, which the default `reader` role provides. A role that cannot
+delete security groups still works: the charm logs a warning and leaves an unused duplicate in
+place.
 
 ### Integrations
 

@@ -43,6 +43,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.on[IMAGE_RELATION_NAME].relation_joined,
             self.on[IMAGE_RELATION_NAME].relation_changed,
             self.on[IMAGE_RELATION_NAME].relation_broken,
+            # So a blocked unit retries when the OpenStack API comes back, rather than
+            # waiting for an unrelated event.
+            self.on.update_status,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -124,6 +127,10 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         rules = state.scaleset_config.security_group_rules
         if not rules:
+            return None
+        if self.model.get_relation(GARM_RELATION_NAME) is None:
+            # Nothing consumes the id until GARM is related, so a configurator used for its
+            # image credentials alone does not take on an OpenStack failure mode.
             return None
         return SecurityGroupReconciler(provider_config=state.provider_config).reconcile(
             name=security_group_name(scaleset_name=state.scaleset_config.name), rules=rules

@@ -24,6 +24,9 @@ from charm_state import ProviderConfig, SecurityGroupRule
 logger = logging.getLogger(__name__)
 
 SECURITY_GROUP_NAME_PREFIX = "garm-"
+# Seconds before an OpenStack request gives up; long enough for a busy Neutron, short enough
+# that a firewalled endpoint blocks the unit rather than wedging the hook.
+REQUEST_TIMEOUT_SECONDS = 30
 SECURITY_GROUP_DESCRIPTION = (
     "Managed by the garm-configurator charm; its rules follow the security-group-rules option."
 )
@@ -31,10 +34,15 @@ SECURITY_GROUP_DESCRIPTION = (
 # What a reconcile can fail with: the SDK's own hierarchy for API responses, and
 # keystoneauth's for transport and authentication, which never reach the SDK's base class —
 # an unreachable Keystone is the case the blocked status exists for.
-OPENSTACK_ERRORS = (
+_OPENSTACK_ERRORS = (
     openstack.exceptions.SDKException,
     keystoneauth1.exceptions.base.ClientException,
 )
+
+# The SDK resource names the ethertype ``ether_type``; the body it is created from spells it
+# ``ethertype``. Reading the wrong one leaves it unset on every observed rule, which would
+# make each configured rule look new and rewrite the whole group on every reconcile.
+_SDK_ATTRIBUTE = {"ethertype": "ether_type"}
 
 # A rule's identity is the value of these fields, in this order. OpenStack assigns the id,
 # tenant, and description itself, and reports the rest back exactly as configured, so two
@@ -105,10 +113,10 @@ class SecurityGroupReconciler:
                 group = self._ensure_group(connection=connection, name=name)
                 self._reconcile_rules(connection=connection, group=group, rules=rules)
                 return str(group.id)
-        except OPENSTACK_ERRORS as exc:
+        except _OPENSTACK_ERRORS as exc:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
 
-    def _auth_fields(self) -> dict[str, str]:
+    def _auth_fields(self) -> dict[str, object]:
         """Return the keyword arguments the OpenStack SDK authenticates with."""
         config = self._provider_config
         return {
@@ -119,6 +127,8 @@ class SecurityGroupReconciler:
             "user_domain_name": config.user_domain_name,
             "project_domain_name": config.project_domain_name,
             "region_name": config.region_name,
+            # Without it a blackholed Keystone hangs the hook instead of blocking the unit.
+            "api_timeout": REQUEST_TIMEOUT_SECONDS,
         }
 
     def _ensure_group(self, connection: typing.Any, name: str) -> typing.Any:
@@ -205,10 +215,16 @@ class SecurityGroupReconciler:
             group: The security group to converge.
             rules: The rules the group should hold.
         """
-        observed = {
-            tuple(getattr(rule, field, None) for field in RULE_FIELDS): rule
-            for rule in connection.network.security_group_rules(security_group_id=group.id)
-        }
+        observed: dict[tuple, typing.Any] = {}
+        surplus: list[typing.Any] = []
+        for rule in connection.network.security_group_rules(security_group_id=group.id):
+            identity = _get_observed_identity(rule=rule)
+            if identity in observed:
+                # Neutron accepts the same rule twice; only one is wanted.
+                surplus.append(rule)
+                continue
+            observed[identity] = rule
+
         desired: set[tuple] = set()
         for rule in rules:
             identity = _get_identity(rule=rule)
@@ -219,27 +235,52 @@ class SecurityGroupReconciler:
                 continue
             logger.info("Adding rule %s to security group %s", identity, group.name)
             connection.network.create_security_group_rule(
-                security_group_id=group.id, **rule.neutron_fields
+                security_group_id=group.id, **_neutron_fields(rule=rule)
             )
-        for identity, rule in observed.items():
-            if identity in desired:
-                continue
-            logger.info("Removing rule %s from security group %s", identity, group.name)
+
+        obsolete = [rule for identity, rule in observed.items() if identity not in desired]
+        for rule in obsolete + surplus:
+            logger.info(
+                "Removing rule %s from security group %s",
+                _get_observed_identity(rule=rule),
+                group.name,
+            )
             connection.network.delete_security_group_rule(security_group_rule=rule)
+
+
+def _get_observed_identity(rule: typing.Any) -> tuple:
+    """Return the identity of a rule as the SDK reports it, `ether_type` included."""
+    return tuple(getattr(rule, _SDK_ATTRIBUTE.get(field, field), None) for field in RULE_FIELDS)
+
+
+def _neutron_fields(rule: SecurityGroupRule) -> dict[str, object]:
+    """Return a configured rule as OpenStack names its fields."""
+    # Neutron defaults to IPv4; only an IPv6 prefix, which is the one with a colon, needs
+    # saying. "any" is spelled as a null protocol.
+    ethertype = "IPv6" if rule.remote_ip_prefix and ":" in rule.remote_ip_prefix else "IPv4"
+    return {
+        "direction": rule.direction,
+        "ethertype": ethertype,
+        "protocol": None if rule.protocol == "any" else rule.protocol,
+        "port_range_min": rule.port_min,
+        "port_range_max": rule.port_max,
+        "remote_ip_prefix": rule.remote_ip_prefix,
+    }
 
 
 def _get_identity(rule: SecurityGroupRule) -> tuple:
     """Return a configured rule's identity: the value of RULE_FIELDS, in order."""
-    return tuple(rule.neutron_fields.get(field) for field in RULE_FIELDS)
+    fields = _neutron_fields(rule=rule)
+    return tuple(fields.get(field) for field in RULE_FIELDS)
 
 
 def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
-    """Delete a duplicate group, tolerating a port that attached it since the check.
+    """Delete a duplicate group, tolerating the failures a duplicate is not worth blocking for.
 
-    The port check above and this delete cannot be atomic, so OpenStack can still answer
-    with a conflict. That is the same condition the check guards against, so it is logged
-    rather than raised: a group a port uses must not block the reconcile. Every other
-    failure — a refused permission, an unreachable API — still propagates.
+    Two of them leave the group in place instead of stranding the unit: a conflict, because
+    the port check above and the delete cannot be atomic, and a refusal, because a role
+    allowed to create groups but not delete them can still converge the survivor. Both are
+    logged. Every other failure — an unreachable API, a server fault — still propagates.
     """
     try:
         connection.network.delete_security_group(security_group=group.id)
@@ -250,13 +291,21 @@ def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
             group.name,
             group.id,
         )
+    except openstack.exceptions.ForbiddenException:
+        logger.warning(
+            "Could not delete security group %s (%s): the OpenStack credentials may not"
+            " delete security groups. Leaving it in place",
+            group.name,
+            group.id,
+        )
 
 
 def _ports_using(connection: typing.Any, group_id: str) -> list[typing.Any]:
     """Return the ports that attach a security group.
 
-    The filter is applied again here because OpenStack ignores a query parameter it does
-    not know, which would otherwise report every port in the project as attached.
+    The SDK maps ``security_group_ids`` onto Neutron's ``security_groups`` filter, and the
+    result is filtered again here so a server that ignores the filter cannot make every
+    port in the project look attached.
     """
     return [
         port
