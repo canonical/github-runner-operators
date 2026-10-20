@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-10-20
 
-- `garm-configurator`: add the `security-group-rules` configuration, which isolates a scale set's runners in their own OpenStack security group instead of the project's default group. The charm creates and maintains the group and passes it to the `garm` charm for the provider to attach to every runner.
+- `garm-configurator`: add the `security-group-rules` configuration, which isolates a scale set's runners in their own OpenStack security group instead of the project's default group. The charm creates and maintains the group and passes it to the `garm` charm for the provider to attach to every runner. The option is on by default: after the refresh, the configured OpenStack credentials create one security group per scale set, which counts against the project's security group quota, and the credentials need permission to create and delete security groups and their rules. Set the option to `[]` to manage no group; that, or removing the application, also deletes the group the charm created unless a port still attaches it.
 
 ## 2026-10-16
 

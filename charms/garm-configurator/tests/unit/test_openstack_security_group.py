@@ -47,16 +47,34 @@ class _FakeNetwork:
         # Models an OpenStack that ignores the filter it does not know.
         self._ignore_port_filter = ignore_port_filter
         self.port_queries = []
+        self.list_queries = []
         self.created_groups = []
         self.deleted_groups = []
         self.created_rules = []
         self.deleted_rules = []
 
-    def security_groups(self):
-        return self.groups
+    def security_groups(self, name=None, project_id=None):
+        self.list_queries.append({"name": name, "project_id": project_id})
+        return [group for group in self.groups if name is None or group.name == name]
 
     def create_security_group(self, name, description):
-        group = _FakeGroup(name, gid=f"sg-{name}")
+        # Neutron gives every new group one any-address egress rule per ethertype, whose
+        # remote_ip_prefix is reported as None. A reconcile that compares prefixes literally
+        # tries to create them again and is rejected with a 409, so the fake does too.
+        group = _FakeGroup(
+            name,
+            gid=f"sg-{name}",
+            rules=[
+                _stored_rule(
+                    direction="egress",
+                    ethertype=ethertype,
+                    protocol=None,
+                    remote_ip_prefix=None,
+                    rule_id=f"default-{ethertype}",
+                )
+                for ethertype in ("IPv4", "IPv6")
+            ],
+        )
         self.groups.append(group)
         self.created_groups.append(name)
         return group
@@ -77,10 +95,15 @@ class _FakeNetwork:
         return list(self._group(security_group_id).rules)
 
     def create_security_group_rule(self, security_group_id, **fields):
+        group = self._group(security_group_id)
+        if any(_neutron_key(rule) == _neutron_key(fields) for rule in group.rules):
+            # Neutron refuses a duplicate rule with a 409, which is what strands a reconcile
+            # that fails to recognise its own rule coming back.
+            raise openstack.exceptions.ConflictException("Security group rule already exists")
         self.created_rules.append(fields)
         rule = sdk_rules.SecurityGroupRule.new(**fields)
         rule.id = f"rule-created-{len(self.created_rules)}"
-        self._group(security_group_id).rules.append(rule)
+        group.rules.append(rule)
         return rule
 
     def delete_security_group_rule(self, security_group_rule):
@@ -94,6 +117,8 @@ class _FakeNetwork:
 
 class _FakeConnection:
     """A fake OpenStack connection holding one network service."""
+
+    current_project_id = "project-id"
 
     def __init__(self, network):
         self.network = network
@@ -166,6 +191,34 @@ def _rule_fields(
     }
 
 
+def _neutron_key(rule):
+    """Return the key Neutron uses to reject a duplicate rule.
+
+    `securitygroups_db._rule_to_key` treats ``0.0.0.0/0``, ``::/0`` and an absent prefix as the
+    same any-address value, which is the trap this fake exists to catch.
+    """
+
+    def field(name, default=None):
+        if isinstance(rule, dict):
+            value = rule.get(name, default)
+        else:
+            value = getattr(rule, "ether_type" if name == "ethertype" else name, default)
+        return default if value is None else value
+
+    return (
+        field("direction"),
+        field("ethertype"),
+        None if field("protocol") in (None, "any") else field("protocol"),
+        field("port_range_min"),
+        field("port_range_max"),
+        None
+        if field("remote_ip_prefix") in (None, "0.0.0.0/0", "::/0")
+        else field("remote_ip_prefix"),
+        field("remote_group_id"),
+        field("remote_address_group_id"),
+    )
+
+
 def _stored_rule(**fields):
     """Build a rule with the SDK's own resource, as OpenStack reports it.
 
@@ -184,11 +237,13 @@ SSH_FROM_SUBNET_RULE = SecurityGroupRule(
     direction="ingress", protocol="tcp", port_min=22, port_max=22, remote_ip_prefix="10.0.0.0/8"
 )
 EGRESS_ALL_V4_RULE = SecurityGroupRule(direction="egress", remote_ip_prefix="0.0.0.0/0")
+EGRESS_ALL_V6_RULE = SecurityGroupRule(direction="egress", remote_ip_prefix="::/0")
 SSH_INGRESS = _rule_fields("ingress", protocol="tcp", port_min=22, port_max=22)
 SSH_INGRESS_FROM_SUBNET = _rule_fields(
     "ingress", protocol="tcp", port_min=22, port_max=22, prefix="10.0.0.0/8"
 )
-EGRESS_ALL_V4 = _rule_fields("egress", prefix="0.0.0.0/0")
+# What Neutron stores for an any-address egress rule: no prefix at all.
+EGRESS_ANY_V4 = _rule_fields("egress", prefix=None)
 
 
 def test_security_group_name_is_derived_from_the_scaleset_name():
@@ -207,13 +262,21 @@ def test_security_group_name_is_derived_from_the_scaleset_name():
         pytest.param(
             None,
             [SSH_FROM_SUBNET_RULE, EGRESS_ALL_V4_RULE],
-            [SSH_INGRESS_FROM_SUBNET, EGRESS_ALL_V4],
-            [],
+            [SSH_INGRESS_FROM_SUBNET],
+            ["rule-default-IPv6"],
             f"sg-{GROUP_NAME}",
             id="create-group",
         ),
         pytest.param(
-            [_stored_rule(**SSH_INGRESS), _stored_rule(**EGRESS_ALL_V4)],
+            None,
+            [EGRESS_ALL_V4_RULE, EGRESS_ALL_V6_RULE],
+            [],
+            [],
+            f"sg-{GROUP_NAME}",
+            id="default-config-matches-neutron-defaults",
+        ),
+        pytest.param(
+            [_stored_rule(**SSH_INGRESS), _stored_rule(**EGRESS_ANY_V4)],
             [SSH, EGRESS_ALL_V4_RULE],
             [],
             [],
@@ -223,8 +286,8 @@ def test_security_group_name_is_derived_from_the_scaleset_name():
         pytest.param(
             None,
             [SSH, SSH, EGRESS_ALL_V4_RULE],
-            [SSH_INGRESS, EGRESS_ALL_V4],
-            [],
+            [SSH_INGRESS],
+            ["rule-default-IPv6"],
             f"sg-{GROUP_NAME}",
             id="dedupe-configured",
         ),
@@ -237,7 +300,7 @@ def test_security_group_name_is_derived_from_the_scaleset_name():
                 ),
             ],
             [SSH, EGRESS_ALL_V4_RULE],
-            [EGRESS_ALL_V4],
+            [EGRESS_ANY_V4],
             ["rule-2"],
             "sg-existing",
             id="delete-stale-rule",
@@ -250,7 +313,7 @@ def test_security_group_name_is_derived_from_the_scaleset_name():
                 )
             ],
             [EGRESS_ALL_V4_RULE],
-            [EGRESS_ALL_V4],
+            [EGRESS_ANY_V4],
             ["rule-7"],
             "sg-existing",
             id="delete-rule-added-by-hand",
@@ -293,8 +356,8 @@ def test_a_duplicate_identical_rule_is_removed(sdk):
                 GROUP_NAME,
                 gid="sg-existing",
                 rules=[
-                    _stored_rule(**EGRESS_ALL_V4, rule_id=1),
-                    _stored_rule(**EGRESS_ALL_V4, rule_id=2),
+                    _stored_rule(**EGRESS_ANY_V4, rule_id=1),
+                    _stored_rule(**EGRESS_ANY_V4, rule_id=2),
                 ],
             )
         ]
@@ -315,7 +378,7 @@ def test_reconciling_unchanged_rules_makes_no_change(sdk):
         attribute name would leave every rule looking new and rewrite the group on every event.
     """
     network = _FakeNetwork(
-        [_FakeGroup(GROUP_NAME, gid="sg-existing", rules=[_stored_rule(**EGRESS_ALL_V4)])]
+        [_FakeGroup(GROUP_NAME, gid="sg-existing", rules=[_stored_rule(**EGRESS_ANY_V4)])]
     )
     reconciler = _reconciler(sdk, network)
 
@@ -403,6 +466,95 @@ def test_duplicate_groups_converge_on_one_group(
 
     assert group_id == expected_group_id
     assert network.deleted_groups == expected_deleted
+
+
+def test_delete_removes_the_groups_of_that_name(sdk):
+    """
+    arrange: One group with the managed name, and one belonging to something else.
+    act: Delete the managed group.
+    assert: Only that group goes, and the call reports it did something, so clearing the
+        option does not leave the group behind.
+    """
+    network = _FakeNetwork(
+        [
+            _FakeGroup(GROUP_NAME, gid="sg-managed"),
+            _FakeGroup("someone-elses-group", gid="sg-other"),
+        ]
+    )
+
+    deleted = _reconciler(sdk, network).delete(name=GROUP_NAME)
+
+    assert deleted is True
+    assert network.deleted_groups == ["sg-managed"]
+
+
+def test_delete_reports_nothing_when_there_is_no_group(sdk):
+    """
+    arrange: A project where the charm never created a group.
+    act: Delete it.
+    assert: Nothing is deleted and nothing raises, so an opt-out deployment does not fail.
+    """
+    network = _FakeNetwork()
+
+    assert _reconciler(sdk, network).delete(name=GROUP_NAME) is False
+    assert network.deleted_groups == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(openstack.exceptions.ConflictException("Security Group in use"), id="in-use"),
+        pytest.param(
+            openstack.exceptions.ForbiddenException("Policy does not allow this request"),
+            id="not-permitted",
+        ),
+    ],
+)
+def test_delete_tolerates_a_group_it_may_not_remove(sdk, error):
+    """
+    arrange: A group a port still attaches, or credentials that may not delete groups.
+    act: Delete it.
+    assert: The call reports nothing deleted and does not raise, because it runs while the
+        application is being removed and must not block that.
+    """
+
+    class _Refuses(_FakeNetwork):
+        def delete_security_group(self, security_group):
+            raise error
+
+    network = _Refuses([_FakeGroup(GROUP_NAME, gid="sg-managed")])
+
+    assert _reconciler(sdk, network).delete(name=GROUP_NAME) is False
+
+
+def test_delete_reports_an_unreachable_api_without_raising(monkeypatch):
+    """
+    arrange: An OpenStack that cannot be reached.
+    act: Delete the managed group.
+    assert: The failure is logged and reported as nothing deleted, because the call runs while
+        the application is being removed and must not block it.
+    """
+
+    def connect(**_auth_fields):
+        raise openstack.exceptions.SDKException("neutron unreachable")
+
+    monkeypatch.setattr("openstack_security_group.openstack.connect", connect)
+
+    assert SecurityGroupReconciler(_provider_config()).delete(name=GROUP_NAME) is False
+
+
+def test_the_group_list_is_scoped_to_the_project(sdk):
+    """
+    arrange: A project with a group of the managed name.
+    act: Reconcile.
+    assert: The list asks for that name in this project only, so admin-scoped credentials
+        cannot mistake another project's group for a duplicate.
+    """
+    network = _FakeNetwork([_FakeGroup(GROUP_NAME, gid="sg-only")])
+
+    _reconciler(sdk, network).reconcile(name=GROUP_NAME, rules=[EGRESS_ALL_V4_RULE])
+
+    assert network.list_queries == [{"name": GROUP_NAME, "project_id": "project-id"}]
 
 
 def test_ports_are_only_listed_when_the_name_is_duplicated(sdk):

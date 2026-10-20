@@ -48,6 +48,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.on.update_status,
         ]:
             self.framework.observe(event, self._reconcile)
+        self.framework.observe(self.on.remove, self._on_remove)
 
     def _reconcile(self, event: ops.EventBase) -> None:
         """Handle all charm events by reconciling configuration and relation data.
@@ -71,7 +72,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         self._update_image_relation(state)
         try:
-            security_group_id = self._ensure_security_group(state)
+            security_group_id = self._ensure_security_group(state=state, event=event)
         except SecurityGroupReconcileError as e:
             name = security_group_name(scaleset_name=state.scaleset_config.name)
             logger.warning("Security group %s could not be reconciled: %s", name, e)
@@ -112,11 +113,25 @@ class GarmConfiguratorCharm(ops.CharmBase):
             }
         )
 
-    def _ensure_security_group(self, state: CharmState) -> str | None:
+    def _on_remove(self, _: ops.RemoveEvent) -> None:
+        """Delete the managed security group before Juju removes the application."""
+        if not self.unit.is_leader():
+            return
+        try:
+            state = CharmState.from_charm(self)
+        except CharmConfigInvalidError as e:
+            logger.warning("Not removing the managed security group: %s", e.msg)
+            return
+        SecurityGroupReconciler(provider_config=state.provider_config).delete(
+            name=security_group_name(scaleset_name=state.scaleset_config.name)
+        )
+
+    def _ensure_security_group(self, state: CharmState, event: ops.EventBase) -> str | None:
         """Reconcile the security group the scaleset's runners are attached to.
 
         Args:
             state: Current resolved charm state.
+            event: The triggering event, so a cleared option can remove the group it created.
 
         Returns:
             The id of the group the runners are attached to, or None when the operator
@@ -127,6 +142,12 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         rules = state.scaleset_config.security_group_rules
         if not rules:
+            if isinstance(event, ops.ConfigChangedEvent):
+                # The operator turned the feature off: remove the group it created, if no
+                # port still uses it.
+                SecurityGroupReconciler(provider_config=state.provider_config).delete(
+                    name=security_group_name(scaleset_name=state.scaleset_config.name)
+                )
             return None
         if self.model.get_relation(GARM_RELATION_NAME) is None:
             # Nothing consumes the id until GARM is related, so a configurator used for its

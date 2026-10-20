@@ -141,14 +141,16 @@ config:
         scaleset's runners. The charm keeps the group's rules equal to this list, so a
         rule added by hand is removed. A rule takes: "direction" (required, "ingress" or
         "egress"), "protocol" ("tcp", "udp", "icmp", "icmpv6", or "any", default "any"),
-        "port_min"/"port_max" (tcp and udp only), and "remote_ip_prefix" (a CIDR, default
-        every address), for example:
+        "port_min"/"port_max" (tcp and udp only), and "remote_ip_prefix" (a CIDR; without
+        one the rule covers every address of its ethertype, IPv4 unless the CIDR is IPv6),
+        for example:
         [{"direction": "ingress", "protocol": "tcp", "port_min": 22, "remote_ip_prefix": "10.0.0.0/8"}]
         The default allows all egress and no ingress, which is what a runner needs to reach
         GitHub. OpenStack attaches this group instead of the project's default group, so a
-        list without an egress rule is rejected. Set an empty list to manage no group.
-        Requires OpenStack credentials that may create and delete security groups and
-        their rules.
+        list without an egress rule is rejected. Set an empty list to manage no group, which
+        deletes the group this charm created unless a port still attaches it; removing the
+        application does the same. Requires OpenStack credentials that may create and delete
+        security groups and their rules.
     dockerhub-mirror:
       type: string
       description: |
@@ -192,7 +194,7 @@ parts:
     source: .
     plugin: charm
     # charmcraft installs requirements.txt with --no-binary=:all:, so the OpenStack SDK's
-    # cryptography dependency is built from source and needs the OpenSSL headers.
-    build-packages:
-      - libssl-dev
-      - pkg-config
+    # cryptography dependency would otherwise be built from source and need OpenSSL headers.
+    # Installing it from wheels first avoids both.
+    charm-binary-python-packages:
+      - cryptography

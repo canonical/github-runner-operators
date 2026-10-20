@@ -358,6 +358,20 @@ _MISSING_CONFIG_SENTINEL = object()
             id="security-group-rules-port-max-without-min",
         ),
         pytest.param(
+            {"security-group-rules": '[{"direction": "egress", "protocol": "icmpv6"}]'},
+            "security-group-rules rule 0: protocol icmpv6 requires an IPv6 remote_ip_prefix",
+            id="security-group-rules-icmpv6-without-ipv6",
+        ),
+        pytest.param(
+            {
+                "security-group-rules": (
+                    '[{"direction": "egress", "protocol": "icmp", "remote_ip_prefix": "::/0"}]'
+                )
+            },
+            "security-group-rules rule 0: protocol icmp requires an IPv4 remote_ip_prefix",
+            id="security-group-rules-icmp-with-ipv6",
+        ),
+        pytest.param(
             {"security-group-rules": '[{"direction": "ingress"}]'},
             "security-group-rules needs at least one egress rule: OpenStack attaches this "
             "group instead of the project's default group, so a runner with no egress "
@@ -1196,8 +1210,9 @@ def test_an_empty_rule_list_manages_no_security_group(security_group_calls):
     """
     arrange: security-group-rules set to an empty list, the documented opt-out.
     act: Run config-changed.
-    assert: No group is reconciled and the relation carries no id, so the runners keep the
-        project's default group and a deployment that cannot reach OpenStack still works.
+    assert: No group is reconciled, the one it created before is deleted, and the relation
+        carries no id, so the runners keep the project's default group and a deployment that
+        cannot reach OpenStack still works.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -1217,7 +1232,7 @@ def test_an_empty_rule_list_manages_no_security_group(security_group_calls):
 
     assert out.unit_status == ops.ActiveStatus("Ready")
     assert "security_group_id" not in out.get_relation(garm_relation.id).local_unit_data
-    assert security_group_calls == []
+    assert security_group_calls[-1] == ("delete", "garm-my-scaleset")
 
 
 def test_clearing_the_option_to_an_empty_string_blocks():
@@ -1272,6 +1287,43 @@ def test_no_group_is_reconciled_without_a_garm_relation(security_group_calls):
     out = ctx.run(ctx.on.config_changed(), state)
 
     assert out.unit_status == ops.ActiveStatus("Ready; configured image overrides image builder")
+    assert security_group_calls == []
+
+
+def test_removing_the_application_deletes_the_managed_group(security_group_calls):
+    """
+    arrange: A deployed configurator whose group is still manageable.
+    act: Run the remove hook as the leader.
+    assert: The group the charm created is deleted, so removing the application does not leave
+        it behind against the project's quota.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    state = State(config=config, secrets=[secret, pk_secret], leader=True)
+
+    ctx.run(ctx.on.remove(), state)
+
+    assert security_group_calls[-1] == ("delete", "garm-my-scaleset")
+
+
+def test_a_non_leader_does_not_delete_on_removal(security_group_calls):
+    """
+    arrange: A configurator unit that is not the leader.
+    act: Run the remove hook.
+    assert: Nothing is deleted, so a multi-unit deployment does not race its own cleanup.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    state = State(config=config, secrets=[secret, pk_secret], leader=False)
+
+    ctx.run(ctx.on.remove(), state)
+
     assert security_group_calls == []
 
 

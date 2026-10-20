@@ -76,8 +76,8 @@ options and defaults before applying the configuration.
 
 ### Security groups
 
-The optional `security-group-rules` option makes the charm manage one OpenStack security group
-per scale set. The charm creates the group, named `garm-<name>`, and keeps its rules equal to
+The `security-group-rules` option, on by default, makes the charm manage one OpenStack
+security group per scale set. The charm creates the group, named `garm-<name>`, and keeps its rules equal to
 the configured list: a rule that is not listed is removed, including one added by hand. The
 group's id is published to the GARM charm, which passes it to the OpenStack provider so that
 every runner of the scale set is attached to it.
@@ -98,14 +98,17 @@ Set the option to an empty list to manage no security group: the runners then ke
 project's default group and the charm makes no OpenStack call. That is also how a deployment
 opts out where the configurator cannot reach the OpenStack API.
 
-The charm never deletes the group it manages: clearing the option detaches it from the scale
-set and leaves it in place, as does removing the application, so an operator decides when to
-remove it. Renaming the scale set therefore leaves a `garm-<old name>` group behind, and
-repeated renames add up against the project's security group quota. OpenStack allows duplicate
-group names, so when several groups share the managed
+Clearing the option, or removing the application, deletes the group the charm created unless a
+port still attaches it; a group left in use is reported in the log and left for the operator.
+Renaming the scale set leaves a `garm-<old name>` group behind, because the charm keeps no
+record of the previous name, and repeated renames add up against the project's security group
+quota. OpenStack allows duplicate group names, so when several groups share the managed
 name the charm keeps the one a port already attaches, or the oldest when none does, and
 deletes the duplicates that no port uses. A duplicate that a port still attaches is left in
 place and reported in the log, so the charm never detaches a running runner's security group.
+
+Scale set names must be unique within the tenant. The group is named after the scale set, so two
+deployments using the same name would share one group and keep removing each other's rules.
 
 The OpenStack credentials need `create_security_group`, `delete_security_group`,
 `create_security_group_rule`, and `delete_security_group_rule`, plus read access to security

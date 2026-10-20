@@ -259,6 +259,17 @@ class SecurityGroupRule(BaseModel):
             ) from exc
 
     @model_validator(mode="after")
+    def _validate_icmp_ethertype(self) -> "SecurityGroupRule":
+        """Reject the protocol and ethertype pairings Neutron refuses."""
+        # A rule with no prefix is IPv4, because only an IPv6 prefix names its ethertype.
+        ipv6 = bool(self.remote_ip_prefix and ":" in self.remote_ip_prefix)
+        if self.protocol == "icmpv6" and not ipv6:
+            raise ValueError("protocol icmpv6 requires an IPv6 remote_ip_prefix")
+        if self.protocol == "icmp" and ipv6:
+            raise ValueError("protocol icmp requires an IPv4 remote_ip_prefix")
+        return self
+
+    @model_validator(mode="after")
     def _validate_ports(self) -> "SecurityGroupRule":
         """Reject a port range the protocol cannot carry, and fill in a single port."""
         # A range needs a lower bound; Neutron has no "everything up to" form.

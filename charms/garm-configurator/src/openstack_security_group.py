@@ -39,6 +39,11 @@ _OPENSTACK_ERRORS = (
     keystoneauth1.exceptions.base.ClientException,
 )
 
+# Neutron treats these as the same any-address rule (``securitygroups_db._rule_to_key``), and a
+# new group already carries one egress rule per ethertype spelled this way. Comparing the
+# literal strings would make every reconcile try to create them again and get a 409.
+ANY_ADDRESS_PREFIXES = (None, "0.0.0.0/0", "::/0")
+
 # The SDK resource names the ethertype ``ether_type``; the body it is created from spells it
 # ``ethertype``. Reading the wrong one leaves it unset on every observed rule, which would
 # make each configured rule look new and rewrite the whole group on every reconcile.
@@ -105,16 +110,43 @@ class SecurityGroupReconciler:
                 rejected call says nothing about the group's final state.
         """
         try:
-            # The SDK's signature is narrower than the keyword arguments a connection
-            # accepts at runtime, so it is called through an opaque callable. Connection
-            # closes itself on exit.
-            connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
-            with connect(**self._auth_fields()) as connection:
+            with self._connection() as connection:
                 group = self._ensure_group(connection=connection, name=name)
                 self._reconcile_rules(connection=connection, group=group, rules=rules)
                 return str(group.id)
         except _OPENSTACK_ERRORS as exc:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
+
+    def delete(self, name: str) -> bool:
+        """Delete the managed group, unless a port still attaches it.
+
+        Called when the operator turns the feature off and when the application is removed.
+
+        Args:
+            name: The group name, as returned by :func:`security_group_name`.
+
+        Returns:
+            Whether a group was deleted. This never raises: it runs while the charm is being
+            removed, where a failure must not block the removal that asked for it.
+        """
+        try:
+            with self._connection() as connection:
+                deleted = False
+                for group in self._groups_named(connection=connection, name=name):
+                    deleted = _delete_group(connection=connection, group=group) or deleted
+                return deleted
+        except _OPENSTACK_ERRORS as exc:
+            logger.warning("Could not delete security group %s: %s", name, _reason(exc))
+            return False
+
+    def _connection(self) -> typing.Any:
+        """Return a connection authenticated with the provider config.
+
+        The SDK's signature is narrower than the keyword arguments a connection accepts at
+        runtime, so it is called through an opaque callable. Connection closes itself on exit.
+        """
+        connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
+        return connect(**self._auth_fields())
 
     def _auth_fields(self) -> dict[str, object]:
         """Return the keyword arguments the OpenStack SDK authenticates with."""
@@ -141,17 +173,29 @@ class SecurityGroupReconciler:
         Returns:
             The security group this charm manages.
         """
-        groups = sorted(
-            (group for group in connection.network.security_groups() if group.name == name),
-            # Oldest first. An absent timestamp reads as oldest, which is only ever a tie-break.
-            key=lambda group: (str(group.created_at or ""), str(group.id)),
-        )
+        groups = self._groups_named(connection=connection, name=name)
         if not groups:
             logger.info("Creating security group %s", name)
             return connection.network.create_security_group(
                 name=name, description=SECURITY_GROUP_DESCRIPTION
             )
         return self._keep_one_group(connection=connection, name=name, groups=groups)
+
+    @staticmethod
+    def _groups_named(connection: typing.Any, name: str) -> list[typing.Any]:
+        """Return this project's groups of that name, oldest first.
+
+        The name and project are filtered server-side: with admin-scoped credentials an
+        unfiltered list returns every project's groups, and another project's group of the
+        same name would count as a duplicate to delete.
+        """
+        return sorted(
+            connection.network.security_groups(
+                name=name, project_id=connection.current_project_id
+            ),
+            # An absent timestamp reads as oldest, which is only ever a tie-break.
+            key=lambda group: (str(group.created_at or ""), str(group.id)),
+        )
 
     def _keep_one_group(
         self, connection: typing.Any, name: str, groups: list[typing.Any]
@@ -198,7 +242,7 @@ class SecurityGroupReconciler:
                 name,
                 survivor.id,
             )
-            _delete_unused_group(connection=connection, group=group)
+            _delete_group(connection=connection, group=group)
         return survivor
 
     def _reconcile_rules(
@@ -250,13 +294,16 @@ class SecurityGroupReconciler:
 
 def _get_observed_identity(rule: typing.Any) -> tuple:
     """Return the identity of a rule as the SDK reports it, `ether_type` included."""
-    return tuple(getattr(rule, _SDK_ATTRIBUTE.get(field, field), None) for field in RULE_FIELDS)
+    return tuple(
+        _normalised(field=field, value=getattr(rule, _SDK_ATTRIBUTE.get(field, field), None))
+        for field in RULE_FIELDS
+    )
 
 
 def _neutron_fields(rule: SecurityGroupRule) -> dict[str, object]:
     """Return a configured rule as OpenStack names its fields."""
     # Neutron defaults to IPv4; only an IPv6 prefix, which is the one with a colon, needs
-    # saying. "any" is spelled as a null protocol.
+    # saying. "any" is spelled as a null protocol and as no prefix at all.
     ethertype = "IPv6" if rule.remote_ip_prefix and ":" in rule.remote_ip_prefix else "IPv4"
     return {
         "direction": rule.direction,
@@ -264,8 +311,15 @@ def _neutron_fields(rule: SecurityGroupRule) -> dict[str, object]:
         "protocol": None if rule.protocol == "any" else rule.protocol,
         "port_range_min": rule.port_min,
         "port_range_max": rule.port_max,
-        "remote_ip_prefix": rule.remote_ip_prefix,
+        "remote_ip_prefix": _normalised(field="remote_ip_prefix", value=rule.remote_ip_prefix),
     }
+
+
+def _normalised(field: str, value: object) -> object:
+    """Return a rule value in the form Neutron compares it in."""
+    if field == "remote_ip_prefix" and value in ANY_ADDRESS_PREFIXES:
+        return None
+    return value
 
 
 def _get_identity(rule: SecurityGroupRule) -> tuple:
@@ -274,20 +328,22 @@ def _get_identity(rule: SecurityGroupRule) -> tuple:
     return tuple(fields.get(field) for field in RULE_FIELDS)
 
 
-def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
-    """Delete a duplicate group, tolerating the failures a duplicate is not worth blocking for.
+def _delete_group(connection: typing.Any, group: typing.Any) -> bool:
+    """Delete one group, treating the two refusals that are not this charm's as warnings.
 
-    Two of them leave the group in place instead of stranding the unit: a conflict, because
-    the port check above and the delete cannot be atomic, and a refusal, because a role
-    allowed to create groups but not delete them can still converge the survivor. Both are
-    logged. Every other failure — an unreachable API, a server fault — still propagates.
+    A conflict means a port still attaches the group, and a refusal means the credentials may
+    not delete groups; either way the group stays, the caller carries on, and neither is worth
+    stranding the unit or blocking an application removal over.
+
+    Returns:
+        Whether the group was deleted.
     """
     try:
         connection.network.delete_security_group(security_group=group.id)
+        return True
     except openstack.exceptions.ConflictException:
         logger.warning(
-            "Could not delete security group %s (%s): a port attached it during the"
-            " reconcile. Leaving it in place",
+            "Leaving security group %s (%s) in place: a port still attaches it",
             group.name,
             group.id,
         )
@@ -298,6 +354,7 @@ def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
             group.name,
             group.id,
         )
+    return False
 
 
 def _ports_using(connection: typing.Any, group_id: str) -> list[typing.Any]:
