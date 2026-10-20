@@ -76,7 +76,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 f"Security group {name} could not be reconciled: {e}"
             )
             return
-        self._configure_garm_relation(state, security_group_id)
+        self._configure_garm_relation(state, security_group_id or "")
 
         if state.image_overrides_builder:
             self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
@@ -109,21 +109,24 @@ class GarmConfiguratorCharm(ops.CharmBase):
             }
         )
 
-    def _ensure_security_group(self, state: CharmState) -> str:
+    def _ensure_security_group(self, state: CharmState) -> str | None:
         """Reconcile the security group the scaleset's runners are attached to.
 
         Args:
             state: Current resolved charm state.
 
         Returns:
-            The id of the group the runners are attached to.
+            The id of the group the runners are attached to, or None when the operator
+            configured no rules — the runners then keep the project's default group.
 
         Raises:
             SecurityGroupReconcileError: If OpenStack could not be reconciled with.
         """
+        rules = state.scaleset_config.security_group_rules
+        if not rules:
+            return None
         return SecurityGroupReconciler(state.provider_config).reconcile(
-            security_group_name(state.scaleset_config.name),
-            state.scaleset_config.security_group_rules,
+            security_group_name(state.scaleset_config.name), rules
         )
 
     def _ensure_relation_secret(

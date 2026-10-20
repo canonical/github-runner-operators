@@ -57,6 +57,9 @@ def deploy_garm_configurator_app_fixture(
             "os-arch": "amd64",
             "max-runner": "1",
             "repo": "myorg/myrepo",
+            # No OpenStack runs in CI: opt out of the charm-managed security group so the
+            # configurator does not block on an unreachable Keystone.
+            "security-group-rules": "[]",
         },
     )
     juju.wait(

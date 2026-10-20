@@ -302,7 +302,8 @@ class ScalesetConfig(BaseModel):
         enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
         image_visibility: Glance visibility the provider searches when resolving an image name.
-        security_group_rules: Rules of the security group the charm manages for the runners.
+        security_group_rules: Rules of the security group the charm manages for the runners,
+            or empty when it manages none.
     """
 
     name: str
@@ -414,8 +415,8 @@ def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule]
             egress rule.
 
     Returns:
-        The parsed rules. The charmcraft default lists all egress, so the option is always
-        set in practice.
+        The parsed rules, empty when the operator opts out of managing a group. The
+        charmcraft default lists all egress, so the group is managed unless it is cleared.
     """
     document = _get_optional_string_config(charm, SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME)
     if document is None:
@@ -441,7 +442,10 @@ def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule]
                 f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} rule {index}: "
                 f"{_describe_rule_error(exc)}"
             ) from exc
-    if not any(rule.direction == "egress" for rule in rules):
+    # An empty list is the opt-out: the charm manages no group and the runners keep the
+    # project's default one. A configured group needs egress, though, or it would isolate
+    # the runner from GitHub entirely.
+    if rules and not any(rule.direction == "egress" for rule in rules):
         raise CharmConfigInvalidError(
             f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} needs at least one egress rule: "
             f"OpenStack attaches this group instead of the project's default group, so a "

@@ -1192,6 +1192,34 @@ def test_rule_change_is_published_on_the_next_reconcile(security_group_calls):
     assert len(security_group_calls[-1][1]) == 2
 
 
+def test_an_empty_rule_list_manages_no_security_group(security_group_calls):
+    """
+    arrange: security-group-rules set to an empty list, the documented opt-out.
+    act: Run config-changed.
+    assert: No group is reconciled and the relation carries no id, so the runners keep the
+        project's default group and a deployment that cannot reach OpenStack still works.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    config["security-group-rules"] = "[]"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert "security_group_id" not in out.get_relation(garm_relation.id).local_unit_data
+    assert security_group_calls == []
+
+
 def test_security_group_failure_blocks_and_publishes_nothing(monkeypatch):
     """
     arrange: OpenStack refuses the reconcile.

@@ -844,6 +844,9 @@ def deploy_configurator_with_image_fixture(
         "min-idle-runner": "0",
         "max-runner": "5",
         "org": "test-org",
+        # No OpenStack runs in CI: opt out of the charm-managed security group so the
+        # configurator does not block on an unreachable Keystone.
+        "security-group-rules": "[]",
     }
 
     _deploy_configurator(

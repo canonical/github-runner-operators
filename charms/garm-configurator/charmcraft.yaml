@@ -146,15 +146,17 @@ config:
         For example:
         [{"direction": "ingress", "protocol": "tcp", "port_min": 22, "remote_ip_prefix": "10.0.0.0/8"}].
         The charm creates a group named "garm-<name>" and keeps its rules equal to
-        this list, so rules added to the group by hand are removed. When no egress
-        rule is listed the charm allows all egress, because OpenStack attaches this
-        group instead of the project's default group and a runner that cannot reach
-        GitHub never runs a job. The group this charm manages is never deleted: clearing
-        this option, or removing the application, leaves it in place for the operator to
-        remove. OpenStack allows duplicate names, so when several groups share it the
-        charm keeps the one a port already attaches — the one protecting live runners —
-        or the oldest, and deletes the duplicates no port uses. Requires OpenStack
-        credentials allowed to create and delete security groups and security group rules.
+        this list, so rules added to the group by hand are removed. A list without an
+        egress rule is rejected, because OpenStack attaches this group instead of the
+        project's default group and a runner with no egress cannot reach GitHub. Set the
+        option to an empty list to manage no security group, which leaves the runners on
+        the project's default group and makes no OpenStack call. The group this charm
+        manages is never deleted: clearing this option, or removing the application,
+        leaves it in place for the operator to remove. OpenStack allows duplicate names,
+        so when several groups share it the charm keeps the one a port already attaches —
+        the one protecting live runners — or the oldest, and deletes the duplicates no
+        port uses. Requires OpenStack credentials allowed to create and delete security
+        groups and security group rules.
     dockerhub-mirror:
       type: string
       description: |

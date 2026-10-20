@@ -89,6 +89,10 @@ charm allows all egress for that reason.
 A rule change reaches new runners on the next reconcile. A runner that already exists keeps the
 group it was launched with until GARM replaces it.
 
+Set the option to an empty list to manage no security group: the runners then keep the
+project's default group and the charm makes no OpenStack call. That is also how a deployment
+opts out where the configurator cannot reach the OpenStack API.
+
 The charm never deletes the group it manages: clearing the option detaches it from the scale
 set and leaves it in place, as does removing the application, so an operator decides when to
 remove it. OpenStack allows duplicate group names, so when several groups share the managed
