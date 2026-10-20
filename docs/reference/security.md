@@ -43,7 +43,8 @@ operator responsibilities, see the {ref}`security overview <explanation_security
   OpenStack security group per scale set. OpenStack attaches that group instead of
   the project's default group, and the charm removes rules it does not manage from
   it, so a rule added by hand is deleted unless it is also listed in the option.
-  When groups share the managed name, the charm deletes all but the oldest.
+  When groups share the managed name, the charm deletes the unused duplicates and
+  leaves any group a port still attaches in place.
 
 ## Removal and vulnerability reporting
 

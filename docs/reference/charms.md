@@ -92,8 +92,9 @@ group it was launched with until GARM replaces it.
 The charm never deletes the group it manages: clearing the option detaches it from the scale
 set and leaves it in place, as does removing the application, so an operator decides when to
 remove it. OpenStack allows duplicate group names, so when several groups share the managed
-name the charm keeps the oldest and deletes the others. A duplicate still referenced by a port
-cannot be deleted, and the charm reports that instead of converging on one of two groups.
+name the charm keeps the one a port already attaches, or the oldest when none does, and
+deletes the duplicates that no port uses. A duplicate that a port still attaches is left in
+place and reported in the log, so the charm never detaches a running runner's security group.
 
 The OpenStack credentials need the `create_security_group`, `delete_security_group`,
 `create_security_group_rule`, and `delete_security_group_rule` permissions.

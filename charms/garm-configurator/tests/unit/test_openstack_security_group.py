@@ -50,11 +50,22 @@ class _FakeGroup:
         self.rules = list(rules)
 
 
+class _FakePort:
+    """A port as the SDK reports it."""
+
+    def __init__(self, *security_group_ids):
+        self.security_group_ids = list(security_group_ids)
+
+
 class _FakeNetwork:
     """The network service of a fake OpenStack connection."""
 
-    def __init__(self, groups=()):
+    def __init__(self, groups=(), ports=(), ignore_port_filter=False):
         self.groups = list(groups)
+        self._ports = list(ports)
+        # Models an OpenStack that ignores the filter it does not know.
+        self._ignore_port_filter = ignore_port_filter
+        self.port_queries = []
         self.created_groups = []
         self.deleted_groups = []
         self.created_rules = []
@@ -72,6 +83,14 @@ class _FakeNetwork:
     def delete_security_group(self, group_id):
         self.deleted_groups.append(group_id)
         self.groups = [group for group in self.groups if group.id != group_id]
+
+    def ports(self, security_group_ids=None):
+        self.port_queries.append(security_group_ids)
+        if self._ignore_port_filter:
+            return list(self._ports)
+        return [
+            port for port in self._ports if set(security_group_ids) & set(port.security_group_ids)
+        ]
 
     def security_group_rules(self, security_group_id):
         return list(self._group(security_group_id).rules)
@@ -286,10 +305,11 @@ def test_a_rule_added_by_hand_is_removed():
 
 def test_duplicate_groups_keep_the_oldest_and_delete_the_rest():
     """
-    arrange: Two groups sharing the managed name, as a race between two configurators leaves.
+    arrange: Two groups sharing the managed name and no port attaching either, as a race
+        between two configurators leaves.
     act: Reconcile.
-    assert: The older group is adopted and the newer one deleted, so the charm converges on one
-        group instead of failing, and two configurators racing pick the same survivor.
+    assert: The older group is adopted and the unused newer one deleted, so the charm
+        converges on one group instead of failing.
     """
     network = _FakeNetwork(
         [
@@ -306,31 +326,87 @@ def test_duplicate_groups_keep_the_oldest_and_delete_the_rest():
     assert network.created_groups == []
 
 
-def test_a_duplicate_that_cannot_be_deleted_blocks_the_reconcile():
+def test_duplicate_a_port_still_attaches_is_kept_rather_than_deleted():
     """
-    arrange: Two groups sharing the managed name, and an OpenStack that refuses the delete
-        because a port still references the obsolete one.
+    arrange: Two groups sharing the managed name, with runners attached to the newer one.
     act: Reconcile.
-    assert: The failure reaches the caller as a reconcile error, so the unit blocks instead of
-        silently converging on one of two groups.
+    assert: The attached group is adopted and the unused one deleted, so the charm converges
+        on the group protecting live runners and never asks OpenStack to delete a group a port
+        still uses.
     """
-
-    class _RefusesDelete(_FakeNetwork):
-        def delete_security_group(self, group_id):
-            raise RuntimeError("Security Group sg-newer in use")
-
-    network = _RefusesDelete(
+    network = _FakeNetwork(
         [
             _FakeGroup(GROUP_NAME, gid="sg-newer", created_at="2026-02-01T00:00:00Z"),
             _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
-        ]
+        ],
+        ports=[_FakePort("sg-newer")],
     )
     reconciler, _, _ = _reconciler(network)
 
-    with pytest.raises(SecurityGroupReconcileError) as exc_info:
-        reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
 
-    assert "in use" in str(exc_info.value)
+    assert group_id == "sg-newer"
+    assert network.deleted_groups == ["sg-older"]
+
+
+def test_two_attached_duplicates_are_both_left_in_place():
+    """
+    arrange: Two groups sharing the managed name, with a port attaching each.
+    act: Reconcile.
+    assert: Neither is deleted — OpenStack would refuse — and the reconcile still succeeds on
+        the oldest, leaving the operator to move the other port.
+    """
+    network = _FakeNetwork(
+        [
+            _FakeGroup(GROUP_NAME, gid="sg-newer", created_at="2026-02-01T00:00:00Z"),
+            _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
+        ],
+        ports=[_FakePort("sg-newer"), _FakePort("sg-older")],
+    )
+    reconciler, _, _ = _reconciler(network)
+
+    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+
+    assert group_id == "sg-older"
+    assert network.deleted_groups == []
+    assert network.created_groups == []
+
+
+def test_ports_are_only_listed_when_the_name_is_duplicated():
+    """
+    arrange: A single group with the managed name, the normal case.
+    act: Reconcile.
+    assert: No port listing happens, so a steady-state reconcile costs no extra API calls.
+    """
+    network = _FakeNetwork([_FakeGroup(GROUP_NAME, gid="sg-only")])
+    reconciler, _, _ = _reconciler(network)
+
+    reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+
+    assert network.port_queries == []
+
+
+def test_port_filter_is_applied_locally_too():
+    """
+    arrange: An OpenStack that ignores the security group filter and returns every port.
+    act: Reconcile a duplicated name.
+    assert: Only ports naming the group count as attached, so an ignored filter cannot make an
+        unused duplicate look used and keep it forever.
+    """
+    network = _FakeNetwork(
+        [
+            _FakeGroup(GROUP_NAME, gid="sg-newer", created_at="2026-02-01T00:00:00Z"),
+            _FakeGroup(GROUP_NAME, gid="sg-older", created_at="2026-01-01T00:00:00Z"),
+        ],
+        ports=[_FakePort("some-other-group")],
+        ignore_port_filter=True,
+    )
+    reconciler, _, _ = _reconciler(network)
+
+    group_id = reconciler.reconcile(GROUP_NAME, [EGRESS_ALL_V4_RULE])
+
+    assert group_id == "sg-older"
+    assert network.deleted_groups == ["sg-newer"]
 
 
 def test_connection_is_closed_after_a_successful_reconcile():

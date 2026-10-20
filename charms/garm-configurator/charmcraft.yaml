@@ -151,9 +151,10 @@ config:
         group instead of the project's default group and a runner that cannot reach
         GitHub never runs a job. The group this charm manages is never deleted: clearing
         this option, or removing the application, leaves it in place for the operator to
-        remove. A duplicate group that shares the name is deleted, keeping the oldest,
-        because OpenStack allows duplicate names. Requires OpenStack credentials allowed to
-        create and delete security groups and security group rules.
+        remove. OpenStack allows duplicate names, so when several groups share it the
+        charm keeps the one a port already attaches — the one protecting live runners —
+        or the oldest, and deletes the duplicates no port uses. Requires OpenStack
+        credentials allowed to create and delete security groups and security group rules.
     dockerhub-mirror:
       type: string
       description: |

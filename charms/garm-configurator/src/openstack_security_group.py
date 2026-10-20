@@ -124,12 +124,6 @@ class SecurityGroupReconciler:
     def _ensure_group(self, connection: typing.Any, name: str) -> typing.Any:
         """Return the named group, creating it when the project has none.
 
-        The oldest group of that name wins, so two configurators racing to create it settle
-        on the same survivor instead of deleting each other's group on every reconcile.
-        Neutron refuses to delete a group a port still references, so an obsolete duplicate
-        that something else attached to blocks the reconcile rather than breaking that
-        port's networking.
-
         Args:
             connection: The authenticated OpenStack connection.
             name: The group name.
@@ -141,21 +135,64 @@ class SecurityGroupReconciler:
             (group for group in connection.network.security_groups() if group.name == name),
             key=_age,
         )
-        for obsolete in groups[1:]:
-            logger.warning(
-                "Deleting security group %s (%s): %s (%s) is the group this charm manages",
-                name,
-                obsolete.id,
-                name,
-                groups[0].id,
+        if not groups:
+            logger.info("Creating security group %s", name)
+            return connection.network.create_security_group(
+                name=name, description=SECURITY_GROUP_DESCRIPTION
             )
-            connection.network.delete_security_group(obsolete.id)
-        if groups:
+        return self._keep_one_group(connection, name, groups)
+
+    def _keep_one_group(
+        self, connection: typing.Any, name: str, groups: list[typing.Any]
+    ) -> typing.Any:
+        """Pick the group to converge and remove the duplicates nothing is using.
+
+        OpenStack allows duplicate names, so two configurators can each create one. The
+        survivor is the oldest group a port already attaches — the one protecting live
+        runners — or the oldest group when none is attached. Every configurator makes the
+        same choice, so the duplicates settle instead of deleting each other.
+
+        A duplicate a port still attaches is left alone rather than deleted: OpenStack
+        refuses that delete anyway, and trying it would block the reconcile over a group
+        this charm does not manage. The warning names it, so an operator can move the port
+        and remove the group.
+
+        Args:
+            connection: The authenticated OpenStack connection.
+            name: The group name.
+            groups: Every group of that name, oldest first.
+
+        Returns:
+            The security group this charm manages.
+        """
+        if len(groups) == 1:
             return groups[0]
-        logger.info("Creating security group %s", name)
-        return connection.network.create_security_group(
-            name=name, description=SECURITY_GROUP_DESCRIPTION
-        )
+        attached = {group.id: _ports_using(connection, group.id) for group in groups}
+        survivor = next((group for group in groups if attached[group.id]), groups[0])
+        for group in groups:
+            if group.id == survivor.id:
+                continue
+            if attached[group.id]:
+                logger.warning(
+                    "Leaving security group %s (%s) in place: %d port(s) still attach it, and"
+                    " %s (%s) is the group this charm manages",
+                    name,
+                    group.id,
+                    len(attached[group.id]),
+                    name,
+                    survivor.id,
+                )
+                continue
+            logger.warning(
+                "Deleting duplicate security group %s (%s); %s (%s) is the group this charm"
+                " manages",
+                name,
+                group.id,
+                name,
+                survivor.id,
+            )
+            connection.network.delete_security_group(group.id)
+        return survivor
 
     def _reconcile_rules(
         self, connection: typing.Any, group: typing.Any, rules: list[SecurityGroupRule]
@@ -227,6 +264,19 @@ def _observed_rule_fields(rule: typing.Any) -> dict[str, object]:
 def _rule_identity(fields: dict[str, object]) -> tuple:
     """Return what distinguishes one rule from another."""
     return tuple(fields.get(field) for field in RULE_FIELDS)
+
+
+def _ports_using(connection: typing.Any, group_id: str) -> list[typing.Any]:
+    """Return the ports that attach a security group.
+
+    The filter is applied again here because OpenStack ignores a query parameter it does
+    not know, which would otherwise report every port in the project as attached.
+    """
+    return [
+        port
+        for port in connection.network.ports(security_group_ids=[group_id])
+        if group_id in (port.security_group_ids or [])
+    ]
 
 
 def _age(group: typing.Any) -> str:
