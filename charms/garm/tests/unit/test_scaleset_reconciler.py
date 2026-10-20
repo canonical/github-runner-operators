@@ -258,6 +258,7 @@ def _spec(
     template_id=None,
     runner_config=None,
     image_visibility="",
+    security_group_id="",
 ):
     return ScalesetSpec(
         name=name,
@@ -276,6 +277,7 @@ def _spec(
         template_id=template_id,
         runner_config=runner_config or RunnerConfig(),
         image_visibility=image_visibility,
+        security_group_id=security_group_id,
     )
 
 
@@ -1338,6 +1340,34 @@ def test_create_sends_image_visibility_as_an_extra_spec():
     assert params.extra_specs == {"image_visibility": "private"}
 
 
+def test_create_sends_the_configurator_security_group_as_an_extra_spec():
+    """
+    arrange: A spec whose configurator manages a security group for the scaleset.
+    act: Reconcile a create.
+    assert: The extra_specs attach that group, since Nova otherwise attaches the project's
+        default group to every runner.
+    """
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(client, [_spec(security_group_id="sg-1234")])
+
+    _, _, params = client.created[0]
+    assert params.extra_specs == {"security_groups": ["sg-1234"]}
+
+
+def test_create_omits_security_groups_when_unmanaged():
+    """
+    arrange: A spec from a configurator that manages no security group.
+    act: Reconcile a create.
+    assert: No security_groups extra spec is sent, leaving Nova's default group in place, so
+        deployments predating the option are unchanged.
+    """
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(client, [_spec()])
+
+    _, _, params = client.created[0]
+    assert params.extra_specs is None
+
+
 @pytest.mark.parametrize(
     "observed_extra, desired, expected_extra",
     [
@@ -1359,6 +1389,33 @@ def test_update_converges_image_visibility(observed_extra, desired, expected_ext
         scalesets=[_existing_scaleset(extra_specs=observed_extra)],
     )
     _reconcile(client, [_spec(image_visibility=desired)])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.extra_specs == expected_extra
+
+
+@pytest.mark.parametrize(
+    "observed_extra, desired, expected_extra",
+    [
+        ({}, "sg-1234", {"security_groups": ["sg-1234"]}),
+        ({"security_groups": ["sg-old"]}, "sg-1234", {"security_groups": ["sg-1234"]}),
+        ({"security_groups": ["sg-1234"]}, "", {}),
+    ],
+    ids=["set", "changed", "cleared"],
+)
+def test_update_converges_the_security_group(observed_extra, desired, expected_extra):
+    """
+    arrange: An existing scaleset attached to a different group, or to none.
+    act: Reconcile the spec.
+    assert: One update brings the extra_specs to the desired group, clearing it with an
+        explicit empty dict when the configurator no longer manages one.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=observed_extra)],
+    )
+    _reconcile(client, [_spec(security_group_id=desired)])
 
     assert len(client.updated) == 1
     _, params = client.updated[0]

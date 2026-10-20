@@ -1397,6 +1397,30 @@ def test_image_visibility_follows_the_configurator_databag(
     assert [spec.image_visibility for spec in specs] == [expected]
 
 
+@pytest.mark.parametrize(
+    "databag_value, expected",
+    [("sg-1234", "sg-1234"), (" sg-1234 ", "sg-1234"), ("", ""), (None, "")],
+    ids=["set", "stripped", "empty", "absent"],
+)
+def test_security_group_follows_the_configurator_databag(
+    ctx: Context, garm_api: _GarmApiMocks, databag_value: str | None, expected: str
+):
+    """
+    arrange: A configurator unit publishing a managed security group id, a padded one, an
+        empty value, or nothing — the last two being a configurator that manages no group.
+    act: Run update-status.
+    assert: The scaleset spec carries the id, or none so GARM leaves the provider's default
+        group in place.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+    if databag_value is not None:
+        data["security_group_id"] = databag_value
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
+    assert [spec.security_group_id for spec in specs] == [expected]
+
+
 # --- Event wiring -------------------------------------------------------------------------
 
 

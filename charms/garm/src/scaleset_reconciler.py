@@ -149,6 +149,7 @@ class ScalesetSpec:
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
     image_visibility: str = ""
+    security_group_id: str = ""
 
 
 class ScalesetReconciler:
@@ -1143,6 +1144,8 @@ class ScalesetReconciler:
             or bool(observed_extra.get("disable_updates"))
             != bool(desired_extra.get("disable_updates"))
             or observed_extra.get("image_visibility") != desired_extra.get("image_visibility")
+            or (observed_extra.get("security_groups") or [])
+            != (desired_extra.get("security_groups") or [])
             or (observed.template_id or 0) != template_id
             or observed.runner_prefix != runner_prefix(spec.name)
         )
@@ -1332,8 +1335,9 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
 
     Single source of truth for create, update, and drift detection: combines the
     operator-supplied pre-install scripts with the charm's aproxy bootstrap, the
-    ``disable_updates`` flag when a runner proxy is configured, and the image
-    visibility the provider searches when resolving an image name.
+    ``disable_updates`` flag when a runner proxy is configured, the image
+    visibility the provider searches when resolving an image name, and the
+    configurator-managed security group.
 
     Args:
         spec: The desired scaleset.
@@ -1360,4 +1364,9 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
         }
     if spec.image_visibility:
         extra_specs["image_visibility"] = spec.image_visibility
+    if spec.security_group_id:
+        # Nova attaches the groups it is given *instead of* the project's default
+        # group, which is why the configurator only publishes an id for a group it
+        # has already opened egress on.
+        extra_specs["security_groups"] = [spec.security_group_id]
     return extra_specs
