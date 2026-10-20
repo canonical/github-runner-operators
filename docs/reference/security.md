@@ -39,6 +39,10 @@ operator responsibilities, see the {ref}`security overview <explanation_security
   URL syntax validation does not guarantee encrypted transport.
 - ``pre-install-scripts`` and ``pre-job-script`` are trusted operator-supplied
   shell code.
+- The configurator's ``security-group-rules`` option creates and converges one
+  OpenStack security group per scale set. OpenStack attaches that group instead of
+  the project's default group, and the charm removes rules it does not manage from
+  it, so a rule added by hand is deleted unless it is also listed in the option.
 
 ## Removal and vulnerability reporting
 

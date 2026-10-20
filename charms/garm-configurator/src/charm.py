@@ -16,6 +16,11 @@ from charm_state import (
     CharmConfigInvalidError,
     CharmState,
 )
+from openstack_security_group import (
+    SecurityGroupReconcileError,
+    SecurityGroupReconciler,
+    security_group_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +50,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """Handle all charm events by reconciling configuration and relation data.
 
         Reads the current charm state, forwards OpenStack credentials to the
-        image-builder relation, publishes scaleset configuration (and secrets
-        when the image reference is available) to all garm-configurator relations,
-        then sets unit status to reflect readiness.
+        image-builder relation, reconciles the scaleset's security group, publishes
+        scaleset configuration (and secrets when the image reference is available) to
+        all garm-configurator relations, then sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
@@ -61,9 +66,40 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(e.msg)
             return
 
-        self._update_image_relation(state)
-        self._configure_garm_relation(state)
+        if not self._configure(state):
+            return
+        self._set_ready_status(state)
 
+    def _configure(self, state: CharmState) -> bool:
+        """Publish the resolved state, reconciling the scaleset's security group first.
+
+        Args:
+            state: Current resolved charm state.
+
+        Returns:
+            Whether the state was published. False means the unit is blocked on a security
+            group that could not be reconciled: the relations are then left untouched, so
+            GARM never acts on a group id the charm could not confirm.
+        """
+        self._update_image_relation(state)
+        try:
+            security_group_id = self._ensure_security_group(state)
+        except SecurityGroupReconcileError as e:
+            name = security_group_name(state.scaleset_config.name)
+            logger.warning("Security group %s could not be reconciled: %s", name, e)
+            self.unit.status = ops.BlockedStatus(
+                f"Security group {name} could not be reconciled: {e}"
+            )
+            return False
+        self._configure_garm_relation(state, security_group_id or "")
+        return True
+
+    def _set_ready_status(self, state: CharmState) -> None:
+        """Report readiness, which depends on where the runner image came from.
+
+        Args:
+            state: Current resolved charm state.
+        """
         if state.image_overrides_builder:
             self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
         elif state.image is not None:
@@ -93,6 +129,26 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "user_domain_name": state.provider_config.user_domain_name,
                 "username": state.provider_config.username,
             }
+        )
+
+    def _ensure_security_group(self, state: CharmState) -> str | None:
+        """Reconcile the security group the scaleset's runners are attached to.
+
+        Args:
+            state: Current resolved charm state.
+
+        Returns:
+            The id of the group, or None when the operator configured no rules — the
+            runners then keep the project's default security group.
+
+        Raises:
+            SecurityGroupReconcileError: If OpenStack could not be reconciled with.
+        """
+        rules = state.scaleset_config.security_group_rules
+        if rules is None:
+            return None
+        return SecurityGroupReconciler(state.provider_config).reconcile(
+            security_group_name(state.scaleset_config.name), rules
         )
 
     def _ensure_relation_secret(
@@ -129,13 +185,14 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         return secret
 
-    def _configure_garm_relation(self, state: CharmState) -> None:
+    def _configure_garm_relation(self, state: CharmState, security_group_id: str) -> None:
         """Publish scaleset configuration to the garm-configurator relation.
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
         image visibility, flavor, arch, runner counts, labels, runner group,
-        remote-shell toggle, and pre-install scripts) to the relation. The ``image_id`` wire field
-        carries either an OpenStack image name or ID for compatibility.
+        remote-shell toggle, pre-install scripts, and the managed security group) to
+        the relation. The ``image_id`` wire field carries either an OpenStack image
+        name or ID for compatibility.
         The optional ``org`` and ``repo`` fields are included only when set.
 
         When the image reference is present and this unit holds leadership, also
@@ -149,6 +206,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Args:
             state: Current resolved charm state.
+            security_group_id: The id of the configurator-managed security group, or an
+                empty string when the charm manages none.
         """
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
@@ -177,6 +236,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "aproxy_redirect_ports": rc.aproxy_redirect_ports or "",
             "otel_collector_endpoint": rc.otel_collector_endpoint or "",
             "pre_job_script": rc.pre_job_script or "",
+            "security_group_id": security_group_id,
         }
         if state.scaleset_config.org:
             basic_data["org"] = state.scaleset_config.org

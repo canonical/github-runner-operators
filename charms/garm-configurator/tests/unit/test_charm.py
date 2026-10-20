@@ -11,6 +11,7 @@ import pytest
 from scenario import Context, Relation, Secret, State
 
 from charm import GarmConfiguratorCharm
+from openstack_security_group import SecurityGroupReconcileError
 
 
 def _make_secret():
@@ -320,6 +321,34 @@ _MISSING_CONFIG_SENTINEL = object()
             {"image-visibility": "everyone"},
             "image-visibility must be one of: public, private, shared, community, all",
             id="invalid-image-visibility",
+        ),
+        pytest.param(
+            {"security-group-rules": "not json"},
+            "security-group-rules must be a JSON list of rules",
+            id="security-group-rules-not-json",
+        ),
+        pytest.param(
+            {"security-group-rules": '{"direction": "ingress"}'},
+            "security-group-rules must be a JSON list of rules",
+            id="security-group-rules-not-a-list",
+        ),
+        pytest.param(
+            {"security-group-rules": '[{"direction": "sideways"}]'},
+            "security-group-rules rule 0: direction: Input should be 'ingress' or 'egress'",
+            id="security-group-rules-invalid-direction",
+        ),
+        pytest.param(
+            {
+                "security-group-rules": '[{"direction": "ingress", "protocol": "icmp", "port_min": 22}]'
+            },
+            "security-group-rules rule 0: port_min and port_max require protocol tcp or udp, "
+            "not icmp",
+            id="security-group-rules-ports-on-icmp",
+        ),
+        pytest.param(
+            {"security-group-rules": '[{"direction": "ingress", "remote_prefix": "0.0.0.0/0"}]'},
+            "security-group-rules rule 0: remote_prefix: Extra inputs are not permitted",
+            id="security-group-rules-misspelt-field",
         ),
     ],
 )
@@ -1042,3 +1071,158 @@ def test_image_visibility_written_to_garm_configurator_relation(configured, expe
     assert out.get_relation(garm_relation.id).local_unit_data.get("image_visibility", "") == (
         expected
     )
+
+
+def _security_group_rules_config() -> str:
+    """Return a minimal valid security-group-rules document."""
+    return '[{"direction": "ingress", "protocol": "tcp", "port_min": 22}]'
+
+
+def test_security_group_id_written_to_garm_configurator_relation(monkeypatch):
+    """
+    arrange: Rules configured for the managed group, and a reconciler that creates it.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: The relation carries the group's id, and the reconciler was asked for the group
+        named after the scaleset, so GARM can attach the group to the runners.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    config["security-group-rules"] = _security_group_rules_config()
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+    calls = []
+
+    class _FakeReconciler:
+        def __init__(self, provider_config):
+            calls.append(("network", provider_config.network))
+
+        def reconcile(self, name, rules):
+            calls.append((name, [rule.direction for rule in rules]))
+            return "sg-1234"
+
+    monkeypatch.setattr("charm.SecurityGroupReconciler", _FakeReconciler)
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert out.get_relation(garm_relation.id).local_unit_data["security_group_id"] == "sg-1234"
+    assert calls == [("network", "external-net"), ("garm-my-scaleset", ["ingress"])]
+
+
+def test_security_group_not_managed_without_rules(monkeypatch):
+    """
+    arrange: No security-group-rules configured, as in a deployment predating the option.
+    act: Run config-changed.
+    assert: No group is reconciled and the relation carries no id, so the runners keep the
+        project's default security group and existing deployments are unchanged.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    class _UnexpectedReconciler:
+        def __init__(self, provider_config):
+            raise AssertionError("no security group must be reconciled without rules")
+
+    monkeypatch.setattr("charm.SecurityGroupReconciler", _UnexpectedReconciler)
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.ActiveStatus("Ready")
+    assert "security_group_id" not in out.get_relation(garm_relation.id).local_unit_data
+
+
+def test_clearing_security_group_rules_withdraws_the_id(monkeypatch):
+    """
+    arrange: A deployment whose managed group id is on the relation.
+    act: Clear security-group-rules and run config-changed again.
+    assert: The id is withdrawn, so GARM stops attaching the group and the runners return to
+        the project's default security group.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    config["security-group-rules"] = _security_group_rules_config()
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    class _FakeReconciler:
+        def __init__(self, provider_config):
+            pass
+
+        def reconcile(self, name, rules):
+            return "sg-1234"
+
+    monkeypatch.setattr("charm.SecurityGroupReconciler", _FakeReconciler)
+    configured = ctx.run(ctx.on.config_changed(), state)
+    cleared_config = dict(config)
+    cleared_config["security-group-rules"] = ""
+
+    cleared = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(configured, config=cleared_config),
+    )
+
+    assert "security_group_id" not in cleared.get_relation(garm_relation.id).local_unit_data
+
+
+def test_security_group_failure_blocks_and_publishes_nothing(monkeypatch):
+    """
+    arrange: OpenStack refuses the reconcile.
+    act: Run config-changed.
+    assert: The unit blocks naming the group and withholds the scaleset configuration, so
+        GARM never acts on a group id the charm could not confirm.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    config["security-group-rules"] = _security_group_rules_config()
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+        leader=True,
+    )
+
+    class _FailingReconciler:
+        def __init__(self, provider_config):
+            pass
+
+        def reconcile(self, name, rules):
+            raise SecurityGroupReconcileError("keystone refused the token")
+
+    monkeypatch.setattr("charm.SecurityGroupReconciler", _FailingReconciler)
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.BlockedStatus(
+        "Security group garm-my-scaleset could not be reconciled: keystone refused the token"
+    )
+    assert "name" not in out.get_relation(garm_relation.id).local_unit_data

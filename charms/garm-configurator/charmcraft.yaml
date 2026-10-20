@@ -133,6 +133,25 @@ config:
       description: |
         A Python dict-like string containing key-value pairs of script name
         to bash script to be run prior to runner installation.
+    security-group-rules:
+      type: string
+      description: |
+        Optional JSON list of rules for the OpenStack security group the charm manages
+        for this scaleset's runners. Each rule takes:
+        "direction" ("ingress" or "egress", required), "protocol" ("tcp", "udp",
+        "icmp", "icmpv6", or "any", default "any"), "port_min" and "port_max"
+        (inclusive, 1-65535, tcp and udp only; "port_min" alone means that one port),
+        and "remote_ip_prefix" (a CIDR such as "10.0.0.0/8", default every address).
+        For example:
+        [{"direction": "ingress", "protocol": "tcp", "port_min": 22, "remote_ip_prefix": "10.0.0.0/8"}].
+        The charm creates a group named "garm-<name>" and keeps its rules equal to
+        this list, so rules added to the group by hand are removed. When no egress
+        rule is listed the charm allows all egress, because OpenStack attaches this
+        group instead of the project's default group and a runner that cannot reach
+        GitHub never runs a job. The group is never deleted: clearing this option, or
+        removing the application, leaves it in place for the operator to remove.
+        Requires OpenStack credentials allowed to create security groups and to create
+        and delete security group rules; it never deletes the group itself.
     dockerhub-mirror:
       type: string
       description: |

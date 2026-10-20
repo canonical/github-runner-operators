@@ -74,6 +74,28 @@ options and defaults before applying the configuration.
 [Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations)
 ```
 
+### Security groups
+
+The optional `security-group-rules` option makes the charm manage one OpenStack security group
+per scale set. The charm creates the group, named `garm-<name>`, and keeps its rules equal to
+the configured list: a rule that is not listed is removed, including one added by hand. The
+group's id is published to the GARM charm, which passes it to the OpenStack provider so that
+every runner of the scale set is attached to it.
+
+OpenStack attaches the configured groups instead of the project's default security group, so
+the rules must allow the runner's outbound traffic to GitHub. When no egress rule is listed the
+charm allows all egress for that reason.
+
+A rule change reaches new runners on the next reconcile. A runner that already exists keeps the
+group it was launched with until GARM replaces it.
+
+The charm never deletes the group. Clearing the option detaches it from the scale set and
+leaves it in place, as does removing the application, so an operator decides when to remove it.
+
+The OpenStack credentials need the `create_security_group`, `create_security_group_rule`, and
+`delete_security_group_rule` permissions. The charm does not delete security groups, so it does
+not need `delete_security_group`.
+
 ### Integrations
 
 The GARM configurator charm integrates with a GARM charm. The GARM charm manages

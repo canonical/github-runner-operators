@@ -4,10 +4,13 @@
 """State of the GARM configurator charm."""
 
 import ipaddress
+import json
+from typing import Literal
 
 import ops
 from pydantic import (
     BaseModel,
+    ConfigDict,
     HttpUrl,
     TypeAdapter,
     ValidationError,
@@ -42,6 +45,7 @@ SCALESET_ORG_CONFIG_NAME = "org"
 SCALESET_RUNNER_GROUP_CONFIG_NAME = "runner-group"
 SCALESET_ENABLE_SHELL_CONFIG_NAME = "enable-shell"
 SCALESET_PRE_INSTALL_SCRIPTS_CONFIG_NAME = "pre-install-scripts"
+SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME = "security-group-rules"
 
 DOCKERHUB_MIRROR_CONFIG_NAME = "dockerhub-mirror"
 RUNNER_HTTP_PROXY_CONFIG_NAME = "runner-http-proxy"
@@ -218,6 +222,69 @@ class GithubAppConfig(BaseModel):
         )
 
 
+class SecurityGroupRule(BaseModel):
+    """One rule of the OpenStack security group the charm manages for a scaleset.
+
+    Attributes:
+        direction: Whether the rule admits ingress or egress traffic.
+        protocol: Transport protocol the rule applies to, or "any" for every protocol.
+        port_min: First port of the range, or None to cover every port.
+        port_max: Last port of the range, or None to cover only port_min.
+        remote_ip_prefix: CIDR the rule applies to, or None to cover every address.
+    """
+
+    # An unknown key is rejected rather than dropped: a misspelt ``remote_ip_prefix``
+    # would otherwise silently widen the rule to every address.
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["ingress", "egress"]
+    protocol: Literal["tcp", "udp", "icmp", "icmpv6", "any"] = "any"
+    port_min: int | None = None
+    port_max: int | None = None
+    remote_ip_prefix: str | None = None
+
+    @field_validator("remote_ip_prefix")
+    @classmethod
+    def _validate_cidr(cls, value: str | None) -> str | None:
+        """Require a CIDR, normalised to the network address Neutron expects."""
+        if value is None:
+            return None
+        try:
+            # strict, because Neutron rejects a prefix with host bits set; a bare
+            # address is read as a single-host network.
+            return str(ipaddress.ip_network(value.strip(), strict=True))
+        except ValueError as exc:
+            raise ValueError(
+                f"must be a CIDR such as 10.0.0.0/8, 192.0.2.1/32, or ::/0; got {value!r}"
+            ) from exc
+
+    @model_validator(mode="after")
+    def _validate_ports(self) -> "SecurityGroupRule":
+        """Reject a port range the protocol cannot carry, and fill in a single port."""
+        if self.port_min is None and self.port_max is None:
+            return self
+        if self.protocol not in ("tcp", "udp"):
+            raise ValueError(
+                f"port_min and port_max require protocol tcp or udp, not {self.protocol}"
+            )
+        if self.port_min is None:
+            raise ValueError("port_max requires port_min")
+        port_max = self.port_min if self.port_max is None else self.port_max
+        if not 1 <= self.port_min <= 65535 or not 1 <= port_max <= 65535:
+            raise ValueError("port_min and port_max must be in 1..65535")
+        if self.port_min > port_max:
+            raise ValueError("port_min must not be greater than port_max")
+        self.port_max = port_max
+        return self
+
+    @property
+    def ethertype(self) -> str:
+        """The ethertype the remote prefix implies, which Neutron defaults to IPv4."""
+        if self.remote_ip_prefix and ":" in self.remote_ip_prefix:
+            return "IPv6"
+        return "IPv4"
+
+
 class ScalesetConfig(BaseModel):
     """Scaleset configuration.
 
@@ -234,6 +301,8 @@ class ScalesetConfig(BaseModel):
         enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
         image_visibility: Glance visibility the provider searches when resolving an image name.
+        security_group_rules: Rules of the security group the charm manages for the runners,
+            or None to manage no security group.
     """
 
     name: str
@@ -248,6 +317,7 @@ class ScalesetConfig(BaseModel):
     enable_shell: bool = False
     pre_install_scripts: str | None = None
     image_visibility: str | None = None
+    security_group_rules: list[SecurityGroupRule] | None = None
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ScalesetConfig":
@@ -329,7 +399,56 @@ class ScalesetConfig(BaseModel):
             enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
             image_visibility=image_visibility,
+            security_group_rules=_parse_security_group_rules(charm),
         )
+
+
+def _parse_security_group_rules(charm: ops.CharmBase) -> list[SecurityGroupRule] | None:
+    """Parse the optional security-group-rules JSON document.
+
+    Args:
+        charm: The charm instance.
+
+    Raises:
+        CharmConfigInvalidError: If the value is not a JSON list of valid rules.
+
+    Returns:
+        The parsed rules, or None when the option is unset — the charm then manages no
+        security group, so runners keep the project's default one.
+    """
+    document = _get_optional_string_config(charm, SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME)
+    if document is None:
+        return None
+    try:
+        entries = json.loads(document)
+    except ValueError as exc:
+        raise CharmConfigInvalidError(
+            f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} must be a JSON list of rules"
+        ) from exc
+    if not isinstance(entries, list):
+        raise CharmConfigInvalidError(
+            f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} must be a JSON list of rules"
+        )
+
+    rules: list[SecurityGroupRule] = []
+    for index, entry in enumerate(entries):
+        try:
+            rules.append(SecurityGroupRule.model_validate(entry))
+        except ValidationError as exc:
+            raise CharmConfigInvalidError(
+                f"{SCALESET_SECURITY_GROUP_RULES_CONFIG_NAME} rule {index}: "
+                f"{_describe_rule_error(exc)}"
+            ) from exc
+    return rules
+
+
+def _describe_rule_error(exc: ValidationError) -> str:
+    """Render one rule's first validation error as a single status line."""
+    error = exc.errors()[0]
+    field = ".".join(str(part) for part in error["loc"])
+    # Pydantic prefixes the message of an error raised by a custom validator.
+    message = " ".join(str(error["msg"]).removeprefix("Value error, ").split())
+    return f"{field}: {message}" if field else message
 
 
 def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:

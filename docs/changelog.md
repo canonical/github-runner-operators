@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-20
+
+- `garm-configurator`: add the optional `security-group-rules` configuration, which makes the charm create and maintain one OpenStack security group per scale set and publish its id to the `garm` charm, which passes it to the OpenStack provider so that every runner is attached to it. The group is named `garm-<name>` and its rules are kept equal to the configured list, so rules added to it by hand are removed. The charm allows all egress when no egress rule is listed, because OpenStack attaches this group instead of the project's default group and a runner that cannot reach GitHub never runs a job. The group is never deleted: clearing the option, or removing the application, leaves it in place for the operator to remove. A rule change reaches runners created after the next reconcile; a runner that already exists keeps the group it was launched with. Deployments that do not set the option are unchanged and keep the project's default security group.
+
 ## 2026-10-16
 
 - `garm`: name runners after their scale set (for example `my-scaleset-dvnyp5dm3sm`) instead of GARM's default `garm-<id>`. The prefix is the scale set name in lowercase, with every run of characters other than letters and digits replaced by a hyphen, and truncated to 40 characters so the runner name still fits a 63-character hostname. Existing scale sets are updated in place; runners created before the update keep their names.
