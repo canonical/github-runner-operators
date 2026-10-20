@@ -258,12 +258,17 @@ through spread. The suite deploys GARM with PostgreSQL and a traefik ingress —
 load-balancer address is what makes GARM's callback and metadata URLs reachable from
 the tenant — waits for a runner VM to register, and dispatches
 `.github/workflows/garm_e2e_test_run.yaml` at the scale set's label; the test passes
-only if that job concludes successfully. The host admits no inbound traffic from the
+only if that job concludes successfully. Before dispatching, it also checks the
+configurator's security group in the tenant directly: that `garm-<label>` admits no
+ingress, and that the runner's port carries that group and no other — the one assertion
+that fails if the group id stops reaching the provider while the rest of the suite stays
+green. The host admits no inbound traffic from the
 tenant, so the workflow boots a relay VM there that the host feeds over a reverse SSH
 tunnel, and runner VMs send their GARM traffic to it; the relay and its security group
 are deleted in an always-run cleanup step. Runners
 left on the tenant are deleted whatever the outcome, matched on the
-`garm-controller-id` GARM stamps on every server it creates.
+`garm-controller-id` GARM stamps on every server it creates, and each run's
+`garm-<label>` security group is swept with them.
 
 It is triggered manually and is **not** a merge gate:
 

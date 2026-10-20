@@ -531,14 +531,32 @@ jobs:
           ORPHANS=$(openstack server list --long --image "$E2E_RUNNER_IMAGE_NAME" -f json \
             | python3 -c "import json,sys; print('\n'.join(s['ID'] for s in json.load(sys.stdin) if 'garm-controller-id' in (s.get('Properties') or {})))")
 
-          if [ -z "$ORPHANS" ]; then
+          if [ -n "$ORPHANS" ]; then
+            echo "$ORPHANS" | while read -r ID; do
+              echo "Deleting orphaned runner ${ID}"
+              openstack server delete --wait "$ID" || echo "::warning::Could not delete ${ID}"
+            done
+          else
             echo "No runners left on the tenant."
+          fi
+
+          # Each run's configurator manages its own garm-<label> security group and, by
+          # design, never deletes it. With the runners gone it has no ports, so sweep it
+          # here: the tenant belongs to this suite and runs are serialised, so the prefix
+          # cannot match another run's group.
+          # Matched on the scale-set label pattern (garm-e2e-<digest>, from _e2e_label)
+          # so the relay's own garm-e2e-relay-<run> group is left to the step below.
+          MANAGED=$(openstack security group list -f json \
+            | python3 -c "import json,re,sys; print('\n'.join(g['Name'] for g in json.load(sys.stdin) if re.fullmatch(r'garm-e2e-[0-9a-f]{6}', g.get('Name') or '')))")
+
+          if [ -z "$MANAGED" ]; then
+            echo "No managed security groups left on the tenant."
             exit 0
           fi
 
-          echo "$ORPHANS" | while read -r ID; do
-            echo "Deleting orphaned runner ${ID}"
-            openstack server delete --wait "$ID" || echo "::warning::Could not delete ${ID}"
+          echo "$MANAGED" | while read -r NAME; do
+            echo "Deleting managed security group ${NAME}"
+            openstack security group delete "$NAME" || echo "::warning::Could not delete ${NAME}"
           done
 
       - name: Delete the callback relay

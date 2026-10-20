@@ -12,6 +12,7 @@ import time
 import uuid
 
 import jubilant
+import openstack
 import pytest
 import requests
 from tests.e2e.conftest import GarmCli
@@ -89,13 +90,20 @@ def test_garm_agent_shell(
     logger.info("Agent shell on %s executed a command successfully", runner_name)
 
 
-def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str):
+def test_garm_e2e(
+    juju: jubilant.Juju,
+    garm_with_ingress: str,
+    e2e_scaleset: str,
+    openstack_credentials: dict[str, str],
+):
     """
     arrange: GARM deployed with postgresql + traefik ingress; garm-configurator holding real
         ProdStack credentials, a stable runner-image name, and a unique run label;
         GARM's controller metadata_url resolved to the routable LB address.
     act: Dispatch garm_e2e_test_run.yaml against the run label and wait for completion.
-    assert: The workflow run concludes 'success' — which is only reachable if GARM
+    assert: The runner's port carries only the security group the configurator
+        manages — so the group id crossed the relation and the provider's extra spec —
+        and the workflow run concludes 'success', which is only reachable if GARM
         authenticated to OpenStack, booted a VM on the published image, the runner
         registered with GitHub, picked up the job, and exited clean.
     """
@@ -110,6 +118,7 @@ def test_garm_e2e(juju: jubilant.Juju, garm_with_ingress: str, e2e_scaleset: str
 
     # Wait for runner VM to spawn and register before dispatching
     _wait_for_runner_online(juju, garm_with_ingress, label)
+    _assert_runner_uses_the_managed_security_group(openstack_credentials, label)
 
     github_client = create_github_app_client(E2E_APP_ENV)
 
@@ -167,6 +176,55 @@ def _skip_unless_agent_url_is_tls(juju: jubilant.Juju, garm_app: str) -> None:
             f"GARM's agent_url is {agent_url!r}: garm-agent disables its shell over a "
             "cleartext transport, so the remote shell needs an ingress that terminates "
             "TLS and runner VMs that trust its CA."
+        )
+
+
+def _assert_runner_uses_the_managed_security_group(
+    credentials: dict[str, str], label: str
+) -> None:
+    """Assert the runner carries the security group the configurator manages for it.
+
+    Nothing else in this suite looks at the runner's port. Without this, a regression
+    that dropped the group id from the relation or from the provider's extra spec would
+    leave every other assertion green: Nova would attach the project's default group
+    instead, and the runner would work exactly as before.
+
+    Args:
+        credentials: The tenant credentials the configurator and provider authenticate with.
+        label: The scale set's unique run label, from which the group name derives.
+    """
+    with openstack.connect(
+        auth_url=credentials["auth_url"],
+        username=credentials["username"],
+        password=credentials["password"],
+        project_name=credentials["project_name"],
+        user_domain_name=credentials["user_domain_name"],
+        project_domain_name=credentials["project_domain_name"],
+        region_name=credentials["region_name"],
+        interface="public",
+    ) as connection:
+        name = f"garm-{label}"
+        group = connection.network.find_security_group(name, ignore_missing=True)
+        assert group is not None, f"the configurator did not create security group {name}"
+
+        # No ingress: one compromised runner must not be able to reach its peers. The
+        # runner still needs egress for GitHub, GARM, and whatever its jobs fetch.
+        rules = list(connection.network.security_group_rules(security_group_id=group.id))
+        assert {rule.direction for rule in rules} == {"egress"}, (
+            f"security group {name} holds non-egress rules: "
+            f"{[(rule.direction, rule.remote_ip_prefix) for rule in rules]}"
+        )
+
+        ports = [
+            port
+            for port in connection.network.ports(security_group_ids=[group.id])
+            if group.id in (port.security_group_ids or [])
+        ]
+        assert ports, f"no runner port is attached to security group {name}"
+        # Exactly one: OpenStack replaces the project's default group with the ones it is
+        # given, so a second entry would mean the managed group was added, not used.
+        assert ports[0].security_group_ids == [group.id], (
+            f"the runner's port carries {ports[0].security_group_ids} rather than {name} alone"
         )
 
 

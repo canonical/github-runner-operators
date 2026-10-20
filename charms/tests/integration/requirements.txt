@@ -1,4 +1,5 @@
 jubilant
+openstacksdk
 PyGithub
 ops
 pytest
