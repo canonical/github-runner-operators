@@ -7,6 +7,10 @@ Network isolation for the runners is policy, so the configurator owns it: it cre
 security group per scaleset and keeps its rules in line with the operator's
 ``security-group-rules``. The ``garm`` charm passes the group's id to the OpenStack provider
 as the scaleset's ``security_groups`` extra spec.
+
+Nothing the charms provide needs an ingress rule. GARM's remote shell rides the agent's
+connection, which the runner opens to ``agent_url``, and a ``debug-ssh`` session is an
+outbound tmate client on the runner; both are traffic the runner originates.
 """
 
 import logging
@@ -36,10 +40,6 @@ RULE_FIELDS = (
     "remote_group_id",
     "remote_address_group_id",
 )
-
-# Juju shows a status message on one short line, so the unit status keeps only this much of
-# a failure; the log line carries the rest.
-MAX_STATUS_REASON_LENGTH = 60
 
 
 class SecurityGroupReconcileError(Exception):
@@ -95,8 +95,8 @@ class SecurityGroupReconciler:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             connection = connect(**self._auth_fields())
             try:
-                group = self._ensure_group(connection, name)
-                self._reconcile_rules(connection, group, rules)
+                group = self._ensure_group(connection=connection, name=name)
+                self._reconcile_rules(connection=connection, group=group, rules=rules)
                 return str(group.id)
             finally:
                 connection.close()
@@ -137,7 +137,7 @@ class SecurityGroupReconciler:
             return connection.network.create_security_group(
                 name=name, description=SECURITY_GROUP_DESCRIPTION
             )
-        return self._keep_one_group(connection, name, groups)
+        return self._keep_one_group(connection=connection, name=name, groups=groups)
 
     def _keep_one_group(
         self, connection: typing.Any, name: str, groups: list[typing.Any]
@@ -158,7 +158,9 @@ class SecurityGroupReconciler:
         """
         if len(groups) == 1:
             return groups[0]
-        attached = {group.id: _ports_using(connection, group.id) for group in groups}
+        attached = {
+            group.id: _ports_using(connection=connection, group_id=group.id) for group in groups
+        }
         survivor = next((group for group in groups if attached[group.id]), groups[0])
         for group in groups:
             if group.id == survivor.id:
@@ -182,7 +184,7 @@ class SecurityGroupReconciler:
                 name,
                 survivor.id,
             )
-            _delete_unused_group(connection, group)
+            _delete_unused_group(connection=connection, group=group)
         return survivor
 
     def _reconcile_rules(
@@ -200,12 +202,12 @@ class SecurityGroupReconciler:
             rules: The rules the group should hold.
         """
         observed = {
-            _observed_identity(rule): rule
+            _get_observed_identity(rule=rule): rule
             for rule in connection.network.security_group_rules(security_group_id=group.id)
         }
         desired: set[tuple] = set()
         for rule in rules:
-            identity = tuple(rule.neutron_fields.get(field) for field in RULE_FIELDS)
+            identity = _get_identity(rule=rule)
             if identity in desired:
                 continue
             desired.add(identity)
@@ -219,10 +221,15 @@ class SecurityGroupReconciler:
             if identity in desired:
                 continue
             logger.info("Removing rule %s from security group %s", identity, group.name)
-            connection.network.delete_security_group_rule(rule)
+            connection.network.delete_security_group_rule(security_group_rule=rule)
 
 
-def _observed_identity(rule: typing.Any) -> tuple:
+def _get_identity(rule: SecurityGroupRule) -> tuple:
+    """Return a configured rule's identity: the value of RULE_FIELDS, in order."""
+    return tuple(rule.neutron_fields.get(field) for field in RULE_FIELDS)
+
+
+def _get_observed_identity(rule: typing.Any) -> tuple:
     """Return the identity of a rule as OpenStack reports it."""
     return tuple(getattr(rule, field, None) for field in RULE_FIELDS)
 
@@ -236,7 +243,7 @@ def _delete_unused_group(connection: typing.Any, group: typing.Any) -> None:
     failure — a refused permission, an unreachable API — still propagates.
     """
     try:
-        connection.network.delete_security_group(group.id)
+        connection.network.delete_security_group(security_group=group.id)
     except openstack.exceptions.ConflictException:
         logger.warning(
             "Could not delete security group %s (%s): a port attached it during the"
@@ -262,11 +269,3 @@ def _ports_using(connection: typing.Any, group_id: str) -> list[typing.Any]:
 def _reason(exc: Exception) -> str:
     """Return the failure as one line, for the log."""
     return " ".join(str(exc).split()) or type(exc).__name__
-
-
-def status_reason(exc: Exception) -> str:
-    """Return as much of the failure as a unit status can show, for the operator."""
-    reason = _reason(exc)
-    if len(reason) > MAX_STATUS_REASON_LENGTH:
-        reason = f"{reason[:MAX_STATUS_REASON_LENGTH]}..."
-    return reason

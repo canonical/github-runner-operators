@@ -86,6 +86,11 @@ OpenStack attaches the configured groups instead of the project's default securi
 the rules must allow the runner's outbound traffic to GitHub. When no egress rule is listed the
 charm allows all egress for that reason.
 
+Nothing the charms provide needs an ingress rule. The GARM remote shell (`enable-shell`) rides
+the agent's connection, which the runner opens to the GARM agent URL, and a `debug-ssh` session
+is an outbound tmate client on the runner. Both are traffic the runner originates, so an
+ingress-free group supports them.
+
 A rule change reaches new runners on the next reconcile. A runner that already exists keeps the
 group it was launched with until GARM replaces it.
 

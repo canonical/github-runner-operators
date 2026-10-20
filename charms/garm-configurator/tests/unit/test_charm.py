@@ -1252,6 +1252,6 @@ def test_security_group_failure_blocks_and_publishes_nothing(monkeypatch):
     out = ctx.run(ctx.on.config_changed(), state)
 
     assert out.unit_status == ops.BlockedStatus(
-        "Security group garm-my-scaleset could not be reconciled: keystone refused the token"
+        "Security group garm-my-scaleset could not be reconciled (see debug-log)"
     )
     assert "name" not in out.get_relation(garm_relation.id).local_unit_data

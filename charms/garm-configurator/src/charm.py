@@ -20,7 +20,6 @@ from openstack_security_group import (
     SecurityGroupReconcileError,
     SecurityGroupReconciler,
     security_group_name,
-    status_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,13 +70,13 @@ class GarmConfiguratorCharm(ops.CharmBase):
         try:
             security_group_id = self._ensure_security_group(state)
         except SecurityGroupReconcileError as e:
-            name = security_group_name(state.scaleset_config.name)
+            name = security_group_name(scaleset_name=state.scaleset_config.name)
             logger.warning("Security group %s could not be reconciled: %s", name, e)
             self.unit.status = ops.BlockedStatus(
-                f"Security group {name} could not be reconciled: {status_reason(e)}"
+                f"Security group {name} could not be reconciled (see debug-log)"
             )
             return
-        self._configure_garm_relation(state, security_group_id or "")
+        self._configure_garm_relation(state=state, security_group_id=security_group_id or "")
 
         if state.image_overrides_builder:
             self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
@@ -126,8 +125,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
         rules = state.scaleset_config.security_group_rules
         if not rules:
             return None
-        return SecurityGroupReconciler(state.provider_config).reconcile(
-            security_group_name(state.scaleset_config.name), rules
+        return SecurityGroupReconciler(provider_config=state.provider_config).reconcile(
+            name=security_group_name(scaleset_name=state.scaleset_config.name), rules=rules
         )
 
     def _ensure_relation_secret(
