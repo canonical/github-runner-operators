@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-21
+
+- `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
+
 ## 2026-10-16
 
 - `garm`: name runners after their scale set (for example `my-scaleset-dvnyp5dm3sm`) instead of GARM's default `garm-<id>`. The prefix is the scale set name in lowercase, with every run of characters other than letters and digits replaced by a hyphen, and truncated to 40 characters so the runner name still fits a 63-character hostname. Existing scale sets are updated in place; runners created before the update keep their names.
