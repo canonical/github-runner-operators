@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-10-21
 
-- `garm`: set `USER` and `LOGNAME` in the runner `.env` so job steps see the account the runner UID resolves to (`ubuntu`) rather than the duplicate-UID alias (`runner`) that GARM starts the runner as. Tools that resolve the caller by UID — `sg`, `newgrp`, `chown`, and sbuild's schroot user — already reported `ubuntu`, so a step doing `usermod -aG <group> $USER` added the alias while `sg <group>` checked `ubuntu` and fell back to a password prompt. The values are written by the `github_linux_charmed` template, which scale sets without runner options reference directly and scale sets with runner options derive their template from.
+- `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
 
 ## 2026-10-16
 

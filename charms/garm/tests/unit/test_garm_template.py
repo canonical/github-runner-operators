@@ -18,7 +18,7 @@ _CONN = SSHDebugInfo(host="h", port=10022, rsa_fingerprint="rsa-fp", ed25519_fin
 def test_ssh_debug_info_env_vars():
     """
     arrange: One SSHDebugInfo connection.
-    act: Call build_tmate_env_snippet() and prepend_after_shebang().
+    act: Call build_env_snippet() and prepend_after_shebang().
     assert: The patched script starts with the shebang, then contains
             all four TMATE_SERVER_* variables with correct values.
     """
@@ -30,7 +30,7 @@ def test_ssh_debug_info_env_vars():
     )
     base_script = "#!/bin/bash\necho 'hello'\n"
 
-    snippet = garm_template.build_tmate_env_snippet([conn])
+    snippet = garm_template.build_env_snippet([conn])
     patched = garm_template.prepend_after_shebang(base_script, snippet)
 
     assert patched.startswith("#!/bin/bash\n")
@@ -357,28 +357,54 @@ def test_apply_charmed_template_raises_when_charmed_has_no_id():
         garm_template.apply_charmed_template(client, [])
 
 
-def test_runner_env_snippet_matches_uid_resolved_account():
+def test_env_snippet_resolves_runner_account_on_the_instance():
     """
-    arrange: No inputs.
-    act: Call build_runner_env_snippet().
-    assert: The snippet writes USER and LOGNAME to the runner .env, set to the
-            account the runner UID resolves to, and strips stale values first.
+    arrange: No debug-ssh connections.
+    act: Call build_env_snippet().
+    assert: The account is derived on the instance from the runner UID and
+            written as USER and LOGNAME, with no account name baked into the
+            template.
     """
-    snippet = garm_template.build_runner_env_snippet()
+    snippet = garm_template.build_env_snippet([])
 
-    assert f"touch {garm_template.RUNNER_ENV_PATH}" in snippet
-    assert f"sed -i '/^USER=/d;/^LOGNAME=/d' {garm_template.RUNNER_ENV_PATH}" in snippet
-    assert f"USER={garm_template.RUNNER_UID_USER}" in snippet
-    assert f"LOGNAME={garm_template.RUNNER_UID_USER}" in snippet
-    assert garm_template.RUNNER_UID_USER == "ubuntu"
+    assert 'getent passwd "$(id -u runner)"' in snippet
+    assert "printf 'USER=%s\\nLOGNAME=%s\\n'" in snippet
+    assert "$runner_account" in snippet
+    assert "USER=ubuntu" not in snippet
+    assert "USER=runner" not in snippet
+
+
+def test_env_snippet_guards_an_empty_lookup():
+    """
+    arrange: No debug-ssh connections.
+    act: Call build_env_snippet().
+    assert: The write is guarded, so a failed lookup cannot blank USER in .env.
+    """
+    snippet = garm_template.build_env_snippet([])
+
+    assert '[ -n "$runner_account" ]' in snippet
+
+
+def test_env_snippet_writes_tmate_vars_verbatim():
+    """
+    arrange: One debug-ssh connection.
+    act: Call build_env_snippet().
+    assert: The tmate variables go through a quoted heredoc, so values from the
+            relation are not shell-expanded.
+    """
+    snippet = garm_template.build_env_snippet([_CONN])
+
+    assert '<< "EOF"' in snippet
+    assert f"TMATE_SERVER_HOST={_CONN.host}" in snippet
+    assert f"TMATE_SERVER_PORT={_CONN.port}" in snippet
 
 
 def test_build_charmed_template_data_sets_user_env_without_connections():
     """
     arrange: A base script and no debug-ssh connections.
     act: Call _build_charmed_template_data().
-    assert: The rendered script still carries the USER/LOGNAME block, so every
-            scale set referencing the charmed template gets it.
+    assert: The rendered script resolves and writes the account, so every scale
+            set referencing the charmed template gets the entries.
     """
     client = MagicMock()
     template = MagicMock()
@@ -388,16 +414,17 @@ def test_build_charmed_template_data_sets_user_env_without_connections():
     decoded = garm_template._build_charmed_template_data(client, 1, []).decode()
 
     assert decoded.startswith("#!/bin/bash\n")
-    assert f"USER={garm_template.RUNNER_UID_USER}" in decoded
-    assert f"LOGNAME={garm_template.RUNNER_UID_USER}" in decoded
+    assert 'getent passwd "$(id -u runner)"' in decoded
+    assert "printf 'USER=%s\\nLOGNAME=%s\\n'" in decoded
+    assert "TMATE_SERVER_HOST" not in decoded
 
 
 def test_build_charmed_template_data_user_env_precedes_base_body():
     """
     arrange: A base script whose body would abort on error.
     act: Call _build_charmed_template_data() with no connections.
-    assert: The user-env block lands before the base body, so it is written even
-            though the base template later enables set -e.
+    assert: The env writer lands before the base body, so it runs before the
+            base template enables set -e.
     """
     client = MagicMock()
     template = MagicMock()
@@ -406,15 +433,15 @@ def test_build_charmed_template_data_user_env_precedes_base_body():
 
     decoded = garm_template._build_charmed_template_data(client, 1, []).decode()
 
-    assert decoded.index("USER=") < decoded.index("set -e")
-    assert decoded.index("LOGNAME=") < decoded.index("set -e")
+    assert decoded.index("runner_account=") < decoded.index("set -e")
+    assert decoded.index("printf 'USER=") < decoded.index("set -e")
 
 
-def test_build_charmed_template_data_sets_user_env_once():
+def test_build_charmed_template_data_writes_user_env_once():
     """
     arrange: A base script and one debug-ssh connection.
     act: Call _build_charmed_template_data().
-    assert: Exactly one USER= assignment is written, and the tmate variables are
+    assert: Exactly one USER assignment is written, and the tmate variables are
             still present alongside it.
     """
     client = MagicMock()
@@ -423,7 +450,8 @@ def test_build_charmed_template_data_sets_user_env_once():
     client.get_template.return_value = template
 
     decoded = garm_template._build_charmed_template_data(client, 1, [_CONN]).decode()
-    written = [line for line in decoded.splitlines() if line.startswith("USER=")]
+    written = [line for line in decoded.splitlines() if "USER=" in line]
 
-    assert written == [f"USER={garm_template.RUNNER_UID_USER}"]
+    assert len(written) == 1
+    assert "printf" in written[0]
     assert f"TMATE_SERVER_HOST={_CONN.host}" in decoded
