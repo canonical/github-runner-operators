@@ -677,13 +677,15 @@ class GarmCharm(paas_charm.go.Charm):
             raise
 
     def _build_desired_scalesets(
-        self, template_id: int | None, group_ids: dict[tuple[str, str], str]
+        self, template_id: int | None, group_ids: dict[str, str]
     ) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units.
 
         Args:
             template_id: The charmed runner template each scale set references.
-            group_ids: Per provider name and scale set name, the id of its security group.
+            group_ids: Per scale set name, the id of its security group. The name is the
+                identity a scale set has across the model, which the scaleset reconciler
+                already relies on.
 
         Returns:
             The specs, each carrying its group id when one was ensured.
@@ -700,7 +702,7 @@ class GarmCharm(paas_charm.go.Charm):
                     specs.append(
                         dataclasses.replace(
                             spec,
-                            security_group_id=group_ids.get((spec.provider_name, spec.name), ""),
+                            security_group_id=group_ids.get(spec.name, ""),
                         )
                     )
         return specs
@@ -771,7 +773,7 @@ class GarmCharm(paas_charm.go.Charm):
             security_group_rules=security_group_rules,
         )
 
-    def _ensure_security_groups(self) -> tuple[dict[tuple[str, str], str], str | None]:
+    def _ensure_security_groups(self) -> tuple[dict[str, str], str | None]:
         """Create and converge the security group of every scale set the configurators describe.
 
         Runs before the scale sets are built, because their ids are part of the desired state. A
@@ -779,9 +781,9 @@ class GarmCharm(paas_charm.go.Charm):
         reconciling one configurator at a time would have each delete the others' groups.
 
         Returns:
-            Per (provider name, scale set name), the id of the group ensured for it, and a status
-            message when a group could not be. A scale set left without an id is skipped by the
-            scaleset reconciler rather than created without its isolation.
+            Per scale set name, the id of the group ensured for it, and a status message when a
+            group could not be. A scale set left without an id is skipped by the scaleset
+            reconciler rather than created without its isolation.
         """
         configs = self._get_configurator_provider_configs()
         tenant_of = {config["unit_name"]: _tenant_of(config=config) for config in configs}
@@ -799,7 +801,7 @@ class GarmCharm(paas_charm.go.Charm):
             if tenant is not None and rules:
                 wanted.setdefault(tenant, {})[name] = rules
 
-        group_ids: dict[tuple[str, str], str] = {}
+        group_ids: dict[str, str] = {}
         failed = False
         for config in configs:
             tenant = _tenant_of(config=config)
@@ -812,15 +814,9 @@ class GarmCharm(paas_charm.go.Charm):
                 logger.warning("Security groups for %s could not be ensured: %s", tenant, exc)
                 failed = True
                 continue
-            for name, group_id in ensured.items():
-                # Keyed by provider name, so the spec builder needs no tenant lookup.
-                group_ids[(config["unit_name"], name)] = group_id
+            group_ids.update(ensured)
 
-        missing = any(
-            (provider, name) not in group_ids
-            for provider, tenant in tenant_of.items()
-            for name in wanted.get(tenant, {})
-        )
+        missing = any(name not in group_ids for names in wanted.values() for name in names)
         status = (
             "Waiting for OpenStack security groups (see debug-log)"
             if failed or unusable or missing

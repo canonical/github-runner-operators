@@ -102,11 +102,13 @@ class SecurityGroupReconciler:
         self._description = SECURITY_GROUP_DESCRIPTION.format(owner)
 
     def reconcile(self, rules: dict[str, list[SecurityGroupRule]]) -> dict[str, str]:
-        """Ensure each scale set's group exists and holds its rules, and sweep the rest.
+        """Ensure each scale set's group exists and holds its rules.
+
+        Groups no scale set claims are left for :meth:`sweep`, which runs once the scale sets
+        have been reconciled: only then has a deleted scale set released its group.
 
         Args:
-            rules: Per scale set name, the rules its group should hold. A scale set absent from
-                this mapping no longer exists, so its group is deleted.
+            rules: Per scale set name, the rules its group should hold.
 
         Returns:
             Per scale set name, the id of the group the provider should attach.
@@ -119,16 +121,18 @@ class SecurityGroupReconciler:
         try:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             with connect(**self._auth_fields()) as connection:
-                claimed, duplicates = self._groups_by_name(connection=connection)
+                existing = self._groups_by_name(connection=connection)
                 for name, group_rules in rules.items():
-                    group = claimed.pop(security_group_name(scaleset_name=name), None)
-                    if group is None:
-                        group = self._create_group(connection=connection, name=name)
-                    self._reconcile_rules(connection=connection, group=group, rules=group_rules)
-                    groups[name] = str(group.id)
-                self._delete_unclaimed(
-                    connection=connection, unclaimed=[*claimed.values(), *duplicates]
-                )
+                    copies = existing.get(security_group_name(scaleset_name=name))
+                    if not copies:
+                        copies = [self._create_group(connection=connection, name=name)]
+                    # Every copy is converged: OpenStack allows duplicate names, and the copy a
+                    # runner is attached to must not keep stale rules.
+                    for group in copies:
+                        self._reconcile_rules(
+                            connection=connection, group=group, rules=group_rules
+                        )
+                    groups[name] = str(copies[0].id)
         except _OPENSTACK_ERRORS as exc:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
         return groups
@@ -152,10 +156,22 @@ class SecurityGroupReconciler:
         try:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             with connect(**self._auth_fields()) as connection:
-                groups, duplicates = self._groups_by_name(connection=connection)
-                unclaimed = [group for name, group in groups.items() if name not in wanted]
+                groups = self._groups_by_name(connection=connection)
+                unclaimed = [
+                    group
+                    for name, copies in groups.items()
+                    if name not in wanted
+                    for group in copies
+                ]
+                # One copy of a claimed name is enough; the rest go once nothing attaches them.
+                surplus = [
+                    group
+                    for name, copies in groups.items()
+                    if name in wanted
+                    for group in copies[1:]
+                ]
                 return self._delete_unclaimed(
-                    connection=connection, unclaimed=[*unclaimed, *duplicates]
+                    connection=connection, unclaimed=[*unclaimed, *surplus]
                 )
         except _OPENSTACK_ERRORS as exc:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
@@ -173,11 +189,11 @@ class SecurityGroupReconciler:
         try:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             with connect(**self._auth_fields()) as connection:
-                groups, duplicates = self._groups_by_name(connection=connection)
+                groups = self._groups_by_name(connection=connection)
                 return (
                     self._delete_unclaimed(
                         connection=connection,
-                        unclaimed=[*groups.values(), *duplicates],
+                        unclaimed=[copy for copies in groups.values() for copy in copies],
                         settle_attempts=REMOVAL_DELETE_ATTEMPTS,
                     )
                     > 0
@@ -200,29 +216,21 @@ class SecurityGroupReconciler:
             "api_timeout": REQUEST_TIMEOUT_SECONDS,
         }
 
-    def _groups_by_name(
-        self, connection: typing.Any
-    ) -> tuple[dict[str, typing.Any], list[typing.Any]]:
-        """Return the groups this application created, keyed by name, plus any duplicates.
+    def _groups_by_name(self, connection: typing.Any) -> dict[str, list[typing.Any]]:
+        """Return the groups this application created, keyed by name.
 
-        The project is filtered server-side, and the name prefix and description marker
-        client-side: another GARM application sharing the project owns its own groups.
-
-        A duplicate sharing a name is returned separately rather than dropped, because a group
-        that is never claimed is also never deleted.
+        OpenStack allows duplicate names, so each name maps to every copy of it. The project is
+        filtered server-side, and the name prefix and description marker client-side, so another
+        GARM application sharing the project keeps its own groups.
         """
-        groups: dict[str, typing.Any] = {}
-        duplicates: list[typing.Any] = []
+        groups: dict[str, list[typing.Any]] = {}
         for group in connection.network.security_groups(project_id=connection.current_project_id):
             if not (group.name or "").startswith(SECURITY_GROUP_NAME_PREFIX):
                 continue
             if group.description != self._description:
                 continue
-            if group.name in groups:
-                duplicates.append(group)
-                continue
-            groups[group.name] = group
-        return groups, duplicates
+            groups.setdefault(group.name, []).append(group)
+        return groups
 
     def _create_group(self, connection: typing.Any, name: str) -> typing.Any:
         """Create a scale set's group and return it."""

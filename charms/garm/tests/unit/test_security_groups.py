@@ -320,7 +320,10 @@ def test_a_group_no_scaleset_claims_is_deleted(sdk):
         ]
     )
 
-    _reconciler(sdk, network).reconcile(rules={SCALESET_NAME: [SSH]})
+    reconciler = _reconciler(sdk, network)
+
+    reconciler.reconcile(rules={SCALESET_NAME: [SSH]})
+    reconciler.sweep(claimed=[SCALESET_NAME])
 
     assert network.deleted_groups == ["sg-orphan"]
 
@@ -368,7 +371,10 @@ def test_a_group_still_in_use_is_kept(sdk):
         ]
     )
 
-    _reconciler(sdk, network).reconcile(rules={SCALESET_NAME: [SSH]})
+    reconciler = _reconciler(sdk, network)
+
+    reconciler.reconcile(rules={SCALESET_NAME: [SSH]})
+    reconciler.sweep(claimed=[SCALESET_NAME])
 
     assert network.deleted_groups == []
     assert network.attempts == 1
@@ -405,19 +411,34 @@ def test_a_scale_set_that_opts_out_has_its_group_deleted(sdk):
     assert: The group is deleted, so turning the feature off does not leak it.
     """
     network = _FakeNetwork([_FakeGroup(GROUP_NAME, gid="sg-orphan")])
+    reconciler = _reconciler(sdk, network)
 
-    groups = _reconciler(sdk, network).reconcile(rules={})
+    assert reconciler.reconcile(rules={}) == {}
+    assert reconciler.sweep(claimed=[]) == 1
 
-    assert groups == {}
     assert network.deleted_groups == ["sg-orphan"]
+
+
+def test_reconcile_does_not_delete_the_groups_the_sweep_has_not_seen(sdk):
+    """
+    arrange: A group no scale set claims.
+    act: Reconcile, without sweeping.
+    assert: Nothing is deleted, because deletion happens after the scale sets are reconciled —
+        that is when a deleted scale set has released its group.
+    """
+    network = _FakeNetwork([_FakeGroup("garm-renamed-away", gid="sg-orphan")])
+
+    _reconciler(sdk, network).reconcile(rules={})
+
+    assert network.deleted_groups == []
 
 
 def test_a_duplicate_group_name_is_also_swept(sdk):
     """
     arrange: Two groups this application created with the same name, from an interrupted pass.
     act: Reconcile the scale set.
-    assert: One is kept and the other deleted, because a group that is never claimed is never
-        removed either.
+    assert: Both are converged to the published rules — the copy a runner is attached to must
+        not keep stale rules — and the unattached one is deleted.
     """
     network = _FakeNetwork(
         [
@@ -426,7 +447,10 @@ def test_a_duplicate_group_name_is_also_swept(sdk):
         ]
     )
 
-    groups = _reconciler(sdk, network).reconcile(rules={SCALESET_NAME: [SSH]})
+    reconciler = _reconciler(sdk, network)
+
+    groups = reconciler.reconcile(rules={SCALESET_NAME: [SSH]})
+    reconciler.sweep(claimed=[SCALESET_NAME])
 
     assert groups == {SCALESET_NAME: "sg-kept"}
     assert network.deleted_groups == ["sg-duplicate"]
