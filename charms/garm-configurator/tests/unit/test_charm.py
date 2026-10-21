@@ -1042,3 +1042,31 @@ def test_image_visibility_written_to_garm_configurator_relation(configured, expe
     assert out.get_relation(garm_relation.id).local_unit_data.get("image_visibility", "") == (
         expected
     )
+
+
+@pytest.mark.parametrize(
+    "configured, expected",
+    [("sg-runner", "sg-runner"), (None, "")],
+    ids=["set", "unset"],
+)
+def test_security_group_written_to_garm_configurator_relation(configured, expected):
+    """
+    arrange: Valid config with security-group set or unset.
+    act: Run config-changed with a garm-configurator relation present.
+    assert: The databag carries the group, or an empty string when unset so the provider
+        attaches the project's default group.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    if configured is not None:
+        config["security-group"] = configured
+    garm_relation = _make_garm_configurator_relation()
+    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.get_relation(garm_relation.id).local_unit_data.get("security_group", "") == (
+        expected
+    )

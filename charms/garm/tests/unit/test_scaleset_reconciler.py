@@ -258,6 +258,7 @@ def _spec(
     template_id=None,
     runner_config=None,
     image_visibility="",
+    security_group="",
 ):
     return ScalesetSpec(
         name=name,
@@ -276,6 +277,7 @@ def _spec(
         template_id=template_id,
         runner_config=runner_config or RunnerConfig(),
         image_visibility=image_visibility,
+        security_group=security_group,
     )
 
 
@@ -1336,6 +1338,48 @@ def test_create_sends_image_visibility_as_an_extra_spec():
 
     _, _, params = client.created[0]
     assert params.extra_specs == {"image_visibility": "private"}
+
+
+@pytest.mark.parametrize(
+    "observed_extra, desired, expected_extra",
+    [
+        ({"security_groups": ["sg-old"]}, "sg-runner", {"security_groups": ["sg-runner"]}),
+        ({"security_groups": ["sg-runner"]}, "", {}),
+    ],
+    ids=["changed", "cleared"],
+)
+def test_update_converges_security_group(observed_extra, desired, expected_extra):
+    """
+    arrange: An existing scaleset carrying a different security group, or one the spec no
+        longer sets.
+    act: Reconcile the spec.
+    assert: One update brings the extra spec to the desired group, clearing it with an
+        explicit empty dict when unset — GARM round-trips the value as sent, so a key it
+        rewrote would update the scaleset on every reconcile instead.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(extra_specs=observed_extra)],
+    )
+    _reconcile(client, [_spec(security_group=desired)])
+
+    assert len(client.updated) == 1
+    _, params = client.updated[0]
+    assert params.extra_specs == expected_extra
+
+
+def test_create_sends_security_group_as_an_extra_spec():
+    """
+    arrange: A spec naming a security group locked down for runner traffic.
+    act: Reconcile a create.
+    assert: The group reaches the provider, which attaches it to the runner's port; without
+        it runners share the project's default group and can reach each other.
+    """
+    client = FakeGarmClient(providers=["openstack-demo"], scalesets=[])
+    _reconcile(client, [_spec(security_group="sg-runner")])
+
+    _, _, params = client.created[0]
+    assert params.extra_specs == {"security_groups": ["sg-runner"]}
 
 
 @pytest.mark.parametrize(
