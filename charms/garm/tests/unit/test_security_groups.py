@@ -527,6 +527,27 @@ def test_an_openstack_failure_is_reported_to_the_caller(monkeypatch):
     assert str(exc_info.value) == "keystone unreachable"
 
 
+def test_sweep_reports_an_unreachable_api_without_raising(monkeypatch):
+    """
+    arrange: An OpenStack that cannot be reached.
+    act: Sweep.
+    assert: Nothing is deleted and nothing raises: the scale sets are already reconciled, so a
+        failed sweep costs a retry, not a failed hook.
+    """
+
+    def connect(**_auth_fields):
+        raise openstack.exceptions.SDKException("neutron unreachable")
+
+    monkeypatch.setattr("security_groups.openstack.connect", connect)
+
+    assert (
+        SecurityGroupReconciler(provider_config=PROVIDER_CONFIG, owner=OWNER).sweep(
+            claimed=[SCALESET_NAME]
+        )
+        == 0
+    )
+
+
 def test_delete_never_raises(monkeypatch):
     """
     arrange: An OpenStack that cannot be reached while the application is being removed.

@@ -147,10 +147,9 @@ class SecurityGroupReconciler:
             claimed: The scale set names that still want a group.
 
         Returns:
-            How many groups were deleted.
-
-        Raises:
-            SecurityGroupReconcileError: If OpenStack refused or could not be reached.
+            How many groups were deleted. This never raises: the scale sets are already
+            reconciled by the time it runs, so a failure costs nothing but a retry on the next
+            pass, and a tenant that opted out must not block the unit.
         """
         wanted = {security_group_name(scaleset_name=name) for name in claimed}
         try:
@@ -174,7 +173,8 @@ class SecurityGroupReconciler:
                     connection=connection, unclaimed=[*unclaimed, *surplus]
                 )
         except _OPENSTACK_ERRORS as exc:
-            raise SecurityGroupReconcileError(_reason(exc)) from exc
+            logger.warning("Could not remove orphaned security groups: %s", _reason(exc))
+            return 0
 
     def delete(self) -> bool:
         """Delete every group this application created, unless a port still attaches it.

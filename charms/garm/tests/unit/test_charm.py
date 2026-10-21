@@ -18,6 +18,7 @@ import os
 import typing
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import openstack.exceptions
 import ops
 import pytest
 import yaml
@@ -41,6 +42,7 @@ from github_reconciler import (
     CredentialSpec,
 )
 from scaleset_reconciler import Handover, ScalesetProgress, _effective_extra_specs
+from security_groups import SecurityGroupReconcileError
 
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
@@ -1482,6 +1484,28 @@ def test_a_non_leader_does_not_touch_the_security_groups(
     # A non-leader does not reach the scaleset reconciler at all, so nothing is created either
     # way; what matters is that the leader's groups are not touched.
     garm_api.scaleset.return_value.reconcile.assert_not_called()
+
+
+def test_an_opted_out_tenant_that_cannot_reach_openstack_stays_active(
+    ctx: Context, garm_api: _GarmApiMocks, openstack_tenant, monkeypatch
+):
+    """
+    arrange: A configurator that opted out, and an OpenStack the charm cannot reach — the state
+        the integration suite runs in.
+    act: Run update-status.
+    assert: The unit stays active. The only OpenStack call left for an opt-out is the sweep for a
+        group it may have created earlier, and failing that must not block the deployment.
+    """
+
+    def security_groups(self, project_id=None):
+        raise openstack.exceptions.SDKException("keystone unreachable")
+
+    monkeypatch.setattr(type(openstack_tenant.network), "security_groups", security_groups)
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "security_group_rules": "[]"}
+
+    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    assert out.unit_status == ops.ActiveStatus()
 
 
 def test_unusable_rules_do_not_sweep_the_group(

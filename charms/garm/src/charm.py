@@ -75,6 +75,8 @@ _PHASE_RETIRING: typing.Final[str] = "retiring predecessor"
 _PHASE_AWAITING_DELETION: typing.Final[str] = "awaiting deletion"
 
 GARM_CONFIG_VERSION: typing.Final[str] = "1"
+# Juju shows one line, so the cause goes to debug-log.
+_SECURITY_GROUP_STATUS: typing.Final[str] = "Waiting for OpenStack security groups (see debug-log)"
 
 
 def _generate_passphrase(length: int = _DB_PASSPHRASE_LENGTH) -> str:
@@ -817,17 +819,14 @@ class GarmCharm(paas_charm.go.Charm):
                 # nothing and leaves its group to the sweep.
                 ensured = reconciler.reconcile(rules=wanted.get(tenant, {}))
             except SecurityGroupReconcileError as exc:
-                logger.warning("Security groups for %s could not be ensured: %s", tenant, exc)
-                failed = True
+                failed = (
+                    _report_security_group_failure(tenant=tenant, wanted=wanted, exc=exc) or failed
+                )
                 continue
             group_ids.update(ensured)
 
         missing = any(name not in group_ids for names in wanted.values() for name in names)
-        status = (
-            "Waiting for OpenStack security groups (see debug-log)"
-            if failed or unusable or missing
-            else None
-        )
+        status = _SECURITY_GROUP_STATUS if failed or unusable or missing else None
         return group_ids, status
 
     def _remove_orphaned_security_groups(self, desired: list[ScalesetSpec]) -> None:
@@ -979,7 +978,8 @@ class GarmCharm(paas_charm.go.Charm):
             group_ids, security_group_status = self._ensure_security_groups()
             desired = self._build_desired_scalesets(template_id, group_ids=group_ids)
             replacing = ScalesetReconciler(auth_client).reconcile(desired)
-            # Only now: a scale set deleted this pass has released its group.
+            # Only now: a scale set deleted this pass has released its group. The sweep reports
+            # its own failures, because the scale sets are already reconciled.
             self._remove_orphaned_security_groups(desired=desired)
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
@@ -1045,6 +1045,23 @@ class GarmCharm(paas_charm.go.Charm):
             return None
         logger.info("GARM agent mode enabled with garm-agent %s from the rock", version)
         return True
+
+
+def _report_security_group_failure(
+    tenant: tuple[str, str],
+    wanted: dict[tuple[str, str], dict[str, list[SecurityGroupRule]]],
+    exc: Exception,
+) -> bool:
+    """Log one tenant's security group failure, and say whether the operator must hear about it.
+
+    A tenant with nothing claimed was only checked for a group left behind, so failing to reach
+    OpenStack there must not block a deployment that opted out.
+    """
+    if wanted.get(tenant):
+        logger.warning("Security groups for %s could not be ensured: %s", tenant, exc)
+        return True
+    logger.info("Could not check %s for orphaned security groups: %s", tenant, exc)
+    return False
 
 
 def _tenant_of(config: Mapping[str, str]) -> tuple[str, str]:
