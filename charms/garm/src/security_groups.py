@@ -133,10 +133,38 @@ class SecurityGroupReconciler:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
         return groups
 
+    def sweep(self, claimed: typing.Iterable[str]) -> int:
+        """Delete the groups this application owns that no scale set claims any more.
+
+        Runs after the scale sets are reconciled, so a group whose scale set was deleted in this
+        pass is already unclaimed.
+
+        Args:
+            claimed: The scale set names that still want a group.
+
+        Returns:
+            How many groups were deleted.
+
+        Raises:
+            SecurityGroupReconcileError: If OpenStack refused or could not be reached.
+        """
+        wanted = {security_group_name(scaleset_name=name) for name in claimed}
+        try:
+            connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
+            with connect(**self._auth_fields()) as connection:
+                groups, duplicates = self._groups_by_name(connection=connection)
+                unclaimed = [group for name, group in groups.items() if name not in wanted]
+                return self._delete_unclaimed(
+                    connection=connection, unclaimed=[*unclaimed, *duplicates]
+                )
+        except _OPENSTACK_ERRORS as exc:
+            raise SecurityGroupReconcileError(_reason(exc)) from exc
+
     def delete(self) -> bool:
         """Delete every group this application created, unless a port still attaches it.
 
-        Used when the application is removed.
+        Used when the application is removed, so a group a port still holds is retried briefly:
+        nothing runs after this pass to try again.
 
         Returns:
             Whether any group was deleted. This never raises: it runs while the charm is being
@@ -145,9 +173,15 @@ class SecurityGroupReconciler:
         try:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             with connect(**self._auth_fields()) as connection:
-                claimed, duplicates = self._groups_by_name(connection=connection)
-                unclaimed = [*claimed.values(), *duplicates]
-                return self._delete_unclaimed(connection=connection, unclaimed=unclaimed) > 0
+                groups, duplicates = self._groups_by_name(connection=connection)
+                return (
+                    self._delete_unclaimed(
+                        connection=connection,
+                        unclaimed=[*groups.values(), *duplicates],
+                        settle_attempts=REMOVAL_DELETE_ATTEMPTS,
+                    )
+                    > 0
+                )
         except _OPENSTACK_ERRORS as exc:
             logger.warning("Could not delete the managed security groups: %s", _reason(exc))
             return False
