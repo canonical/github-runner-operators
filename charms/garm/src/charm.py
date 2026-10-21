@@ -42,7 +42,13 @@ from github_reconciler import (
     GithubReconciler,
 )
 from resource_cleanup import GarmCleanupError, GarmResourceCleanup
-from scaleset_reconciler import Handover, ScalesetProgress, ScalesetReconciler, ScalesetSpec
+from scaleset_reconciler import (
+    Handover,
+    ScalesetProgress,
+    ScalesetReconciler,
+    ScalesetSpec,
+    _claims_security_group,
+)
 from security_groups import SecurityGroupReconcileError, SecurityGroupReconciler
 from security_log import owasp_log
 
@@ -843,7 +849,8 @@ class GarmCharm(paas_charm.go.Charm):
             claimed = [
                 spec.name
                 for spec in desired
-                if spec.security_group_rules and tenant_of.get(spec.provider_name) == tenant
+                if _claims_security_group(spec=spec)
+                and tenant_of.get(spec.provider_name) == tenant
             ]
             SecurityGroupReconciler(provider_config=config, owner=self.app.name).sweep(
                 claimed=claimed

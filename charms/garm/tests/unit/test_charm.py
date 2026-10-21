@@ -1484,6 +1484,27 @@ def test_a_non_leader_does_not_touch_the_security_groups(
     garm_api.scaleset.return_value.reconcile.assert_not_called()
 
 
+def test_unusable_rules_do_not_sweep_the_group(
+    ctx: Context, garm_api: _GarmApiMocks, openstack_tenant
+):
+    """
+    arrange: A configurator that published valid rules in an earlier pass, then published rules
+        that do not parse.
+    act: Run update-status with the unparsable document.
+    assert: The group created earlier is still there, because the scale set still exists and
+        still claims it; only an explicit empty list opts out.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+    created = [group.name for group in openstack_tenant.network.groups]
+
+    broken = {**data, "security_group_rules": "not json"}
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: broken}))
+
+    assert created == ["garm-my-scaleset"]
+    assert [group.name for group in openstack_tenant.network.groups] == created
+
+
 def test_a_configurator_without_the_key_is_left_alone(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configurator that predates the split, publishing no security group rules while

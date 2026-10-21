@@ -1164,15 +1164,24 @@ class ScalesetReconciler:
         )
 
 
+def _claims_security_group(spec: ScalesetSpec) -> bool:
+    """Whether a spec asks for a security group, whatever this pass could do about it.
+
+    A missing or unparsable rules document still claims: the group it would use must not be
+    swept while its scale set exists. Only an explicit empty list opts out.
+    """
+    return spec.security_group_rules != []
+
+
 def _security_group_unattached(spec: ScalesetSpec) -> bool:
     """Whether a spec asked for a security group and did not get one.
 
     Unparsable rules count as asking: a configurator that published garbage must not quietly
     produce unisolated runners.
     """
-    if spec.security_group_rules is None:
-        return True
-    return bool(spec.security_group_rules) and not spec.security_group_id
+    if not _claims_security_group(spec=spec):
+        return False
+    return spec.security_group_rules is None or not spec.security_group_id
 
 
 def target_scaleset_name(logical_name: str, labels: list[str]) -> str:
