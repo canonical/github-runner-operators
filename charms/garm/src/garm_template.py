@@ -66,6 +66,8 @@ def build_env_snippet(connections: list[SSHDebugInfo]) -> str:
     The GitHub Actions runner applies ``.env`` to its own environment before any
     job starts, so steps inherit these values.
 
+    # 2026-10-21: once the account setup decisions are finalized, this workaround
+    # can be removed. See #438.
     The first two entries are the account the runner UID resolves to, because
     the runner images create ``runner`` as a duplicate-UID alias of ``ubuntu``:
     every lookup keyed on the UID — ``getpwuid``, and with it ``sg``, ``newgrp``,
