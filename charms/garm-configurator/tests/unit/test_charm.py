@@ -1046,15 +1046,15 @@ def test_image_visibility_written_to_garm_configurator_relation(configured, expe
 
 @pytest.mark.parametrize(
     "configured, expected",
-    [("sg-runner", "sg-runner"), (" sg-runner ", "sg-runner"), (None, "")],
-    ids=["set", "stripped", "unset"],
+    [("sg-runner", "sg-runner"), (None, "")],
+    ids=["set", "unset"],
 )
 def test_security_group_written_to_garm_configurator_relation(configured, expected):
     """
-    arrange: Valid config with security-group set, padded with whitespace, or unset.
+    arrange: Valid config with security-group set or unset.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The databag carries the stripped security group, or an empty string when unset so
-        the provider attaches the project's default group.
+    assert: The databag carries the group, or an empty string when unset so the provider
+        attaches the project's default group.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()

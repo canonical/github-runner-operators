@@ -332,7 +332,7 @@ class ScalesetConfig(BaseModel):
             enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
             image_visibility=image_visibility,
-            security_group=_get_string_config(charm, SECURITY_GROUP_CONFIG_NAME),
+            security_group=str(charm.config.get(SECURITY_GROUP_CONFIG_NAME, "")).strip(),
         )
 
 
@@ -340,11 +340,6 @@ def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
     """Return a stripped optional string configuration value."""
     value = charm.config.get(key)
     return (str(value).strip() if value else "") or None
-
-
-def _get_string_config(charm: ops.CharmBase, key: str) -> str:
-    """Return a stripped string configuration value, or "" when unset."""
-    return _get_optional_string_config(charm, key) or ""
 
 
 def _ipv4_exclude_token_error(token: str) -> str | None:

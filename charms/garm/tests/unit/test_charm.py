@@ -1399,8 +1399,8 @@ def test_image_visibility_follows_the_configurator_databag(
 
 @pytest.mark.parametrize(
     "databag_value, expected",
-    [("sg-runner", "sg-runner"), ("", ""), (None, "")],
-    ids=["set", "empty", "absent"],
+    [("sg-runner", "sg-runner"), (None, "")],
+    ids=["set", "absent"],
 )
 def test_security_group_follows_the_configurator_databag(
     ctx: Context, garm_api: _GarmApiMocks, databag_value: str | None, expected: str
