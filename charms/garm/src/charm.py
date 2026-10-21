@@ -682,8 +682,19 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
-        """Build the desired scaleset list from all garm-configurator relation units."""
+    def _build_desired_scalesets(
+        self, template_id: int | None
+    ) -> tuple[list[ScalesetSpec], str | None]:
+        """Build the desired scaleset list from all garm-configurator relation units.
+
+        Each scale set's security group is ensured here too, because its id is part of the
+        desired state: the providers have to be reconciled once per tenant, and the scale set is
+        not created without the group.
+
+        Returns:
+            The specs, each carrying its group id when one was ensured, and a status message
+            when a group could not be.
+        """
         specs = []
         for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
             # Sorted, because `relation.units` is a set: the reconciler's dedupe is
@@ -694,7 +705,7 @@ class GarmCharm(paas_charm.go.Charm):
                 spec = self._build_scaleset_spec(relation.data[unit], template_id)
                 if spec is not None:
                     specs.append(spec)
-        return specs
+        return self._with_security_groups(specs=specs)
 
     @staticmethod
     def _build_scaleset_spec(
@@ -776,7 +787,7 @@ class GarmCharm(paas_charm.go.Charm):
             security_group_rules=security_group_rules,
         )
 
-    def _attach_security_groups(
+    def _with_security_groups(
         self, specs: list[ScalesetSpec]
     ) -> tuple[list[ScalesetSpec], str | None]:
         """Ensure each scale set's security group and record the id to attach.
@@ -954,9 +965,7 @@ class GarmCharm(paas_charm.go.Charm):
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
-            desired, security_group_status = self._attach_security_groups(
-                self._build_desired_scalesets(template_id)
-            )
+            desired, security_group_status = self._build_desired_scalesets(template_id)
             replacing = ScalesetReconciler(auth_client).reconcile(desired)
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
