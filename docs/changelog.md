@@ -8,9 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
-## 2026-10-20
+## 2026-10-22
 
 - `garm-configurator`: add the `security-group-rules` configuration, which isolates a scale set's runners in their own OpenStack security group instead of the project's default group. The configurator validates the rules and publishes them; the `garm` charm creates the group, keeps its rules equal to the published list, and attaches it to every runner. The option is on by default and the default allows all egress and no ingress, so after the refresh each scale set gets one group, which counts against the project's security group quota and needs credentials allowed to create and delete security groups and their rules. Set the option to `[]` to manage no group. The `garm` charm deletes a group once no scale set claims it, and removing only the configurator leaves its groups behind.
+
+## 2026-10-21
+
+- `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
 
 ## 2026-10-16
 
