@@ -792,6 +792,11 @@ class GarmCharm(paas_charm.go.Charm):
             The specs with their group id filled in, and a status message when something could
             not be ensured. A spec left without an id is skipped by the scaleset reconciler.
         """
+        if not self.unit.is_leader():
+            # One unit owns the groups: two units would race each other's creates and deletes.
+            # The specs then carry no id, so the scaleset reconciler leaves them to the leader
+            # rather than creating runners without isolation.
+            return specs, None
         configs = self._get_configurator_provider_configs()
         tenant_of = {
             config["unit_name"]: (config["auth_url"], config["project_name"]) for config in configs

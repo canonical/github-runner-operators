@@ -1465,6 +1465,25 @@ def test_the_attached_group_reaches_the_provider_extra_specs(
     ]
 
 
+def test_a_non_leader_does_not_touch_the_security_groups(
+    ctx: Context, garm_api: _GarmApiMocks, openstack_tenant
+):
+    """
+    arrange: A unit that is not the leader, with a configurator publishing rules.
+    act: Run update-status.
+    assert: No group is created — one unit owns them, so two cannot race each other's creates and
+        deletes — and the scale set carries no id, so the leader is the one that creates it.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+
+    ctx.run(ctx.on.update_status(), _state(leader=False, configurator_units_data={0: data}))
+
+    assert openstack_tenant.network.groups == []
+    # A non-leader does not reach the scaleset reconciler at all, so nothing is created either
+    # way; what matters is that the leader's groups are not touched.
+    garm_api.scaleset.return_value.reconcile.assert_not_called()
+
+
 def test_a_configurator_without_the_key_is_left_alone(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configurator that predates the split, publishing no security group rules while
