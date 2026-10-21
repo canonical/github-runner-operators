@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from charm_state import RunnerConfig
+from charm_state import RunnerConfig, SecurityGroupRule
 from garm_api import (
     GarmApiError,
     GarmAuthenticatedClient,
@@ -149,6 +149,9 @@ class ScalesetSpec:
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
     image_visibility: str = ""
+    # None means the configurator's rules could not be parsed, so this scale set is skipped
+    # rather than created without the isolation it asked for. Empty means no group is managed.
+    security_group_rules: list[SecurityGroupRule] | None = None
     security_group_id: str = ""
 
 
@@ -163,8 +166,14 @@ class ScalesetReconciler:
         """
         self._client = client
 
-    def reconcile(self, desired: list[ScalesetSpec]) -> list[ScalesetProgress]:
+    def reconcile(
+        self, desired: list[ScalesetSpec], skip: frozenset[str] | set[str] = frozenset()
+    ) -> list[ScalesetProgress]:
         """Sync GARM scalesets to match *desired*.
+
+        A spec in *skip* is claimed but not reconciled. That is the fail-closed path for a
+        scale set whose security group could not be ensured: it must not be created without
+        the group, and it must not be treated as an orphan either.
 
         Performs the minimum set of CREATE / UPDATE / DELETE operations, and
         maintains a per-scaleset runner-install template carrying the runner
@@ -191,6 +200,7 @@ class ScalesetReconciler:
 
         Args:
             desired: The full desired set of scalesets.
+            skip: Scale set names to claim but leave alone this pass.
 
         Returns:
             One entry per replacement still in flight; empty once converged.
@@ -223,7 +233,7 @@ class ScalesetReconciler:
             try:
                 progress.extend(
                     self._reconcile_one(
-                        spec, providers, observed, templates, families.get(spec.name, [])
+                        spec, providers, observed, templates, families.get(spec.name, []), skip
                     )
                 )
             except (GarmConnectionError, GarmUnauthorizedError):
@@ -325,6 +335,7 @@ class ScalesetReconciler:
         observed: dict[str, ScaleSet],
         templates: dict[str, Template],
         family: list[str],
+        skip: frozenset[str] | set[str] = frozenset(),
     ) -> list[ScalesetProgress]:
         """Reconcile a single desired scaleset: validate, create or update, and sync its template.
 
@@ -334,10 +345,17 @@ class ScalesetReconciler:
             observed: Observed scalesets keyed by name.
             templates: Observed templates keyed by name.
             family: Every live generation of this spec, plus its target name.
+            skip: Scale set names to leave alone this pass.
 
         Returns:
             One entry per replaced generation of this spec still draining.
         """
+        if spec.name in skip:
+            logger.info(
+                "Leaving scaleset %s alone this pass: its security group is not ensured",
+                spec.name,
+            )
+            return []
         active_name = target_scaleset_name(spec.name, spec.labels)
         try:
             create_params = self._to_create_params(spec, active_name)

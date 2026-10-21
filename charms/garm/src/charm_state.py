@@ -12,12 +12,14 @@ as the state grows.
 
 import dataclasses
 import ipaddress
+import json
 import logging
 import re
 import typing
 from collections.abc import Mapping
 
 import ops
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from entity_reconciler import EntitySpec
 
@@ -48,6 +50,84 @@ class SSHDebugInfo:
 
 # Databag keys written by the garm-configurator charm — the single source of
 # truth for the configurator→garm relation contract for runner options.
+SECURITY_GROUP_RULES_DATABAG_KEY: typing.Final = "security_group_rules"
+
+
+class SecurityGroupRule(BaseModel):
+    """One rule of a scale set's OpenStack security group.
+
+    The configurator validates the operator's ``security-group-rules`` before publishing them,
+    but relation data is still parsed defensively here: a malformed document must leave the
+    existing group alone rather than converge it to nothing.
+
+    Attributes:
+        direction: Whether the rule admits ingress or egress traffic.
+        protocol: Transport protocol the rule applies to, or "any" for every protocol.
+        port_min: First port of the range, or None to cover every port.
+        port_max: Last port of the range, or None to cover only port_min.
+        remote_ip_prefix: CIDR the rule applies to, or None to cover every address.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: typing.Literal["ingress", "egress"]
+    protocol: typing.Literal["tcp", "udp", "icmp", "icmpv6", "any"] = "any"
+    port_min: int | None = None
+    port_max: int | None = None
+    remote_ip_prefix: str | None = None
+
+    @field_validator("remote_ip_prefix")
+    @classmethod
+    def _validate_cidr(cls, value: str | None) -> str | None:
+        """Require a CIDR, normalised to the network address OpenStack expects."""
+        if value is None:
+            return None
+        try:
+            return str(ipaddress.ip_network(value.strip(), strict=True))
+        except ValueError as exc:
+            raise ValueError(f"must be a CIDR; got {value!r}") from exc
+
+    @model_validator(mode="after")
+    def _normalise_ports(self) -> "SecurityGroupRule":
+        """Fill in a single port's upper bound, as the configurator does before publishing.
+
+        Neutron reports a single port as a range of one. Without the same normalisation here
+        every rule with a single port would look different from the one in the group, and be
+        recreated on each pass.
+        """
+        if self.port_min is not None and self.port_max is None:
+            self.port_max = self.port_min
+        return self
+
+    @property
+    def ethertype(self) -> str:
+        """The ethertype the remote prefix implies, which OpenStack defaults to IPv4."""
+        if self.remote_ip_prefix and ":" in self.remote_ip_prefix:
+            return "IPv6"
+        return "IPv4"
+
+
+def parse_security_group_rules(raw: str) -> list[SecurityGroupRule]:
+    """Parse the rules a configurator published for its scale set.
+
+    Args:
+        raw: The relation value: a JSON list of rule objects, or empty when the configurator
+            manages no group.
+
+    Raises:
+        ValueError: If the document is not a JSON list of valid rules.
+
+    Returns:
+        The parsed rules, empty when the configurator manages no group.
+    """
+    if not raw.strip():
+        return []
+    document = json.loads(raw)
+    if not isinstance(document, list):
+        raise ValueError("security_group_rules must be a JSON list of rules")
+    return [SecurityGroupRule.model_validate(entry) for entry in document]
+
+
 RUNNER_OPTION_DATABAG_KEYS: typing.Final = (
     "dockerhub_mirror",
     "runner_http_proxy",

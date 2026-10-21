@@ -17,14 +17,18 @@ import ops
 import paas_charm.go
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
+from pydantic import ValidationError
 
 from agent_tools import AgentToolsError, ensure_agent_tools
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
+    SECURITY_GROUP_RULES_DATABAG_KEY,
     CharmState,
     RunnerConfig,
+    SecurityGroupRule,
     credential_name,
+    parse_security_group_rules,
     resolve_entity,
 )
 from entity_reconciler import EntityReconciler
@@ -39,6 +43,7 @@ from github_reconciler import (
 )
 from resource_cleanup import GarmCleanupError, GarmResourceCleanup
 from scaleset_reconciler import Handover, ScalesetProgress, ScalesetReconciler, ScalesetSpec
+from security_groups import SecurityGroupReconcileError, SecurityGroupReconciler
 from security_log import owasp_log
 
 logger = logging.getLogger(__name__)
@@ -183,6 +188,24 @@ class GarmCharm(paas_charm.go.Charm):
         """Reconcile charm state."""
         self.restart()
 
+    def _drain_garm(self, base_url: str, username: str, password: str) -> None:
+        """Drain GARM's resources, then delete the security groups it created.
+
+        Args:
+            base_url: The GARM API base URL.
+            username: GARM administrator username.
+            password: GARM administrator password.
+        """
+        owasp_log.sys_shutdown(
+            userid=username,
+            description="GARM application teardown: draining resources before removal",
+        )
+        auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
+        GarmResourceCleanup(auth_client).run()
+        # The scale sets and their runners are gone, so their groups can go too.
+        for config in self._get_configurator_provider_configs():
+            SecurityGroupReconciler(provider_config=config, owner=self.app.name).delete()
+
     def _on_remove(self, _: ops.RemoveEvent) -> None:
         """Drain GARM resources before Juju removes the application."""
         if not self.unit.is_leader():
@@ -247,12 +270,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         base_url = GARM_LOCAL_API_BASE_URL
         try:
-            owasp_log.sys_shutdown(
-                userid=username,
-                description="GARM application teardown: draining resources before removal",
-            )
-            auth_client = GarmAuthenticatedClient.from_login(base_url, username, password)
-            GarmResourceCleanup(auth_client).run()
+            self._drain_garm(base_url=base_url, username=username, password=password)
         except GarmApiError as exc:
             logger.error(
                 "GARM removal cleanup failed: %s. Operator action: resolve the "
@@ -714,6 +732,15 @@ class GarmCharm(paas_charm.go.Charm):
             max_runners = int(required["max_runner"])
         except ValueError:
             return None
+        try:
+            security_group_rules: list[SecurityGroupRule] | None = parse_security_group_rules(
+                data.get(SECURITY_GROUP_RULES_DATABAG_KEY, "")
+            )
+        except (ValidationError, ValueError) as exc:
+            # Fail closed: the spec stays claimed so its scale set is not treated as an orphan,
+            # but it is skipped until the rules parse.
+            logger.warning("Scaleset %s has malformed security group rules: %s", name, exc)
+            security_group_rules = None
         return ScalesetSpec(
             name=name,
             provider_name=required["provider_name"],
@@ -732,8 +759,62 @@ class GarmCharm(paas_charm.go.Charm):
             template_id=template_id,
             runner_config=RunnerConfig.from_databag(data),
             image_visibility=data.get("image_visibility", "").strip(),
-            security_group_id=data.get("security_group_id", "").strip(),
+            security_group_rules=security_group_rules,
         )
+
+    def _attach_security_groups(
+        self, specs: list[ScalesetSpec]
+    ) -> tuple[list[ScalesetSpec], set[str], str | None]:
+        """Ensure each scale set's security group and record the id to attach.
+
+        Runs per configurator, because each one holds the credentials of its own tenant: a
+        union of names would create groups in the wrong project and hand back ids the provider
+        cannot attach.
+
+        Args:
+            specs: The desired scale sets, carrying the rules their configurator published.
+
+        Returns:
+            The specs with their group id filled in, the scale sets to leave alone this pass,
+            and a status message when something could not be ensured.
+        """
+        malformed = {spec.name for spec in specs if spec.security_group_rules is None}
+        wanted: dict[str, dict[str, list[SecurityGroupRule]]] = {}
+        for spec in specs:
+            if spec.security_group_rules:
+                wanted.setdefault(spec.provider_name, {})[spec.name] = spec.security_group_rules
+
+        group_ids: dict[tuple[str, str], str] = {}
+        skipped = set(malformed)
+        failed: list[str] = []
+        for config in self._get_configurator_provider_configs():
+            provider_names = wanted.get(config["unit_name"], {})
+            if not provider_names:
+                continue
+            reconciler = SecurityGroupReconciler(provider_config=config, owner=self.app.name)
+            try:
+                for name, group_id in reconciler.reconcile(rules=provider_names).items():
+                    group_ids[(config["unit_name"], name)] = group_id
+            except SecurityGroupReconcileError as exc:
+                logger.warning(
+                    "Security groups for %s could not be ensured: %s", config["unit_name"], exc
+                )
+                # Fail closed: these scale sets are not created without their group, and they
+                # stay claimed so the scale set reconciler does not treat them as orphans.
+                skipped.update(provider_names)
+                failed.append(str(exc))
+
+        attached = [
+            dataclasses.replace(
+                spec, security_group_id=group_ids.get((spec.provider_name, spec.name), "")
+            )
+            for spec in specs
+        ]
+        if failed or malformed:
+            if failed:
+                logger.warning("%d tenant(s) could not be reconciled: %s", len(failed), failed[0])
+            return attached, skipped, "Waiting for OpenStack security groups (see debug-log)"
+        return attached, skipped, None
 
     def _build_desired_credentials(self) -> list[CredentialSpec]:
         """Build desired GitHub credentials from configurator relation data.
@@ -849,9 +930,10 @@ class GarmCharm(paas_charm.go.Charm):
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
-            replacing = ScalesetReconciler(auth_client).reconcile(
+            desired, skipped, security_group_status = self._attach_security_groups(
                 self._build_desired_scalesets(template_id)
             )
+            replacing = ScalesetReconciler(auth_client).reconcile(desired, skip=skipped)
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
             # Active, not maintenance: every label is served throughout the drain, by
@@ -864,6 +946,9 @@ class GarmCharm(paas_charm.go.Charm):
                 )
             else:
                 self.update_app_and_unit_status(ops.ActiveStatus())
+            if security_group_status:
+                # Set after the active status above, which would otherwise overwrite it.
+                self.update_app_and_unit_status(ops.WaitingStatus(security_group_status))
         except CharmedTemplateError as exc:
             logger.warning("GARM charmed template error during reconcile: %s", exc)
             self.update_app_and_unit_status(ops.WaitingStatus(str(exc)))

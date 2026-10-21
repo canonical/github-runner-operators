@@ -25,6 +25,14 @@ description: |
 extensions:
   - go-framework
 
+parts:
+  charm:
+    # charmcraft installs requirements.txt with --no-binary=:all:, so the OpenStack SDK's
+    # cryptography dependency would otherwise be built from source and need OpenSSL headers.
+    # Installing it from wheels first avoids both.
+    charm-binary-python-packages:
+      - cryptography
+
 requires:
   postgresql:
     interface: postgresql_client

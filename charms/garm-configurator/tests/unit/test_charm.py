@@ -11,7 +11,6 @@ import pytest
 from scenario import Context, Relation, Secret, State
 
 from charm import GarmConfiguratorCharm
-from openstack_security_group import SecurityGroupReconcileError
 
 
 def _make_secret():
@@ -1106,13 +1105,12 @@ def _security_group_rules_config() -> str:
     return '[{"direction": "ingress", "protocol": "tcp", "port_min": 22}, {"direction": "egress"}]'
 
 
-def test_security_group_id_written_to_garm_configurator_relation(security_group_calls):
+def test_security_group_rules_are_published_for_garm_to_apply():
     """
     arrange: Rules configured for the managed group.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The relation carries the reconciled group's id, and the reconcile was asked for
-        the group named after the scaleset with the parsed rules, so GARM attaches exactly
-        the group the charm manages.
+    assert: The relation carries the validated rules, which is what the GARM charm applies to
+        the group it creates; the configurator itself makes no OpenStack call.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -1130,23 +1128,21 @@ def test_security_group_id_written_to_garm_configurator_relation(security_group_
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.unit_status == ops.ActiveStatus("Ready")
-    assert out.get_relation(garm_relation.id).local_unit_data["security_group_id"] == "sg-1234"
-    group_calls = security_group_calls[1:]
-    assert group_calls[0][0] == "garm-my-scaleset"
-    assert [(rule.direction, rule.protocol, rule.port_min) for rule in group_calls[0][1]] == [
+    published = json.loads(
+        out.get_relation(garm_relation.id).local_unit_data["security_group_rules"]
+    )
+    assert [(rule["direction"], rule["protocol"], rule["port_min"]) for rule in published] == [
         ("ingress", "tcp", 22),
         ("egress", "any", None),
     ]
 
 
-def test_default_rules_isolate_the_runners_without_configuration(security_group_calls):
+def test_default_rules_are_published_without_configuration():
     """
     arrange: No security-group-rules set, so the charmcraft default applies.
     act: Run config-changed.
-    assert: The reconcile runs with the default rules — all egress, no ingress — so a
-        deployment is isolated without the operator writing any rule, and a runner can still
-        reach GitHub.
+    assert: The default — all egress, no ingress — is published, so a deployment is isolated
+        without the operator writing a rule.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -1163,56 +1159,21 @@ def test_default_rules_isolate_the_runners_without_configuration(security_group_
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.unit_status == ops.ActiveStatus("Ready")
-    assert out.get_relation(garm_relation.id).local_unit_data["security_group_id"] == "sg-1234"
-    rules = security_group_calls[1][1]
-    assert [(rule.direction, rule.protocol, rule.remote_ip_prefix) for rule in rules] == [
-        ("egress", "any", "0.0.0.0/0"),
-        ("egress", "any", "::/0"),
+    published = json.loads(
+        out.get_relation(garm_relation.id).local_unit_data["security_group_rules"]
+    )
+    assert [(rule["direction"], rule["remote_ip_prefix"]) for rule in published] == [
+        ("egress", "0.0.0.0/0"),
+        ("egress", "::/0"),
     ]
 
 
-def test_rule_change_is_published_on_the_next_reconcile(security_group_calls):
-    """
-    arrange: A deployment already publishing one group id.
-    act: Change the rules and run config-changed again.
-    assert: The reconcile runs with the new rules and the relation keeps the reconciled id,
-        so a rule edit is applied without a unit restart.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["image"] = "runner-noble-amd64"
-    garm_relation = _make_garm_configurator_relation()
-    state = State(
-        config=config,
-        secrets=[secret, pk_secret],
-        relations=[garm_relation],
-        leader=True,
-    )
-    first = ctx.run(ctx.on.config_changed(), state)
-    changed_config = dict(config)
-    changed_config["security-group-rules"] = _security_group_rules_config()
-
-    changed = ctx.run(
-        ctx.on.config_changed(),
-        dataclasses.replace(first, config=changed_config),
-    )
-
-    assert changed.get_relation(garm_relation.id).local_unit_data["security_group_id"] == (
-        "sg-1234"
-    )
-    assert len(security_group_calls[-1][1]) == 2
-
-
-def test_an_empty_rule_list_manages_no_security_group(security_group_calls):
+def test_an_empty_rule_list_publishes_no_rules():
     """
     arrange: security-group-rules set to an empty list, the documented opt-out.
     act: Run config-changed.
-    assert: No group is reconciled, the one it created before is deleted, and the relation
-        carries no id, so the runners keep the project's default group and a deployment that
-        cannot reach OpenStack still works.
+    assert: An empty list is published, so the GARM charm attaches no group and removes the one
+        it created, leaving the runners on the project's default group.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -1231,134 +1192,5 @@ def test_an_empty_rule_list_manages_no_security_group(security_group_calls):
     out = ctx.run(ctx.on.config_changed(), state)
 
     assert out.unit_status == ops.ActiveStatus("Ready")
-    assert "security_group_id" not in out.get_relation(garm_relation.id).local_unit_data
-    assert security_group_calls[-1] == ("delete", "garm-my-scaleset")
-
-
-def test_clearing_the_option_to_an_empty_string_blocks():
-    """
-    arrange: security-group-rules cleared to an empty string, which is how Juju sets a cleared
-        option.
-    act: Run config-changed.
-    assert: The unit blocks and names the way to opt out, so the isolation cannot disappear
-        silently behind an empty value.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["security-group-rules"] = ""
-    garm_relation = _make_garm_configurator_relation()
-    state = State(
-        config=config,
-        secrets=[secret, pk_secret],
-        relations=[garm_relation],
-        leader=True,
-    )
-
-    out = ctx.run(ctx.on.config_changed(), state)
-
-    assert out.unit_status == ops.BlockedStatus(
-        "security-group-rules cannot be empty; use [] to manage no security group"
-    )
-
-
-def test_no_group_is_reconciled_without_a_garm_relation(security_group_calls):
-    """
-    arrange: A configurator integrated only with an image builder, as one supplying provider
-        credentials alone would be.
-    act: Run config-changed.
-    assert: No OpenStack call happens, so such a deployment does not take on a new failure mode
-        for an id nothing consumes.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["image"] = "runner-noble-amd64"
-    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "legacy-uuid"}})
-    state = State(
-        config=config,
-        secrets=[secret, pk_secret],
-        relations=[image_relation],
-        leader=True,
-    )
-
-    out = ctx.run(ctx.on.config_changed(), state)
-
-    assert out.unit_status == ops.ActiveStatus("Ready; configured image overrides image builder")
-    assert security_group_calls == []
-
-
-def test_removing_the_application_deletes_the_managed_group(security_group_calls):
-    """
-    arrange: A deployed configurator whose group is still manageable.
-    act: Run the remove hook as the leader.
-    assert: The group the charm created is deleted, so removing the application does not leave
-        it behind against the project's quota.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["image"] = "runner-noble-amd64"
-    state = State(config=config, secrets=[secret, pk_secret], leader=True)
-
-    ctx.run(ctx.on.remove(), state)
-
-    assert security_group_calls[-1] == ("delete", "garm-my-scaleset")
-
-
-def test_a_non_leader_does_not_delete_on_removal(security_group_calls):
-    """
-    arrange: A configurator unit that is not the leader.
-    act: Run the remove hook.
-    assert: Nothing is deleted, so a multi-unit deployment does not race its own cleanup.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["image"] = "runner-noble-amd64"
-    state = State(config=config, secrets=[secret, pk_secret], leader=False)
-
-    ctx.run(ctx.on.remove(), state)
-
-    assert security_group_calls == []
-
-
-def test_security_group_failure_blocks_and_publishes_nothing(monkeypatch):
-    """
-    arrange: OpenStack refuses the reconcile.
-    act: Run config-changed.
-    assert: The unit blocks naming the group and withholds the scaleset configuration, so
-        GARM never acts on a group id the charm could not confirm.
-    """
-    ctx = Context(GarmConfiguratorCharm)
-    secret = _make_secret()
-    pk_secret = _make_private_key_secret()
-    config = _valid_config(secret, pk_secret)
-    config["image"] = "runner-noble-amd64"
-    garm_relation = _make_garm_configurator_relation()
-    state = State(
-        config=config,
-        secrets=[secret, pk_secret],
-        relations=[garm_relation],
-        leader=True,
-    )
-
-    class _FailingReconciler:
-        def __init__(self, provider_config):
-            pass
-
-        def reconcile(self, name, rules):
-            raise SecurityGroupReconcileError("keystone refused the token")
-
-    monkeypatch.setattr("charm.SecurityGroupReconciler", _FailingReconciler)
-
-    out = ctx.run(ctx.on.config_changed(), state)
-
-    assert out.unit_status == ops.BlockedStatus(
-        "Security group garm-my-scaleset could not be reconciled (see debug-log)"
-    )
-    assert "name" not in out.get_relation(garm_relation.id).local_unit_data
+    published = out.get_relation(garm_relation.id).local_unit_data["security_group_rules"]
+    assert json.loads(published) == []

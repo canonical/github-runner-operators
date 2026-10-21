@@ -16,11 +16,6 @@ from charm_state import (
     CharmConfigInvalidError,
     CharmState,
 )
-from openstack_security_group import (
-    SecurityGroupReconcileError,
-    SecurityGroupReconciler,
-    security_group_name,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +43,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
             self.on.update_status,
         ]:
             self.framework.observe(event, self._reconcile)
-        self.framework.observe(self.on.remove, self._on_remove)
 
     def _reconcile(self, event: ops.EventBase) -> None:
         """Handle all charm events by reconciling configuration and relation data.
@@ -71,16 +65,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             return
 
         self._update_image_relation(state)
-        try:
-            security_group_id = self._ensure_security_group(state=state, event=event)
-        except SecurityGroupReconcileError as e:
-            name = security_group_name(scaleset_name=state.scaleset_config.name)
-            logger.warning("Security group %s could not be reconciled: %s", name, e)
-            self.unit.status = ops.BlockedStatus(
-                f"Security group {name} could not be reconciled (see debug-log)"
-            )
-            return
-        self._configure_garm_relation(state=state, security_group_id=security_group_id or "")
+        self._configure_garm_relation(state=state)
 
         if state.image_overrides_builder:
             self.unit.status = ops.ActiveStatus("Ready; configured image overrides image builder")
@@ -111,50 +96,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "user_domain_name": state.provider_config.user_domain_name,
                 "username": state.provider_config.username,
             }
-        )
-
-    def _on_remove(self, _: ops.RemoveEvent) -> None:
-        """Delete the managed security group before Juju removes the application."""
-        if not self.unit.is_leader():
-            return
-        try:
-            state = CharmState.from_charm(self)
-        except CharmConfigInvalidError as e:
-            logger.warning("Not removing the managed security group: %s", e.msg)
-            return
-        SecurityGroupReconciler(provider_config=state.provider_config).delete(
-            name=security_group_name(scaleset_name=state.scaleset_config.name)
-        )
-
-    def _ensure_security_group(self, state: CharmState, event: ops.EventBase) -> str | None:
-        """Reconcile the security group the scaleset's runners are attached to.
-
-        Args:
-            state: Current resolved charm state.
-            event: The triggering event, so a cleared option can remove the group it created.
-
-        Returns:
-            The id of the group the runners are attached to, or None when the operator
-            configured no rules — the runners then keep the project's default group.
-
-        Raises:
-            SecurityGroupReconcileError: If OpenStack could not be reconciled with.
-        """
-        rules = state.scaleset_config.security_group_rules
-        if not rules:
-            if isinstance(event, ops.ConfigChangedEvent):
-                # The operator turned the feature off: remove the group it created, if no
-                # port still uses it.
-                SecurityGroupReconciler(provider_config=state.provider_config).delete(
-                    name=security_group_name(scaleset_name=state.scaleset_config.name)
-                )
-            return None
-        if self.model.get_relation(GARM_RELATION_NAME) is None:
-            # Nothing consumes the id until GARM is related, so a configurator used for its
-            # image credentials alone does not take on an OpenStack failure mode.
-            return None
-        return SecurityGroupReconciler(provider_config=state.provider_config).reconcile(
-            name=security_group_name(scaleset_name=state.scaleset_config.name), rules=rules
         )
 
     def _ensure_relation_secret(
@@ -191,14 +132,14 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         return secret
 
-    def _configure_garm_relation(self, state: CharmState, security_group_id: str) -> None:
+    def _configure_garm_relation(self, state: CharmState) -> None:
         """Publish scaleset configuration to the garm-configurator relation.
 
         Writes non-secret scaleset fields (name, provider, credentials, image,
         image visibility, flavor, arch, runner counts, labels, runner group,
-        remote-shell toggle, pre-install scripts, and the managed security group) to
-        the relation. The ``image_id`` wire field carries either an OpenStack image
-        name or ID for compatibility.
+        remote-shell toggle, pre-install scripts, and the security group rules the GARM
+        charm applies for this scale set) to the relation. The ``image_id`` wire field
+        carries either an OpenStack image name or ID for compatibility.
         The optional ``org`` and ``repo`` fields are included only when set.
 
         When the image reference is present and this unit holds leadership, also
@@ -212,8 +153,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Args:
             state: Current resolved charm state.
-            security_group_id: The id of the configurator-managed security group, or an
-                empty string when the charm manages none.
         """
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
@@ -221,6 +160,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         pre_install = state.scaleset_config.pre_install_scripts
         rc = state.runner_config
+        rules = state.scaleset_config.security_group_rules
         basic_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
@@ -242,7 +182,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "aproxy_redirect_ports": rc.aproxy_redirect_ports or "",
             "otel_collector_endpoint": rc.otel_collector_endpoint or "",
             "pre_job_script": rc.pre_job_script or "",
-            "security_group_id": security_group_id,
+            # An empty list publishes "[]": the GARM charm then attaches no group and removes
+            # the one it created, which is the opt-out.
+            "security_group_rules": json.dumps([rule.model_dump() for rule in rules]),
         }
         if state.scaleset_config.org:
             basic_data["org"] = state.scaleset_config.org
