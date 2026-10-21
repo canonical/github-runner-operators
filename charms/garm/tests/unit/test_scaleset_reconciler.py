@@ -54,9 +54,13 @@ class _FakeScaleset:
         enabled=True,
         updated_at=None,
         runner_prefix=None,
+        provider_name="openstack-demo",
     ):
         self.name = name
         self.id = sid
+        # What the reconciler hands back so the charm can drop a provider only once no
+        # scaleset names it; None models a GARM row that was created without one.
+        self.provider_name = provider_name
         self.image = image
         self.flavor = flavor
         self.max_runners = max_runners
@@ -280,7 +284,13 @@ def _spec(
 
 
 def _reconcile(client, desired):
-    return ScalesetReconciler(client).reconcile(desired)
+    progress, _ = ScalesetReconciler(client).reconcile(desired)
+    return progress
+
+
+def _reconcile_referenced(client, desired):
+    """Reconcile and return the providers GARM still holds scalesets for."""
+    return ScalesetReconciler(client).reconcile(desired)[1]
 
 
 @pytest.mark.parametrize(
