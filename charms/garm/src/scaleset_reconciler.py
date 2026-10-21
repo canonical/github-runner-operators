@@ -149,6 +149,7 @@ class ScalesetSpec:
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
     image_visibility: str = ""
+    security_group: str = ""
 
 
 class ScalesetReconciler:
@@ -1143,6 +1144,7 @@ class ScalesetReconciler:
             or bool(observed_extra.get("disable_updates"))
             != bool(desired_extra.get("disable_updates"))
             or observed_extra.get("image_visibility") != desired_extra.get("image_visibility")
+            or observed_extra.get("security_groups") != desired_extra.get("security_groups")
             or (observed.template_id or 0) != template_id
             or observed.runner_prefix != runner_prefix(spec.name)
         )
@@ -1332,8 +1334,9 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
 
     Single source of truth for create, update, and drift detection: combines the
     operator-supplied pre-install scripts with the charm's aproxy bootstrap, the
-    ``disable_updates`` flag when a runner proxy is configured, and the image
-    visibility the provider searches when resolving an image name.
+    ``disable_updates`` flag when a runner proxy is configured, the image
+    visibility the provider searches when resolving an image name, and the
+    security group a runner's port is attached to.
 
     Args:
         spec: The desired scaleset.
@@ -1360,4 +1363,7 @@ def _effective_extra_specs(spec: ScalesetSpec) -> dict[str, object]:
         }
     if spec.image_visibility:
         extra_specs["image_visibility"] = spec.image_visibility
+    if spec.security_group:
+        # The provider's extra spec is a list; the configurator publishes one group.
+        extra_specs["security_groups"] = [spec.security_group]
     return extra_specs

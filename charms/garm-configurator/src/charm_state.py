@@ -24,6 +24,7 @@ OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME = "openstack-user-domain-name"
 OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME = "openstack-project-domain-name"
 OPENSTACK_REGION_NAME_CONFIG_NAME = "openstack-region-name"
 OPENSTACK_NETWORK_CONFIG_NAME = "openstack-network"
+SECURITY_GROUP_CONFIG_NAME = "security-group"
 
 GITHUB_APP_ID_CONFIG_NAME = "github-app-id"
 GITHUB_APP_INSTALLATION_ID_CONFIG_NAME = "github-app-installation-id"
@@ -234,6 +235,7 @@ class ScalesetConfig(BaseModel):
         enable_shell: Whether GARM's remote shell is enabled on the scaleset.
         pre_install_scripts: Script name to bash script pairs for pre-installation.
         image_visibility: Glance visibility the provider searches when resolving an image name.
+        security_group: OpenStack security group name or ID to attach to runners.
     """
 
     name: str
@@ -248,6 +250,7 @@ class ScalesetConfig(BaseModel):
     enable_shell: bool = False
     pre_install_scripts: str | None = None
     image_visibility: str | None = None
+    security_group: str = ""
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ScalesetConfig":
@@ -329,6 +332,7 @@ class ScalesetConfig(BaseModel):
             enable_shell=bool(charm.config.get(SCALESET_ENABLE_SHELL_CONFIG_NAME, False)),
             pre_install_scripts=pre_install_scripts,
             image_visibility=image_visibility,
+            security_group=_get_string_config(charm, SECURITY_GROUP_CONFIG_NAME),
         )
 
 
@@ -336,6 +340,11 @@ def _get_optional_string_config(charm: ops.CharmBase, key: str) -> str | None:
     """Return a stripped optional string configuration value."""
     value = charm.config.get(key)
     return (str(value).strip() if value else "") or None
+
+
+def _get_string_config(charm: ops.CharmBase, key: str) -> str:
+    """Return a stripped string configuration value, or "" when unset."""
+    return _get_optional_string_config(charm, key) or ""
 
 
 def _ipv4_exclude_token_error(token: str) -> str | None:

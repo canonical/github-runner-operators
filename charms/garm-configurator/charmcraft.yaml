@@ -52,6 +52,11 @@ config:
       type: string
       description: |
         OpenStack network name or ID to use for instances.
+    security-group:
+      type: string
+      description: |
+        OpenStack security group name or ID to attach to runner instances. When
+        unset, the provider attaches the project's default security group.
     github-app-id:
       type: int
       description: |

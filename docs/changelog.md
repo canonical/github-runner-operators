@@ -11,6 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-10-21
 
 - `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
+- `garm-configurator`: add the optional `security-group` configuration, which the `garm` charm passes to the OpenStack provider as the scale set's `security_groups` extra spec. Runners in a project otherwise share its default security group, so they can reach each other and a compromised job can attack its peers; set `security-group` to a group that isolates them. The group applies to runners created after it is set; runners that already exist keep the group they were launched with.
 
 ## 2026-10-16
 
