@@ -77,7 +77,11 @@ replacing it.
 * Runners that already exist keep the group they were launched with. A changed group reaches new
   runners only; existing ones pick it up as they are replaced.
 * Removing only the configurator takes its credentials away before the GARM charm can delete the
-  remaining groups. Remove the GARM application too, or delete the groups by hand.
+  remaining groups. Remove the GARM application too, or delete the groups by hand. The removal
+  path retries a group whose port is still being removed, because nothing runs after it.
+* The GARM charm must be upgraded before the configurator that publishes rules: a GARM charm
+  given a configurator that predates this split sees no rules, and treats the scale set as one it
+  must not touch rather than sweeping a group it does not know about.
 * Scale set names must be unique within a project: the group is named after the scale set, and
   two deployments using one name would share a group and keep removing each other's rules.
 

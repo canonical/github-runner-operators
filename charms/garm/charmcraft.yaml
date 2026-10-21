@@ -28,12 +28,14 @@ extensions:
 parts:
   # The go-framework extension owns the charm part and rejects customising it, but charmcraft
   # builds requirements.txt with --no-binary=:all: and the build environment carries no OpenSSL
-  # headers, which the OpenStack SDK's cryptography dependency needs. A part of its own installs
-  # them into the shared build environment before the charm part builds.
+  # or libffi headers, which the OpenStack SDK's cryptography and cffi dependencies need. A part
+  # of its own installs them into the shared build environment. It must sort before "charm",
+  # which craft-parts orders by part name, or the headers arrive after the build that needs them.
   build-deps:
     plugin: nil
     build-packages:
       - libssl-dev
+      - libffi-dev
       - pkg-config
 
 requires:

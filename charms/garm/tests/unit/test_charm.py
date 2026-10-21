@@ -40,7 +40,7 @@ from github_reconciler import (
     MANAGED_CREDENTIAL_DESCRIPTION,
     CredentialSpec,
 )
-from scaleset_reconciler import Handover, ScalesetProgress
+from scaleset_reconciler import Handover, ScalesetProgress, _effective_extra_specs
 
 MODEL_NAME = "garm-model"
 CONTAINER_NAME = "app"
@@ -91,6 +91,10 @@ _PROVIDER_UNIT_DATA = {
 }
 
 _SCALESET_UNIT_DATA = {
+    "security_group_rules": (
+        '[{"direction": "egress", "remote_ip_prefix": "0.0.0.0/0"},'
+        ' {"direction": "egress", "remote_ip_prefix": "::/0"}]'
+    ),
     "name": "my-scaleset",
     "provider_name": "garm-configurator-0",
     "image_id": "img-1",
@@ -582,7 +586,7 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     """
     out = ctx.run(ctx.on.update_status(), _state(configurator_related=False))
 
-    garm_api.scaleset.return_value.reconcile.assert_called_once_with([], skip=set())
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
     service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
     assert service.command == "/usr/local/bin/garm-entrypoint.py"
     assert service.startup == "disabled"
@@ -1226,7 +1230,7 @@ def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_ap
 
     ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
 
-    garm_api.scaleset.return_value.reconcile.assert_called_once_with([], skip=set())
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
 
 
 def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api: _GarmApiMocks):
@@ -1245,7 +1249,7 @@ def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api:
         _state(configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **scaleset_data}}),
     )
 
-    garm_api.scaleset.return_value.reconcile.assert_called_once_with([], skip=set())
+    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
     assert out.unit_status == ops.ActiveStatus()
 
 
@@ -1440,20 +1444,99 @@ def test_a_scaleset_without_rules_manages_no_group(ctx: Context, garm_api: _Garm
     assert specs[0].security_group_id == ""
 
 
+def test_the_attached_group_reaches_the_provider_extra_specs(
+    ctx: Context, garm_api: _GarmApiMocks, openstack_tenant
+):
+    """
+    arrange: A configurator publishing the default rules, and a tenant the fake creates the
+        group in.
+    act: Run update-status.
+    assert: The spec the reconciler receives carries the created group's id, and that id is what
+        the provider receives as the scale set's security_groups extra spec.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+
+    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    (specs,) = garm_api.scaleset.return_value.reconcile.call_args.args
+    assert specs[0].security_group_id == openstack_tenant.network.groups[0].id
+    assert _effective_extra_specs(specs[0])["security_groups"] == [
+        openstack_tenant.network.groups[0].id
+    ]
+
+
+def test_a_configurator_without_the_key_is_left_alone(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator that predates the split, publishing no security group rules while
+        it still manages the group itself.
+    act: Run update-status.
+    assert: The scale set is not touched and its group is not swept, so a GARM-first upgrade
+        does not strip isolation from runners whose configurator has not been refreshed yet.
+    """
+    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+    del data["security_group_rules"]
+
+    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+
+    (specs,) = garm_api.scaleset.return_value.reconcile.call_args.args
+    assert specs[0].security_group_rules is None
+    assert out.unit_status == ops.WaitingStatus(
+        "Waiting for OpenStack security groups (see debug-log)"
+    )
+
+
+def test_two_configurators_in_one_tenant_see_one_anothers_scale_sets(
+    ctx: Context, garm_api: _GarmApiMocks, openstack_tenant
+):
+    """
+    arrange: Two configurators whose scale sets live in the same OpenStack project.
+    act: Run update-status.
+    assert: Both groups are created in one pass and neither pass deletes the other's, so sharing
+        a project does not make them sweep each other's groups.
+    """
+    second = {
+        **_PROVIDER_UNIT_DATA,
+        **_SCALESET_UNIT_DATA,
+        "name": "other-scaleset",
+        "provider_name": "second-configurator-0",
+    }
+    second_credentials = {**_PROVIDER_UNIT_DATA, "openstack_username": "admin2"}
+    state = _state(
+        configurator_relations=[
+            Relation(
+                id=11,
+                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                remote_app_name="garm-configurator",
+                remote_units_data={0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}},
+            ),
+            Relation(
+                id=12,
+                endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+                remote_app_name="second-configurator",
+                remote_units_data={0: {**second_credentials, **second}},
+            ),
+        ]
+    )
+
+    ctx.run(ctx.on.update_status(), state)
+
+    created = sorted(group.name for group in openstack_tenant.network.groups)
+    assert created == ["garm-my-scaleset", "garm-other-scaleset"]
+
+
 def test_malformed_rules_leave_the_scaleset_alone(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configurator publishing rules that do not parse.
     act: Run update-status.
-    assert: The scale set is claimed but skipped, so it is neither created without its group nor
-        mistaken for an orphan and deleted, and the unit reports the problem.
+    assert: The spec carries no rules so the scaleset reconciler claims it without creating it,
+        and the unit reports the problem.
     """
     data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "security_group_rules": "not json"}
 
     out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
 
     (specs,) = garm_api.scaleset.return_value.reconcile.call_args.args
-    assert [spec.name for spec in specs] == ["my-scaleset"]
-    assert garm_api.scaleset.return_value.reconcile.call_args.kwargs["skip"] == {"my-scaleset"}
+    assert [spec.security_group_rules for spec in specs] == [None]
     assert out.unit_status == ops.WaitingStatus(
         "Waiting for OpenStack security groups (see debug-log)"
     )

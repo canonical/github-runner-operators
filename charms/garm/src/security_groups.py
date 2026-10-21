@@ -15,6 +15,7 @@ outbound tmate client on the runner; both are traffic the runner originates.
 """
 
 import logging
+import time
 import typing
 
 import keystoneauth1.exceptions.base
@@ -32,6 +33,10 @@ REQUEST_TIMEOUT_SECONDS = 30
 # Everything this charm creates is named after the scale set and described with this marker, so
 # a sweep can tell its groups from another GARM application's in the same project.
 SECURITY_GROUP_DESCRIPTION = "Managed by the {} charm."
+# A group whose port is still being removed cannot be deleted yet. On the removal path, retry
+# briefly: no later pass runs to try again.
+REMOVAL_DELETE_ATTEMPTS = 3
+REMOVAL_DELETE_SETTLE_SECONDS = 5
 
 # What a reconcile can fail with: the SDK's own hierarchy for API responses, and keystoneauth's
 # for transport and authentication, which never reach the SDK's base class.
@@ -114,14 +119,16 @@ class SecurityGroupReconciler:
         try:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             with connect(**self._auth_fields()) as connection:
-                claimed = self._groups_by_name(connection=connection)
+                claimed, duplicates = self._groups_by_name(connection=connection)
                 for name, group_rules in rules.items():
                     group = claimed.pop(security_group_name(scaleset_name=name), None)
                     if group is None:
                         group = self._create_group(connection=connection, name=name)
                     self._reconcile_rules(connection=connection, group=group, rules=group_rules)
                     groups[name] = str(group.id)
-                self._delete_unclaimed(connection=connection, unclaimed=claimed.values())
+                self._delete_unclaimed(
+                    connection=connection, unclaimed=[*claimed.values(), *duplicates]
+                )
         except _OPENSTACK_ERRORS as exc:
             raise SecurityGroupReconcileError(_reason(exc)) from exc
         return groups
@@ -138,7 +145,8 @@ class SecurityGroupReconciler:
         try:
             connect = typing.cast(typing.Callable[..., typing.Any], openstack.connect)
             with connect(**self._auth_fields()) as connection:
-                unclaimed = self._groups_by_name(connection=connection).values()
+                claimed, duplicates = self._groups_by_name(connection=connection)
+                unclaimed = [*claimed.values(), *duplicates]
                 return self._delete_unclaimed(connection=connection, unclaimed=unclaimed) > 0
         except _OPENSTACK_ERRORS as exc:
             logger.warning("Could not delete the managed security groups: %s", _reason(exc))
@@ -158,20 +166,29 @@ class SecurityGroupReconciler:
             "api_timeout": REQUEST_TIMEOUT_SECONDS,
         }
 
-    def _groups_by_name(self, connection: typing.Any) -> dict[str, typing.Any]:
-        """Return the groups this application created, keyed by name.
+    def _groups_by_name(
+        self, connection: typing.Any
+    ) -> tuple[dict[str, typing.Any], list[typing.Any]]:
+        """Return the groups this application created, keyed by name, plus any duplicates.
 
-        The name prefix and the project are filtered server-side, and the description marker
+        The project is filtered server-side, and the name prefix and description marker
         client-side: another GARM application sharing the project owns its own groups.
+
+        A duplicate sharing a name is returned separately rather than dropped, because a group
+        that is never claimed is also never deleted.
         """
-        return {
-            group.name: group
-            for group in connection.network.security_groups(
-                project_id=connection.current_project_id
-            )
-            if (group.name or "").startswith(SECURITY_GROUP_NAME_PREFIX)
-            and group.description == self._description
-        }
+        groups: dict[str, typing.Any] = {}
+        duplicates: list[typing.Any] = []
+        for group in connection.network.security_groups(project_id=connection.current_project_id):
+            if not (group.name or "").startswith(SECURITY_GROUP_NAME_PREFIX):
+                continue
+            if group.description != self._description:
+                continue
+            if group.name in groups:
+                duplicates.append(group)
+                continue
+            groups[group.name] = group
+        return groups, duplicates
 
     def _create_group(self, connection: typing.Any, name: str) -> typing.Any:
         """Create a scale set's group and return it."""
@@ -185,7 +202,6 @@ class SecurityGroupReconciler:
     ) -> None:
         """Converge a group's rules to *rules*, which is authoritative.
 
-        Additions come first, so a change never removes a rule before its replacement exists.
         A rule listed twice is created once; a duplicate Neutron already holds is removed.
 
         Args:
@@ -202,19 +218,10 @@ class SecurityGroupReconciler:
                 continue
             observed[identity] = rule
 
-        desired: set[tuple] = set()
-        for rule in rules:
-            identity = _get_identity(rule=rule)
-            if identity in desired:
-                continue
-            desired.add(identity)
-            if identity in observed:
-                continue
-            logger.info("Adding rule %s to security group %s", identity, group.name)
-            connection.network.create_security_group_rule(
-                security_group_id=group.id, **_neutron_fields(rule=rule)
-            )
+        desired = {_get_identity(rule=rule) for rule in rules}
 
+        # Removals first: identity is the rule, so an obsolete rule can never stand in for one
+        # being added, and adding first would leave the group briefly wider than the policy.
         obsolete = [rule for identity, rule in observed.items() if identity not in desired]
         for rule in obsolete + surplus:
             logger.info(
@@ -224,31 +231,77 @@ class SecurityGroupReconciler:
             )
             connection.network.delete_security_group_rule(security_group_rule=rule)
 
+        added: set[tuple] = set()
+        for rule in rules:
+            identity = _get_identity(rule=rule)
+            if identity in observed or identity in added:
+                continue
+            added.add(identity)
+            logger.info("Adding rule %s to security group %s", identity, group.name)
+            connection.network.create_security_group_rule(
+                security_group_id=group.id, **_neutron_fields(rule=rule)
+            )
+
     def _delete_unclaimed(
-        self, connection: typing.Any, unclaimed: typing.Iterable[typing.Any]
+        self,
+        connection: typing.Any,
+        unclaimed: typing.Iterable[typing.Any],
+        settle_attempts: int = 1,
     ) -> int:
         """Delete groups no scale set claims, one refusal at a time.
+
+        Args:
+            connection: The authenticated OpenStack connection.
+            unclaimed: The groups to remove.
+            settle_attempts: How many times to retry a group a port still attaches. One on the
+                reconcile path, which runs again anyway; more on the removal path, which does not.
 
         Returns:
             How many groups were deleted.
         """
         deleted = 0
         for group in unclaimed:
-            try:
-                connection.network.delete_security_group(security_group=group.id)
-                logger.info("Deleted security group %s (%s)", group.name, group.id)
-                deleted += 1
-            except openstack.exceptions.ConflictException:
-                # Expected for hours after a scale set is deleted: Nova removes the port
-                # asynchronously, and until it does the group is still attached.
-                logger.info("Keeping security group %s: a port still attaches it", group.name)
-            except openstack.exceptions.ForbiddenException:
-                logger.warning(
-                    "Could not delete security group %s: the OpenStack credentials may not"
-                    " delete security groups",
-                    group.name,
-                )
+            for attempt in range(1, settle_attempts + 1):
+                last = attempt == settle_attempts
+                if self._delete_group(connection=connection, group=group, last=last):
+                    deleted += 1
+                    break
+                if not last:
+                    time.sleep(REMOVAL_DELETE_SETTLE_SECONDS)
         return deleted
+
+    def _delete_group(self, connection: typing.Any, group: typing.Any, last: bool) -> bool:
+        """Delete one group, reporting the refusals that are not this charm's as logs.
+
+        Args:
+            connection: The authenticated OpenStack connection.
+            group: The group to delete.
+            last: Whether this is the final attempt, so a port still attached is worth reporting.
+
+        Returns:
+            Whether the group is gone.
+        """
+        try:
+            connection.network.delete_security_group(security_group=group.id)
+            logger.info("Deleted security group %s (%s)", group.name, group.id)
+            return True
+        except openstack.exceptions.NotFoundException:
+            # A concurrent pass deleted it, which is the outcome this call wanted.
+            logger.info("Security group %s is already gone", group.name)
+            return True
+        except openstack.exceptions.ConflictException:
+            # Expected for hours after a scale set is deleted: Nova removes the port
+            # asynchronously, and until it does the group is still attached.
+            if last:
+                logger.info("Keeping security group %s: a port still attaches it", group.name)
+            return False
+        except openstack.exceptions.ForbiddenException:
+            logger.warning(
+                "Could not delete security group %s: the OpenStack credentials may not"
+                " delete security groups",
+                group.name,
+            )
+            return False
 
 
 def _get_identity(rule: SecurityGroupRule) -> tuple:

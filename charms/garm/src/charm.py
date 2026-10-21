@@ -42,7 +42,13 @@ from github_reconciler import (
     GithubReconciler,
 )
 from resource_cleanup import GarmCleanupError, GarmResourceCleanup
-from scaleset_reconciler import Handover, ScalesetProgress, ScalesetReconciler, ScalesetSpec
+from scaleset_reconciler import (
+    Handover,
+    ScalesetProgress,
+    ScalesetReconciler,
+    ScalesetSpec,
+    _security_group_unattached,
+)
 from security_groups import SecurityGroupReconcileError, SecurityGroupReconciler
 from security_log import owasp_log
 
@@ -732,15 +738,23 @@ class GarmCharm(paas_charm.go.Charm):
             max_runners = int(required["max_runner"])
         except ValueError:
             return None
-        try:
-            security_group_rules: list[SecurityGroupRule] | None = parse_security_group_rules(
-                data.get(SECURITY_GROUP_RULES_DATABAG_KEY, "")
+        raw_rules = data.get(SECURITY_GROUP_RULES_DATABAG_KEY)
+        if raw_rules is None:
+            # A configurator that predates the split managed the group itself, so leave the
+            # scale set alone rather than sweeping a group this charm does not know about.
+            logger.warning(
+                "Scaleset %s: the configurator publishes no security group rules; refresh it",
+                name,
             )
-        except (ValidationError, ValueError) as exc:
-            # Fail closed: the spec stays claimed so its scale set is not treated as an orphan,
-            # but it is skipped until the rules parse.
-            logger.warning("Scaleset %s has malformed security group rules: %s", name, exc)
             security_group_rules = None
+        else:
+            try:
+                security_group_rules = parse_security_group_rules(raw_rules)
+            except (ValidationError, ValueError) as exc:
+                # Fail closed: the spec stays claimed so its scale set is not treated as an
+                # orphan, but it is skipped until the rules parse.
+                logger.warning("Scaleset %s has malformed security group rules: %s", name, exc)
+                security_group_rules = None
         return ScalesetSpec(
             name=name,
             provider_name=required["provider_name"],
@@ -764,57 +778,62 @@ class GarmCharm(paas_charm.go.Charm):
 
     def _attach_security_groups(
         self, specs: list[ScalesetSpec]
-    ) -> tuple[list[ScalesetSpec], set[str], str | None]:
+    ) -> tuple[list[ScalesetSpec], str | None]:
         """Ensure each scale set's security group and record the id to attach.
 
-        Runs per configurator, because each one holds the credentials of its own tenant: a
-        union of names would create groups in the wrong project and hand back ids the provider
-        cannot attach.
+        Groups live in a project, and several configurators can describe scale sets in the same
+        one, so each tenant is reconciled with the union of its scale sets: reconciling one
+        configurator at a time would have each delete the others' groups.
 
         Args:
             specs: The desired scale sets, carrying the rules their configurator published.
 
         Returns:
-            The specs with their group id filled in, the scale sets to leave alone this pass,
-            and a status message when something could not be ensured.
+            The specs with their group id filled in, and a status message when something could
+            not be ensured. A spec left without an id is skipped by the scaleset reconciler.
         """
-        malformed = {spec.name for spec in specs if spec.security_group_rules is None}
-        wanted: dict[str, dict[str, list[SecurityGroupRule]]] = {}
+        configs = self._get_configurator_provider_configs()
+        tenant_of = {
+            config["unit_name"]: (config["auth_url"], config["project_name"]) for config in configs
+        }
+        wanted: dict[tuple[str, str], dict[str, list[SecurityGroupRule]]] = {}
         for spec in specs:
-            if spec.security_group_rules:
-                wanted.setdefault(spec.provider_name, {})[spec.name] = spec.security_group_rules
-
-        group_ids: dict[tuple[str, str], str] = {}
-        skipped = set(malformed)
-        failed: list[str] = []
-        for config in self._get_configurator_provider_configs():
-            provider_names = wanted.get(config["unit_name"], {})
-            if not provider_names:
+            tenant = tenant_of.get(spec.provider_name)
+            if tenant is None or not spec.security_group_rules:
                 continue
+            wanted.setdefault(tenant, {})[spec.name] = spec.security_group_rules
+
+        group_ids: dict[tuple[str, str], dict[str, str]] = {}
+        failed = False
+        for config in configs:
+            tenant = (config["auth_url"], config["project_name"])
             reconciler = SecurityGroupReconciler(provider_config=config, owner=self.app.name)
             try:
-                for name, group_id in reconciler.reconcile(rules=provider_names).items():
-                    group_ids[(config["unit_name"], name)] = group_id
+                # Every tenant is reconciled even with nothing wanted, so the sweep can remove
+                # groups whose scale sets are gone, including an opt-out.
+                group_ids[tenant] = reconciler.reconcile(rules=wanted.get(tenant, {}))
             except SecurityGroupReconcileError as exc:
-                logger.warning(
-                    "Security groups for %s could not be ensured: %s", config["unit_name"], exc
-                )
-                # Fail closed: these scale sets are not created without their group, and they
-                # stay claimed so the scale set reconciler does not treat them as orphans.
-                skipped.update(provider_names)
-                failed.append(str(exc))
+                logger.warning("Security groups for %s could not be ensured: %s", tenant, exc)
+                failed = True
 
         attached = [
             dataclasses.replace(
-                spec, security_group_id=group_ids.get((spec.provider_name, spec.name), "")
+                spec,
+                security_group_id=group_ids.get(
+                    tenant_of.get(spec.provider_name, ("", "")), {}
+                ).get(spec.name, ""),
+                # A provider no configurator supplied credentials for is left to the scaleset
+                # reconciler's own provider gate: this charm cannot manage a group in a tenant
+                # it has no credentials for, and the scale set is never created anyway.
+                security_group_rules=(
+                    spec.security_group_rules if spec.provider_name in tenant_of else []
+                ),
             )
             for spec in specs
         ]
-        if failed or malformed:
-            if failed:
-                logger.warning("%d tenant(s) could not be reconciled: %s", len(failed), failed[0])
-            return attached, skipped, "Waiting for OpenStack security groups (see debug-log)"
-        return attached, skipped, None
+        if failed or any(_security_group_unattached(spec=spec) for spec in attached):
+            return attached, "Waiting for OpenStack security groups (see debug-log)"
+        return attached, None
 
     def _build_desired_credentials(self) -> list[CredentialSpec]:
         """Build desired GitHub credentials from configurator relation data.
@@ -930,10 +949,10 @@ class GarmCharm(paas_charm.go.Charm):
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
-            desired, skipped, security_group_status = self._attach_security_groups(
+            desired, security_group_status = self._attach_security_groups(
                 self._build_desired_scalesets(template_id)
             )
-            replacing = ScalesetReconciler(auth_client).reconcile(desired, skip=skipped)
+            replacing = ScalesetReconciler(auth_client).reconcile(desired)
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
             # Active, not maintenance: every label is served throughout the drain, by
@@ -941,14 +960,14 @@ class GarmCharm(paas_charm.go.Charm):
             # run to DRAIN_DEADLINE, and blocking `juju wait-for` on hours of healthy
             # background convergence would be wrong.
             if replacing:
-                self.update_app_and_unit_status(
-                    ops.ActiveStatus(_scaleset_replacement_status(replacing))
-                )
+                message = _scaleset_replacement_status(replacing)
+                if security_group_status:
+                    message = f"{message}; {security_group_status}"
+                self.update_app_and_unit_status(ops.ActiveStatus(message))
+            elif security_group_status:
+                self.update_app_and_unit_status(ops.WaitingStatus(security_group_status))
             else:
                 self.update_app_and_unit_status(ops.ActiveStatus())
-            if security_group_status:
-                # Set after the active status above, which would otherwise overwrite it.
-                self.update_app_and_unit_status(ops.WaitingStatus(security_group_status))
         except CharmedTemplateError as exc:
             logger.warning("GARM charmed template error during reconcile: %s", exc)
             self.update_app_and_unit_status(ops.WaitingStatus(str(exc)))

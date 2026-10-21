@@ -149,9 +149,10 @@ class ScalesetSpec:
     template_id: int | None = None
     runner_config: RunnerConfig = field(default_factory=RunnerConfig)
     image_visibility: str = ""
-    # None means the configurator's rules could not be parsed, so this scale set is skipped
-    # rather than created without the isolation it asked for. Empty means no group is managed.
-    security_group_rules: list[SecurityGroupRule] | None = None
+    # Empty means no group is managed. None means the configurator's rules were absent or did
+    # not parse, so this scale set is skipped rather than created without the isolation it
+    # asked for.
+    security_group_rules: list[SecurityGroupRule] | None = field(default_factory=list)
     security_group_id: str = ""
 
 
@@ -166,14 +167,11 @@ class ScalesetReconciler:
         """
         self._client = client
 
-    def reconcile(
-        self, desired: list[ScalesetSpec], skip: frozenset[str] | set[str] = frozenset()
-    ) -> list[ScalesetProgress]:
+    def reconcile(self, desired: list[ScalesetSpec]) -> list[ScalesetProgress]:
         """Sync GARM scalesets to match *desired*.
 
-        A spec in *skip* is claimed but not reconciled. That is the fail-closed path for a
-        scale set whose security group could not be ensured: it must not be created without
-        the group, and it must not be treated as an orphan either.
+        A spec that asked for a security group and has none is claimed but not reconciled: it
+        must not be created without the group, and it must not be treated as an orphan either.
 
         Performs the minimum set of CREATE / UPDATE / DELETE operations, and
         maintains a per-scaleset runner-install template carrying the runner
@@ -200,7 +198,6 @@ class ScalesetReconciler:
 
         Args:
             desired: The full desired set of scalesets.
-            skip: Scale set names to claim but leave alone this pass.
 
         Returns:
             One entry per replacement still in flight; empty once converged.
@@ -233,7 +230,7 @@ class ScalesetReconciler:
             try:
                 progress.extend(
                     self._reconcile_one(
-                        spec, providers, observed, templates, families.get(spec.name, []), skip
+                        spec, providers, observed, templates, families.get(spec.name, [])
                     )
                 )
             except (GarmConnectionError, GarmUnauthorizedError):
@@ -335,7 +332,6 @@ class ScalesetReconciler:
         observed: dict[str, ScaleSet],
         templates: dict[str, Template],
         family: list[str],
-        skip: frozenset[str] | set[str] = frozenset(),
     ) -> list[ScalesetProgress]:
         """Reconcile a single desired scaleset: validate, create or update, and sync its template.
 
@@ -345,12 +341,11 @@ class ScalesetReconciler:
             observed: Observed scalesets keyed by name.
             templates: Observed templates keyed by name.
             family: Every live generation of this spec, plus its target name.
-            skip: Scale set names to leave alone this pass.
 
         Returns:
             One entry per replaced generation of this spec still draining.
         """
-        if spec.name in skip:
+        if _security_group_unattached(spec=spec):
             logger.info(
                 "Leaving scaleset %s alone this pass: its security group is not ensured",
                 spec.name,
@@ -1167,6 +1162,17 @@ class ScalesetReconciler:
             or (observed.template_id or 0) != template_id
             or observed.runner_prefix != runner_prefix(spec.name)
         )
+
+
+def _security_group_unattached(spec: ScalesetSpec) -> bool:
+    """Whether a spec asked for a security group and did not get one.
+
+    Unparsable rules count as asking: a configurator that published garbage must not quietly
+    produce unisolated runners.
+    """
+    if spec.security_group_rules is None:
+        return True
+    return bool(spec.security_group_rules) and not spec.security_group_id
 
 
 def target_scaleset_name(logical_name: str, labels: list[str]) -> str:

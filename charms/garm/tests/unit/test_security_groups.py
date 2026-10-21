@@ -353,7 +353,12 @@ def test_a_group_still_in_use_is_kept(sdk):
     """
 
     class _InUse(_FakeNetwork):
+        def __init__(self, groups=()):
+            super().__init__(groups)
+            self.attempts = 0
+
         def delete_security_group(self, security_group):
+            self.attempts += 1
             raise openstack.exceptions.ConflictException("Security Group in use")
 
     network = _InUse(
@@ -366,6 +371,7 @@ def test_a_group_still_in_use_is_kept(sdk):
     _reconciler(sdk, network).reconcile(rules={SCALESET_NAME: [SSH]})
 
     assert network.deleted_groups == []
+    assert network.attempts == 1
 
 
 def test_a_hook_without_delete_permission_still_converges(sdk):
@@ -390,6 +396,56 @@ def test_a_hook_without_delete_permission_still_converges(sdk):
     groups = _reconciler(sdk, network).reconcile(rules={SCALESET_NAME: [SSH]})
 
     assert groups == {SCALESET_NAME: "sg-kept"}
+
+
+def test_a_scale_set_that_opts_out_has_its_group_deleted(sdk):
+    """
+    arrange: A group this application created, and a scale set that publishes no rules.
+    act: Reconcile an empty mapping, as the opt-out does.
+    assert: The group is deleted, so turning the feature off does not leak it.
+    """
+    network = _FakeNetwork([_FakeGroup(GROUP_NAME, gid="sg-orphan")])
+
+    groups = _reconciler(sdk, network).reconcile(rules={})
+
+    assert groups == {}
+    assert network.deleted_groups == ["sg-orphan"]
+
+
+def test_a_duplicate_group_name_is_also_swept(sdk):
+    """
+    arrange: Two groups this application created with the same name, from an interrupted pass.
+    act: Reconcile the scale set.
+    assert: One is kept and the other deleted, because a group that is never claimed is never
+        removed either.
+    """
+    network = _FakeNetwork(
+        [
+            _FakeGroup(GROUP_NAME, gid="sg-kept", rules=[_stored_rule(**SSH_FIELDS)]),
+            _FakeGroup(GROUP_NAME, gid="sg-duplicate"),
+        ]
+    )
+
+    groups = _reconciler(sdk, network).reconcile(rules={SCALESET_NAME: [SSH]})
+
+    assert groups == {SCALESET_NAME: "sg-kept"}
+    assert network.deleted_groups == ["sg-duplicate"]
+
+
+def test_a_group_deleted_by_a_concurrent_pass_is_not_an_error(sdk):
+    """
+    arrange: An unclaimed group another pass removes first.
+    act: Reconcile.
+    assert: The pass completes, because the outcome is the one it wanted.
+    """
+
+    class _Gone(_FakeNetwork):
+        def delete_security_group(self, security_group):
+            raise openstack.exceptions.NotFoundException("no such security group")
+
+    network = _Gone([_FakeGroup("garm-orphan", gid="sg-gone")])
+
+    assert _reconciler(sdk, network).reconcile(rules={}) == {}
 
 
 def test_the_group_list_is_scoped_to_the_project(sdk):
