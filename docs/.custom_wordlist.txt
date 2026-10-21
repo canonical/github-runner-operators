@@ -39,6 +39,7 @@ LogQL
 Loki
 Makefile
 Multipass
+nftables
 MyST
 Numpy
 OAuth
@@ -63,6 +64,7 @@ reStructuredText
 retrigger(ing)?
 Rockcraft
 rst
+ruleset
 scaleset
 scalesets
 SCons
@@ -90,11 +92,13 @@ ulwazi
 uncomment(ing)?
 URI(s)?
 URL
+untrusted
 utils
 uv
 VMs
 WCAG
 whitespace
+workloadless
 whitespaces
 wordlist
 xetex
