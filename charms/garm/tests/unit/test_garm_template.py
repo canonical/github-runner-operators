@@ -355,3 +355,75 @@ def test_apply_charmed_template_raises_when_charmed_has_no_id():
         garm_template.CharmedTemplateError, match=garm_template.GARM_CHARMED_TEMPLATE_NAME
     ):
         garm_template.apply_charmed_template(client, [])
+
+
+def test_runner_env_snippet_matches_uid_resolved_account():
+    """
+    arrange: No inputs.
+    act: Call build_runner_env_snippet().
+    assert: The snippet writes USER and LOGNAME to the runner .env, set to the
+            account the runner UID resolves to, and strips stale values first.
+    """
+    snippet = garm_template.build_runner_env_snippet()
+
+    assert f"touch {garm_template.RUNNER_ENV_PATH}" in snippet
+    assert f"sed -i '/^USER=/d;/^LOGNAME=/d' {garm_template.RUNNER_ENV_PATH}" in snippet
+    assert f"USER={garm_template.RUNNER_UID_USER}" in snippet
+    assert f"LOGNAME={garm_template.RUNNER_UID_USER}" in snippet
+    assert garm_template.RUNNER_UID_USER == "ubuntu"
+
+
+def test_build_charmed_template_data_sets_user_env_without_connections():
+    """
+    arrange: A base script and no debug-ssh connections.
+    act: Call _build_charmed_template_data().
+    assert: The rendered script still carries the USER/LOGNAME block, so every
+            scale set referencing the charmed template gets it.
+    """
+    client = MagicMock()
+    template = MagicMock()
+    template.data = base64.b64encode(b"#!/bin/bash\nset -e\necho hello\n").decode()
+    client.get_template.return_value = template
+
+    decoded = garm_template._build_charmed_template_data(client, 1, []).decode()
+
+    assert decoded.startswith("#!/bin/bash\n")
+    assert f"USER={garm_template.RUNNER_UID_USER}" in decoded
+    assert f"LOGNAME={garm_template.RUNNER_UID_USER}" in decoded
+
+
+def test_build_charmed_template_data_user_env_precedes_base_body():
+    """
+    arrange: A base script whose body would abort on error.
+    act: Call _build_charmed_template_data() with no connections.
+    assert: The user-env block lands before the base body, so it is written even
+            though the base template later enables set -e.
+    """
+    client = MagicMock()
+    template = MagicMock()
+    template.data = base64.b64encode(b"#!/bin/bash\nset -e\necho body\n").decode()
+    client.get_template.return_value = template
+
+    decoded = garm_template._build_charmed_template_data(client, 1, []).decode()
+
+    assert decoded.index("USER=") < decoded.index("set -e")
+    assert decoded.index("LOGNAME=") < decoded.index("set -e")
+
+
+def test_build_charmed_template_data_sets_user_env_once():
+    """
+    arrange: A base script and one debug-ssh connection.
+    act: Call _build_charmed_template_data().
+    assert: Exactly one USER= assignment is written, and the tmate variables are
+            still present alongside it.
+    """
+    client = MagicMock()
+    template = MagicMock()
+    template.data = base64.b64encode(b"#!/bin/bash\necho hello\n").decode()
+    client.get_template.return_value = template
+
+    decoded = garm_template._build_charmed_template_data(client, 1, [_CONN]).decode()
+    written = [line for line in decoded.splitlines() if line.startswith("USER=")]
+
+    assert written == [f"USER={garm_template.RUNNER_UID_USER}"]
+    assert f"TMATE_SERVER_HOST={_CONN.host}" in decoded

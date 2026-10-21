@@ -17,6 +17,14 @@ RUNNER_HOME = "/home/runner/actions-runner"
 PRE_JOB_HOOK_PATH = f"{RUNNER_HOME}/pre-job.sh"
 RUNNER_ENV_PATH = f"{RUNNER_HOME}/.env"
 
+# The account that owns the runner's UID. The runner images create `runner` as a
+# duplicate-UID alias of `ubuntu`, so `getpwuid(uid)` — and with it `sg`,
+# `newgrp`, `chown`, and sbuild's schroot user — resolves to `ubuntu`, the first
+# entry for that UID in /etc/passwd, while `$USER` said `runner`. Job `.env` sets
+# `USER`/`LOGNAME` to this value so both agree. See
+# canonical/self-hosted-github-runner-images images/standard/templates/_common.j2.
+RUNNER_UID_USER = "ubuntu"
+
 
 def prepend_after_shebang(script: str, snippet: str) -> str:
     """Insert *snippet* immediately after the shebang line of *script*.

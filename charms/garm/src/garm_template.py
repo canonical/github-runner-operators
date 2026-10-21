@@ -9,7 +9,7 @@ import typing
 
 from charm_state import SSHDebugInfo
 from garm_api import GarmApiError, GarmAuthenticatedClient
-from runner_paths import RUNNER_ENV_PATH, prepend_after_shebang
+from runner_paths import RUNNER_ENV_PATH, RUNNER_UID_USER, prepend_after_shebang
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,11 @@ def apply_charmed_template(
     """Create or update the charmed runner install template and return its id.
 
     Derives ``github_linux_charmed`` from the built-in ``github_linux`` base by
-    prepending shell snippets. The debug-ssh snippet (tmate env vars) is added
-    only when connections are present; with none the charmed template is still
-    maintained as a snippet-free copy of the base so scalesets can reference it
-    unconditionally (future snippets attach the same way).
+    prepending shell snippets, so scalesets can reference it unconditionally.
+    The user-env snippet (``USER``/``LOGNAME`` matching the account the runner
+    UID resolves to) is always present; the debug-ssh snippet (tmate env vars) is
+    added only when connections are present. Scale sets with runner options
+    derive their own template from this one, so both snippets travel with them.
 
     Args:
         client: Authenticated GARM API client.
@@ -57,6 +58,35 @@ def apply_charmed_template(
 
     patched_data = _build_charmed_template_data(client, base.id, connections)
     return _sync_charmed_template(client, charmed, patched_data, len(connections))
+
+
+def build_runner_env_snippet() -> str:
+    """Build a shell snippet that aligns ``$USER``/``$LOGNAME`` with the UID.
+
+    GARM starts the runner as ``runner``, which the runner images create as a
+    duplicate-UID alias of ``ubuntu``. Every lookup keyed on the UID —
+    ``getpwuid``, and with it ``sg``, ``newgrp`` and sbuild's schroot user —
+    resolves to ``ubuntu``, so a job that read ``$USER`` acted on a different
+    account than the one those tools check. The runner applies ``.env`` to its
+    own environment before any job starts, so steps inherit these values and
+    ``$USER`` matches the passwd entry the UID resolves to.
+
+    Returns:
+        A shell snippet string (no shebang) writing the two variables to the
+        runner ``.env`` file.
+    """
+    lines = [
+        f"mkdir -p $(dirname {RUNNER_ENV_PATH})",
+        f"touch {RUNNER_ENV_PATH}",
+        # Idempotent on reused instances: drop any previous value before writing.
+        f"sed -i '/^USER=/d;/^LOGNAME=/d' {RUNNER_ENV_PATH}",
+        f'cat >> {RUNNER_ENV_PATH} << "EOF"',
+        f"USER={RUNNER_UID_USER}",
+        f"LOGNAME={RUNNER_UID_USER}",
+        "EOF",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def build_tmate_env_snippet(connections: list[SSHDebugInfo]) -> str:
@@ -101,7 +131,8 @@ def _build_charmed_template_data(
     Args:
         client: Authenticated GARM API client.
         base_id: ID of the base template to fetch.
-        connections: Debug-ssh connections used to build the tmate snippet.
+        connections: Debug-ssh connections used to build the tmate snippet; may
+            be empty.
 
     Returns:
         Patched shell script as bytes.
@@ -119,9 +150,7 @@ def _build_charmed_template_data(
 
     # GARM returns the template body as a base64-encoded string.
     base_script = base64.b64decode(base_template.data).decode("utf-8")
-    snippet = build_tmate_env_snippet(connections)
-    if not snippet:
-        return base_script.encode("utf-8")
+    snippet = build_runner_env_snippet() + build_tmate_env_snippet(connections)
     return prepend_after_shebang(base_script, snippet).encode("utf-8")
 
 
