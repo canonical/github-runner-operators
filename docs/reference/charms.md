@@ -45,6 +45,35 @@ The GARM charm supports integration with COS (Canonical Observability Stack). Se
 [Integrations for GARM charm](https://charmhub.io/garm/integrations)
 ```
 
+(garm-charm-security-groups)=
+
+### Security groups
+
+When a configurator publishes `security-group-rules`, the GARM charm creates one OpenStack
+security group for each scale set, named `garm-<scale set name>`, in that configurator's project.
+It keeps the group's rules equal to the published list — a rule that is not listed is removed,
+including one added by hand — and passes the group's id to the OpenStack provider as the scale
+set's `security_groups` extra spec, so every runner of that scale set is attached to it.
+
+The GARM charm owns the group's lifecycle because it is the charm that knows when the group can
+go. A group is deleted once no scale set claims it: when a scale set is renamed or removed, its
+runners are drained and deleted first, then the group follows. A group that a port still
+attaches cannot be deleted; that is expected for some time after a scale set is removed, because
+OpenStack removes the port asynchronously, so it is logged and retried on the next reconcile.
+
+Two limits are worth knowing. Runners that already exist keep the group they were launched with,
+so a scale set picks up a new or changed group only as its runners are replaced. And removing
+only the configurator takes its credentials with it, so the GARM charm cannot delete the
+remaining groups; remove the GARM application too.
+
+Scale set names must be unique within a project: the group is named after the scale set, so two
+deployments using the same name would share one group and keep removing each other's rules.
+
+The OpenStack credentials need `create_security_group`, `delete_security_group`,
+`create_security_group_rule`, and `delete_security_group_rule`, plus read access to security
+groups and their rules, which the default `reader` role provides. Credentials that may not delete
+groups still work: the charm logs a warning and keeps the groups it cannot remove.
+
 ## GARM configurator charm
 
 The GARM configurator charm provides a set of configurations of GitHub runner scaleset to the GARM charm. Multiple GARM configurator charms can be integrated to a single GARM charm, with each instance of GARM configurator charm representing a single GitHub runner scaleset in GARM.
@@ -76,45 +105,28 @@ options and defaults before applying the configuration.
 
 ### Security groups
 
-The `security-group-rules` option, on by default, makes the charm manage one OpenStack
-security group per scale set. The charm creates the group, named `garm-<name>`, and keeps its rules equal to
-the configured list: a rule that is not listed is removed, including one added by hand. The
-group's id is published to the GARM charm, which passes it to the OpenStack provider so that
-every runner of the scale set is attached to it.
+The `security-group-rules` option, on by default, describes the OpenStack security group each
+scale set's runners should be attached to. The configurator validates the rules and publishes
+them on the `garm-configurator` relation; it makes no OpenStack call itself, so it needs no
+permissions and no network path to the cloud. The GARM charm creates and maintains the group
+(see [security groups in the GARM charm](#garm-charm-security-groups)).
 
-OpenStack attaches the configured groups instead of the project's default security group, so
-the rules must allow the runner's outbound traffic to GitHub. When no egress rule is listed the
-charm allows all egress for that reason.
+Each rule takes a `direction` (`ingress` or `egress`), an optional `protocol` (`tcp`, `udp`,
+`icmp`, `icmpv6`, or `any`), optional `port_min`/`port_max` for `tcp` and `udp`, and an optional
+`remote_ip_prefix` CIDR. Without a prefix a rule covers every address of its ethertype, which is
+IPv4 unless the CIDR is IPv6.
 
-Nothing the charms provide needs an ingress rule. The GARM remote shell (`enable-shell`) rides
-the agent's connection, which the runner opens to the GARM agent URL, and a `debug-ssh` session
-is an outbound tmate client on the runner. Both are traffic the runner originates, so an
-ingress-free group supports them.
+The default allows all egress and no ingress. OpenStack attaches the configured group instead of
+the project's default security group, so a list with no egress rule is rejected rather than
+converged: a runner with no egress cannot reach GitHub. Nothing the charms provide needs an
+ingress rule — the GARM remote shell rides the agent's connection, which the runner opens, and a
+`debug-ssh` session is an outbound tmate client on the runner.
 
-A rule change reaches new runners on the next reconcile. A runner that already exists keeps the
-group it was launched with until GARM replaces it.
+Set the option to an empty list to manage no group. The GARM charm then attaches nothing and
+removes the group it created, leaving the runners on the project's default group.
 
-Set the option to an empty list to manage no security group: the runners then keep the
-project's default group and the charm makes no OpenStack call. That is also how a deployment
-opts out where the configurator cannot reach the OpenStack API.
-
-Clearing the option, or removing the application, deletes the group the charm created unless a
-port still attaches it; a group left in use is reported in the log and left for the operator.
-Renaming the scale set leaves a `garm-<old name>` group behind, because the charm keeps no
-record of the previous name, and repeated renames add up against the project's security group
-quota. OpenStack allows duplicate group names, so when several groups share the managed
-name the charm keeps the one a port already attaches, or the oldest when none does, and
-deletes the duplicates that no port uses. A duplicate that a port still attaches is left in
-place and reported in the log, so the charm never detaches a running runner's security group.
-
-Scale set names must be unique within the tenant. The group is named after the scale set, so two
-deployments using the same name would share one group and keep removing each other's rules.
-
-The OpenStack credentials need `create_security_group`, `delete_security_group`,
-`create_security_group_rule`, and `delete_security_group_rule`, plus read access to security
-groups, their rules, and ports, which the default `reader` role provides. A role that cannot
-delete security groups still works: the charm logs a warning and leaves an unused duplicate in
-place.
+A rule change is applied to the group at the next GARM reconcile, which reaches new runners
+immediately and existing ones only when they are replaced.
 
 ### Integrations
 

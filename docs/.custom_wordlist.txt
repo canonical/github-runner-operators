@@ -14,6 +14,7 @@ docstrings?
 dvipng
 filelog
 fonts
+ethertype
 freefont
 Furo
 Garm
