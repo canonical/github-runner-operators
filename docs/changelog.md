@@ -11,7 +11,7 @@ Each revision is versioned by the date of the revision.
 ## 2026-10-21
 
 - `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
-- `garm`: keep a removed configurator's provider published until the last scale set that uses it is gone, so removing a `garm-configurator` relation finishes instead of retrying until the five-day drain deadline. The charm records the provider set it starts GARM with, adds providers as configurators relate, and removes one only once no scale set refers to it — the provider is dropped on a later reconcile, after its scale sets are deleted.
+- `garm`: keep a removed configurator's provider published until the last scale set that uses it is gone, so removing a `garm-configurator` relation finishes instead of retrying until the five-day drain deadline. The charm records the provider set it starts GARM with, adds providers as configurator applications relate, and removes one only once no scale set refers to it — the provider is dropped on a later reconcile, after its scale sets are deleted.
 - `garm` upgrade note: deployments already stuck before this release do not recover on upgrade, because the removed configurator's credentials are no longer available to the charm. Relate the same configurator application again — its unit name reproduces the missing provider name — so the provider is republished and the drain resumes; a scale set whose runner is stuck in the `deleted` status can also be cleared by hand.
 
 ## 2026-10-16

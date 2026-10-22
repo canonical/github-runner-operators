@@ -129,18 +129,6 @@ def _generate_admin_password() -> str:
     return "".join(chars)
 
 
-def _by_provider_name(configs: typing.Iterable[dict[str, str]]) -> list[dict[str, str]]:
-    """Order provider configs by provider name, so a published set is deterministic.
-
-    Args:
-        configs: The provider configs to order.
-
-    Returns:
-        The same configs, sorted by ``unit_name``, which is the provider name.
-    """
-    return sorted(configs, key=lambda config: config["unit_name"])
-
-
 def _parse_provider_record(published: str, source: str) -> list[dict[str, str]]:
     """Parse a recorded provider set, rejecting anything that cannot drive GARM.
 
