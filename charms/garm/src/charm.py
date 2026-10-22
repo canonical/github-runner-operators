@@ -772,29 +772,10 @@ class GarmCharm(paas_charm.go.Charm):
                     description="Provider set GARM was last started with",
                 )
                 return
-            superseded = secret.get_info().revision
             if secret.peek_content().get(GARM_PROVIDERS_SECRET_KEY) != payload:
                 secret.set_content({GARM_PROVIDERS_SECRET_KEY: payload})
-                self._remove_superseded_revision(secret, superseded)
         except ops.ModelError as exc:
             raise ProviderRecordError(f"cannot record the GARM provider set: {exc}") from exc
-
-    @staticmethod
-    def _remove_superseded_revision(secret: ops.Secret, superseded: int) -> None:
-        """Drop the revision this write replaced, so old provider passwords do not linger.
-
-        Only this application writes the record and every reader uses ``peek_content()``, so
-        no unit depends on an older revision. Removal is best effort: a store that refuses
-        keeps it, which costs space rather than correctness.
-
-        Args:
-            secret: The record secret, after the new revision was written.
-            superseded: The revision the write replaced.
-        """
-        try:
-            secret.remove_revision(superseded)
-        except (ops.ModelError, ValueError) as exc:
-            logger.debug("Could not remove superseded provider record revision: %s", exc)
 
     def _resolve_secret_value(self, secret_uri: str) -> str:
         """Resolve a secret URI and return its ``value`` content.
