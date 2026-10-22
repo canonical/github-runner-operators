@@ -381,16 +381,10 @@ class GarmCharm(paas_charm.go.Charm):
         related_providers = self._get_configurator_provider_configs()
         recorded_providers = self._read_provider_record()
         configurator_related = CharmState.from_charm(self).configurator_related
-        if not related_providers and not recorded_providers:
-            if not configurator_related:
-                self._reconcile_runners()
-            logger.info("GARM configurator provider data not yet available; blocking")
-            self.update_app_and_unit_status(
-                ops.WaitingStatus("Waiting for garm-configurator relation")
-            )
-            return
         # The record is published even with no relation left: a drain outlives the relation,
-        # and a replaced pod must start GARM with the providers that drain needs.
+        # and a replaced pod must start GARM with the providers that drain needs. An empty
+        # set is published the same way, so the workload converges on what the relations and
+        # the record justify instead of keeping a set that nothing stands behind.
         published_providers = self._published_providers(related_providers, recorded_providers)
 
         container = self.unit.get_container(CONTAINER_NAME)
@@ -420,21 +414,27 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
-        if not related_providers and configurator_related:
-            # A configurator is related but has published nothing yet. Reconciling now would
-            # rebuild the desired set from that silence and prune the scalesets it is about
-            # to describe, so wait with the record untouched.
+        # Reconcile before recording: the pass is what establishes which providers are still
+        # referenced, and it must not be buried by the framework reporting active afterward.
+        #
+        # The chain iterates the desired state, so an empty one reconciles to zero. It must
+        # not, however, read silence as "nothing is desired": every reconciler deletes what
+        # it is not told to keep, so a configurator that has not published yet would lose the
+        # credentials, entities and scalesets it is about to describe. Only a relation that
+        # has published, or no configurator at all, is a complete desired state.
+        if related_providers or not configurator_related:
+            referenced_providers = self._reconcile_runners()
+            self._save_provider_record(
+                self._trimmed_providers(
+                    published_providers, related_providers, referenced_providers
+                )
+            )
+        else:
             logger.info("GARM configurator provider data not yet available; blocking")
+        if not related_providers:
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
-            return
-        # Reconcile before recording: the pass is what establishes which providers are still
-        # referenced, and it must not be buried by the framework reporting active afterward.
-        referenced_providers = self._reconcile_runners()
-        self._save_provider_record(
-            self._trimmed_providers(published_providers, related_providers, referenced_providers)
-        )
 
     def _entrypoint_environment(
         self,

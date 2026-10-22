@@ -652,7 +652,8 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     arrange: A ready charm whose garm-configurator relation has been removed.
     act: Run update-status.
     assert: Scalesets are reconciled against an empty desired state, deleting the ones the
-        removed relation orphaned, while the entrypoint remains disabled and the unit reports
+        removed relation orphaned. The workload keeps running with an empty provider set,
+        so nothing the relations no longer justify stays published, and the unit reports
         what it is waiting for.
     """
     out = ctx.run(ctx.on.update_status(), _state(configurator_related=False))
@@ -660,7 +661,8 @@ def test_missing_configurator_relation_prunes_orphaned_scalesets(
     garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
     service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
     assert service.command == "/usr/local/bin/garm-entrypoint.py"
-    assert service.startup == "disabled"
+    assert service.startup == "enabled"
+    assert json.loads(service.environment["GARM_PROVIDERS_JSON"]) == []
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
@@ -767,6 +769,73 @@ def test_remove_refuses_without_admin_credentials(
 
     garm_api.auth.from_login.assert_not_called()
     assert "Operator action: restore the labelled admin credentials secret" in caplog.text
+
+
+def test_no_configurator_unpublishes_the_last_provider(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: The record still holds a provider, and no configurator relation is left — the
+        state in which the last trim has been recorded but not yet published.
+    act: Run update-status twice.
+    assert: The first hook publishes the record and trims it once no scaleset references it;
+        the next hook starts the workload with an empty provider set, so the published set can
+        never outlive the relation that justified it.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = ([], set())
+
+    with caplog.at_level(logging.INFO):
+        trimmed = ctx.run(
+            ctx.on.update_status(),
+            _state(
+                configurator_related=False,
+                recorded_providers=[_provider_config("garm-configurator-0")],
+            ),
+        )
+
+    # The record is published for this hook — nothing says the provider is dead yet — and the
+    # trim that follows empties it.
+    assert _published_provider_names(trimmed) == ["garm-configurator-0"]
+    assert _recorded_provider_names(trimmed) == []
+    assert (
+        "Removing provider garm-configurator-0: no scaleset references it any more" in caplog.text
+    )
+
+    out = ctx.run(ctx.on.update_status(), trimmed)
+
+    service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
+    assert json.loads(service.environment["GARM_PROVIDERS_JSON"]) == []
+    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+
+
+def test_silent_configurator_keeps_the_record_published_and_does_not_reconcile(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: A configurator relation that exists but has published nothing yet, while the
+        record holds a provider.
+    act: Run update-status.
+    assert: The recorded provider is published so the running GARM keeps what a drain needs,
+        and the reconcile chain does NOT run: every reconciler deletes what it is not told to
+        keep, so an unfinished relation would otherwise cost the scalesets it is about to
+        describe.
+    """
+    with caplog.at_level(logging.INFO):
+        out = ctx.run(
+            ctx.on.update_status(),
+            _state(
+                configurator_units_data={0: {}},
+                recorded_providers=[_provider_config("garm-configurator-0")],
+            ),
+        )
+
+    service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
+    assert json.loads(service.environment["GARM_PROVIDERS_JSON"])[0]["unit_name"] == (
+        "garm-configurator-0"
+    )
+    garm_api.scaleset.assert_not_called()
+    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+    assert "provider data not yet available" in caplog.text
 
 
 def test_unpopulated_configurator_relation_does_not_prune(
