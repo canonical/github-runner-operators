@@ -23,6 +23,7 @@ from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
     CharmState,
+    ProviderConfig,
     RunnerConfig,
     credential_name,
     resolve_entity,
@@ -130,7 +131,7 @@ def _generate_admin_password() -> str:
     return "".join(chars)
 
 
-def _parse_provider_record(published: str, source: str) -> list[dict[str, str]]:
+def _parse_provider_record(published: str, source: str) -> list[ProviderConfig]:
     """Parse a recorded provider set, rejecting anything that cannot drive GARM.
 
     Args:
@@ -153,6 +154,7 @@ def _parse_provider_record(published: str, source: str) -> list[dict[str, str]]:
         raise ProviderRecordError(f"{source} is not valid JSON: {exc}") from exc
     if not isinstance(configs, list):
         raise ProviderRecordError(f"{source} is not a list of providers")
+    parsed: list[ProviderConfig] = []
     for config in configs:
         if not isinstance(config, dict) or not isinstance(config.get("unit_name"), str):
             raise ProviderRecordError(f"{source} holds a provider with no unit name")
@@ -161,7 +163,10 @@ def _parse_provider_record(published: str, source: str) -> list[dict[str, str]]:
             raise ProviderRecordError(
                 f"{source} holds provider {config['unit_name']} without {', '.join(missing)}"
             )
-    return configs
+        parsed.append(
+            ProviderConfig(**{field: str(config[field]) for field in PROVIDER_REQUIRED_FIELDS})
+        )
+    return parsed
 
 
 def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
@@ -441,7 +446,7 @@ class GarmCharm(paas_charm.go.Charm):
         self,
         postgresql_config: dict[str, typing.Any],
         secrets_data: dict[str, str],
-        provider_configs: list[dict[str, str]],
+        provider_configs: list[ProviderConfig],
     ) -> dict[str, str]:
         """Build the environment consumed by the GARM entrypoint."""
         environment = {
@@ -453,7 +458,9 @@ class GarmCharm(paas_charm.go.Charm):
             "GARM_JWT_SECRET": secrets_data["jwt-secret"],
             "GARM_PASSPHRASE": secrets_data["db-passphrase"],
             "GARM_PROVIDERS_JSON": json.dumps(
-                provider_configs, sort_keys=True, separators=(",", ":")
+                [config.as_dict() for config in provider_configs],
+                sort_keys=True,
+                separators=(",", ":"),
             ),
             "APP_BASE_URL": self._base_url,
         }
@@ -576,7 +583,7 @@ class GarmCharm(paas_charm.go.Charm):
 
     def _get_configurator_provider_configs(
         self,
-    ) -> list[dict[str, str]]:
+    ) -> list[ProviderConfig]:
         """Read OpenStack provider configs from all Configurator applications.
 
         Each Configurator application is expected to have one unit, which
@@ -590,9 +597,7 @@ class GarmCharm(paas_charm.go.Charm):
         clouds.yaml file.
 
         Returns:
-            A list of dicts, each containing the provider config fields
-            (auth_url, username, password, project_name, etc.) plus a
-            ``unit_name`` key for the provider's TOML name.
+            One ``ProviderConfig`` per configurator application.
         """
         relations = sorted(
             self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []),
@@ -602,7 +607,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
-        configs: list[dict[str, str]] = []
+        configs: list[ProviderConfig] = []
         for relation in relations:
             units = sorted(relation.units, key=lambda unit: unit.name)
             if not units:
@@ -634,17 +639,17 @@ class GarmCharm(paas_charm.go.Charm):
                 password = self._resolve_secret_value(str(password_secret_uri))
 
             configs.append(
-                {
-                    "unit_name": unit_name,
-                    "auth_url": data.get("openstack_auth_url", ""),
-                    "username": data.get("openstack_username", ""),
-                    "password": password,
-                    "project_name": data.get("openstack_project_name", ""),
-                    "user_domain_name": data.get("openstack_user_domain_name", ""),
-                    "project_domain_name": data.get("openstack_project_domain_name", ""),
-                    "region_name": data.get("openstack_region_name", ""),
-                    "network": data.get("openstack_network", ""),
-                }
+                ProviderConfig(
+                    unit_name=unit_name,
+                    auth_url=data.get("openstack_auth_url", ""),
+                    username=data.get("openstack_username", ""),
+                    password=password,
+                    project_name=data.get("openstack_project_name", ""),
+                    user_domain_name=data.get("openstack_user_domain_name", ""),
+                    project_domain_name=data.get("openstack_project_domain_name", ""),
+                    region_name=data.get("openstack_region_name", ""),
+                    network=data.get("openstack_network", ""),
+                )
             )
 
         logger.info(
@@ -655,8 +660,8 @@ class GarmCharm(paas_charm.go.Charm):
         return configs
 
     def _published_providers(
-        self, related: list[dict[str, str]], recorded: dict[str, dict[str, str]]
-    ) -> list[dict[str, str]]:
+        self, related: list[ProviderConfig], recorded: dict[str, ProviderConfig]
+    ) -> list[ProviderConfig]:
         """Return the provider set to publish: the record with the relations on top.
 
         Args:
@@ -669,11 +674,11 @@ class GarmCharm(paas_charm.go.Charm):
         """
         merged = {
             **recorded,
-            **{config["unit_name"]: config for config in related},
+            **{config.unit_name: config for config in related},
         }
-        return sorted(merged.values(), key=lambda config: config["unit_name"])
+        return sorted(merged.values(), key=lambda config: config.unit_name)
 
-    def _read_provider_record(self) -> dict[str, dict[str, str]]:
+    def _read_provider_record(self) -> dict[str, ProviderConfig]:
         """Return the recorded provider set, by provider name.
 
         Returns:
@@ -698,14 +703,14 @@ class GarmCharm(paas_charm.go.Charm):
         recorded = _parse_provider_record(
             content.get(GARM_PROVIDERS_SECRET_KEY, ""), "the GARM provider record"
         )
-        return {config["unit_name"]: config for config in recorded}
+        return {config.unit_name: config for config in recorded}
 
     @staticmethod
     def _trimmed_providers(
-        published: list[dict[str, str]],
-        related: list[dict[str, str]],
+        published: list[ProviderConfig],
+        related: list[ProviderConfig],
         scalesets: list[ScaleSet] | None,
-    ) -> list[dict[str, str]]:
+    ) -> list[ProviderConfig]:
         """Drop providers no relation publishes and no live scaleset names.
 
         Args:
@@ -723,7 +728,7 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning(
                 "The scalesets GARM still holds could not be read; keeping every provider"
                 " this hook: %s",
-                sorted(config["unit_name"] for config in published),
+                sorted(config.unit_name for config in published),
             )
             return published
         unmapped = [scaleset.name for scaleset in scalesets if not scaleset.provider_name]
@@ -732,19 +737,19 @@ class GarmCharm(paas_charm.go.Charm):
                 "Scalesets %s name no provider, so the provider set cannot be mapped to the"
                 " scalesets GARM holds; keeping every provider this hook: %s",
                 unmapped,
-                sorted(config["unit_name"] for config in published),
+                sorted(config.unit_name for config in published),
             )
             return published
 
-        related_names = {config["unit_name"] for config in related}
+        related_names = {config.unit_name for config in related}
         referenced = {scaleset.provider_name for scaleset in scalesets if scaleset.provider_name}
         kept = [
             config
             for config in published
-            if config["unit_name"] in related_names or config["unit_name"] in referenced
+            if config.unit_name in related_names or config.unit_name in referenced
         ]
-        kept_names = {config["unit_name"] for config in kept}
-        for name in sorted({config["unit_name"] for config in published} - kept_names):
+        kept_names = {config.unit_name for config in kept}
+        for name in sorted({config.unit_name for config in published} - kept_names):
             logger.info("Removing provider %s: no scaleset references it any more", name)
         still_needed = sorted((kept_names - related_names) & referenced)
         if still_needed:
@@ -757,9 +762,9 @@ class GarmCharm(paas_charm.go.Charm):
                 " owning configurator is related again.",
                 sorted(unrebuildable),
             )
-        return sorted(kept, key=lambda config: config["unit_name"])
+        return sorted(kept, key=lambda config: config.unit_name)
 
-    def _save_provider_record(self, published: list[dict[str, str]]) -> None:
+    def _save_provider_record(self, published: list[ProviderConfig]) -> None:
         """Record the provider set GARM is running with, so it outlives the pod.
 
         Leader-only: this is the single writer, so the record has one revision history.
@@ -773,7 +778,11 @@ class GarmCharm(paas_charm.go.Charm):
         """
         if not self.unit.is_leader():
             return
-        payload = json.dumps(published, sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(
+            [config.as_dict() for config in published],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         try:
             try:
                 secret = self.model.get_secret(label=GARM_PROVIDERS_LABEL)
