@@ -29,6 +29,7 @@ from charm_state import (
 )
 from entity_reconciler import EntityReconciler
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
+from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
 from github_reconciler import (
@@ -47,33 +48,14 @@ GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
 # The provider set GARM was last started with. Kept in a secret, not only in the Pebble
-# plan, so it survives a pod replacement and is the same for every unit: a drain can run
-# for days, and a restart with a shrunken set in the middle of one is the deadlock this
-# record prevents (ISD-7262).
+# plan, so it survives a pod replacement and is shared by every unit: a drain can run for
+# days, and a restart with a shrunken set in the middle of one strands the scaleset.
 GARM_PROVIDERS_LABEL: typing.Final[str] = "garm-providers"
 GARM_PROVIDERS_SECRET_KEY: typing.Final[str] = "providers"
-# Mirrors the fields garm_entrypoint requires of a provider; a record missing one would be
-# published into a workload that cannot start, so it is rejected here instead.
-_PROVIDER_RECORD_FIELDS: typing.Final[tuple[str, ...]] = (
-    "unit_name",
-    "network",
-    "auth_url",
-    "username",
-    "password",
-    "project_name",
-    "user_domain_name",
-    "project_domain_name",
-    "region_name",
-)
 
 
 class ProviderRecordError(Exception):
-    """The provider record cannot be read or written, so the provider set is unknown.
-
-    Raised out of the hook on purpose: publishing a set derived from a record the charm
-    could not read, or restarting GARM with a set it could not record, would leave a
-    scaleset whose provider nothing can rebuild — the deadlock this record prevents.
-    """
+    """The provider record could not be read or written, so the provider set is unknown."""
 
 
 CONTAINER_NAME: typing.Final[str] = "app"
@@ -185,7 +167,7 @@ def _parse_provider_record(published: str, source: str) -> list[dict[str, str]]:
     for config in configs:
         if not isinstance(config, dict) or not isinstance(config.get("unit_name"), str):
             raise ProviderRecordError(f"{source} holds a provider with no unit name")
-        missing = [field for field in _PROVIDER_RECORD_FIELDS if not config.get(field)]
+        missing = [field for field in PROVIDER_REQUIRED_FIELDS if not config.get(field)]
         if missing:
             raise ProviderRecordError(
                 f"{source} holds provider {config['unit_name']} without {', '.join(missing)}"
@@ -379,17 +361,11 @@ class GarmCharm(paas_charm.go.Charm):
         install/leader_elected before pebble is ready, then gates on
         workload readiness before writing config and replanning.
 
-        The provider set is read, published, reconciled against GARM and only then trimmed
-        and recorded — in that order, once each. A provider the relations publish joins the
-        record; an entry leaves it only when no relation publishes it and no scaleset GARM
-        still holds names it. Keep that order — delete the runners, delete the scaleset,
-        then drop the provider — because GARM fixes its provider map per process: a
-        scaleset whose provider is missing gets neither the worker that purges its instances
-        nor the one that deletes its VMs, and its teardown can never finish.
-
-        The record is the charm's only knowledge of a departed configurator's credentials,
-        so a record that cannot be read or written raises out of the hook rather than
-        yielding a guessed set (see ``ProviderRecordError``).
+        The provider set is read, published, reconciled and then trimmed and recorded, once
+        each, in that order. A provider joins the record when a relation publishes it and
+        leaves it only when no relation publishes it and no scaleset GARM still holds names
+        it. Keep that order: GARM fixes its provider map per process, so a scaleset whose
+        provider was dropped first can never be drained or deleted.
 
         Args:
             rerun_migrations: Passed through to the parent restart.
@@ -415,17 +391,19 @@ class GarmCharm(paas_charm.go.Charm):
             return
 
         related_providers = self._get_configurator_provider_configs()
-        if not related_providers:
-            if not CharmState.from_charm(self).configurator_related:
+        recorded_providers = self._read_provider_record()
+        configurator_related = CharmState.from_charm(self).configurator_related
+        if not related_providers and not recorded_providers:
+            if not configurator_related:
                 self._reconcile_runners()
             logger.info("GARM configurator provider data not yet available; blocking")
             self.update_app_and_unit_status(
                 ops.WaitingStatus("Waiting for garm-configurator relation")
             )
             return
-        # After the gate above, so an application with no configurator left keeps its
-        # workload untouched rather than being replanned against a shrinking provider set.
-        published_providers = self._published_providers(related_providers)
+        # The record is published even with no relation left: a drain outlives the relation,
+        # and a replaced pod must start GARM with the providers that drain needs.
+        published_providers = self._published_providers(related_providers, recorded_providers)
 
         container = self.unit.get_container(CONTAINER_NAME)
         entrypoint_environment = self._entrypoint_environment(
@@ -454,6 +432,15 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
+        if not related_providers and configurator_related:
+            # A configurator is related but has published nothing yet. Reconciling now would
+            # rebuild the desired set from that silence and prune the scalesets it is about
+            # to describe, so wait with the record untouched.
+            logger.info("GARM configurator provider data not yet available; blocking")
+            self.update_app_and_unit_status(
+                ops.WaitingStatus("Waiting for garm-configurator relation")
+            )
+            return
         # Reconcile before recording: the pass is what establishes which providers are still
         # referenced, and it must not be buried by the framework reporting active afterward.
         referenced_providers = self._reconcile_runners()
@@ -678,43 +665,40 @@ class GarmCharm(paas_charm.go.Charm):
         )
         return configs
 
-    def _published_providers(self, related: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _published_providers(
+        self, related: list[dict[str, str]], recorded: dict[str, dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Return the provider set to publish: the record with the relations on top.
-
-        A provider enters the record the first time a relation publishes it, because that is
-        the only moment its credentials can be read — Juju hides a departing unit from
-        ``relation-departed`` onwards, so a provider absent from the record at that point
-        could never be rebuilt. Relation data wins over the recorded copy for a provider that
-        is still related, so a rotated password reaches GARM.
 
         Args:
             related: The provider configs the remaining relations publish.
+            recorded: The recorded configs, by provider name.
 
         Returns:
-            The provider set to publish, ordered by provider name.
+            The provider set to publish, ordered by provider name. Relation data wins, so a
+            rotated password reaches GARM.
         """
-        merged = {config["unit_name"]: config for config in self._read_provider_record().values()}
+        merged = dict(recorded)
         merged.update({config["unit_name"]: config for config in related})
-        return _by_provider_name(merged.values())
+        return sorted(merged.values(), key=lambda config: config["unit_name"])
 
     def _read_provider_record(self) -> dict[str, dict[str, str]]:
         """Return the recorded provider set, by provider name.
 
         Returns:
-            The recorded configs, or an empty set when nothing has been recorded yet — the
-            first start of an application, which is a normal state rather than a failure.
+            The recorded configs, or an empty mapping when nothing has been recorded yet.
 
         Raises:
-            ProviderRecordError: If the record exists but cannot be read, or is not a usable
-                provider set. Publishing a set derived from it would drop providers a live
-                scaleset still needs, so the hook must stop instead.
+            ProviderRecordError: If the record exists but cannot be read, or does not hold a
+                usable provider set: publishing from it would drop providers a live scaleset
+                still needs.
         """
         try:
             secret = self.model.get_secret(label=GARM_PROVIDERS_LABEL)
-            # Refresh: tracking can lag this application's own write, and the record has to
-            # be read at its latest revision — reading a revision behind would resurrect a
-            # provider that the previous hook trimmed away.
-            content = secret.get_content(refresh=True)
+            # Latest revision without tracking it: the record is written by this application
+            # only, and a read one revision behind would resurrect a provider the previous
+            # hook trimmed away.
+            content = secret.peek_content()
         except ops.SecretNotFoundError:
             logger.info("No recorded GARM provider set; publishing the relations only")
             return {}
@@ -740,9 +724,8 @@ class GarmCharm(paas_charm.go.Charm):
                 could not be established.
 
         Returns:
-            The set to record. ``published`` unchanged when ``referenced`` is None: "no
-            scaleset references it" cannot be concluded from "could not tell", and a provider
-            kept a hook too long costs a stale entry while a dropped one cannot be rebuilt.
+            The set to record; ``published`` unchanged when ``referenced`` is None, because
+            "no scaleset references it" cannot be concluded from "could not tell".
         """
         if referenced is None:
             logger.warning(
@@ -764,9 +747,6 @@ class GarmCharm(paas_charm.go.Charm):
         still_needed = sorted((kept_names - related_names) & referenced)
         if still_needed:
             logger.info("Keeping providers a live scaleset still references: %s", still_needed)
-        # A provider a scaleset names but no relation and no record can produce cannot be
-        # rebuilt, so its scaleset cannot finish tearing down. Say so, rather than leaving it
-        # to the reconciler's "will retry" warnings.
         unrebuildable = referenced - kept_names - related_names
         if unrebuildable:
             logger.warning(
@@ -775,13 +755,12 @@ class GarmCharm(paas_charm.go.Charm):
                 " owning configurator is related again.",
                 sorted(unrebuildable),
             )
-        return _by_provider_name(kept)
+        return sorted(kept, key=lambda config: config["unit_name"])
 
     def _save_provider_record(self, published: list[dict[str, str]]) -> None:
         """Record the provider set GARM is running with, so it outlives the pod.
 
-        Leader-only: every unit of this application runs its own GARM against the same
-        database, so one record has to describe the set they should all keep.
+        Leader-only: this is the single writer, so the record has one revision history.
 
         Args:
             published: The provider configs the workload was started with.
@@ -800,13 +779,32 @@ class GarmCharm(paas_charm.go.Charm):
                 self.app.add_secret(
                     {GARM_PROVIDERS_SECRET_KEY: payload},
                     label=GARM_PROVIDERS_LABEL,
-                    description="Provider set GARM was last started with (ISD-7262)",
+                    description="Provider set GARM was last started with",
                 )
                 return
-            if secret.get_content(refresh=True).get(GARM_PROVIDERS_SECRET_KEY) != payload:
+            superseded = secret.get_info().revision
+            if secret.peek_content().get(GARM_PROVIDERS_SECRET_KEY) != payload:
                 secret.set_content({GARM_PROVIDERS_SECRET_KEY: payload})
+                self._remove_superseded_revision(secret, superseded)
         except ops.ModelError as exc:
             raise ProviderRecordError(f"cannot record the GARM provider set: {exc}") from exc
+
+    @staticmethod
+    def _remove_superseded_revision(secret: ops.Secret, superseded: int) -> None:
+        """Drop the revision this write replaced, so old provider passwords do not linger.
+
+        Only this application writes the record and every reader uses ``peek_content()``, so
+        no unit depends on an older revision. Removal is best effort: a store that refuses
+        keeps it, which costs space rather than correctness.
+
+        Args:
+            secret: The record secret, after the new revision was written.
+            superseded: The revision the write replaced.
+        """
+        try:
+            secret.remove_revision(superseded)
+        except (ops.ModelError, ValueError) as exc:
+            logger.debug("Could not remove superseded provider record revision: %s", exc)
 
     def _resolve_secret_value(self, secret_uri: str) -> str:
         """Resolve a secret URI and return its ``value`` content.

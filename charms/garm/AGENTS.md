@@ -35,16 +35,23 @@ charm conventions; this file lists only what's specific to `garm`.
   scalesets, and only then trims and re-records what no relation and no surviving scaleset
   names. **DON'T** reduce the published set to the current relations: GARM fixes its provider
   map per process, so dropping a provider whose scaleset still exists leaves that scaleset
-  with no worker that can delete its runners or the scaleset — the teardown deadlocks
-  (ISD-7262). The provider leaves the record on the hook after its last scaleset is gone, and
-  GARM's next start drops it.
+  with no worker that can delete its runners or the scaleset — the teardown deadlocks. The
+  provider leaves the record on the hook after its last scaleset is gone, and GARM's next
+  start drops it.
+  - The record is published even with **no** configurator left, so a pod replaced mid-drain
+    still starts GARM with the providers that drain needs. The hook waits for the relation
+    only when nothing is related **and** nothing is recorded.
+  - A configurator that is related but has published nothing yet is a waiting state, not a
+    reason to reconcile: the sweep would prune the scalesets that configurator is about to
+    describe.
   - The trim takes effect at the **following** replan; that is deliberate, so a retirement
     does not restart GARM twice.
   - A reconcile pass that cannot establish which scalesets GARM holds returns `None`, and
     `None` trims nothing. **DON'T** default it to an empty set — that deletes every provider.
   - A record that cannot be read or written raises `ProviderRecordError` out of the hook and
     puts the unit in error state: the charm cannot deduce the provider set, and guessing is
-    what strands a scaleset.
+    what strands a scaleset. The leader is the only writer, and readers use
+    `peek_content()`, so the superseded revision is removed after each write.
 - GARM serves its API and `/metrics` on one fixed port (`GARM_PORT`); the `app-port` /
   `metrics-port` / `metrics-path` config options have no effect (the charm logs a warning
   rather than blocking). The port is pinned in the `_workload_config` property.

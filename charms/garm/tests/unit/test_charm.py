@@ -957,6 +957,79 @@ def test_recorded_provider_set_survives_a_replaced_pod(ctx: Context, garm_api: _
     assert _published_provider_names(out) == ["configurator-b-0", "garm-configurator-0"]
 
 
+def test_removing_the_last_configurator_keeps_the_drain_alive_across_a_pod(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: The last configurator is gone, its scaleset is still in GARM, and the record
+        holds its provider — then the pod is replaced, so no Pebble layer survives.
+    act: Reconcile on the replaced pod.
+    assert: The recorded provider is still published and GARM is started with it. The early
+        return that reports "waiting for the relation" would skip the record entirely, and a
+        replaced pod would start with no provider at all, so the scaleset could never drain.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = ([], {"garm-configurator-0"})
+
+    fired = ctx.run(
+        ctx.on.update_status(),
+        _state(
+            configurator_related=False,
+            recorded_providers=[_provider_config("garm-configurator-0")],
+        ),
+    )
+
+    assert _published_provider_names(fired) == ["garm-configurator-0"]
+    assert _recorded_provider_names(fired) == ["garm-configurator-0"]
+    service = fired.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
+    assert service.startup == "enabled"
+    # Nothing is related, so every scaleset is orphaned and the sweep drains it.
+    assert garm_api.scaleset.return_value.reconcile.call_args.args[0] == []
+
+    replaced = ctx.run(
+        ctx.on.update_status(),
+        _state(
+            configurator_related=False,
+            recorded_providers=[_provider_config("garm-configurator-0")],
+        ),
+    )
+
+    assert _published_provider_names(replaced) == ["garm-configurator-0"]
+
+
+def test_record_is_emptied_once_its_last_scaleset_is_gone(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: No configurator left, and GARM holds no scaleset any more.
+    act: Reconcile, then reconcile once more.
+    assert: The record is emptied on the first pass — so a departed provider's credentials do
+        not linger with nothing left to drain — and the next pass goes back to reporting what
+        it waits for, with no provider published.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = ([], set())
+
+    with caplog.at_level(logging.INFO):
+        emptied = ctx.run(
+            ctx.on.update_status(),
+            _state(
+                configurator_related=False,
+                recorded_providers=[_provider_config("garm-configurator-0")],
+            ),
+        )
+
+    assert (
+        "Removing provider garm-configurator-0: no scaleset references it any more" in caplog.text
+    )
+    assert _recorded_provider_names(emptied) == []
+
+    out = ctx.run(ctx.on.update_status(), emptied)
+
+    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
+    # The record stays empty: nothing is republished, so a provider whose scalesets are all
+    # gone cannot come back when a new configurator relates.
+    assert _recorded_provider_names(out) == []
+
+
 def test_related_configurator_credentials_replace_the_recorded_ones(
     ctx: Context, garm_api: _GarmApiMocks
 ):

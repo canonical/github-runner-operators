@@ -273,8 +273,8 @@ class ScalesetReconciler:
                 continue
             if not scaleset.provider_name:
                 logger.warning(
-                    "Scaleset %s (id=%s) names no provider; the provider set cannot be"
-                    " trimmed from this pass",
+                    "Scaleset %s (id=%s) names no provider, so the provider set cannot be"
+                    " mapped to its scalesets and trimming stays off until it is gone",
                     name,
                     scaleset.id,
                 )
