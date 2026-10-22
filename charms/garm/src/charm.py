@@ -420,25 +420,31 @@ class GarmCharm(paas_charm.go.Charm):
         )
         container.replan()
         self._maybe_first_run()
+        # A configurator that is related but has not published yet must not be reconciled:
+        # the chain iterates the desired state, and every reconciler deletes what it is not
+        # told to keep, so that silence would cost the credentials, entities and scalesets it
+        # is about to describe.
+        if not related_providers and configurator_related:
+            logger.info("GARM configurator provider data not yet available; blocking")
+            self._report_waiting_for_configurator()
+            return
+
         # Reconcile before recording: the pass is what establishes which providers are still
         # referenced, and it must not be buried by the framework reporting active afterward.
-        #
-        # The chain iterates the desired state, so an empty one reconciles to zero. It must
-        # not, however, read silence as "nothing is desired": every reconciler deletes what
-        # it is not told to keep, so a configurator that has not published yet would lose the
-        # credentials, entities and scalesets it is about to describe. Only a relation that
-        # has published, or no configurator at all, is a complete desired state.
-        if related_providers or not configurator_related:
-            live_scalesets = self._reconcile_garm_state()
-            self._save_provider_record(
-                self._trimmed_providers(published_providers, related_providers, live_scalesets)
-            )
-        else:
-            logger.info("GARM configurator provider data not yet available; blocking")
+        # An empty desired state is a real one — with no configurator left the workload runs
+        # with no providers, and the pass reconciles that to zero.
+        live_scalesets = self._reconcile_garm_state()
+        self._save_provider_record(
+            self._trimmed_providers(published_providers, related_providers, live_scalesets)
+        )
         if not related_providers:
-            self.update_app_and_unit_status(
-                ops.WaitingStatus("Waiting for garm-configurator relation")
-            )
+            self._report_waiting_for_configurator()
+
+    def _report_waiting_for_configurator(self) -> None:
+        """Report that the unit is waiting for a configurator that publishes providers."""
+        self.update_app_and_unit_status(
+            ops.WaitingStatus("Waiting for garm-configurator relation")
+        )
 
     def _entrypoint_environment(
         self,
