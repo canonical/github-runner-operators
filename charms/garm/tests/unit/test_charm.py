@@ -1472,7 +1472,7 @@ def test_first_run_skipped_when_credentials_are_incomplete(ctx: Context, garm_ap
     """
     secrets = _owned_secrets(admin_content={"username": "admin"})
 
-    with patch.object(GarmCharm, "_reconcile_runners"):
+    with patch.object(GarmCharm, "_reconcile_garm_state"):
         ctx.run(ctx.on.update_status(), _state(secrets=secrets))
 
     garm_api.client.assert_not_called()

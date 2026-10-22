@@ -429,11 +429,9 @@ class GarmCharm(paas_charm.go.Charm):
         # credentials, entities and scalesets it is about to describe. Only a relation that
         # has published, or no configurator at all, is a complete desired state.
         if related_providers or not configurator_related:
-            referenced_providers = self._reconcile_runners()
+            live_scalesets = self._reconcile_garm_state()
             self._save_provider_record(
-                self._trimmed_providers(
-                    published_providers, related_providers, referenced_providers
-                )
+                self._trimmed_providers(published_providers, related_providers, live_scalesets)
             )
         else:
             logger.info("GARM configurator provider data not yet available; blocking")
@@ -1033,8 +1031,8 @@ class GarmCharm(paas_charm.go.Charm):
             description=MANAGED_CREDENTIAL_DESCRIPTION,
         )
 
-    def _reconcile_runners(self) -> list[ScaleSet] | None:
-        """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
+    def _reconcile_garm_state(self) -> list[ScaleSet] | None:
+        """Make GARM match the charm's desired state: its own config, then its resources.
 
         The steps are ordered, not independent: GARM rejects every operational call with
         409 ``urls_required`` until the controller URLs are set; org/repo entities reference a
