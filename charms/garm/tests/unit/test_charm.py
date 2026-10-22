@@ -1008,17 +1008,23 @@ def test_provider_set_is_not_shrunk_when_the_scaleset_state_is_unknown(
     assert "keeping every provider this hook" in caplog.text
 
 
-def test_provider_set_is_not_shrunk_when_a_scaleset_names_no_provider(
+def test_unattributable_scaleset_is_reported_and_does_not_block_the_trim(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
-    arrange: A departing configurator, and a scaleset GARM holds that names no provider.
+    arrange: A departing configurator, a live scaleset that names no provider, and one that
+        names the surviving configurator's provider.
     act: Run update-status.
-    assert: Every published provider is kept: nothing maps that scaleset to a provider, so
-        the charm cannot tell which provider it still needs — and dropping one it cannot rule
-        out is the deadlock.
+    assert: The unmapped scaleset is reported as an orphan and the trim carries on: the
+        departed provider goes, the surviving one stays. Keeping every provider for a row
+        nothing can attribute to one would disable trimming for the whole application without
+        making that row any more deletable — GARM resolves a scaleset's provider from the same
+        field the charm cannot read.
     """
-    garm_api.scaleset.return_value.reconcile.return_value = ([], [_held_scaleset(None)])
+    garm_api.scaleset.return_value.reconcile.return_value = (
+        [],
+        [_held_scaleset(None), _held_scaleset("configurator-b-0")],
+    )
 
     with caplog.at_level(logging.INFO):
         out = ctx.run(
@@ -1032,8 +1038,14 @@ def test_provider_set_is_not_shrunk_when_a_scaleset_names_no_provider(
             ),
         )
 
-    assert _published_provider_names(out) == ["configurator-b-0", "garm-configurator-0"]
+    # The trim lands in the record on this hook; the published set follows on the next one.
+    assert _recorded_provider_names(out) == ["configurator-b-0"]
     assert "name no provider" in caplog.text
+    assert "Removing provider garm-configurator-0" in caplog.text
+
+    later = ctx.run(ctx.on.update_status(), out)
+
+    assert _published_provider_names(later) == ["configurator-b-0"]
 
 
 def test_recorded_provider_set_survives_a_replaced_pod(ctx: Context, garm_api: _GarmApiMocks):

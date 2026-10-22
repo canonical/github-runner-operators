@@ -721,8 +721,9 @@ class GarmCharm(paas_charm.go.Charm):
 
         Returns:
             The set to record; ``published`` unchanged when the surviving scalesets are
-            unknown, or when one of them names no provider — "no scaleset references it"
-            cannot be concluded from "could not tell".
+            unknown, because "no scaleset references it" cannot be concluded from "could not
+            tell". A scaleset that names no provider is reported and skipped: it cannot be
+            attributed to a provider, so it neither keeps one nor blocks the rest.
         """
         if scalesets is None:
             logger.warning(
@@ -731,15 +732,21 @@ class GarmCharm(paas_charm.go.Charm):
                 sorted(config.unit_name for config in published),
             )
             return published
-        unmapped = [scaleset.name for scaleset in scalesets if not scaleset.provider_name]
+        # A scaleset with no provider name cannot be attributed to one, so it can neither
+        # justify retaining a provider nor be rescued by retaining them: GARM resolves a
+        # scaleset's provider from that same field. Report it as an orphan and reconcile the
+        # providers that can be accounted for, rather than letting one corrupt row disable
+        # trimming for the whole application.
+        unmapped = sorted(
+            str(scaleset.name) for scaleset in scalesets if not scaleset.provider_name
+        )
         if unmapped:
             logger.warning(
-                "Scalesets %s name no provider, so the provider set cannot be mapped to the"
-                " scalesets GARM holds; keeping every provider this hook: %s",
+                "Live scalesets %s name no provider, so nothing attributes them to one;"
+                " leaving them to GARM and reconciling the remaining providers: %s",
                 unmapped,
                 sorted(config.unit_name for config in published),
             )
-            return published
 
         related_names = {config.unit_name for config in related}
         referenced = {scaleset.provider_name for scaleset in scalesets if scaleset.provider_name}
