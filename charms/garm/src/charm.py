@@ -678,8 +678,10 @@ class GarmCharm(paas_charm.go.Charm):
             The provider set to publish, ordered by provider name. Relation data wins, so a
             rotated password reaches GARM.
         """
-        merged = dict(recorded)
-        merged.update({config["unit_name"]: config for config in related})
+        merged = {
+            **recorded,
+            **{config["unit_name"]: config for config in related},
+        }
         return sorted(merged.values(), key=lambda config: config["unit_name"])
 
     def _read_provider_record(self) -> dict[str, dict[str, str]]:
