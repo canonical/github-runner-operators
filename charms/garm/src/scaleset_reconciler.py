@@ -164,7 +164,7 @@ class ScalesetReconciler:
 
     def reconcile(
         self, desired: list[ScalesetSpec]
-    ) -> tuple[list[ScalesetProgress], set[str] | None]:
+    ) -> tuple[list[ScalesetProgress], list[ScaleSet]]:
         """Sync GARM scalesets to match *desired*.
 
         Performs the minimum set of CREATE / UPDATE / DELETE operations, and
@@ -194,11 +194,10 @@ class ScalesetReconciler:
             desired: The full desired set of scalesets.
 
         Returns:
-            The replacements still in flight (empty once converged), and the providers the
-            scalesets GARM still holds are created with, so the caller can drop a provider
-            only once nothing references it. The provider set is ``None`` when it cannot be
-            established: a surviving scaleset with no provider name leaves nothing to map
-            it to, and "nothing is referenced" must never be guessed from a failed read.
+            The replacements still in flight (empty once converged), and the scalesets GARM
+            still holds after this pass. Callers decide what those mean — the charm keeps a
+            provider published while a scaleset still names it — so this reports what GARM
+            answered rather than concluding anything about the desired state.
 
         Raises:
             GarmApiError: If any spec failed to reconcile, re-raised once the rest
@@ -244,43 +243,24 @@ class ScalesetReconciler:
                 deleted.add(name)
         if failure is not None:
             raise failure
-        return progress, self._referenced_providers(desired, observed, deleted)
+        return progress, self._surviving_scalesets(observed, deleted)
 
     @staticmethod
-    def _referenced_providers(
-        desired: list[ScalesetSpec], observed: dict[str, ScaleSet], deleted: set[str]
-    ) -> set[str] | None:
-        """Return the providers the scalesets GARM still holds were created with.
+    def _surviving_scalesets(observed: dict[str, ScaleSet], deleted: set[str]) -> list[ScaleSet]:
+        """Return the scalesets GARM still holds after this pass.
 
         Built from what GARM answered, not from what this pass asked for: a scaleset whose
         delete was refused, deferred, or never attempted is still held, and a provider
         dropped while its scaleset survives can never be handed back.
 
         Args:
-            desired: The specs reconciled by this pass; their providers stay referenced even
-                while the scaleset that will use one is only now being created.
             observed: The scalesets GARM listed before this pass, by name.
             deleted: Names of scalesets GARM accepted a delete for during this pass.
 
         Returns:
-            The referenced provider names, or None when a surviving scaleset has no provider
-            name — GARM holds it, but nothing maps it to a provider, so the caller cannot
-            tell which provider is still needed and must not drop any.
+            The surviving scalesets, ordered by name so a caller's decisions are stable.
         """
-        referenced = {spec.provider_name for spec in desired}
-        for name, scaleset in observed.items():
-            if name in deleted:
-                continue
-            if not scaleset.provider_name:
-                logger.warning(
-                    "Scaleset %s (id=%s) names no provider, so the provider set cannot be"
-                    " mapped to its scalesets and trimming stays off until it is gone",
-                    name,
-                    scaleset.id,
-                )
-                return None
-            referenced.add(scaleset.provider_name)
-        return referenced
+        return [observed[name] for name in sorted(observed) if name not in deleted]
 
     @staticmethod
     def _dedupe(desired: list[ScalesetSpec]) -> list[ScalesetSpec]:

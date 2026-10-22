@@ -15,6 +15,7 @@ import dataclasses
 import json
 import logging
 import os
+import types
 import typing
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -160,7 +161,7 @@ def garm_api_fixture() -> typing.Iterator[_GarmApiMocks]:
         # No scaleset is mid-replacement by default, so the charm reports active. The
         # referenced set is what the pass observed GARM still holds: empty means no scaleset
         # references any provider.
-        scaleset_cls.return_value.reconcile.return_value = ([], set())
+        scaleset_cls.return_value.reconcile.return_value = ([], [])
         calls = MagicMock()
         calls.attach_mock(auth_client.update_controller, "controller")
         calls.attach_mock(agent_tools, "agent_tools")
@@ -312,6 +313,11 @@ def _configurator_relation(app_name: str) -> Relation:
             }
         },
     )
+
+
+def _held_scaleset(provider_name: str | None, name: str = "held-scaleset-left-behind"):
+    """Return a scaleset as GARM reports it after a pass: only the fields the charm reads."""
+    return types.SimpleNamespace(name=name, provider_name=provider_name)
 
 
 def _recorded_provider_names(state: State) -> list[str]:
@@ -782,7 +788,7 @@ def test_no_configurator_unpublishes_the_last_provider(
         the next hook starts the workload with an empty provider set, so the published set can
         never outlive the relation that justified it.
     """
-    garm_api.scaleset.return_value.reconcile.return_value = ([], set())
+    garm_api.scaleset.return_value.reconcile.return_value = ([], [])
 
     with caplog.at_level(logging.INFO):
         trimmed = ctx.run(
@@ -890,7 +896,10 @@ def test_departing_configurator_provider_is_kept_while_its_scaleset_remains(
         provider here would strand the scaleset: GARM rejects deleting the runner in its
         ``deleted`` status and the scaleset while it still lists runners.
     """
-    garm_api.scaleset.return_value.reconcile.return_value = ([], {"garm-configurator-0"})
+    garm_api.scaleset.return_value.reconcile.return_value = (
+        [],
+        [_held_scaleset("garm-configurator-0")],
+    )
 
     with caplog.at_level(logging.INFO):
         out = ctx.run(
@@ -932,7 +941,10 @@ def test_departing_configurator_provider_is_removed_once_its_scaleset_is_gone(
         loses it on the next — the trim is recorded after the pass that justified it, so it
         takes effect at the following replan rather than restarting GARM twice.
     """
-    garm_api.scaleset.return_value.reconcile.return_value = ([], {"garm-configurator-0"})
+    garm_api.scaleset.return_value.reconcile.return_value = (
+        [],
+        [_held_scaleset("garm-configurator-0")],
+    )
     with caplog.at_level(logging.INFO):
         fired = ctx.run(
             ctx.on.update_status(),
@@ -948,7 +960,7 @@ def test_departing_configurator_provider_is_removed_once_its_scaleset_is_gone(
     assert _published_provider_names(fired) == ["configurator-b-0", "garm-configurator-0"]
     assert _recorded_provider_names(fired) == ["configurator-b-0", "garm-configurator-0"]
 
-    garm_api.scaleset.return_value.reconcile.return_value = ([], set())
+    garm_api.scaleset.return_value.reconcile.return_value = ([], [])
     with caplog.at_level(logging.INFO):
         trimmed = ctx.run(ctx.on.update_status(), fired)
 
@@ -996,6 +1008,34 @@ def test_provider_set_is_not_shrunk_when_the_scaleset_state_is_unknown(
     assert "keeping every provider this hook" in caplog.text
 
 
+def test_provider_set_is_not_shrunk_when_a_scaleset_names_no_provider(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: A departing configurator, and a scaleset GARM holds that names no provider.
+    act: Run update-status.
+    assert: Every published provider is kept: nothing maps that scaleset to a provider, so
+        the charm cannot tell which provider it still needs — and dropping one it cannot rule
+        out is the deadlock.
+    """
+    garm_api.scaleset.return_value.reconcile.return_value = ([], [_held_scaleset(None)])
+
+    with caplog.at_level(logging.INFO):
+        out = ctx.run(
+            ctx.on.update_status(),
+            _state(
+                configurator_relations=[_configurator_relation("configurator-b")],
+                recorded_providers=[
+                    _provider_config("configurator-b-0"),
+                    _provider_config("garm-configurator-0"),
+                ],
+            ),
+        )
+
+    assert _published_provider_names(out) == ["configurator-b-0", "garm-configurator-0"]
+    assert "name no provider" in caplog.text
+
+
 def test_recorded_provider_set_survives_a_replaced_pod(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: Two configurators publishing providers, reconciled once so the set is recorded,
@@ -1014,7 +1054,10 @@ def test_recorded_provider_set_survives_a_replaced_pod(ctx: Context, garm_api: _
     recorded = _recorded_provider_names(first)
     assert set(recorded) == {"garm-configurator-0", "configurator-b-0"}
 
-    garm_api.scaleset.return_value.reconcile.return_value = ([], {"garm-configurator-0"})
+    garm_api.scaleset.return_value.reconcile.return_value = (
+        [],
+        [_held_scaleset("garm-configurator-0")],
+    )
     out = ctx.run(
         ctx.on.update_status(),
         _state(
@@ -1037,7 +1080,10 @@ def test_removing_the_last_configurator_keeps_the_drain_alive_across_a_pod(
         return that reports "waiting for the relation" would skip the record entirely, and a
         replaced pod would start with no provider at all, so the scaleset could never drain.
     """
-    garm_api.scaleset.return_value.reconcile.return_value = ([], {"garm-configurator-0"})
+    garm_api.scaleset.return_value.reconcile.return_value = (
+        [],
+        [_held_scaleset("garm-configurator-0")],
+    )
 
     fired = ctx.run(
         ctx.on.update_status(),
@@ -1075,7 +1121,7 @@ def test_record_is_emptied_once_its_last_scaleset_is_gone(
         not linger with nothing left to drain — and the next pass goes back to reporting what
         it waits for, with no provider published.
     """
-    garm_api.scaleset.return_value.reconcile.return_value = ([], set())
+    garm_api.scaleset.return_value.reconcile.return_value = ([], [])
 
     with caplog.at_level(logging.INFO):
         emptied = ctx.run(
@@ -1148,7 +1194,7 @@ def test_unrebuildable_provider_is_reported(
     """
     garm_api.scaleset.return_value.reconcile.return_value = (
         [],
-        {"garm-configurator-0", "vanished-configurator-0"},
+        [_held_scaleset("garm-configurator-0"), _held_scaleset("vanished-configurator-0")],
     )
 
     with caplog.at_level(logging.INFO):

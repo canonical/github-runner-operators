@@ -523,14 +523,14 @@ def test_delete_orphaned_scaleset():
     assert client.deleted == [42]
 
 
-def test_referenced_providers_counts_a_desired_spec_before_its_scaleset_exists():
+def test_surviving_scalesets_exclude_the_ones_deleted_in_the_pass():
     """
-    arrange: A desired spec whose scaleset does not exist yet, and an orphaned scaleset
-        GARM accepts a delete for.
+    arrange: An orphaned scaleset GARM accepts a delete for, and a desired spec whose
+        scaleset does not exist yet.
     act: Reconcile.
-    assert: The desired provider is referenced even though nothing names it in GARM yet,
-        and the deleted scaleset's provider drops out — its provider is what the charm may
-        now stop publishing.
+    assert: Only the scalesets GARM still holds are returned: the deleted one drops out, and
+        a scaleset the pass only created is not reported, because the caller derives what is
+        still needed from what GARM answered, not from what the pass asked for.
     """
     client = FakeGarmClient(
         providers=["openstack-demo", "retired-provider"],
@@ -539,18 +539,19 @@ def test_referenced_providers_counts_a_desired_spec_before_its_scaleset_exists()
         ],
     )
 
-    referenced = _reconcile_referenced(client, [_spec(name="new-scaleset")])
+    surviving = _reconcile_referenced(client, [_spec(name="new-scaleset")])
 
     assert client.deleted == [42]
-    assert referenced == {"openstack-demo"}
+    assert [scaleset.name for scaleset in surviving] == []
 
 
-def test_referenced_providers_keeps_a_scaleset_whose_delete_was_refused():
+def test_surviving_scalesets_keep_a_scaleset_whose_delete_was_refused():
     """
     arrange: An orphaned scaleset whose delete GARM rejects, because it still owns runners.
     act: Reconcile.
-    assert: Its provider stays referenced: GARM still holds the scaleset, so the provider
-        it needs must not be dropped.
+    assert: The scaleset is reported as surviving, so the caller keeps the provider it names:
+        GARM still holds it, and a provider dropped while its scaleset survives can never be
+        handed back.
     """
 
     class _DeleteFailingClient(FakeGarmClient):
@@ -564,26 +565,29 @@ def test_referenced_providers_keeps_a_scaleset_whose_delete_was_refused():
         ],
     )
 
-    referenced = _reconcile_referenced(client, [_spec(name="new-scaleset")])
+    surviving = _reconcile_referenced(client, [_spec(name="new-scaleset")])
 
-    assert referenced == {"openstack-demo", "retired-provider"}
+    assert [scaleset.name for scaleset in surviving] == ["stale-scaleset"]
+    assert surviving[0].provider_name == "retired-provider"
 
 
-def test_referenced_providers_is_unknown_when_a_scaleset_names_no_provider():
+def test_surviving_scalesets_are_reported_even_with_no_provider_name():
     """
     arrange: A scaleset GARM holds that names no provider at all.
     act: Reconcile.
-    assert: The answer is None, not a set: nothing maps that scaleset to a provider, so the
-        caller cannot tell which provider it still needs and must drop none.
+    assert: The scaleset is still reported as observed, and the caller decides what an
+        unmappable scaleset means — the reconciler states what GARM answered, it does not
+        conclude which providers are safe to drop.
     """
-    # A scaleset the pass keeps, so it is still in the set the caller maps: the desired
-    # spec's own generation, which GARM holds without saying which provider made it.
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[_existing_scaleset(provider_name=None)],
     )
 
-    assert _reconcile_referenced(client, [_spec()]) is None
+    surviving = _reconcile_referenced(client, [_spec()])
+
+    assert [scaleset.name for scaleset in surviving] == [_existing_scaleset()["name"]]
+    assert surviving[0].provider_name is None
 
 
 def test_orphan_template_outlives_a_failed_orphan_delete():

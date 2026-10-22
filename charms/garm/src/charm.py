@@ -29,6 +29,7 @@ from charm_state import (
 )
 from entity_reconciler import EntityReconciler
 from garm_api import GarmApiClient, GarmApiError, GarmAuthenticatedClient, GarmConnectionError
+from garm_client.models.scale_set import ScaleSet
 from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
 from garm_template import CharmedTemplateError
 from garm_template import apply_charmed_template as _apply_garm_template
@@ -703,29 +704,40 @@ class GarmCharm(paas_charm.go.Charm):
     def _trimmed_providers(
         published: list[dict[str, str]],
         related: list[dict[str, str]],
-        referenced: set[str] | None,
+        scalesets: list[ScaleSet] | None,
     ) -> list[dict[str, str]]:
-        """Drop providers no relation publishes and no live scaleset references.
+        """Drop providers no relation publishes and no live scaleset names.
 
         Args:
             published: The provider set GARM was started with on this pass.
             related: The provider configs the remaining relations publish.
-            referenced: The providers of the scalesets GARM still holds, or None when that
-                could not be established.
+            scalesets: The scalesets GARM still holds after the pass, or None when the pass
+                could not establish that.
 
         Returns:
-            The set to record; ``published`` unchanged when ``referenced`` is None, because
-            "no scaleset references it" cannot be concluded from "could not tell".
+            The set to record; ``published`` unchanged when the surviving scalesets are
+            unknown, or when one of them names no provider — "no scaleset references it"
+            cannot be concluded from "could not tell".
         """
-        if referenced is None:
+        if scalesets is None:
             logger.warning(
                 "The scalesets GARM still holds could not be read; keeping every provider"
                 " this hook: %s",
                 sorted(config["unit_name"] for config in published),
             )
             return published
+        unmapped = [scaleset.name for scaleset in scalesets if not scaleset.provider_name]
+        if unmapped:
+            logger.warning(
+                "Scalesets %s name no provider, so the provider set cannot be mapped to the"
+                " scalesets GARM holds; keeping every provider this hook: %s",
+                unmapped,
+                sorted(config["unit_name"] for config in published),
+            )
+            return published
 
         related_names = {config["unit_name"] for config in related}
+        referenced = {scaleset.provider_name for scaleset in scalesets if scaleset.provider_name}
         kept = [
             config
             for config in published
@@ -1005,7 +1017,7 @@ class GarmCharm(paas_charm.go.Charm):
             description=MANAGED_CREDENTIAL_DESCRIPTION,
         )
 
-    def _reconcile_runners(self) -> set[str] | None:
+    def _reconcile_runners(self) -> list[ScaleSet] | None:
         """Sync GARM controller URLs, GitHub credentials, entities, then scalesets.
 
         The steps are ordered, not independent: GARM rejects every operational call with
@@ -1016,10 +1028,10 @@ class GarmCharm(paas_charm.go.Charm):
         scaleset can reference it.
 
         Returns:
-            The providers the scalesets GARM still holds are created with, or None when that
-            could not be established — no admin credentials, a connection or authorization
-            failure, or a template that could not be applied. None means "unknown", and the
-            caller must read it as "drop nothing".
+            The scalesets GARM still holds after the pass, or None when the pass could not
+            run — no admin credentials, a connection or authorization failure, or a template
+            that could not be applied. None means "unknown", and the caller must read it as
+            "drop nothing".
         """
         admin_creds = self._get_admin_credentials()
         if not admin_creds:
@@ -1047,7 +1059,7 @@ class GarmCharm(paas_charm.go.Charm):
             GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
-            replacing, referenced = ScalesetReconciler(auth_client).reconcile(
+            replacing, surviving_scalesets = ScalesetReconciler(auth_client).reconcile(
                 self._build_desired_scalesets(template_id)
             )
             # A label change recreates the scaleset and drains the old one, which
@@ -1062,7 +1074,7 @@ class GarmCharm(paas_charm.go.Charm):
                 )
             else:
                 self.update_app_and_unit_status(ops.ActiveStatus())
-            return referenced
+            return surviving_scalesets
         except CharmedTemplateError as exc:
             logger.warning("GARM charmed template error during reconcile: %s", exc)
             self.update_app_and_unit_status(ops.WaitingStatus(str(exc)))
