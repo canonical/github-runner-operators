@@ -385,3 +385,43 @@ class CharmState:
                 charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, [])
             ),
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class ProviderConfig:
+    """One OpenStack provider, as the charm publishes it to GARM.
+
+    The provider's name is its configurator's unit name with ``/`` replaced by ``-``, which is
+    also the key GARM's provider registry and the scale sets' ``provider_name`` use. The field
+    names are the wire contract: ``as_dict()`` is what the workload entrypoint reads out of
+    ``GARM_PROVIDERS_JSON`` and what the record keeps, so renaming a field changes both.
+
+    Attributes:
+        unit_name: The provider name.
+        auth_url: Keystone authentication URL.
+        username: OpenStack username.
+        password: OpenStack password, in plaintext — it goes into the provider's clouds.yaml.
+        project_name: OpenStack project (tenant).
+        user_domain_name: Domain of the user.
+        project_domain_name: Domain of the project.
+        region_name: OpenStack region.
+        network: Network name or ID instances are attached to.
+    """
+
+    unit_name: str
+    auth_url: str
+    username: str
+    password: str
+    project_name: str
+    user_domain_name: str
+    project_domain_name: str
+    region_name: str
+    network: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Return the wire form the entrypoint and the record read.
+
+        Returns:
+            The provider's fields, keyed by the names in ``GARM_PROVIDERS_JSON``.
+        """
+        return dataclasses.asdict(self)
