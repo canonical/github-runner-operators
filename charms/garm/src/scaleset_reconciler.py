@@ -523,8 +523,9 @@ class ScalesetReconciler:
             # not only an active one — is still listed, so whatever is left needs the
             # same guarded cleanup the orphan sweep uses: a plain delete for anything
             # removable, escalating to forced removal only once GARM itself is stuck
-            # carrying one out, and still leaving a genuinely running job's runner
-            # alone, though past MAX_JOB_RUNTIME none legitimately can be one.
+            # carrying one out. A runner still marked busy is removed too: this branch only
+            # runs once the drain has outlived MAX_JOB_RUNTIME, so no legitimate job can be
+            # running on it.
             logger.warning(
                 "Scaleset %s still reports %d runner(s) after %s of draining;"
                 " removing them directly rather than continuing to wait for GARM's"
@@ -752,9 +753,10 @@ class ScalesetReconciler:
         Args:
             scaleset_id: Id of the scaleset being deleted.
             name: Name of the scaleset being deleted, for logging.
-            past_deadline: Whether the scaleset has been draining longer than any job
-                can last, which turns a runner GARM will not accept a delete for from
-                something to wait out into something to report.
+            past_deadline: Whether the scaleset has been draining longer than any job can
+                last. It turns a runner GARM will not accept a delete for from something to
+                wait out into something to report, and it expires the protection a busy
+                runner would otherwise have indefinitely.
 
         Returns:
             Whether the scaleset owns no runners, so GARM will accept its delete.
@@ -789,6 +791,21 @@ class ScalesetReconciler:
                 # so wait for GARM to move the runner on rather than retry into the
                 # same error every pass.
                 self._log_undeletable_runner(instance, name, past_deadline)
+                continue
+            if past_deadline:
+                # The scaleset has been draining longer than any job can last, so a runner
+                # this record still calls busy cannot be running one: the completion that
+                # would have cleared it was lost. The protection has expired rather than
+                # become true, so removing it is what lets the scaleset finish, and it is a
+                # plain delete unless GARM is already sitting on one it could not carry out.
+                logger.warning(
+                    "Removing runner %s of scaleset %s: it still reports a job after %s of"
+                    " draining, which no legitimate job outlives",
+                    instance.name,
+                    name,
+                    DRAIN_DEADLINE,
+                )
+                self._delete_runner(instance, name)
                 continue
             if _is_running_job(instance):
                 # Deleting the runner here would fail the workflow job running on
@@ -1289,6 +1306,12 @@ def _drain_deadline_passed(scaleset: ScaleSet) -> bool:
         stopped the listener. ``handleAutoScale`` keeps running but writes instances, a
         separate table. False when GARM reports no timestamp: an unknown drain age must
         never read as an expired one.
+
+        Re-disabling a scaleset does not move this clock: GARM's ``updateScaleSet`` builds
+        its update from the fields that differ and issues no statement when none do, so an
+        idempotent disable leaves ``updated_at`` at the moment it was first disabled. That
+        is what lets the drain deadline survive the orphan sweep re-disabling the scaleset
+        on every pass.
     """
     retired_at = scaleset.updated_at
     if retired_at is None:

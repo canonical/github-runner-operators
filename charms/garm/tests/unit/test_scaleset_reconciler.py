@@ -2288,14 +2288,16 @@ def test_drain_past_the_deadline_deletes_the_scaleset_once_removal_completes():
     assert progress == []
 
 
-def test_drain_past_the_deadline_still_leaves_a_running_job_alone():
+def test_drain_past_the_deadline_removes_a_runner_still_marked_busy():
     """
-    arrange: The old generation was disabled longer ago than any job can run, but still
-        reports a runner GARM's job-status stream marks as running one.
+    arrange: The scaleset has been draining longer than any job can last, and still reports
+        a runner GARM's job-status stream marks as running one.
     act: Reconcile.
-    assert: Direct removal past the deadline reuses the same job protection as the
-        orphan sweep, so a genuinely running job is not cut short just because the
-        scaleset around it has been draining a long time.
+    assert: The runner is handed a plain delete. Past MAX_JOB_RUNTIME the record cannot
+        describe a job that is still running — a self-hosted job cannot outlive it — so the
+        completion that would have cleared the runner was lost. Without this the scaleset
+        never drains: the runner is reported busy on every pass for as long as GARM keeps
+        refreshing its row.
     """
     long_ago = datetime.now(timezone.utc) - DRAIN_DEADLINE * 2
     client = FakeGarmClient(
@@ -2309,31 +2311,32 @@ def test_drain_past_the_deadline_still_leaves_a_running_job_alone():
 
     progress = _reconcile(client, [_spec(labels=_LABELS_NEW)])
 
-    assert client.deleted_instances == []
-    assert client.deleted == []
+    # Plain, not forced: forcing is reserved for a delete GARM accepted and could not carry
+    # out, and would drop the record while the VM may still exist.
+    assert client.deleted_instances == [("runner-1", False, False)]
     assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 1)]
 
 
-def test_drain_within_the_deadline_still_waits_for_the_runners():
+def test_drain_within_the_deadline_leaves_a_runner_marked_busy_alone():
     """
-    arrange: The old generation was disabled recently and still has a runner.
+    arrange: A replaced scaleset whose runner reports a job, with the drain still inside
+        DRAIN_DEADLINE.
     act: Reconcile.
-    assert: It is not deleted — the deadline is a backstop for stuck instances, and must
-        not shorten a normal drain and cut a running job short.
+    assert: No delete is issued: a genuinely running job is never cut short, which is the
+        whole reason the deadline exists.
     """
-    recently = datetime.now(timezone.utc) - DRAIN_DEADLINE / 2
     client = FakeGarmClient(
         providers=["openstack-demo"],
         scalesets=[
-            _generation(_LABELS_OLD, id=1, enabled=False, updated_at=recently),
+            _generation(_LABELS_OLD, id=1, enabled=False),
             _generation(_LABELS_NEW, id=2),
         ],
-        instances={1: 1},
+        instances={1: [{"name": "runner-1", "runner_status": "active"}]},
     )
 
     progress = _reconcile(client, [_spec(labels=_LABELS_NEW)])
 
-    assert client.deleted == []
+    assert client.deleted_instances == []
     assert progress == [ScalesetProgress("my-scaleset", _OLD_NAME, _NEW_NAME, 1)]
 
 
