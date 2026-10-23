@@ -151,7 +151,7 @@ def render_pre_job_hooks(config: RunnerConfig) -> str:
     env_delim = _heredoc_delimiter("\n".join(env_entries), "GARM_CHARM_ENV")
     # Per-scaleset env write: these vars come from the scaleset's RunnerConfig, so
     # they land in the per-scaleset template (a separate .env append from the
-    # global tmate one in garm_template.build_tmate_env_snippet).
+    # global one in garm_template.build_env_snippet).
     return _PRE_JOB_HOOKS_TEMPLATE.render(
         runner_home=RUNNER_HOME,
         hook_path=PRE_JOB_HOOK_PATH,
