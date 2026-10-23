@@ -162,7 +162,9 @@ class ScalesetReconciler:
         """
         self._client = client
 
-    def reconcile(self, desired: list[ScalesetSpec]) -> list[ScalesetProgress]:
+    def reconcile(
+        self, desired: list[ScalesetSpec]
+    ) -> tuple[list[ScalesetProgress], list[ScaleSet]]:
         """Sync GARM scalesets to match *desired*.
 
         Performs the minimum set of CREATE / UPDATE / DELETE operations, and
@@ -192,7 +194,11 @@ class ScalesetReconciler:
             desired: The full desired set of scalesets.
 
         Returns:
-            One entry per replacement still in flight; empty once converged.
+            The replacements still in flight (empty once converged), and every scaleset GARM
+            holds after this pass — listed and kept, newly created, or not deleted. Callers
+            decide what those mean: the charm keeps a provider published while a scaleset
+            still names it, so this reports live state rather than concluding anything about
+            the desired state.
 
         Raises:
             GarmApiError: If any spec failed to reconcile, re-raised once the rest
@@ -217,12 +223,18 @@ class ScalesetReconciler:
             claimed.update(family)
 
         progress: list[ScalesetProgress] = []
+        created: dict[str, ScaleSet] = {}
         failure: GarmApiError | None = None
         for spec in desired:
             try:
                 progress.extend(
                     self._reconcile_one(
-                        spec, providers, observed, templates, families.get(spec.name, [])
+                        spec,
+                        providers,
+                        observed,
+                        templates,
+                        families.get(spec.name, []),
+                        created,
                     )
                 )
             except (GarmConnectionError, GarmUnauthorizedError):
@@ -231,12 +243,40 @@ class ScalesetReconciler:
                 logger.warning("Failed to reconcile scaleset %s: %s", spec.name, exc)
                 failure = failure or exc
 
+        deleted: set[str] = set()
         for name, scaleset in observed.items():
             if name not in claimed and self._delete_orphaned(scaleset):
                 self._delete_custom_template(name, templates)
+                deleted.add(name)
         if failure is not None:
             raise failure
-        return progress
+        return progress, self._live_scalesets(observed, deleted, created)
+
+    @staticmethod
+    def _live_scalesets(
+        observed: dict[str, ScaleSet], deleted: set[str], created: dict[str, ScaleSet]
+    ) -> list[ScaleSet]:
+        """Return every scaleset GARM holds after this pass.
+
+        The live set is what GARM answered, adjusted by what this pass did to it: the
+        scalesets it listed and kept, the ones it created, minus the ones whose delete GARM
+        accepted. Reporting the state after the pass rather than the observation before it
+        means a caller never has to reason about which half of a pass a scaleset came from.
+
+        A scaleset whose delete was refused, deferred, or never attempted is still live, and
+        a provider dropped while its scaleset survives can never be handed back.
+
+        Args:
+            observed: The scalesets GARM listed before this pass, by name.
+            deleted: Names of scalesets GARM accepted a delete for during this pass.
+            created: Scalesets this pass created, by name.
+
+        Returns:
+            The live scalesets, ordered by name so a caller's decisions are stable.
+        """
+        live = {name: scaleset for name, scaleset in observed.items() if name not in deleted}
+        live.update(created)
+        return [live[name] for name in sorted(live)]
 
     @staticmethod
     def _dedupe(desired: list[ScalesetSpec]) -> list[ScalesetSpec]:
@@ -324,6 +364,7 @@ class ScalesetReconciler:
         observed: dict[str, ScaleSet],
         templates: dict[str, Template],
         family: list[str],
+        created: dict[str, ScaleSet],
     ) -> list[ScalesetProgress]:
         """Reconcile a single desired scaleset: validate, create or update, and sync its template.
 
@@ -333,6 +374,7 @@ class ScalesetReconciler:
             observed: Observed scalesets keyed by name.
             templates: Observed templates keyed by name.
             family: Every live generation of this spec, plus its target name.
+            created: Scalesets this pass created, filled in so the caller sees them as live.
 
         Returns:
             One entry per replaced generation of this spec still draining.
@@ -370,7 +412,9 @@ class ScalesetReconciler:
         if active_name in observed:
             self._maybe_update(observed[active_name], spec, template_id)
         else:
-            self._create(spec, active_name, entity_id, create_params, template_id)
+            created[active_name] = self._create(
+                spec, active_name, entity_id, create_params, template_id
+            )
 
         if not spec.runner_config.has_config():
             # Runner options were cleared (or the system template is
@@ -1065,14 +1109,25 @@ class ScalesetReconciler:
         entity_id: str,
         params: CreateScaleSetParams,
         template_id: int,
-    ) -> None:
+    ) -> ScaleSet:
+        """Create the scaleset and return it as GARM reports it.
+
+        Args:
+            spec: The desired scaleset.
+            scaleset_name: The generation name to create.
+            entity_id: The GARM entity UUID to create it under.
+            params: Creation parameters.
+            template_id: The runner template to reference, if any.
+
+        Returns:
+            The created scaleset.
+        """
         if template_id:
             params.template_id = template_id
         logger.info("Creating scaleset %s under %s %s", scaleset_name, spec.entity_type, entity_id)
         if spec.entity_type == "organization":
-            self._client.create_org_scaleset(entity_id, params)
-        else:
-            self._client.create_repo_scaleset(entity_id, params)
+            return self._client.create_org_scaleset(entity_id, params)
+        return self._client.create_repo_scaleset(entity_id, params)
 
     def _maybe_update(self, observed: ScaleSet, spec: ScalesetSpec, template_id: int) -> None:
         observed_labels = _observed_labels(observed)

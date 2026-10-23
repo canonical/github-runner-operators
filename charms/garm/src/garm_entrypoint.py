@@ -35,7 +35,7 @@ SENSITIVE_ENV_VARS: Final[tuple[str, ...]] = (
     "GARM_PASSPHRASE",
     "GARM_PROVIDERS_JSON",
 )
-_PROVIDER_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
+PROVIDER_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "unit_name",
     "network",
     "auth_url",
@@ -226,7 +226,7 @@ def _build_provider(
     unit_name = provider.get("unit_name")
     if not isinstance(unit_name, str) or not unit_name or Path(unit_name).name != unit_name:
         raise InvalidConfigurationError(f"Invalid provider unit name: {unit_name!r}")
-    missing = [name for name in _PROVIDER_REQUIRED_FIELDS if name not in provider]
+    missing = [name for name in PROVIDER_REQUIRED_FIELDS if name not in provider]
     if missing:
         raise InvalidConfigurationError(
             f"GARM provider is missing required fields: {', '.join(missing)}"

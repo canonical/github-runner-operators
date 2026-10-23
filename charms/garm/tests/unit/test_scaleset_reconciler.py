@@ -54,9 +54,13 @@ class _FakeScaleset:
         enabled=True,
         updated_at=None,
         runner_prefix=None,
+        provider_name="openstack-demo",
     ):
         self.name = name
         self.id = sid
+        # What the reconciler hands back so the charm can drop a provider only once no
+        # scaleset names it; None models a GARM row that was created without one.
+        self.provider_name = provider_name
         self.image = image
         self.flavor = flavor
         self.max_runners = max_runners
@@ -156,6 +160,7 @@ class FakeGarmClient:
                 enabled=ss.get("enabled", True),
                 updated_at=ss.get("updated_at", None),
                 runner_prefix=ss.get("runner_prefix", None),
+                provider_name=ss.get("provider_name", "openstack-demo"),
             )
             for ss in (scalesets or [])
         ]
@@ -185,11 +190,35 @@ class FakeGarmClient:
     def find_repo_id(self, _name):
         return self._repo_id
 
+    def _created_scaleset(self, params, sid):
+        """Model GARM's answer to a create: the scaleset it now holds.
+
+        The reconciler reports the live set after a pass, so it keeps what the API returns
+        for a create — a fake that returns None would hide that half of the pass.
+        """
+        return _FakeScaleset(
+            name=params.name,
+            sid=sid,
+            provider_name=params.provider_name,
+            image=params.image,
+            flavor=params.flavor,
+            max_runners=params.max_runners,
+            min_idle_runners=params.min_idle_runners,
+            github_runner_group=getattr(params, "github_runner_group", None),
+            enable_shell=getattr(params, "enable_shell", None),
+            extra_specs=getattr(params, "extra_specs", None) or {},
+            tags=getattr(params, "tags", None),
+            template_id=getattr(params, "template_id", None),
+            runner_prefix=getattr(params, "runner_prefix", None),
+        )
+
     def create_org_scaleset(self, org_id, params):
         self.created.append(("org", org_id, params))
+        return self._created_scaleset(params, sid=1000 + len(self.created))
 
     def create_repo_scaleset(self, repo_id, params):
         self.created.append(("repo", repo_id, params))
+        return self._created_scaleset(params, sid=2000 + len(self.created))
 
     def update_scaleset(self, scaleset_id, params):
         # Models a GARM that rejects max_runners=0 on update. Today's GARM does not
@@ -280,7 +309,13 @@ def _spec(
 
 
 def _reconcile(client, desired):
-    return ScalesetReconciler(client).reconcile(desired)
+    progress, _ = ScalesetReconciler(client).reconcile(desired)
+    return progress
+
+
+def _reconcile_live(client, desired):
+    """Reconcile and return every scaleset GARM holds afterwards."""
+    return ScalesetReconciler(client).reconcile(desired)[1]
 
 
 @pytest.mark.parametrize(
@@ -510,6 +545,79 @@ def test_delete_orphaned_scaleset():
     _reconcile(client, [_spec(name="new-scaleset")])
 
     assert client.deleted == [42]
+
+
+def test_live_scalesets_exclude_the_ones_deleted_in_the_pass():
+    """
+    arrange: An orphaned scaleset GARM accepts a delete for, and a desired spec whose
+        scaleset does not exist yet.
+    act: Reconcile.
+    assert: The live set is the state after the pass: the deleted orphan drops out and the
+        scaleset this pass created is reported, so a caller never has to reason about which
+        half of the pass a scaleset came from.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo", "retired-provider"],
+        scalesets=[
+            _existing_scaleset(name="stale-scaleset", id=42, provider_name="retired-provider")
+        ],
+    )
+
+    live = _reconcile_live(client, [_spec(name="new-scaleset")])
+
+    assert client.deleted == [42]
+    assert [scaleset.name for scaleset in live] == [target_scaleset_name("new-scaleset", [])]
+    assert live[0].provider_name == "openstack-demo"
+
+
+def test_live_scalesets_keep_a_scaleset_whose_delete_was_refused():
+    """
+    arrange: An orphaned scaleset whose delete GARM rejects, because it still owns runners.
+    act: Reconcile.
+    assert: The scaleset is reported as surviving, so the caller keeps the provider it names:
+        GARM still holds it, and a provider dropped while its scaleset survives can never be
+        handed back.
+    """
+
+    class _DeleteFailingClient(FakeGarmClient):
+        def delete_scaleset(self, scaleset_id):
+            raise GarmApiError("scaleset still has runners")
+
+    client = _DeleteFailingClient(
+        providers=["openstack-demo", "retired-provider"],
+        scalesets=[
+            _existing_scaleset(name="stale-scaleset", id=42, provider_name="retired-provider")
+        ],
+    )
+
+    live = _reconcile_live(client, [_spec(name="new-scaleset")])
+
+    # Both are live: the orphan whose delete GARM refused, and the scaleset this pass created.
+    assert [scaleset.name for scaleset in live] == [
+        target_scaleset_name("new-scaleset", []),
+        "stale-scaleset",
+    ]
+    by_name = {scaleset.name: scaleset for scaleset in live}
+    assert by_name["stale-scaleset"].provider_name == "retired-provider"
+
+
+def test_live_scalesets_are_reported_even_with_no_provider_name():
+    """
+    arrange: A scaleset GARM holds that names no provider at all.
+    act: Reconcile.
+    assert: The scaleset is still reported as observed, and the caller decides what an
+        unmappable scaleset means — the reconciler states what GARM answered, it does not
+        conclude which providers are safe to drop.
+    """
+    client = FakeGarmClient(
+        providers=["openstack-demo"],
+        scalesets=[_existing_scaleset(provider_name=None)],
+    )
+
+    live = _reconcile_live(client, [_spec()])
+
+    assert [scaleset.name for scaleset in live] == [_existing_scaleset()["name"]]
+    assert live[0].provider_name is None
 
 
 def test_orphan_template_outlives_a_failed_orphan_delete():
