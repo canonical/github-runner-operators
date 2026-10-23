@@ -285,11 +285,8 @@ if os.path.exists("./reuse/substitutions.yaml"):
 # Intersphinx mappings for cross-referencing external documentation.
 intersphinx_mapping = {
     "juju": ("https://canonical.com/juju/docs/juju-cli/3.6/", None),
-<<<<<<< before updating
     "sphinxcontrib-mermaid": (
         "https://sphinxcontrib-mermaid-demo.readthedocs.io/en/latest",
         None,
     ),
-=======
->>>>>>> after updating
 }
