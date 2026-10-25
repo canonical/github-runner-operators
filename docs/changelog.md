@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-25
+
+- `garm`: bump the GARM workload so that runners no longer get stuck. GARM now bounds every PostgreSQL query with a timeout instead of waiting forever on a hung query or row lock, cleans up runners left in `creating` when recording their creation fails, and no longer deadlocks when an instance and its scale set are updated concurrently.
+
 ## 2026-10-21
 
 - `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
