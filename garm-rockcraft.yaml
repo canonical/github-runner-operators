@@ -17,7 +17,7 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # 2026/10/15: Pin to a post-v0.2.1 commit carrying these changes, until v0.2.2+
+    # 2026/10/25: Pin to a post-v0.2.1 commit carrying these changes, until v0.2.2+
     # is released:
     # - golang.org/x/crypto v0.57.0+.
     # - the scale set pseudo pool ID fix (PR #866). Without it, OpenStack scale set
@@ -30,8 +30,11 @@ parts:
     #   databases upgraded through migration 0003 fail migration 0008 with
     #   "operator does not exist: text = uuid" and GARM does not start
     #   (cloudbase/garm#920).
+    # - the database query timeouts, creating-instance reaper and association
+    #   omission (PR #926). Without them, hung PostgreSQL queries and an ABBA
+    #   deadlock between instance and scale set updates leave runners stuck.
     # Switch to source-tag once v0.2.2+ is released.
-    source-commit: ae281e373bc7568d63c0298dc0406109379216d2
+    source-commit: 1ad3680f097c3e71fa564ca26a41e62e13cbf91f
     source-depth: 1
     build-snaps:
       - go/1.26/stable
