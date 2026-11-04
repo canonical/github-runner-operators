@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-10-25
 
-- `garm`: bump the GARM workload so that runners no longer get stuck. GARM now bounds every PostgreSQL query with a timeout instead of waiting forever on a hung query or row lock, cleans up runners left in `creating` when recording their creation fails, and no longer deadlocks when an instance and its scale set are updated concurrently.
+- `garm`: bump the GARM workload to reduce the chance of runners getting stuck. GARM now bounds every non-migration PostgreSQL query with a timeout instead of waiting forever on a hung query or row lock, cleans up runners left in `creating` when recording them as `running` fails, and no longer deadlocks when an instance and its scale set are updated concurrently.
 
 ## 2026-10-21
 
