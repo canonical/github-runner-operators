@@ -25,8 +25,9 @@ There is no mandatory action for GARM charm to function.
 
 ### Configurations
 
-The credentials to access GitHub API are required for GARM charm to function. The GARM charm  supports only 
-GitHub App authentication. See `app-secret-key` and `app-secret-key-id` configurations for more details.
+The credentials to access the GitHub API are supplied by the GARM configurator through the GARM integration. The
+configurator supports GitHub App authentication. See the
+[configurations for the GARM configurator charm](https://charmhub.io/garm-configurator/configurations) for details.
 
 ```{seealso}
 [Configurations for GARM charm](https://charmhub.io/garm/configurations)
@@ -35,7 +36,7 @@ GitHub App authentication. See `app-secret-key` and `app-secret-key-id` configur
 ### Integrations
 
 The GARM charm must be integrated with a PostgreSQL charm, and at least one GARM configurator charm.
-The PostgreSQL charm is for storing runner and job states, while GARM configurator charms provider the configuration for
+The PostgreSQL charm stores runner and job state, while GARM configurator charms provide the configuration for
 a single set GitHub self-hosted runners.
 
 The GARM charm supports integration with COS (Canonical Observability Stack). See [observe your charm with COS lite](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/).
@@ -56,16 +57,18 @@ The GARM configurator charm has no actions.
 
 ### Configurations
 
-The GARM configurator charm has all the relevant configuration for the GARM scaleset. The `architecture` configuration to specify the CPU architecture of the runner is mandatory. The OpenStack credentials are required for the GARM OpenStack provider to function: 
+The GARM configurator charm holds the configuration for one GARM scaleset. The `os-arch` option, which specifies the
+runner CPU architecture, is mandatory. The OpenStack credentials required by the provider include:
 
 * `openstack-auth-url`
-* `openstack-password` 
+* `openstack-password`
 * `openstack-project-domain-name`
 * `openstack-project-name`
 * `openstack-user-domain-name`
-* `openstack-user-name`
+* `openstack-username`
 
-While the remaining configurations are optional or have defaults, it is recommended to review all the configurations for this charm.
+The GitHub App ID, installation ID, and private key are also required for GitHub authentication. Review the remaining
+options and defaults before applying the configuration.
 
 ```{seealso}
 [Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations)
@@ -73,11 +76,15 @@ While the remaining configurations are optional or have defaults, it is recommen
 
 ### Integrations
 
-The GARM configurator charm needs to be integrated with a GARM charm and a 
-[GitHub image builder charm](https://charmhub.io/github-runner-image-builder).
-The GARM charm manages the GitHub self-hosted runners according to the configuration on the GARM configurator charm.
-The GitHub image builder charm is for building images for the GitHub self-hosted runners.
+The GARM configurator charm integrates with a GARM charm. The GARM charm manages
+GitHub self-hosted runners according to the scaleset configuration published by
+the configurator.
 
 ```{seealso}
 [Integrations for GARM configurator charm](https://charmhub.io/garm-configurator/integrations)
 ```
+
+## Security
+
+For security-sensitive defaults, trust boundaries, and removal behavior, see the
+{ref}`GARM security reference <reference_security>`.

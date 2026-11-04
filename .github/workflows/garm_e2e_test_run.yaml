@@ -36,6 +36,59 @@ jobs:
           echo "Kernel: $(uname -sr)"
           echo "User:   $(whoami)"
           echo "Home:   $HOME"
+          echo "USER=${USER:-<unset>} LOGNAME=${LOGNAME:-<unset>} uid=$(id -u)"
+
+      # Regression guard for the runner account layout. GARM starts the runner as
+      # `runner`, which the images create as a duplicate-UID alias of `ubuntu`, so
+      # $USER says one name while getpwuid(uid) - and with it sg, newgrp and chown -
+      # resolves the other. A step passing $USER to one of those tools then writes
+      # one name and is checked as the other, which is how canonical/toolchains-ci
+      # failed with "Password: Invalid password.". The garm charm writes USER and
+      # LOGNAME into the runner .env so both agree; this asserts the result on a
+      # real GARM-spawned runner.
+      - name: Assert the job identity matches its UID
+        run: |
+          set -euo pipefail
+          uid_name="$(getent passwd "$(id -u)" | cut -d: -f1)"
+          echo "id -un=$(id -un) uid_name=${uid_name}"
+          echo "USER=${USER:-<unset>} LOGNAME=${LOGNAME:-<unset>}"
+          [ -n "${uid_name}" ]
+          [ "${USER:-}" = "${uid_name}" ]
+          [ "${LOGNAME:-}" = "${uid_name}" ]
+
+      # The pattern the original report used: grant a group, then enter it with
+      # sg. This step is a new process whose groups come from the runner, which
+      # started before the usermod, so sg cannot take the "gid already in my group
+      # list" shortcut and has to resolve the caller from the UID.
+      - name: Assert usermod -aG then sg succeeds
+        run: |
+          set -euo pipefail
+          sudo groupadd -f runner-e2e
+          sudo usermod -aG runner-e2e "${USER}"
+          sg runner-e2e -c 'id -gn' </dev/null | grep -qx runner-e2e
+
+      # Not a gate. Reports the condition that lets the .env override go (#438):
+      # the runner UID and GID each resolve to a single name. Counting entries is
+      # independent of which account runs this job, unlike exercising sg against
+      # a group granted to a different name.
+      - name: Report the runner account layout
+        run: |
+          runner_uid="$(id -u runner 2>/dev/null || true)"
+          if [ -z "${runner_uid}" ]; then
+            echo "no 'runner' account on this image; nothing aliases it"
+            exit 0
+          fi
+          runner_gid="$(id -g runner)"
+          passwd_entries="$(getent passwd | awk -F: -v u="${runner_uid}" '$3==u' | wc -l)"
+          group_entries="$(getent group | awk -F: -v g="${runner_gid}" '$3==g' | wc -l)"
+          echo "runner uid ${runner_uid}: ${passwd_entries} passwd entry/entries"
+          echo "runner gid ${runner_gid}: ${group_entries} group entry/entries"
+          if [ "${passwd_entries}" -eq 1 ] && [ "${group_entries}" -eq 1 ]; then
+            echo "::notice::the runner uid and gid are unambiguous; the USER/LOGNAME override can go (see #438)"
+          else
+            echo "the runner uid and gid are shared with another name; the override is still required (see #438)"
+          fi
+
       - name: Assert egress
         run: |
           curl -sSf --max-time 30 -o /dev/null https://github.com

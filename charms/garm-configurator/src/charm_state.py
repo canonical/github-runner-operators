@@ -355,7 +355,7 @@ def _ipv4_exclude_token_error(token: str) -> str | None:
         return "invalid"
     if start.version != 4 or end.version != 4:
         return "ipv4"
-    return None if start <= end else "range"
+    return None if int(start) <= int(end) else "range"
 
 
 class RunnerConfig(BaseModel):

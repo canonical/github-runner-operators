@@ -258,9 +258,10 @@ through spread. The suite deploys GARM with PostgreSQL and a traefik ingress —
 load-balancer address is what makes GARM's callback and metadata URLs reachable from
 the tenant — waits for a runner VM to register, and dispatches
 `.github/workflows/garm_e2e_test_run.yaml` at the scale set's label; the test passes
-only if that job concludes successfully. Runner VMs that cannot reach the host's ports
-directly tunnel their callbacks back over SSH, using an ephemeral, forwarding-only key
-the workflow publishes on the host and removes in an always-run cleanup step. Runners
+only if that job concludes successfully. The host admits no inbound traffic from the
+tenant, so the workflow boots a relay VM there that the host feeds over a reverse SSH
+tunnel, and runner VMs send their GARM traffic to it; the relay and its security group
+are deleted in an always-run cleanup step. Runners
 left on the tenant are deleted whatever the outcome, matched on the
 `garm-controller-id` GARM stamps on every server it creates.
 
@@ -277,10 +278,8 @@ changes to the end-to-end test can be exercised without merging them first.
 does not cancel what is already running, so a second dispatch queues behind the first
 rather than displacing it — expect to wait out a run in progress, which takes roughly
 25 minutes when green. Serialising is deliberate: the suite assumes it owns the private-endpoint host
-(its Kubernetes cluster, the load-balancer address pinned to the host's own IP, the
-tunnel entry in
-`authorized_keys`) and every GARM-tagged instance on the tenant, none of which is scoped
-per run. Two runs in parallel would contend for all of it, up to deleting each other's
+(its Kubernetes cluster, the load-balancer address pinned to the host's own IP) and every
+GARM-tagged instance on the tenant, none of which is scoped per run. Two runs in parallel would contend for all of it, up to deleting each other's
 runner VMs.
 
 #### Required secrets

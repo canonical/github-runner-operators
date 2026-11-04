@@ -84,6 +84,13 @@ LABEL_HASH_LENGTH = 8
 # GitHub's own limit on the System label GARM registers the scale set under.
 MAX_SCALESET_NAME_LENGTH = 64
 
+# GARM names each runner `<runner_prefix>-<id>` and never validates the prefix length.
+# The name becomes the OpenStack server name and so the runner's hostname, bounded to a
+# 63-character DNS label. The id is the base62 form of a shortid, or of a UUID when that
+# fails — at most 22 characters — which leaves 63 - 1 - 22 for the prefix.
+MAX_RUNNER_PREFIX_LENGTH = 40
+DEFAULT_RUNNER_PREFIX = "garm"
+
 # Past this, a runner a retired scaleset still reports cannot be doing a legitimate
 # job: these are self-hosted runners, bound by MAX_JOB_RUNTIME, not the six-hour cap
 # GitHub enforces on the runners it hosts itself. The margin absorbs reconcile
@@ -155,7 +162,9 @@ class ScalesetReconciler:
         """
         self._client = client
 
-    def reconcile(self, desired: list[ScalesetSpec]) -> list[ScalesetProgress]:
+    def reconcile(
+        self, desired: list[ScalesetSpec]
+    ) -> tuple[list[ScalesetProgress], list[ScaleSet]]:
         """Sync GARM scalesets to match *desired*.
 
         Performs the minimum set of CREATE / UPDATE / DELETE operations, and
@@ -185,7 +194,11 @@ class ScalesetReconciler:
             desired: The full desired set of scalesets.
 
         Returns:
-            One entry per replacement still in flight; empty once converged.
+            The replacements still in flight (empty once converged), and every scaleset GARM
+            holds after this pass — listed and kept, newly created, or not deleted. Callers
+            decide what those mean: the charm keeps a provider published while a scaleset
+            still names it, so this reports live state rather than concluding anything about
+            the desired state.
 
         Raises:
             GarmApiError: If any spec failed to reconcile, re-raised once the rest
@@ -210,12 +223,18 @@ class ScalesetReconciler:
             claimed.update(family)
 
         progress: list[ScalesetProgress] = []
+        created: dict[str, ScaleSet] = {}
         failure: GarmApiError | None = None
         for spec in desired:
             try:
                 progress.extend(
                     self._reconcile_one(
-                        spec, providers, observed, templates, families.get(spec.name, [])
+                        spec,
+                        providers,
+                        observed,
+                        templates,
+                        families.get(spec.name, []),
+                        created,
                     )
                 )
             except (GarmConnectionError, GarmUnauthorizedError):
@@ -224,12 +243,40 @@ class ScalesetReconciler:
                 logger.warning("Failed to reconcile scaleset %s: %s", spec.name, exc)
                 failure = failure or exc
 
+        deleted: set[str] = set()
         for name, scaleset in observed.items():
             if name not in claimed and self._delete_orphaned(scaleset):
                 self._delete_custom_template(name, templates)
+                deleted.add(name)
         if failure is not None:
             raise failure
-        return progress
+        return progress, self._live_scalesets(observed, deleted, created)
+
+    @staticmethod
+    def _live_scalesets(
+        observed: dict[str, ScaleSet], deleted: set[str], created: dict[str, ScaleSet]
+    ) -> list[ScaleSet]:
+        """Return every scaleset GARM holds after this pass.
+
+        The live set is what GARM answered, adjusted by what this pass did to it: the
+        scalesets it listed and kept, the ones it created, minus the ones whose delete GARM
+        accepted. Reporting the state after the pass rather than the observation before it
+        means a caller never has to reason about which half of a pass a scaleset came from.
+
+        A scaleset whose delete was refused, deferred, or never attempted is still live, and
+        a provider dropped while its scaleset survives can never be handed back.
+
+        Args:
+            observed: The scalesets GARM listed before this pass, by name.
+            deleted: Names of scalesets GARM accepted a delete for during this pass.
+            created: Scalesets this pass created, by name.
+
+        Returns:
+            The live scalesets, ordered by name so a caller's decisions are stable.
+        """
+        live = {name: scaleset for name, scaleset in observed.items() if name not in deleted}
+        live.update(created)
+        return [live[name] for name in sorted(live)]
 
     @staticmethod
     def _dedupe(desired: list[ScalesetSpec]) -> list[ScalesetSpec]:
@@ -317,6 +364,7 @@ class ScalesetReconciler:
         observed: dict[str, ScaleSet],
         templates: dict[str, Template],
         family: list[str],
+        created: dict[str, ScaleSet],
     ) -> list[ScalesetProgress]:
         """Reconcile a single desired scaleset: validate, create or update, and sync its template.
 
@@ -326,6 +374,7 @@ class ScalesetReconciler:
             observed: Observed scalesets keyed by name.
             templates: Observed templates keyed by name.
             family: Every live generation of this spec, plus its target name.
+            created: Scalesets this pass created, filled in so the caller sees them as live.
 
         Returns:
             One entry per replaced generation of this spec still draining.
@@ -363,7 +412,9 @@ class ScalesetReconciler:
         if active_name in observed:
             self._maybe_update(observed[active_name], spec, template_id)
         else:
-            self._create(spec, active_name, entity_id, create_params, template_id)
+            created[active_name] = self._create(
+                spec, active_name, entity_id, create_params, template_id
+            )
 
         if not spec.runner_config.has_config():
             # Runner options were cleared (or the system template is
@@ -1047,6 +1098,7 @@ class ScalesetReconciler:
                 "enable_shell": spec.enable_shell,
                 "extra_specs": _effective_extra_specs(spec) or None,
                 "template_id": spec.template_id,
+                "runner_prefix": runner_prefix(spec.name),
             }
         )
 
@@ -1057,14 +1109,25 @@ class ScalesetReconciler:
         entity_id: str,
         params: CreateScaleSetParams,
         template_id: int,
-    ) -> None:
+    ) -> ScaleSet:
+        """Create the scaleset and return it as GARM reports it.
+
+        Args:
+            spec: The desired scaleset.
+            scaleset_name: The generation name to create.
+            entity_id: The GARM entity UUID to create it under.
+            params: Creation parameters.
+            template_id: The runner template to reference, if any.
+
+        Returns:
+            The created scaleset.
+        """
         if template_id:
             params.template_id = template_id
         logger.info("Creating scaleset %s under %s %s", scaleset_name, spec.entity_type, entity_id)
         if spec.entity_type == "organization":
-            self._client.create_org_scaleset(entity_id, params)
-        else:
-            self._client.create_repo_scaleset(entity_id, params)
+            return self._client.create_org_scaleset(entity_id, params)
+        return self._client.create_repo_scaleset(entity_id, params)
 
     def _maybe_update(self, observed: ScaleSet, spec: ScalesetSpec, template_id: int) -> None:
         observed_labels = _observed_labels(observed)
@@ -1103,6 +1166,7 @@ class ScalesetReconciler:
             enable_shell=spec.enable_shell,
             extra_specs=extra_specs,
             template_id=spec.template_id,
+            runner_prefix=runner_prefix(spec.name),
         )
         # Send template_id when the scaleset has, or had, a custom template — a 0
         # value detaches it (reverts to the default); omit it otherwise so an
@@ -1135,6 +1199,7 @@ class ScalesetReconciler:
             != bool(desired_extra.get("disable_updates"))
             or observed_extra.get("image_visibility") != desired_extra.get("image_visibility")
             or (observed.template_id or 0) != template_id
+            or observed.runner_prefix != runner_prefix(spec.name)
         )
 
 
@@ -1169,6 +1234,22 @@ def _name_base(logical_name: str) -> str:
         return logical_name
     digest = hashlib.sha256(logical_name.encode("utf-8")).hexdigest()[:LABEL_HASH_LENGTH]
     return f"{logical_name[: limit - LABEL_HASH_LENGTH - 1]}-{digest}"
+
+
+def runner_prefix(logical_name: str) -> str:
+    """Return the prefix GARM names a scaleset's runners with.
+
+    Args:
+        logical_name: The scaleset name the operator configured.
+
+    Returns:
+        The name reduced to a hostname-safe form — lowercase alphanumerics joined by
+        single hyphens — truncated to ``MAX_RUNNER_PREFIX_LENGTH``. GARM's own default
+        prefix when nothing usable remains. Truncation needs no disambiguating hash:
+        GARM appends a random id to every runner name.
+    """
+    prefix = re.sub(r"[^a-z0-9]+", "-", logical_name.lower()).strip("-")
+    return prefix[:MAX_RUNNER_PREFIX_LENGTH].rstrip("-") or DEFAULT_RUNNER_PREFIX
 
 
 def _is_family_member(observed_name: str, logical_name: str) -> bool:

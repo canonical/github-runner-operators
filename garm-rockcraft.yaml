@@ -17,13 +17,24 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # 2026/10/05: Pin GARM to a commit that includes x/crypto v0.57.0
-    # and retains the scale set pseudo pool ID fix (PR #866,
-    # merged post-v0.2.1). Without it, OpenStack scale set names over 10 chars
-    # produce a garm-pool-id server tag that exceeds Nova's 60-char tag limit,
-    # failing every instance creation (cloudbase/garm-provider-openstack#34).
+    # 2026/10/25: Pin to a post-v0.2.1 commit carrying these changes, until v0.2.2+
+    # is released:
+    # - golang.org/x/crypto v0.57.0+.
+    # - the scale set pseudo pool ID fix (PR #866). Without it, OpenStack scale set
+    #   names over 10 chars produce a garm-pool-id server tag that exceeds Nova's
+    #   60-char tag limit, failing every instance creation
+    #   (cloudbase/garm-provider-openstack#34).
+    # - the tags.name widening to varchar(255) (PR #910). Without it, labels over
+    #   64 chars fail on PostgreSQL (cloudbase/garm#905).
+    # - the forge instance column type repair (PR #922). Without it, PostgreSQL
+    #   databases upgraded through migration 0003 fail migration 0008 with
+    #   "operator does not exist: text = uuid" and GARM does not start
+    #   (cloudbase/garm#920).
+    # - the database query timeouts, creating-instance reaper and association
+    #   omission (PR #926). Without them, hung PostgreSQL queries and an ABBA
+    #   deadlock between instance and scale set updates leave runners stuck.
     # Switch to source-tag once v0.2.2+ is released.
-    source-commit: 840558b5b6e26eb1a833e45a63777f5ea3ae60d1
+    source-commit: 1ad3680f097c3e71fa564ca26a41e62e13cbf91f
     source-depth: 1
     build-snaps:
       - go/1.26/stable

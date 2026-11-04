@@ -8,12 +8,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-10-25
+
+- `garm`: bump the GARM workload to reduce the chance of runners getting stuck. GARM now bounds every non-migration PostgreSQL query with a timeout instead of waiting forever on a hung query or row lock, cleans up runners left in `creating` when recording them as `running` fails, and no longer deadlocks when an instance and its scale set are updated concurrently.
+
+## 2026-10-21
+
+- `garm`: job steps now see `USER` and `LOGNAME` set to the account their UID resolves to, so `usermod -aG <group> $USER` followed by `sg <group>` works on GARM runners. This works around the duplicate-UID account layout of the runner images; removal is tracked in [#438](https://github.com/canonical/github-runner-operators/issues/438).
+- `garm`: keep a removed configurator's provider published until the last scale set that uses it is gone, so removing a `garm-configurator` relation finishes instead of retrying until the five-day drain deadline. The charm records the provider set it starts GARM with, adds providers as configurator applications relate, and removes one only once no scale set refers to it — the provider is dropped on a later reconcile, after its scale sets are deleted.
+- `garm` upgrade note: deployments already stuck before this release do not recover on upgrade, because the removed configurator's credentials are no longer available to the charm. Relate the same configurator application again — its unit name reproduces the missing provider name — so the provider is republished and the drain resumes; a scale set whose runner is stuck in the `deleted` status can also be cleared by hand.
+
+## 2026-10-16
+
+- `garm`: name runners after their scale set (for example `my-scaleset-dvnyp5dm3sm`) instead of GARM's default `garm-<id>`. The prefix is the scale set name in lowercase, with every run of characters other than letters and digits replaced by a hyphen, and truncated to 40 characters so the runner name still fits a 63-character hostname. Existing scale sets are updated in place; runners created before the update keep their names.
+
+## 2026-10-15
+
+- `garm`: bump the GARM workload so that it starts on PostgreSQL databases created by older GARM versions. On such databases, the previous workload failed a startup migration with `operator does not exist: text = uuid` and GARM did not start; GARM now converts the affected columns to the expected types on startup.
+
+## 2026-10-07
+
+- `garm`: bump the GARM workload so that scale set labels longer than 64 characters work on PostgreSQL. GARM stored labels in a `varchar(64)` column, so such a label failed with `value too long for type character varying(64)`; the column is now `varchar(255)`, and GARM migrates existing databases on startup.
+
+## 2026-10-06
+
+- `garm`: emit OWASP-structured security events (authentication, authorization, system, and user lifecycle) for the charm-managed GARM operations. Adds a `docs/reference/security-logs.md` reference page describing the security event feed and read-only access to it.
+- `garm`: add vendor-neutral Sigma detection rules for the GARM security events under `docs/security/sigma/garm/`, with a `tox -e sigma-lint` validation environment.
+
 ## 2026-10-05
 
 - `garm`: update GARM and the provider and agent build dependencies to include patched `golang.org/x/crypto`, retaining the scale set pool ID fix.
 
 ## 2026-10-01
 
+- Documentation: add a security overview and secure-operation guide for the GARM and GARM configurator charms, and document security-sensitive charm reference information.
 - `garm-configurator`: add the optional `image-visibility` configuration, which the `garm` charm passes to the OpenStack provider as the scale set's `image_visibility` extra spec. The provider resolves an image name among public images only by default, so a scale set whose image is private to its OpenStack project never boots a runner; set `image-visibility` to `private` for such an image. It accepts `public`, `private`, `shared`, `community`, or `all`, and has no effect when `image` is an image ID. Existing scale sets are unchanged while it is unset.
 
 ## 2026-09-30

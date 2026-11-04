@@ -13,3 +13,4 @@ GARM configurator.
    :maxdepth: 1
 
    Retrieve GARM admin credentials <retrieve-garm-credentials>
+   Secure GARM and the GARM configurator <secure-garm>

@@ -7,7 +7,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from charm_state import CharmState, RunnerConfig, SSHDebugInfo, _get_ssh_debug_connections
+from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
+
+from charm_state import (
+    CharmState,
+    ProviderConfig,
+    RunnerConfig,
+    SSHDebugInfo,
+    _get_ssh_debug_connections,
+)
 
 _COMPLETE = {
     "host": "10.0.0.1",
@@ -329,3 +337,27 @@ def test_runner_config_from_databag_preserves_multiline_pre_job_script():
     config = RunnerConfig.from_databag({"pre_job_script": "echo one\necho two"})
 
     assert config.pre_job_script == "echo one\necho two"
+
+
+def test_provider_config_wire_form_matches_the_entrypoint_contract():
+    """
+    arrange: A provider config for one configurator unit.
+    act: Take its published form.
+    assert: It carries exactly the fields the workload entrypoint requires — the dataclass and
+        the entrypoint's tuple are the same contract expressed twice, so this catches drift in
+        either direction before a workload is started with a config it cannot read.
+    """
+    config = ProviderConfig(
+        unit_name="garm-configurator-0",
+        auth_url="https://ks.example.com:5000/v3",
+        username="admin",
+        password="pass",
+        project_name="proj",
+        user_domain_name="Default",
+        project_domain_name="Default",
+        region_name="RegionOne",
+        network="net1",
+    )
+
+    assert set(config.as_dict()) == set(PROVIDER_REQUIRED_FIELDS)
+    assert config.as_dict()["unit_name"] == "garm-configurator-0"
