@@ -191,8 +191,10 @@ def render_aproxy_pre_install_script(config: RunnerConfig) -> str:
     dnat_rule = (
         rf"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \$default-ipv4:54969"
     )
-    # nftables accepts one address set, but iptables needs one RETURN rule per
-    # exclusion. Address ranges use iprange; CIDRs and individual addresses use -d.
+    # Focal lacks nft but supports iptables, so keep its runner bootstrap working
+    # without adding nftables to the image. nftables accepts one address set, but
+    # iptables needs one RETURN rule per exclusion. Address ranges use iprange;
+    # CIDRs and individual addresses use -d.
     iptables_exclude_rules = [
         (
             f"iptables -t nat -A APROXY_GARM -m iprange --dst-range {address} -j RETURN"
