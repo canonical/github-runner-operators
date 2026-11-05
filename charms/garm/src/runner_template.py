@@ -191,6 +191,8 @@ def render_aproxy_pre_install_script(config: RunnerConfig) -> str:
     dnat_rule = (
         rf"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \$default-ipv4:54969"
     )
+    # nftables accepts one address set, but iptables needs one RETURN rule per
+    # exclusion. Address ranges use iprange; CIDRs and individual addresses use -d.
     iptables_exclude_rules = [
         (
             f"iptables -t nat -A APROXY_GARM -m iprange --dst-range {address} -j RETURN"
@@ -199,6 +201,8 @@ def render_aproxy_pre_install_script(config: RunnerConfig) -> str:
         )
         for address in ["127.0.0.0/8", *excludes]
     ]
+    # The relation format uses N-M ranges; iptables expects N:M and applies one
+    # DNAT rule per port or range.
     iptables_dnat_rules = [
         "iptables -t nat -A APROXY_GARM -p tcp "
         f"--dport {port.replace('-', ':')} -j DNAT --to-destination $default_ipv4:54969"
