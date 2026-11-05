@@ -153,6 +153,25 @@ def test_aproxy_render_uses_configured_ports_and_excludes():
     assert "10.0.0.0-10.141.167.255" in result
 
 
+def test_render_aproxy_pre_install_script_falls_back_to_iptables_for_focal():
+    """Render Focal-safe iptables rules when the base image lacks nft."""
+    config = RunnerConfig(
+        runner_http_proxy="http://proxy.example.com:3128",
+        aproxy_exclude_addresses="10.0.0.0/8,10.0.0.0-10.141.167.255",
+        aproxy_redirect_ports="1-3127,3129-65535",
+    )
+
+    result = render_aproxy_pre_install_script(config)
+
+    assert "if command -v nft >/dev/null 2>&1; then" in result
+    assert "elif command -v iptables >/dev/null 2>&1; then" in result
+    assert "iptables -t nat -N APROXY_GARM 2>/dev/null || true" in result
+    assert "iptables -t nat -A APROXY_GARM -d 10.0.0.0/8 -j RETURN" in result
+    assert "iptables -t nat -A APROXY_GARM -m iprange --dst-range 10.0.0.0-10.141.167.255 -j RETURN" in result
+    assert "iptables -t nat -A APROXY_GARM -p tcp --dport 1:3127 -j DNAT --to-destination $default_ipv4:54969" in result
+    assert "iptables -t nat -A APROXY_GARM -p tcp --dport 3129:65535 -j DNAT --to-destination $default_ipv4:54969" in result
+
+
 def test_render_aproxy_pre_install_script_happy_path():
     """
     arrange: A runner config with every aproxy-related field set to a realistic value.
