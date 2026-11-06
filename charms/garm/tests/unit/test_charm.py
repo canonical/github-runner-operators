@@ -1439,6 +1439,20 @@ def test_first_run_initialises_garm_with_the_stored_credentials(
     )
 
 
+def test_first_run_treats_already_initialised_conflict_as_success(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """An idempotent GARM first-run conflict must not fail the Juju hook."""
+    garm_api.client.return_value.is_initialized.return_value = False
+    garm_api.client.return_value.first_run.side_effect = GarmApiError(
+        'GARM first-run failed (409): {"error":"Conflict","details":"already initialized"}'
+    )
+
+    ctx.run(ctx.on.update_status(), _state())
+
+    garm_api.client.return_value.first_run.assert_called_once()
+
+
 def test_first_run_skipped_when_garm_is_already_initialised(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A leader whose GARM reports itself initialised.
