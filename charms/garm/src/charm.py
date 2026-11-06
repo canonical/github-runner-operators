@@ -880,6 +880,9 @@ class GarmCharm(paas_charm.go.Charm):
                 description="GARM completed first-run initialisation",
             )
         except GarmApiError as exc:
+            if "first-run failed (409)" in str(exc) and "already initialized" in str(exc):
+                logger.info("GARM was already initialised by a concurrent first-run hook")
+                return
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
