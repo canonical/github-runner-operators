@@ -189,13 +189,34 @@ def render_aproxy_pre_install_script(config: RunnerConfig) -> str:
     # land in the file, which nft itself resolves against the `define` above when
     # it loads the file.
     dnat_rule = (
-        f"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \\$default-ipv4:54969"
+        rf"ip daddr != @exclude tcp dport {{ {nft_ports} }} counter dnat to \$default-ipv4:54969"
     )
+    # Focal lacks nft but supports iptables, so keep its runner bootstrap working
+    # without adding nftables to the image. nftables accepts one address set, but
+    # iptables needs one RETURN rule per exclusion. Address ranges use iprange;
+    # CIDRs and individual addresses use -d.
+    iptables_exclude_rules = [
+        (
+            f"iptables -t nat -A APROXY_GARM -m iprange --dst-range {address} -j RETURN"
+            if "-" in address
+            else f"iptables -t nat -A APROXY_GARM -d {address} -j RETURN"
+        )
+        for address in ["127.0.0.0/8", *excludes]
+    ]
+    # The relation format uses N-M ranges; iptables expects N:M and applies one
+    # DNAT rule per port or range.
+    iptables_dnat_rules = [
+        "iptables -t nat -A APROXY_GARM -p tcp "
+        f"--dport {port.replace('-', ':')} -j DNAT --to-destination $default_ipv4:54969"
+        for port in ports
+    ]
     return _APROXY_TEMPLATE.render(
         proxy=shlex.quote(config.runner_http_proxy),
         proxy_host_port=shlex.quote(_proxy_host_port(config.runner_http_proxy)),
         exclude_elements=exclude_elements,
         dnat_rule=dnat_rule,
+        iptables_exclude_rules=iptables_exclude_rules,
+        iptables_dnat_rules=iptables_dnat_rules,
     )
 
 
