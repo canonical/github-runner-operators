@@ -11,6 +11,7 @@ import os
 import secrets
 import string
 import typing
+from collections.abc import Mapping
 
 import ops
 import paas_charm.go
@@ -19,6 +20,7 @@ from garm_configurator_relation import (
     ConfiguratorRelation,
     GarmConfiguratorRequirer,
 )
+from garm_configurator_relation import ProviderConfig as RelationProviderConfig
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
@@ -27,6 +29,8 @@ from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
     BlockedError,
+    PROVIDER_TYPE_LXD,
+    PROVIDER_TYPE_OPENSTACK,
     CharmState,
     ProviderConfig,
     RunnerConfig,
@@ -172,15 +176,57 @@ def _parse_provider_record(published: str, source: str) -> list[ProviderConfig]:
     for config in configs:
         if not isinstance(config, dict) or not isinstance(config.get("unit_name"), str):
             raise ProviderRecordError(f"{source} holds a provider with no unit name")
-        missing = [field for field in PROVIDER_REQUIRED_FIELDS if not config.get(field)]
+        provider_type = str(config.get("provider_type") or PROVIDER_TYPE_OPENSTACK)
+        required = PROVIDER_REQUIRED_FIELDS.get(provider_type)
+        if required is None:
+            raise ProviderRecordError(
+                f"{source} holds provider {config['unit_name']} with an unknown provider type"
+            )
+        missing = [field for field in required if not config.get(field)]
         if missing:
             raise ProviderRecordError(
                 f"{source} holds provider {config['unit_name']} without {', '.join(missing)}"
             )
-        parsed.append(
-            ProviderConfig(**{field: str(config[field]) for field in PROVIDER_REQUIRED_FIELDS})
-        )
+        parsed.append(_provider_config_from_record(config, provider_type))
     return parsed
+
+
+def _provider_config_from_record(
+    config: Mapping[str, typing.Any], provider_type: str
+) -> ProviderConfig:
+    """Rebuild one recorded provider config.
+
+    Args:
+        config: One provider object from the recorded set.
+        provider_type: The provider type, already validated as a known one.
+
+    Returns:
+        The provider config, with string fields coerced back to their wire types.
+    """
+    if provider_type == PROVIDER_TYPE_LXD:
+        return ProviderConfig(
+            unit_name=str(config["unit_name"]),
+            provider_type=provider_type,
+            lxd_api_url=str(config["lxd_api_url"]),
+            lxd_project_name=str(config.get("lxd_project_name") or "default"),
+            lxd_instance_type=str(config.get("lxd_instance_type") or "virtual-machine"),
+            lxd_secure_boot=bool(config.get("lxd_secure_boot", False)),
+            lxd_client_certificate=str(config["lxd_client_certificate"]),
+            lxd_client_key=str(config["lxd_client_key"]),
+            lxd_server_certificate=str(config.get("lxd_server_certificate") or ""),
+        )
+    return ProviderConfig(
+        unit_name=str(config["unit_name"]),
+        provider_type=provider_type,
+        auth_url=str(config["auth_url"]),
+        username=str(config["username"]),
+        password=str(config["password"]),
+        project_name=str(config["project_name"]),
+        user_domain_name=str(config["user_domain_name"]),
+        project_domain_name=str(config["project_domain_name"]),
+        region_name=str(config["region_name"]),
+        network=str(config["network"]),
+    )
 
 
 def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
@@ -652,12 +698,12 @@ class GarmCharm(paas_charm.go.Charm):
     def _get_configurator_provider_configs(
         self, configurator_data: ConfiguratorData
     ) -> list[ProviderConfig]:
-        """Read OpenStack provider configs from all configurator relation units.
+        """Read provider configs from all garm-configurator relation units.
 
         The requirer aggregates every related unit, so each unit yields one provider keyed
-        by its name for TOML provider naming. Passwords stored as Juju secret URIs are
-        resolved at this point so that the plaintext value is available for the provider's
-        clouds.yaml file.
+        by its name for TOML provider naming. Credentials stored as Juju secret URIs are
+        resolved at this point so that the plaintext values are available for the
+        provider's config files.
 
         Args:
             configurator_data: The aggregated garm-configurator relation data.
@@ -685,29 +731,21 @@ class GarmCharm(paas_charm.go.Charm):
         configs: list[ProviderConfig] = []
         for relation in configurator_data.relations:
             provider = relation.provider
-            # Resolve password: may be a plain value or a secret URI.
-            password = provider.openstack_password or ""
-            if not password and provider.openstack_password_secret_uri:
-                password = self._resolve_secret_value(provider.openstack_password_secret_uri)
-
-            configs.append(
-                ProviderConfig(
-                    unit_name=relation.provider_name,
-                    auth_url=provider.openstack_auth_url,
-                    username=provider.openstack_username or "",
-                    password=password,
-                    project_name=provider.openstack_project_name or "",
-                    user_domain_name=provider.openstack_user_domain_name or "",
-                    project_domain_name=provider.openstack_project_domain_name or "",
-                    region_name=provider.openstack_region_name or "",
-                    network=provider.openstack_network or "",
-                )
-            )
+            unit_name = relation.provider_name
+            if provider.provider_type == PROVIDER_TYPE_LXD:
+                config = self._lxd_provider_config(provider, unit_name)
+            else:
+                config = self._openstack_provider_config(provider, unit_name)
+            if config is not None:
+                configs.append(config)
 
         incomplete = sorted(
             config.unit_name
             for config in configs
-            if not all(config.as_dict()[field] for field in PROVIDER_REQUIRED_FIELDS)
+            if not all(
+                config.as_dict().get(field)
+                for field in PROVIDER_REQUIRED_FIELDS[config.provider_type]
+            )
         )
         if incomplete:
             raise InvalidProviderConfigError(
@@ -720,6 +758,91 @@ class GarmCharm(paas_charm.go.Charm):
             len(configs),
         )
         return sorted(configs, key=lambda config: config.unit_name)
+
+    def _openstack_provider_config(
+        self, provider: RelationProviderConfig, unit_name: str
+    ) -> ProviderConfig:
+        """Build one OpenStack provider config, resolving its password secret.
+
+        Args:
+            provider: The provider credentials the configurator unit published.
+            unit_name: The GARM provider name derived from the unit name.
+
+        Returns:
+            The provider config, with the password in plaintext.
+        """
+        # Resolve password: may be a plain value or a secret URI.
+        password = provider.openstack_password or ""
+        if not password and provider.openstack_password_secret_uri:
+            password = self._resolve_secret_value(provider.openstack_password_secret_uri)
+
+        return ProviderConfig(
+            unit_name=unit_name,
+            provider_type=PROVIDER_TYPE_OPENSTACK,
+            auth_url=provider.openstack_auth_url or "",
+            username=provider.openstack_username or "",
+            password=password,
+            project_name=provider.openstack_project_name or "",
+            user_domain_name=provider.openstack_user_domain_name or "",
+            project_domain_name=provider.openstack_project_domain_name or "",
+            region_name=provider.openstack_region_name or "",
+            network=provider.openstack_network or "",
+        )
+
+    def _lxd_provider_config(
+        self, provider: RelationProviderConfig, unit_name: str
+    ) -> ProviderConfig | None:
+        """Build one LXD provider config, resolving its certificate secrets.
+
+        Args:
+            provider: The provider credentials the configurator unit published.
+            unit_name: The GARM provider name derived from the unit name.
+
+        Returns:
+            The provider config, or None when a certificate secret cannot be read yet, so
+            the unit is skipped and retried on the next relation-changed event rather than
+            published with missing credentials.
+        """
+        certificate_uri = provider.lxd_client_certificate_secret_uri
+        key_uri = provider.lxd_client_key_secret_uri
+        if not certificate_uri or not key_uri:
+            logger.warning(
+                "Skipping LXD provider %s: client certificate or key secret URI is missing",
+                unit_name,
+            )
+            return None
+        client_certificate = self._resolve_secret_value(certificate_uri)
+        client_key = self._resolve_secret_value(key_uri)
+        if not client_certificate or not client_key:
+            logger.warning(
+                "Skipping LXD provider %s: client certificate or key secret is not readable",
+                unit_name,
+            )
+            return None
+
+        server_certificate = ""
+        if provider.lxd_server_certificate_secret_uri:
+            server_certificate = self._resolve_secret_value(
+                provider.lxd_server_certificate_secret_uri
+            )
+            if not server_certificate:
+                logger.warning(
+                    "Skipping LXD provider %s: server certificate secret is not readable",
+                    unit_name,
+                )
+                return None
+
+        return ProviderConfig(
+            unit_name=unit_name,
+            provider_type=PROVIDER_TYPE_LXD,
+            lxd_api_url=provider.lxd_api_url or "",
+            lxd_project_name=provider.lxd_project_name or "default",
+            lxd_instance_type=provider.lxd_instance_type or "virtual-machine",
+            lxd_secure_boot=provider.lxd_secure_boot,
+            lxd_client_certificate=client_certificate,
+            lxd_client_key=client_key,
+            lxd_server_certificate=server_certificate,
+        )
 
     def _published_providers(
         self, related: list[ProviderConfig], recorded: dict[str, ProviderConfig]
