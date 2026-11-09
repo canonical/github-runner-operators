@@ -19,10 +19,53 @@ description: |
 
 config:
   options:
+    provider-type:
+      type: string
+      default: openstack
+      description: |
+        Provider type to configure: openstack or lxd. OpenStack is the default so
+        existing deployments keep working without configuration changes.
+    lxd-api-url:
+      type: string
+      description: |
+        LXD API URL. Must start with https://, for example
+        https://lxd.example.com:8443. Required when provider-type is lxd.
+    lxd-project-name:
+      type: string
+      default: default
+      description: |
+        LXD project to create runner instances in. The project must already exist.
+    lxd-instance-type:
+      type: string
+      default: virtual-machine
+      description: |
+        LXD instance type for runners: container or virtual-machine.
+    lxd-secure-boot:
+      type: boolean
+      default: false
+      description: |
+        Enable secure boot for LXD virtual machines. Ignored for containers.
+    lxd-client-certificate:
+      type: secret
+      description: |
+        Juju secret containing the LXD client certificate. Required when
+        provider-type is lxd. The secret content must have a "value" key.
+    lxd-client-key:
+      type: secret
+      description: |
+        Juju secret containing the LXD client key. Required when provider-type is
+        lxd. The secret content must have a "value" key.
+    lxd-server-certificate:
+      type: secret
+      description: |
+        Juju secret containing the LXD server certificate, used for certificate
+        pinning when the server certificate is not signed by a public CA. The
+        secret content must have a "value" key.
     openstack-auth-url:
       type: string
       description: |
-        OpenStack Keystone authentication URL.
+        OpenStack Keystone authentication URL. Required when provider-type is
+        openstack.
     openstack-username:
       type: string
       description: |
