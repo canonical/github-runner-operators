@@ -211,6 +211,20 @@ In order to build the `charm-name` rock, use the
 
 The respective charm code is in the `charms/charm-name` directory.
 
+Code shared by more than one charm lives in `charms/lib`. The `garm` and `garm-configurator`
+charms share the relation-data models in `charms/lib/garm_configurator_relation.py`, which each
+charm's `charmcraft.yaml` copies into its `lib/` directory. Reaching outside the charm directory
+uses Charmcraft's experimental monorepo support, so set the flag when packing locally:
+
+```shell
+cd charms/<charm-directory>
+CHARMCRAFT_EXPERIMENTAL_MONOREPO=1 charmcraft pack
+```
+
+CI sets the same variable when it builds the charms. The `go-framework` extension still rejects a
+custom `parts.charm` entry, so the shared code is a separate `dump` part rather than an override
+of the charm part.
+
 Integration tests for the charm are in the `charms/tests/integration` directory.
 
 Have a look at [this tutorial](https://documentation.ubuntu.com/charmcraft/latest/tutorial/kubernetes-charm-go/)

@@ -2,15 +2,15 @@ env_list = ["fmt", "lint", "complexity", "static", "unit", "coverage-report"]
 
 [env_run_base]
 package = "skip"
-set_env = { PYTHONPATH = "{tox_root}/lib:{tox_root}/src:{tox_root}/tests", PYTHONBREAKPOINT = "pdb.set_trace", PY_COLORS = "1" }
+set_env = { PYTHONPATH = "{tox_root}/lib:{tox_root}/src:{tox_root}/tests:{tox_root}/../lib", PYTHONBREAKPOINT = "pdb.set_trace", PY_COLORS = "1" }
 pass_env = ["PYTHONPATH", "CHARM_BUILD_DIR", "MODEL_SETTINGS"]
 
 [env.fmt]
 description = "Format code according to coding style standards"
 deps = ["ruff", "isort"]
 commands = [
-  ["isort", "src", "tests"],
-  ["ruff", "format", "src", "tests"],
+  ["isort", "src", "tests", "../lib"],
+  ["ruff", "format", "src", "tests", "../lib"],
 ]
 
 [env.lint]
@@ -18,15 +18,15 @@ description = "Check code against coding style standards"
 deps = ["ruff", "codespell"]
 commands = [
   ["codespell", "{tox_root}"],
-  ["ruff", "check", "src"],
-  ["ruff", "format", "--check", "--diff", "src"],
+  ["ruff", "check", "src", "../lib"],
+  ["ruff", "format", "--check", "--diff", "src", "../lib"],
 ]
 
 [env.complexity]
 description = "Check cyclomatic and cognitive complexity"
 deps = ["ruff", "flake8==7.3.0", "flake8-cognitive-complexity==0.1.0"]
 commands = [
-  ["ruff", "check", "--select", "C90", "src"],
+  ["ruff", "check", "--select", "C90", "src", "../lib"],
   ["flake8", "--select", "CCR001", "--max-cognitive-complexity=15", "src", "tests"],
 ]
 

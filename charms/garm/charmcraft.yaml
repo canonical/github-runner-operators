@@ -39,3 +39,10 @@ requires:
 actions:
   get-credentials:
     description: Show the GARM admin credentials.
+
+parts:
+  shared-lib:
+    plugin: dump
+    source: ../lib
+    organize:
+      garm_configurator_relation.py: lib/garm_configurator_relation.py
