@@ -109,6 +109,25 @@ _SCALESET_UNIT_DATA = {
     "repo": "myorg/myrepo",
 }
 
+
+def _lxd_provider_unit_data(
+    certificate: Secret, key: Secret, server_certificate: Secret | None = None
+) -> dict[str, str]:
+    """Return LXD provider relation data pointing at the given certificate secrets."""
+    data = {
+        "provider_type": "lxd",
+        "lxd_api_url": "https://lxd.example.com:8443",
+        "lxd_project_name": "runners",
+        "lxd_instance_type": "container",
+        "lxd_secure_boot": "true",
+        "lxd_client_certificate_secret_uri": certificate.id,
+        "lxd_client_key_secret_uri": key.id,
+    }
+    if server_certificate is not None:
+        data["lxd_server_certificate_secret_uri"] = server_certificate.id
+    return data
+
+
 _TEMPLATE_ID = 99
 _AGENT_VERSION = "v0.1.1"
 
@@ -455,6 +474,166 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
 
     assert container.plan.services[SERVICE_NAME].command == "/usr/local/bin/garm-entrypoint.py"
     assert out.unit_status == ops.ActiveStatus()
+
+
+def test_lxd_provider_is_configured_from_relation_data(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator unit publishing an LXD provider whose certificate secrets are
+        readable.
+    act: Run update-status.
+    assert: The workload receives the LXD provider with the certificate contents resolved,
+        so the entrypoint can render the provider config and certificate files.
+    """
+    certificate = Secret(tracked_content={"value": "client-certificate"})
+    key = Secret(tracked_content={"value": "client-key"})
+    server_certificate = Secret(tracked_content={"value": "server-certificate"})
+    unit_data = {
+        **_lxd_provider_unit_data(certificate, key, server_certificate),
+        **_SCALESET_UNIT_DATA,
+        "image_id": "ubuntu:24.04",
+    }
+
+    out = ctx.run(
+        ctx.on.update_status(),
+        _state(
+            configurator_units_data={0: unit_data},
+            secrets=[certificate, key, server_certificate],
+        ),
+    )
+
+    (provider,) = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
+    assert provider["provider_type"] == "lxd"
+    assert provider["lxd_api_url"] == "https://lxd.example.com:8443"
+    assert provider["lxd_project_name"] == "runners"
+    assert provider["lxd_instance_type"] == "container"
+    assert provider["lxd_secure_boot"] is True
+    assert provider["lxd_client_certificate"] == "client-certificate"
+    assert provider["lxd_client_key"] == "client-key"
+    assert provider["lxd_server_certificate"] == "server-certificate"
+    assert "auth_url" not in provider
+
+
+def test_lxd_provider_without_server_certificate_is_configured(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A configurator unit publishing an LXD provider with no server certificate.
+    act: Run update-status.
+    assert: The provider is published with an empty server certificate, so the entrypoint
+        falls back to the system trust store instead of refusing the provider.
+    """
+    certificate = Secret(tracked_content={"value": "client-certificate"})
+    key = Secret(tracked_content={"value": "client-key"})
+    unit_data = {
+        **_lxd_provider_unit_data(certificate, key),
+        **_SCALESET_UNIT_DATA,
+        "image_id": "ubuntu:24.04",
+    }
+
+    out = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_units_data={0: unit_data}, secrets=[certificate, key]),
+    )
+
+    (provider,) = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
+    assert provider["lxd_server_certificate"] == ""
+
+
+def test_lxd_provider_creates_a_scaleset_with_the_lxd_image(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator unit publishing an LXD provider and a scaleset whose image is an
+        LXD image reference.
+    act: Run update-status.
+    assert: The scaleset is reconciled against the LXD provider with the image reference
+        passed through unchanged, so GARM pulls ubuntu:24.04 from the ubuntu remote.
+    """
+    certificate = Secret(tracked_content={"value": "client-certificate"})
+    key = Secret(tracked_content={"value": "client-key"})
+    unit_data = {
+        **_lxd_provider_unit_data(certificate, key),
+        **_SCALESET_UNIT_DATA,
+        "image_id": "ubuntu:24.04",
+        "labels": "lxd,ubuntu",
+    }
+
+    ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_units_data={0: unit_data}, secrets=[certificate, key]),
+    )
+
+    (spec,) = garm_api.scaleset.return_value.reconcile.call_args.args[0]
+    assert spec.provider_name == "garm-configurator-0"
+    assert spec.image == "ubuntu:24.04"
+    assert spec.labels == ["lxd", "ubuntu"]
+
+
+def test_lxd_provider_without_certificate_secret_uris_is_skipped(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: A published LXD provider payload that omits its certificate secret URIs.
+    act: Run update-status.
+    assert: The provider is skipped with a warning rather than published without credentials,
+        so GARM never starts an LXD provider it cannot authenticate with.
+    """
+    unit_data = {
+        "provider_type": "lxd",
+        "lxd_api_url": "https://lxd.example.com:8443",
+        **_SCALESET_UNIT_DATA,
+    }
+
+    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: unit_data}))
+
+    assert json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"]) == []
+    assert "client certificate or key secret URI is missing" in caplog.text
+
+
+def test_lxd_provider_with_unreadable_client_secret_is_skipped(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: An LXD provider whose certificate secrets are not readable yet.
+    act: Run update-status.
+    assert: The provider is skipped with a warning, so a secret-grant race is retried on the
+        next relation-changed event.
+    """
+    certificate = Secret(tracked_content={"value": "client-certificate"})
+    key = Secret(tracked_content={"value": "client-key"})
+    unit_data = {
+        **_lxd_provider_unit_data(certificate, key),
+        **_SCALESET_UNIT_DATA,
+    }
+
+    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: unit_data}))
+
+    assert json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"]) == []
+    assert "client certificate or key secret is not readable" in caplog.text
+
+
+def test_lxd_provider_with_unreadable_server_certificate_is_skipped(
+    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
+):
+    """
+    arrange: An LXD provider whose optional server certificate is referenced but unreadable.
+    act: Run update-status.
+    assert: The provider is skipped rather than falling back to the system trust store, which
+        would defeat certificate pinning for a self-signed server.
+    """
+    certificate = Secret(tracked_content={"value": "client-certificate"})
+    key = Secret(tracked_content={"value": "client-key"})
+    server_certificate = Secret(tracked_content={"value": "server-certificate"})
+    unit_data = {
+        **_lxd_provider_unit_data(certificate, key, server_certificate),
+        **_SCALESET_UNIT_DATA,
+    }
+
+    out = ctx.run(
+        ctx.on.update_status(),
+        _state(configurator_units_data={0: unit_data}, secrets=[certificate, key]),
+    )
+
+    assert json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"]) == []
+    assert "server certificate secret is not readable" in caplog.text
 
 
 @pytest.mark.parametrize(
