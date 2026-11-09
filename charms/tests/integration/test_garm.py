@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 GARM_BINARY = "/usr/local/bin/garm"
 GARM_PROVIDER_BINARY = "/usr/local/bin/garm-provider-openstack"
+GARM_LXD_PROVIDER_BINARY = "/usr/local/bin/garm-provider-lxd"
 GARM_SECRETS_LABEL = "garm-secrets"
 GARM_CHARMED_TEMPLATE_NAME = "github_linux_charmed"
 
@@ -98,7 +99,8 @@ def test_garm_rock_contains_binaries(
     """
     arrange: The GARM charm is deployed with the built ROCK image.
     act: Execute a file-existence check for GARM binaries inside the workload container.
-    assert: Both the GARM server binary and the OpenStack provider binary are present.
+    assert: The GARM server binary and both the OpenStack and LXD provider binaries are
+        present, so GARM can launch either provider.
     """
     unit = f"{garm_app}/0"
     logger.info("Checking GARM binaries in unit %s", unit)
@@ -112,6 +114,9 @@ def test_garm_rock_contains_binaries(
     )
     assert GARM_PROVIDER_BINARY.split("/")[-1] in result.stdout, (
         f"Expected garm-provider-openstack binary in /usr/local/bin/, got: {result.stdout}"
+    )
+    assert GARM_LXD_PROVIDER_BINARY.split("/")[-1] in result.stdout, (
+        f"Expected garm-provider-lxd binary in /usr/local/bin/, got: {result.stdout}"
     )
     logger.info("GARM binaries confirmed present: %s", result.stdout.strip())
 
