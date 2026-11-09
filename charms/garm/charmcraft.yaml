@@ -40,9 +40,6 @@ actions:
   get-credentials:
     description: Show the GARM admin credentials.
 
-parts:
-  shared-lib:
-    plugin: dump
-    source: ../lib
-    organize:
-      garm_configurator_relation.py: lib/garm_configurator_relation.py
+# The go-framework extension owns the charm part and only supports the legacy charm plugin on
+# this base, so the shared garm-configurator-relation package is a requirements.txt dependency
+# rather than a uv source. Charmcraft's monorepo support makes ../lib resolvable at build time.

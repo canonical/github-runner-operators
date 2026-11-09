@@ -178,10 +178,8 @@ provides:
 
 parts:
   charm:
-    source: .
-    plugin: charm
-  shared-lib:
-    plugin: dump
-    source: ../lib
-    organize:
-      garm_configurator_relation.py: lib/garm_configurator_relation.py
+    plugin: uv
+    source: ../..
+    source-subdir: charms/garm-configurator
+    build-snaps:
+      - astral-uv

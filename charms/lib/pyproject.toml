@@ -1,0 +1,16 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "garm-configurator-relation"
+version = "0.0.0"
+description = "Shared relation-data models for the garm and garm-configurator charms."
+requires-python = ">=3.12"
+dependencies = ["pydantic"]
+
+[tool.setuptools]
+py-modules = ["garm_configurator_relation"]
