@@ -7,8 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
-
 from charm_state import (
     CharmState,
     ProviderConfig,
@@ -16,6 +14,7 @@ from charm_state import (
     SSHDebugInfo,
     _get_ssh_debug_connections,
 )
+from garm_entrypoint import PROVIDER_REQUIRED_FIELDS, PROVIDER_TYPE_LXD, PROVIDER_TYPE_OPENSTACK
 
 _COMPLETE = {
     "host": "10.0.0.1",
@@ -344,8 +343,8 @@ def test_provider_config_wire_form_matches_the_entrypoint_contract():
     arrange: A provider config for one configurator unit.
     act: Take its published form.
     assert: It carries exactly the fields the workload entrypoint requires — the dataclass and
-        the entrypoint's tuple are the same contract expressed twice, so this catches drift in
-        either direction before a workload is started with a config it cannot read.
+        the entrypoint's tuples are the same contract expressed twice, so this catches drift
+        in either direction before a workload is started with a config it cannot read.
     """
     config = ProviderConfig(
         unit_name="garm-configurator-0",
@@ -359,5 +358,35 @@ def test_provider_config_wire_form_matches_the_entrypoint_contract():
         network="net1",
     )
 
-    assert set(config.as_dict()) == set(PROVIDER_REQUIRED_FIELDS)
+    assert set(config.as_dict()) == {
+        *PROVIDER_REQUIRED_FIELDS[PROVIDER_TYPE_OPENSTACK],
+        "provider_type",
+    }
     assert config.as_dict()["unit_name"] == "garm-configurator-0"
+
+
+def test_lxd_provider_config_wire_form_matches_the_entrypoint_contract():
+    """
+    arrange: An LXD provider config carrying the certificate contents instead of URIs.
+    act: Take its published form.
+    assert: It carries only the LXD fields the entrypoint reads, plus the provider type that
+        selects them, and none of the OpenStack fields.
+    """
+    config = ProviderConfig(
+        unit_name="garm-configurator-0",
+        provider_type=PROVIDER_TYPE_LXD,
+        lxd_api_url="https://lxd.example.com:8443",
+        lxd_client_certificate="client-certificate",
+        lxd_client_key="client-key",
+    )
+
+    assert set(config.as_dict()) == {
+        *PROVIDER_REQUIRED_FIELDS[PROVIDER_TYPE_LXD],
+        "provider_type",
+        "lxd_project_name",
+        "lxd_instance_type",
+        "lxd_secure_boot",
+        "lxd_server_certificate",
+    }
+    assert config.as_dict()["provider_type"] == PROVIDER_TYPE_LXD
+    assert "auth_url" not in config.as_dict()

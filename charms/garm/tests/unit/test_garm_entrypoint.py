@@ -4,6 +4,7 @@
 
 """Tests for the GARM entrypoint script."""
 
+import json
 import logging
 import os
 from unittest.mock import patch
@@ -11,6 +12,23 @@ from unittest.mock import patch
 import pytest
 
 import garm_entrypoint
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore[no-redef]
+
+_LXD_PROVIDER = {
+    "unit_name": "garm-configurator-0",
+    "provider_type": "lxd",
+    "lxd_api_url": "https://lxd.example.com:8443",
+    "lxd_project_name": "runners",
+    "lxd_instance_type": "container",
+    "lxd_secure_boot": True,
+    "lxd_client_certificate": "client-certificate",
+    "lxd_client_key": "client-key",
+    "lxd_server_certificate": "server-certificate",
+}
 
 
 def test_render_garm_config_full():
@@ -261,3 +279,135 @@ def test_toml_string_escaping():
         config = garm_entrypoint.render_garm_config(env)
 
     assert 'username = "user\\"with\\\\quotes"' in config
+
+
+def test_build_lxd_provider_writes_config_and_certificate_files(monkeypatch, tmp_path):
+    """arrange: A configurator publishes an LXD provider with all three certificates.
+
+    act: Build the provider files.
+    assert: The provider runs the LXD binary with a TOML config pointing at the written
+        certificate files and the default ubuntu image remote.
+    """
+    provider_dir = tmp_path / "provider"
+    monkeypatch.setattr(garm_entrypoint, "GARM_PROVIDER_CONFIG_DIR", provider_dir)
+
+    entries, files = garm_entrypoint._build_provider_files(
+        {"GARM_PROVIDERS_JSON": json.dumps([_LXD_PROVIDER])}
+    )
+
+    entry = entries[0]
+    assert entry["description"] == "LXD provider (garm-configurator-0)"
+    assert entry["external"]["provider_executable"] == "/usr/local/bin/garm-provider-lxd"
+
+    config_path = provider_dir / "provider-garm-configurator-0.toml"
+    config = tomllib.loads(files[str(config_path)])
+    assert config["url"] == "https://lxd.example.com:8443"
+    assert config["project_name"] == "runners"
+    assert config["instance_type"] == "container"
+    assert config["secure_boot"] is True
+    assert config["unix_socket_path"] == ""
+    assert config["include_default_profile"] is False
+    assert config["client_certificate"].endswith("provider-garm-configurator-0-client.crt")
+    assert config["client_key"].endswith("provider-garm-configurator-0-client.key")
+    assert config["tls_server_certificate"].endswith("provider-garm-configurator-0-server.crt")
+    assert config["image_remotes"] == {
+        "ubuntu": {
+            "addr": "https://cloud-images.ubuntu.com/releases",
+            "public": True,
+            "protocol": "simplestreams",
+            "skip_verify": False,
+        }
+    }
+    assert files[str(provider_dir / "provider-garm-configurator-0-client.crt")] == (
+        "client-certificate"
+    )
+    assert files[str(provider_dir / "provider-garm-configurator-0-client.key")] == "client-key"
+    assert files[str(provider_dir / "provider-garm-configurator-0-server.crt")] == (
+        "server-certificate"
+    )
+
+
+def test_build_lxd_provider_without_server_certificate_uses_system_trust(monkeypatch, tmp_path):
+    """arrange: An LXD provider omits the optional server certificate.
+
+    act: Build the provider files.
+    assert: No server certificate file or field is written, so the provider falls back to the
+        system trust store for a publicly signed certificate.
+    """
+    provider_dir = tmp_path / "provider"
+    monkeypatch.setattr(garm_entrypoint, "GARM_PROVIDER_CONFIG_DIR", provider_dir)
+    provider = {**_LXD_PROVIDER, "lxd_server_certificate": ""}
+
+    _, files = garm_entrypoint._build_provider_files(
+        {"GARM_PROVIDERS_JSON": json.dumps([provider])}
+    )
+
+    config_path = provider_dir / "provider-garm-configurator-0.toml"
+    config = tomllib.loads(files[str(config_path)])
+    assert "tls_server_certificate" not in config
+    assert str(provider_dir / "provider-garm-configurator-0-server.crt") not in files
+
+
+def test_main_removes_stale_provider_certificate_files(monkeypatch, tmp_path):
+    """arrange: The provider directory holds certificate files from a previous provider.
+
+    act: Run main with an LXD provider.
+    assert: The stale certificate files are removed and the current ones are written.
+    """
+    config_path = tmp_path / "config.toml"
+    provider_dir = tmp_path / "provider"
+    provider_dir.mkdir()
+    stale_certificate = provider_dir / "provider-old-client.crt"
+    stale_key = provider_dir / "provider-old-client.key"
+    stale_certificate.write_text("old")
+    stale_key.write_text("old")
+    monkeypatch.setattr(garm_entrypoint, "GARM_CONFIG_PATH", config_path)
+    monkeypatch.setattr(garm_entrypoint, "GARM_PROVIDER_CONFIG_DIR", provider_dir)
+    env = {
+        "POSTGRESQL_DB_HOSTNAME": "db",
+        "POSTGRESQL_DB_USERNAME": "u",
+        "POSTGRESQL_DB_PASSWORD": "p",
+        "GARM_JWT_SECRET": "j",
+        "GARM_PASSPHRASE": "d" * 32,
+        "GARM_PROVIDERS_JSON": json.dumps([_LXD_PROVIDER]),
+    }
+
+    with (
+        patch("garm_entrypoint.os.execvp"),
+        patch("garm_entrypoint.os.chmod"),
+        patch.dict(os.environ, env, clear=True),
+    ):
+        garm_entrypoint.main()
+
+    assert not stale_certificate.exists()
+    assert not stale_key.exists()
+    assert (provider_dir / "provider-garm-configurator-0-client.crt").read_text() == (
+        "client-certificate"
+    )
+    assert (provider_dir / "provider-garm-configurator-0-client.key").read_text() == "client-key"
+
+
+def test_unknown_provider_type_is_rejected():
+    """arrange: A provider names a provider type GARM cannot run.
+
+    act: Build the provider configuration.
+    assert: The unknown type is rejected before any config file path is chosen.
+    """
+    provider = {"unit_name": "garm-configurator-0", "provider_type": "aws"}
+
+    with pytest.raises(garm_entrypoint.InvalidConfigurationError, match="Invalid provider type"):
+        garm_entrypoint._build_provider_files({"GARM_PROVIDERS_JSON": json.dumps([provider])})
+
+
+def test_lxd_provider_missing_required_field_is_rejected():
+    """arrange: An LXD provider omits its client key.
+
+    act: Build the provider configuration.
+    assert: The missing LXD-specific field is named, rather than the OpenStack fields the
+        provider does not use.
+    """
+    provider = {**_LXD_PROVIDER}
+    del provider["lxd_client_key"]
+
+    with pytest.raises(garm_entrypoint.InvalidConfigurationError, match="lxd_client_key"):
+        garm_entrypoint._build_provider_files({"GARM_PROVIDERS_JSON": json.dumps([provider])})
