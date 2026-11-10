@@ -1,0 +1,13 @@
+# Houston delivery status
+
+version: 1
+ticket: "ISD-7499"
+branch: "houston/ISD-7499"
+pr_branch: "houston/ISD-7499"
+worktree: "/home/tphan025/Canonical/github-runner-operators/.worktrees/ISD-7499"
+state: "in-review"
+pr: "https://github.com/canonical/github-runner-operators/pull/454"
+pr_number: 454
+draft: true
+note: "Reverted the cross-charm monorepo design. The pydantic ProviderConfig and tolerant decoder now live in charms/garm-configurator/lib; garm-configurator writes the provider payload with ops.Relation.save. garm and charms/lib are untouched for the follow-up reader PR. Verified garm-configurator tox (fmt/lint/static/complexity/unit/coverage) and charmcraft pack --destructive-mode on Ubuntu 24.04. Existing draft PR #454 updated."
+updated_at: "2026-11-10T17:23:58.017Z"
