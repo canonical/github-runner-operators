@@ -213,8 +213,8 @@ The respective charm code is in the `charms/charm-name` directory.
 
 Code shared by more than one charm lives in `charms/lib`. The `garm` and `garm-configurator`
 charms share the relation-data models in the `garm-configurator-relation` package there.
-Both charms consume it as a regular Python dependency; reaching outside the charm directory uses
-Charmcraft's experimental monorepo support, so set the flag when packing locally:
+Reaching outside the charm directory uses Charmcraft's experimental monorepo support, so set
+the flag when packing locally:
 
 ```shell
 cd charms/<charm-directory>
@@ -224,8 +224,8 @@ CHARMCRAFT_EXPERIMENTAL_MONOREPO=1 charmcraft pack
 CI sets the same variable when it builds the charms. `garm-configurator` builds its charm code
 with the `uv` plugin and declares the package under `[tool.uv.sources]` in its `pyproject.toml`.
 The `go-framework` extension used by `garm` still owns the `charm` part and only supports the
-legacy `charm` plugin on the 24.04 base, so `garm` lists the shared package in
-`requirements.txt`; pip resolves the same relative path through the monorepo mount.
+legacy `charm` plugin on the 24.04 base, so `garm` copies the shared module into `lib/` with an
+explicit build part instead.
 
 Integration tests for the charm are in the `charms/tests/integration` directory.
 

@@ -8,6 +8,3 @@ python-dateutil==4.0.0
 pydantic==2.14.3
 typing-extensions==4.16.0
 owasp-logger==0.1.6
-
-# Shared relation-data contract with the garm-configurator charm.
-../lib
