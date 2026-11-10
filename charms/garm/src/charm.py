@@ -15,8 +15,6 @@ from collections.abc import Mapping
 
 import ops
 import paas_charm.go
-from garm_configurator_relation import ProviderConfig as RelationProviderConfig
-from garm_configurator_relation import decode_relation_value
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
@@ -632,27 +630,29 @@ class GarmCharm(paas_charm.go.Charm):
                 )
 
             unit = units[0]
-            data = relation.load(RelationProviderConfig, unit, decoder=decode_relation_value)
+            data = relation.data[unit]
             # Only include units that have sent the full provider config
-            if not data.is_published():
+            if "openstack_auth_url" not in data:
                 continue
 
             # Resolve password: may be a plain value or a secret URI.
-            password = data.openstack_password
-            if not password and data.openstack_password_secret_uri:
-                password = self._resolve_secret_value(data.openstack_password_secret_uri)
+            password = data.get("openstack_password", "")
+            unit_name = unit.name.replace("/", "-")
+            password_secret_uri = data.get("openstack_password_secret_uri", "")
+            if not password and password_secret_uri:
+                password = self._resolve_secret_value(str(password_secret_uri))
 
             configs.append(
                 ProviderConfig(
-                    unit_name=unit.name.replace("/", "-"),
-                    auth_url=data.openstack_auth_url,
-                    username=data.openstack_username,
+                    unit_name=unit_name,
+                    auth_url=data.get("openstack_auth_url", ""),
+                    username=data.get("openstack_username", ""),
                     password=password,
-                    project_name=data.openstack_project_name,
-                    user_domain_name=data.openstack_user_domain_name,
-                    project_domain_name=data.openstack_project_domain_name,
-                    region_name=data.openstack_region_name,
-                    network=data.openstack_network,
+                    project_name=data.get("openstack_project_name", ""),
+                    user_domain_name=data.get("openstack_user_domain_name", ""),
+                    project_domain_name=data.get("openstack_project_domain_name", ""),
+                    region_name=data.get("openstack_region_name", ""),
+                    network=data.get("openstack_network", ""),
                 )
             )
 

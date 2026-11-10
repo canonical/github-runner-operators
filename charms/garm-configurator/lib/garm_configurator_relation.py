@@ -3,10 +3,10 @@
 
 """Pydantic models for the ``garm-configurator`` relation data contract.
 
-The ``garm-configurator`` charm publishes one provider configuration per unit on the
-``garm-configurator`` relation, and the ``garm`` charm consumes it. Keeping the models in one
-shared module means the writer and the reader cannot drift: both build the same model and use
-``ops.Relation.save`` / ``ops.Relation.load`` rather than hand-writing databag keys.
+The ``garm-configurator`` charm owns the relation contract and publishes one provider
+configuration per unit with ``ops.Relation.save``. The models live with the charm so consumers
+can share the same definitions and use ``ops.Relation.load`` instead of hand-writing databag
+keys.
 """
 
 import json

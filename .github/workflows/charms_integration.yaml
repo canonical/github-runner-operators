@@ -16,10 +16,6 @@ jobs:
       actions: read
     with:
       working-directory: .
-      # The relation-data models are shared from charms/lib, so the charmcraft build needs
-      # the git root mounted to reach outside each charm's project directory.
-      charmcraft-environments: |
-        CHARMCRAFT_EXPERIMENTAL_MONOREPO=1
       # Restrict the matrix to the integration backend. The filter defaults to empty,
       # which would include every backend in spread.yaml — and so run the ProdStack
       # e2e suite on every pull request.

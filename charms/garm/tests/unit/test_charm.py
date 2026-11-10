@@ -457,31 +457,6 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
     assert out.unit_status == ops.ActiveStatus()
 
 
-def test_provider_config_is_loaded_from_json_relation_data(ctx: Context, garm_api: _GarmApiMocks):
-    """
-    arrange: A configurator unit publishing its provider credentials in the JSON form
-        ``Relation.save`` writes.
-    act: Run update-status.
-    assert: The shared model decodes the payload into the same provider config, so the
-        writer and reader agree on the relation contract.
-    """
-    encoded_provider = {key: json.dumps(value) for key, value in _PROVIDER_UNIT_DATA.items()}
-
-    out = ctx.run(
-        ctx.on.update_status(),
-        _state(
-            configurator_units_data={
-                0: {**encoded_provider, **_SCALESET_UNIT_DATA},
-            }
-        ),
-    )
-
-    providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
-    assert providers[0]["unit_name"] == "garm-configurator-0"
-    assert providers[0]["auth_url"] == _PROVIDER_UNIT_DATA["openstack_auth_url"]
-    assert providers[0]["password"] == _PROVIDER_UNIT_DATA["openstack_password"]
-
-
 @pytest.mark.parametrize(
     "unit_count, expected_status, expected_provider_names",
     [

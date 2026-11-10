@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Unit tests for the shared garm-configurator relation model."""
+"""Unit tests for the garm-configurator relation data model."""
 
 import json
 
@@ -12,8 +12,8 @@ def test_provider_config_defaults_are_empty_and_unpublished():
     """
     arrange: A provider config built from a unit databag that has not published anything.
     act: Inspect the defaults and the published flag.
-    assert: Every field is empty and the config is not published, so GARM skips the unit
-        instead of failing validation while the relation is still being set up.
+    assert: Every field is empty and the config is not published, so a consumer skips the
+        unit instead of failing validation while the relation is still being set up.
     """
     config = ProviderConfig()
 
@@ -35,8 +35,8 @@ def test_decode_relation_value_decodes_the_json_wire_format():
     """
     arrange: Values in the JSON form ``Relation.save`` writes.
     act: Decode them.
-    assert: Strings and booleans come back as their Python values, so both charms share the
-        same databag contract.
+    assert: Strings and booleans come back as their Python values, so writer and reader share
+        the same databag contract.
     """
     assert decode_relation_value(json.dumps("admin")) == "admin"
     assert decode_relation_value(json.dumps(True)) is True
