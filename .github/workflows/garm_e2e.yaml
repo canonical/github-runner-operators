@@ -78,6 +78,10 @@ jobs:
       actions: read
     with:
       working-directory: .
+      # The relation-data models are shared from charms/lib, so the charmcraft build needs
+      # the git root mounted to reach outside each charm's project directory.
+      charmcraft-environments: |
+        CHARMCRAFT_EXPERIMENTAL_MONOREPO=1
 
   e2e:
     name: GARM E2E test
