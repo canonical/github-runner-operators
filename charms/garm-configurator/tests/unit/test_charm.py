@@ -703,7 +703,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
         "https://keystone.example.com:5000/v3"
     )
     assert _relation_value(garm_out, "openstack_username") == "admin"
-    assert _relation_value(garm_out, "openstack_password") == ""
+    assert _relation_value(garm_out, "openstack_password") is None
     assert _relation_value(garm_out, "openstack_password_secret_uri")
     assert _relation_value(garm_out, "openstack_project_name") == "myproject"
     assert _relation_value(garm_out, "openstack_user_domain_name") == "Default"
