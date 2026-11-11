@@ -3,14 +3,11 @@
 
 """Pydantic models for the ``garm-configurator`` relation data contract.
 
-The ``garm-configurator`` charm publishes one provider configuration per unit on the
-``garm-configurator`` relation, and the ``garm`` charm consumes it. Keeping the model in one
-shared module means the writer and the reader cannot drift: both build the same model and use
-``ops.Relation.save`` / ``ops.Relation.load`` rather than hand-writing databag keys.
+The ``garm-configurator`` charm owns the relation contract and publishes one provider
+configuration per unit with ``ops.Relation.save``. The models live with the charm so consumers
+can share the same definitions and use ``ops.Relation.load`` instead of hand-writing databag
+keys.
 """
-
-import json
-import typing
 
 import pydantic
 
@@ -44,30 +41,3 @@ class ProviderConfig:
     openstack_project_domain_name: str | None = None
     openstack_region_name: str | None = None
     openstack_network: str | None = None
-
-    def is_published(self) -> bool:
-        """Whether the unit has published a usable provider configuration.
-
-        Returns:
-            True if the auth URL is set, the first field the configurator writes.
-        """
-        return bool(self.openstack_auth_url)
-
-
-def decode_relation_value(value: str) -> typing.Any:
-    """Decode one relation databag value written by ``ops.Relation.save``.
-
-    ``Relation.load`` decodes JSON by default, but a relation can span an upgrade where the
-    remote unit still writes plain strings, or where a legacy field holds a secret URI that is
-    not valid JSON. Falling back to the raw string keeps a mixed-version deployment readable.
-
-    Args:
-        value: The raw databag value.
-
-    Returns:
-        The decoded JSON value, or the raw string when it is not JSON.
-    """
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError):
-        return value

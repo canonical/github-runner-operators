@@ -178,8 +178,5 @@ provides:
 
 parts:
   charm:
-    plugin: uv
-    source: ../..
-    source-subdir: charms/garm-configurator
-    build-snaps:
-      - astral-uv
+    source: .
+    plugin: charm

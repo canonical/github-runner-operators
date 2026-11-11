@@ -1,20 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-[project]
-name = "garm-configurator"
-version = "0.0.0"
-description = "Configuration broker charm for GARM scalesets."
-requires-python = ">=3.12"
-dependencies = [
-    "garm-configurator-relation",
-    "ops==3.9.0",
-    "pydantic==2.14.3",
-]
-
-[tool.uv.sources]
-garm-configurator-relation = { path = "../lib" }
-
 # Testing tools configuration
 [tool.coverage.run]
 branch = true

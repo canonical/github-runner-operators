@@ -48,6 +48,3 @@ build/
 # Git worktrees
 .worktrees/
 .claude
-
-# Houston/opencode local state
-.opencode/
