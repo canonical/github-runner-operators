@@ -1176,6 +1176,32 @@ def test_related_configurator_credentials_replace_the_recorded_ones(
     assert providers[0]["password"] == _PROVIDER_UNIT_DATA["openstack_password"]
 
 
+def test_incomplete_related_provider_blocks_the_update(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: A configurator publishes its provider with an empty password, as when its
+        password secret is not readable yet, over a record holding the complete provider.
+    act: Reconcile.
+    assert: The unit blocks naming the provider, and nothing is applied: GARM is not
+        restarted or reconciled and the record is not rewritten, so the running configuration
+        is held instead of breaking the provider's scalesets and poisoning the record.
+    """
+    state = _state(
+        configurator_units_data={
+            0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "openstack_password": ""}
+        },
+        recorded_providers=[_provider_config("garm-configurator-0")],
+    )
+
+    out = ctx.run(ctx.on.update_status(), state)
+
+    assert out.unit_status == ops.BlockedStatus("Incomplete provider config: garm-configurator-0")
+    assert "garm-command" not in out.get_container(CONTAINER_NAME).layers
+    garm_api.auth.from_login.assert_not_called()
+    assert _secret_content(out, GARM_PROVIDERS_LABEL) == _secret_content(
+        state, GARM_PROVIDERS_LABEL
+    )
+
+
 def test_publishing_does_not_ask_garm_for_its_scalesets(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configured charm whose recorded provider set matches its relations.
