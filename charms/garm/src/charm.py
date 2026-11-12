@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 GARM_PROVIDER_CONFIG_DIR: typing.Final[str] = "/etc/garm"
 GARM_SECRETS_LABEL: typing.Final[str] = "garm-secrets"
 GARM_ADMIN_CREDENTIALS_LABEL: typing.Final[str] = "garm-admin-credentials"
+DATABASE_PASSPHRASE_CONFIG_NAME: typing.Final[str] = "database-passphrase"
 # The provider set GARM was last started with. Kept in a secret, not only in the Pebble
 # plan, so it survives a pod replacement and is shared by every unit: a drain can run for
 # days, and a restart with a shrunken set in the middle of one strands the scaleset.
@@ -535,17 +536,42 @@ class GarmCharm(paas_charm.go.Charm):
             )
 
     def _get_secrets(self) -> dict[str, str] | None:
-        """Retrieve secrets from the juju secret store.
+        """Retrieve GARM secrets, preferring the operator-supplied passphrase.
+
+        The config secret is operator-owned, so refresh it to observe Vault-backed
+        rotations. When it is not configured, retain the legacy passphrase from the
+        charm-owned secret for existing deployments.
 
         Returns:
-            Dict with jwt-secret and db-passphrase, or None if the
-            secret is not accessible (e.g. not yet created by the leader).
+            Dict with jwt-secret and db-passphrase, or None if either secret is
+            not available or the configured secret is invalid.
         """
         try:
             secret = self.model.get_secret(label=GARM_SECRETS_LABEL)
-            return secret.get_content()
+            content = secret.get_content()
         except ops.SecretNotFoundError:
             return None
+
+        configured_secret_id = self.config.get(DATABASE_PASSPHRASE_CONFIG_NAME)
+        if configured_secret_id:
+            try:
+                configured_secret = self.model.get_secret(id=str(configured_secret_id))
+                passphrase = configured_secret.get_content(refresh=True)["value"]
+            except (KeyError, ops.ModelError) as exc:
+                logger.warning(
+                    "Configured GARM database passphrase secret is unavailable: %s", exc
+                )
+                return None
+            if not isinstance(passphrase, str) or not passphrase:
+                logger.warning("Configured GARM database passphrase secret has no non-empty value")
+                return None
+            content["db-passphrase"] = passphrase
+        elif not content.get("db-passphrase"):
+            logger.warning(
+                "GARM database passphrase is not configured and is absent from the legacy secret"
+            )
+            return None
+        return content
 
     def _get_postgresql_config(self) -> dict[str, typing.Any] | None:
         """Get PostgreSQL config from relation data, or None if not available.
