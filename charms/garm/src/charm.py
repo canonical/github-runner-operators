@@ -730,12 +730,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         configs: list[ProviderConfig] = []
         for relation in configurator_data.relations:
-            provider = relation.provider
-            unit_name = relation.provider_name
-            if provider.provider_type == PROVIDER_TYPE_LXD:
-                config = self._lxd_provider_config(provider, unit_name)
-            else:
-                config = self._openstack_provider_config(provider, unit_name)
+            config = self._configurator_relation_provider_config(relation)
             if config is not None:
                 configs.append(config)
 
@@ -758,6 +753,24 @@ class GarmCharm(paas_charm.go.Charm):
             len(configs),
         )
         return sorted(configs, key=lambda config: config.unit_name)
+
+    def _configurator_relation_provider_config(
+        self, relation: ConfiguratorRelation
+    ) -> ProviderConfig | None:
+        """Build the provider config one configurator relation publishes.
+
+        Args:
+            relation: The provider data one configurator relation unit publishes.
+
+        Returns:
+            The provider config, or None when the relation publishes credentials that are
+            not readable yet.
+        """
+        provider = relation.provider
+        unit_name = relation.provider_name
+        if provider.provider_type == PROVIDER_TYPE_LXD:
+            return self._lxd_provider_config(provider, unit_name)
+        return self._openstack_provider_config(provider, unit_name)
 
     def _openstack_provider_config(
         self, provider: RelationProviderConfig, unit_name: str
