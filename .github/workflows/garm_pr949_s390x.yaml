@@ -1,0 +1,126 @@
+# Throwaway: tests cloudbase/garm#949 (runner tools for extra architectures) on
+# s390x. Lives only on the test/garm-pr949-s390x branch; never merge it.
+#
+# The garm job runs GARM from the PR on an s390x runner, and GARM boots an
+# s390x LXD container that registers here under RUNNER_LABEL with the runner
+# Canonical builds. The s390x-runner job, queued from the start, is routed to
+# that runner. GitHub publishes no s390x runner, so that job running at all
+# means GARM took the tools from the metadata URL.
+
+name: GARM PR 949 s390x (throwaway)
+
+on:
+  push:
+    branches: [test/garm-pr949-s390x]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# RUNNER_LABEL is fixed, so two runs would race for each other's runners.
+concurrency:
+  group: garm-pr949-s390x
+  cancel-in-progress: true
+
+env:
+  GARM_SHA: e1f820062593559e2850d4d5be9bddad5161930e # cloudbase/garm#949 head
+  PROVIDER_LXD_SHA: d234a9d9a2e0983a1a83ec12a75528eb1aeda648 # garm-provider-lxd main
+  PROVIDER_COMMON_SHA: a63fbe8afd51e1d3e5478eb0e4e7ead4d30088cc # the version #949 vendors
+  TOOLS_METADATA_URL: https://api.github.com/repos/canonical/github-actions-runner/releases
+  RUNNER_LABEL: garm-pr949-s390x
+
+jobs:
+  garm:
+    name: GARM on s390x host
+    runs-on: self-hosted-linux-s390x-noble-medium
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      # Read the s390x-runner job's status, and cancel the run if this job
+      # fails, so that job does not sit queued for a runner that never comes.
+      actions: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26
+
+      - name: Set up tmate session (debug re-runs only)
+        if: runner.debug == 1
+        uses: canonical/action-tmate@5f11b26528699b78dadfb61273f4c859ac7145cf # main, 2026-04-27
+        with:
+          detached: true
+          timeout-minutes: 60
+
+      - name: Set up GARM with an s390x pool
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
+          E2E_GITHUB_APP_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_APP_INSTALLATION_ID }}
+          E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.E2E_GITHUB_APP_PRIVATE_KEY }}
+        run: .github/garm-pr949-s390x/garm-s390x.sh setup
+
+      - name: Wait for the job on the GARM-spawned runner
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_JOB: Job on GARM-spawned s390x runner
+        # Covers GARM's 20 minute bootstrap timeout plus the job itself.
+        timeout-minutes: 40
+        run: |
+          python3 -I - <<'SCRIPT'
+          import json, os, sys, time, urllib.request
+
+          url = (f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
+                 f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+                 f"/attempts/{os.environ['GITHUB_RUN_ATTEMPT']}/jobs?per_page=100")
+          request = urllib.request.Request(url, headers={
+              "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+              "Accept": "application/vnd.github+json",
+          })
+          target = os.environ["TARGET_JOB"]
+          last = None
+          while True:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  jobs = json.load(response)["jobs"]
+              job = next((j for j in jobs if j["name"] == target), None)
+              if job is None:
+                  sys.exit(f"::error::No job named {target!r} in this run")
+              state = (job["status"], job["conclusion"], job.get("runner_name"))
+              if state != last:
+                  print(f"{target}: status={state[0]} conclusion={state[1]} runner={state[2]}", flush=True)
+                  last = state
+              if job["status"] == "completed":
+                  if job["conclusion"] != "success":
+                      sys.exit(f"::error::{target} concluded {job['conclusion']}: {job['html_url']}")
+                  break
+              time.sleep(15)
+          SCRIPT
+
+      - name: Diagnostics
+        if: always()
+        run: .github/garm-pr949-s390x/garm-s390x.sh diagnostics
+
+      - name: Tear down runners
+        if: always()
+        run: .github/garm-pr949-s390x/garm-s390x.sh teardown
+
+      - name: Cancel the run so the s390x-runner job stops waiting
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/cancel"
+
+  s390x-runner:
+    name: Job on GARM-spawned s390x runner
+    # Must match RUNNER_LABEL; the env context is not available in runs-on.
+    runs-on: [self-hosted, garm-pr949-s390x]
+    timeout-minutes: 15
+    steps:
+      - name: Assert this runs on s390x
+        run: |
+          set -euo pipefail
+          echo "Runner: $(hostname), arch: $(uname -m), RUNNER_ARCH=${RUNNER_ARCH}"
+          [ "$(uname -m)" = s390x ]
