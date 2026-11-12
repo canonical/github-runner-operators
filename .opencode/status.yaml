@@ -9,5 +9,5 @@ state: "in-review"
 pr: "https://github.com/canonical/github-runner-operators/pull/455"
 pr_number: 455
 draft: true
-note: "Rebased houston/ISD-7462 onto houston/ISD-7499 (308956e). Resolved the garm_configurator_relation.py conflict by keeping the refactored in-charm model and adding the LXD fields/provider_type; dropped the now-unused is_published/decode_relation_value helpers. garm-configurator unit/fmt/lint/static/complexity and coverage (94%) pass. Force-pushed the rebased branch; draft PR #455 remains open and draft."
-updated_at: "2026-11-12T13:40:26.306Z"
+note: "Rebased houston/ISD-7462 onto houston/ISD-7499 (219e6ca). Resolved conflicts by combining the refactored ProviderConfig (GitHub fields) with the LXD provider-type/config fields, and made the split provider builder write LXD/OpenStack payloads plus GitHub fields into the datastore. garm-configurator unit tests (85 passed), lint, static, complexity pass; coverage 94% total (charm.py 86%, charm_state.py 97%). Force-pushed; existing draft PR #455 updated."
+updated_at: "2026-11-12T17:47:03.529Z"
