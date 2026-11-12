@@ -213,6 +213,8 @@ configure_garm() {
   repo_id="$(garm-cli repo add --owner "${GITHUB_REPOSITORY%%/*}" --name "${GITHUB_REPOSITORY#*/}" \
     --credentials e2e-app --random-webhook-secret --format json | jq -r .id)"
 
+  wait_for_s390x_tools
+
   # A scale set learns of jobs over its message session with GitHub, so no
   # webhook or idle runner is needed: GARM boots a runner when the job is queued.
   # GitHub routes jobs to a scale set by its name, which is why it is the label.
@@ -223,6 +225,23 @@ configure_garm() {
   echo "SCALESET_ID=${scaleset_id}" >> "${GITHUB_ENV:-/dev/null}"
   garm-cli scaleset show "$scaleset_id"
   echo "::endgroup::"
+}
+
+# GARM fetches the metadata URL unauthenticated, and from a shared egress IP
+# api.github.com often answers 403 (rate limit) until the hourly window resets.
+# GARM retries every ~100s, but any runner it starts before then fails in the
+# provider with no s390x tools, so the scale set waits for them instead.
+wait_for_s390x_tools() {
+  local deadline=$((SECONDS + 900))
+  until sudo journalctl -u "$GARM_UNIT" --no-pager \
+      | grep -q 'found valid runner tools.*arch=s390x'; do
+    if (( SECONDS > deadline )); then
+      echo "::error::GARM found no s390x tools at ${TOOLS_METADATA_URL} within 15 minutes; check the GARM log for 403s (unauthenticated rate limit)."
+      return 1
+    fi
+    sleep 10
+  done
+  echo "GARM has s390x runner tools from ${TOOLS_METADATA_URL}"
 }
 
 diagnostics() {
