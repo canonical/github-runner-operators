@@ -22,6 +22,16 @@ description: |
   its scrape target is declared in paas-config.yaml; the framework's app-port,
   metrics-port and metrics-path options are not used.
 
+config:
+  options:
+    database-passphrase:
+      type: secret
+      description: |
+        Juju secret containing GARM's database encryption passphrase under the
+        "value" key. Set this to the existing passphrase when moving it out of
+        the charm-owned garm-secrets secret; changing it makes existing encrypted
+        database values unreadable.
+
 extensions:
   - go-framework
 
