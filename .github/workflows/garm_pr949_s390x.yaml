@@ -119,7 +119,9 @@ jobs:
   s390x-runner:
     name: Job on GARM-spawned s390x runner
     # Must match RUNNER_LABEL; the env context is not available in runs-on.
-    runs-on: [self-hosted, garm-pr949-s390x]
+    # The label alone: GARM registers JIT runners with only the pool's tags
+    # and its own ID labels, not self-hosted.
+    runs-on: garm-pr949-s390x
     timeout-minutes: 15
     steps:
       - name: Assert this runs on s390x
