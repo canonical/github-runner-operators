@@ -24,10 +24,13 @@ logger = logging.getLogger(__name__)
 GARM_CONFIG_PATH: Final[Path] = Path("/etc/garm/config.toml")
 GARM_PROVIDER_CONFIG_DIR: Final[Path] = Path("/etc/garm")
 OPENSTACK_PROVIDER_BINARY: Final[str] = "/usr/local/bin/garm-provider-openstack"
+LXD_PROVIDER_BINARY: Final[str] = "/usr/local/bin/garm-provider-lxd"
 DEFAULT_DB_PORT: Final[int] = 5432
 DEFAULT_DB_NAME: Final[str] = "garm"
 GARM_LISTEN_ADDRESS: Final[str] = "0.0.0.0"
 GARM_PORT: Final[int] = 8080
+PROVIDER_TYPE_OPENSTACK: Final[str] = "openstack"
+PROVIDER_TYPE_LXD: Final[str] = "lxd"
 SENSITIVE_ENV_VARS: Final[tuple[str, ...]] = (
     "POSTGRESQL_DB_USERNAME",
     "POSTGRESQL_DB_PASSWORD",
@@ -35,7 +38,7 @@ SENSITIVE_ENV_VARS: Final[tuple[str, ...]] = (
     "GARM_PASSPHRASE",
     "GARM_PROVIDERS_JSON",
 )
-PROVIDER_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
+OPENSTACK_PROVIDER_FIELDS: Final[tuple[str, ...]] = (
     "unit_name",
     "network",
     "auth_url",
@@ -46,6 +49,37 @@ PROVIDER_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "project_domain_name",
     "region_name",
 )
+LXD_PROVIDER_FIELDS: Final[tuple[str, ...]] = (
+    "unit_name",
+    "lxd_api_url",
+    "lxd_project_name",
+    "lxd_instance_type",
+    "lxd_secure_boot",
+    "lxd_client_certificate",
+    "lxd_client_key",
+    "lxd_server_certificate",
+)
+# The fields a provider config cannot be rendered without. The LXD server certificate is
+# optional: when it is absent the provider falls back to the system trust store.
+PROVIDER_REQUIRED_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    PROVIDER_TYPE_OPENSTACK: OPENSTACK_PROVIDER_FIELDS,
+    PROVIDER_TYPE_LXD: (
+        "unit_name",
+        "lxd_api_url",
+        "lxd_client_certificate",
+        "lxd_client_key",
+    ),
+}
+# The image remotes GARM's LXD provider gets by default. "ubuntu" covers the release
+# catalogue the configurator's image option refers to (for example ubuntu:24.04).
+DEFAULT_LXD_IMAGE_REMOTES: Final[dict[str, dict[str, typing.Any]]] = {
+    "ubuntu": {
+        "addr": "https://cloud-images.ubuntu.com/releases",
+        "public": True,
+        "protocol": "simplestreams",
+        "skip_verify": False,
+    }
+}
 
 
 class GarmEntrypointError(Exception):
@@ -208,29 +242,41 @@ def _parse_providers(env: dict[str, str]) -> list[typing.Any]:
 def _build_provider(
     provider: typing.Any, proxy_vars: list[str]
 ) -> tuple[dict[str, typing.Any], dict[str, str]]:
-    """Build one external provider entry plus its provider TOML and clouds YAML content.
+    """Build one external provider entry plus the files its executable reads.
 
     Args:
         provider: One provider object from GARM_PROVIDERS_JSON (untrusted input).
         proxy_vars: Proxy variable names to forward to the provider executable.
 
     Returns:
-        The provider config entry and its two config files, keyed by path.
+        The provider config entry and its config files, keyed by path.
 
     Raises:
         InvalidConfigurationError: If the provider object is not a JSON object, its
-            unit name is invalid, or required fields are missing.
+            provider type or unit name is invalid, or required fields are missing.
     """
     if not isinstance(provider, dict):
         raise InvalidConfigurationError("Each GARM provider must be a JSON object")
     unit_name = provider.get("unit_name")
     if not isinstance(unit_name, str) or not unit_name or Path(unit_name).name != unit_name:
         raise InvalidConfigurationError(f"Invalid provider unit name: {unit_name!r}")
-    missing = [name for name in PROVIDER_REQUIRED_FIELDS if name not in provider]
+    provider_type = str(provider.get("provider_type") or PROVIDER_TYPE_OPENSTACK)
+    if provider_type not in PROVIDER_REQUIRED_FIELDS:
+        raise InvalidConfigurationError(f"Invalid provider type: {provider_type!r}")
+    missing = [name for name in PROVIDER_REQUIRED_FIELDS[provider_type] if name not in provider]
     if missing:
         raise InvalidConfigurationError(
             f"GARM provider is missing required fields: {', '.join(missing)}"
         )
+    if provider_type == PROVIDER_TYPE_LXD:
+        return _build_lxd_provider(provider, unit_name, proxy_vars)
+    return _build_openstack_provider(provider, unit_name, proxy_vars)
+
+
+def _build_openstack_provider(
+    provider: dict[str, typing.Any], unit_name: str, proxy_vars: list[str]
+) -> tuple[dict[str, typing.Any], dict[str, str]]:
+    """Build the OpenStack provider entry, its provider TOML, and its clouds YAML."""
     provider_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}.toml"
     clouds_path = GARM_PROVIDER_CONFIG_DIR / f"clouds-{unit_name}.yaml"
     entry = {
@@ -274,6 +320,49 @@ def _build_provider(
             sort_keys=False,
         ),
     }
+    return entry, files
+
+
+def _build_lxd_provider(
+    provider: dict[str, typing.Any], unit_name: str, proxy_vars: list[str]
+) -> tuple[dict[str, typing.Any], dict[str, str]]:
+    """Build the LXD provider entry, its provider TOML, and its certificate files."""
+    provider_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}.toml"
+    client_certificate_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}-client.crt"
+    client_key_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}-client.key"
+    server_certificate_path = GARM_PROVIDER_CONFIG_DIR / f"provider-{unit_name}-server.crt"
+    entry = {
+        "name": unit_name,
+        "provider_type": "external",
+        "description": f"LXD provider ({unit_name})",
+        "external": {
+            "config_file": str(provider_path),
+            "provider_executable": LXD_PROVIDER_BINARY,
+            **({"environment_variables": proxy_vars} if proxy_vars else {}),
+        },
+    }
+    config: dict[str, typing.Any] = {
+        "unix_socket_path": "",
+        "include_default_profile": False,
+        "instance_type": provider.get("lxd_instance_type") or "virtual-machine",
+        "secure_boot": bool(provider.get("lxd_secure_boot", False)),
+        "project_name": provider.get("lxd_project_name") or "default",
+        "url": provider["lxd_api_url"],
+        "client_certificate": str(client_certificate_path),
+        "client_key": str(client_key_path),
+    }
+    files = {
+        str(client_certificate_path): provider["lxd_client_certificate"],
+        str(client_key_path): provider["lxd_client_key"],
+    }
+    server_certificate = provider.get("lxd_server_certificate")
+    if server_certificate:
+        config["tls_server_certificate"] = str(server_certificate_path)
+        files[str(server_certificate_path)] = server_certificate
+    # Tables must come last so tomli_w keeps the scalar keys above them at the top
+    # level rather than nesting them under [image_remotes.ubuntu].
+    config["image_remotes"] = DEFAULT_LXD_IMAGE_REMOTES
+    files[str(provider_path)] = tomli_w.dumps(config)
     return entry, files
 
 
@@ -321,7 +410,7 @@ def main() -> None:
         for path in GARM_PROVIDER_CONFIG_DIR.iterdir():
             name = path.name
             if not name.startswith(("provider-", "clouds-")) or not name.endswith(
-                (".toml", ".yaml")
+                (".toml", ".yaml", ".crt", ".key")
             ):
                 continue
             if str(path) not in expected_paths:
@@ -334,7 +423,7 @@ def main() -> None:
         _scrub_sensitive_env_vars()
         logger.info(
             "Prepared GARM configuration: provider_count=%d config_path=%s",
-            len(provider_files) // 2,
+            len(_parse_providers(env)),
             GARM_CONFIG_PATH,
         )
         logger.info(
