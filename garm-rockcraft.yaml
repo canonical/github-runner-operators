@@ -7,8 +7,8 @@ build-base: ubuntu@24.04
 version: "0.2"
 summary: GARM — GitHub Actions Runner Manager
 description: |
-  ROCK image containing the GARM binary, the OpenStack provider binary, and
-  the garm-agent binaries GARM serves to its runners.
+  ROCK image containing the GARM binary, the OpenStack and LXD provider
+  binaries, and the garm-agent binaries GARM serves to its runners.
 platforms:
   amd64:
 
@@ -74,6 +74,29 @@ parts:
       go build -o bin/garm-provider-openstack .
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
+
+  garm-provider-lxd:
+    plugin: go
+    source: https://github.com/cloudbase/garm-provider-lxd
+    source-type: git
+    # renovate: datasource=github-releases depName=cloudbase/garm-provider-lxd
+    source-tag: v0.1.5
+    build-snaps:
+      - go/1.26/stable
+    build-environment:
+      - GOTOOLCHAIN: local
+      # Static, pure-Go binary for the same reason as garm-provider-openstack:
+      # the bare base ships no dynamic loader or libc.
+      - CGO_ENABLED: "0"
+    override-build: |
+      cd "$CRAFT_PART_SRC"
+      # v0.1.5 is unpatched; upstream main also changes the LXD SDK.
+      go get golang.org/x/crypto@v0.57.0
+      go mod tidy
+      go mod vendor
+      go build -o bin/garm-provider-lxd .
+      mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
+      cp bin/garm-provider-lxd "$CRAFT_PART_INSTALL/usr/local/bin/"
 
   garm-agent:
     plugin: go
