@@ -687,36 +687,7 @@ class GarmCharm(paas_charm.go.Charm):
 
         configs: list[ProviderConfig] = []
         for relation in relations:
-            units = sorted(relation.units, key=lambda unit: unit.name)
-            if not units:
-                logger.warning(
-                    "GARM configurator application has no units: relation_id=%d",
-                    relation.id,
-                )
-                continue
-            if len(units) > 1:
-                logger.warning(
-                    "GARM configurator application has multiple units; using first unit: "
-                    "relation_id=%d unit_count=%d unit=%s",
-                    relation.id,
-                    len(units),
-                    units[0].name,
-                )
-
-            unit = units[0]
-            data = relation.data[unit]
-            unit_name = unit.name.replace("/", "-")
-            provider_type = str(data.get("provider_type") or PROVIDER_TYPE_OPENSTACK)
-            if provider_type == PROVIDER_TYPE_LXD:
-                # An LXD configurator publishes its API URL alongside its certificates.
-                if "lxd_api_url" not in data:
-                    continue
-                config = self._lxd_provider_config(data, unit_name)
-            else:
-                # Only include units that have sent the full provider config
-                if "openstack_auth_url" not in data:
-                    continue
-                config = self._openstack_provider_config(data, unit_name)
+            config = self._configurator_relation_provider_config(relation)
             if config is not None:
                 configs.append(config)
 
@@ -739,6 +710,51 @@ class GarmCharm(paas_charm.go.Charm):
             len(configs),
         )
         return configs
+
+    def _configurator_relation_provider_config(
+        self, relation: ops.Relation
+    ) -> ProviderConfig | None:
+        """Build the provider config one configurator relation publishes.
+
+        If an application has multiple units, its first unit by name is used.
+
+        Args:
+            relation: A garm-configurator relation.
+
+        Returns:
+            The provider config, or None when the relation has no unit yet, has not
+            published its provider payload, or publishes credentials that are not
+            readable yet.
+        """
+        units = sorted(relation.units, key=lambda unit: unit.name)
+        if not units:
+            logger.warning(
+                "GARM configurator application has no units: relation_id=%d",
+                relation.id,
+            )
+            return None
+        if len(units) > 1:
+            logger.warning(
+                "GARM configurator application has multiple units; using first unit: "
+                "relation_id=%d unit_count=%d unit=%s",
+                relation.id,
+                len(units),
+                units[0].name,
+            )
+
+        unit = units[0]
+        data = relation.data[unit]
+        unit_name = unit.name.replace("/", "-")
+        provider_type = str(data.get("provider_type") or PROVIDER_TYPE_OPENSTACK)
+        if provider_type == PROVIDER_TYPE_LXD:
+            # An LXD configurator publishes its API URL alongside its certificates.
+            if "lxd_api_url" not in data:
+                return None
+            return self._lxd_provider_config(data, unit_name)
+        # Only include units that have sent the full provider config
+        if "openstack_auth_url" not in data:
+            return None
+        return self._openstack_provider_config(data, unit_name)
 
     def _openstack_provider_config(
         self, data: Mapping[str, str], unit_name: str
