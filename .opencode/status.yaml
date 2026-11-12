@@ -1,0 +1,13 @@
+# Houston delivery status
+
+version: 1
+ticket: "ISD-7462"
+branch: "houston/ISD-7462"
+pr_branch: "houston/ISD-7462"
+worktree: "/home/tphan025/Canonical/github-runner-operators/.worktrees/ISD-7462"
+state: "in-review"
+pr: "https://github.com/canonical/github-runner-operators/pull/455"
+pr_number: 455
+draft: true
+note: "Rebased houston/ISD-7462 onto houston/ISD-7499 (308956e). Resolved the garm_configurator_relation.py conflict by keeping the refactored in-charm model and adding the LXD fields/provider_type; dropped the now-unused is_published/decode_relation_value helpers. garm-configurator unit/fmt/lint/static/complexity and coverage (94%) pass. Force-pushed the rebased branch; draft PR #455 remains open and draft."
+updated_at: "2026-11-12T13:40:26.306Z"
