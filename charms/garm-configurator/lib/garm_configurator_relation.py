@@ -14,7 +14,7 @@ import pydantic
 
 @pydantic.dataclasses.dataclass
 class ProviderConfig:
-    """OpenStack provider credentials published by one ``garm-configurator`` unit.
+    """Provider and GitHub App credentials published by one ``garm-configurator`` unit.
 
     The field names are the relation databag keys, so they are the wire contract between the
     configurator and GARM. Only the auth URL is required: a unit publishes the rest of the
@@ -30,6 +30,9 @@ class ProviderConfig:
         openstack_project_domain_name: Domain of the project.
         openstack_region_name: OpenStack region.
         openstack_network: Network name or ID instances are attached to.
+        github_app_id: GitHub App ID.
+        github_installation_id: GitHub App installation ID.
+        github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
     """
 
     openstack_auth_url: str
@@ -41,3 +44,6 @@ class ProviderConfig:
     openstack_project_domain_name: str | None = None
     openstack_region_name: str | None = None
     openstack_network: str | None = None
+    github_app_id: int | None = None
+    github_installation_id: int | None = None
+    github_private_key_secret_uri: str | None = None

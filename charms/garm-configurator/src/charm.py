@@ -214,15 +214,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 openstack_project_domain_name=state.provider_config.project_domain_name,
                 openstack_region_name=state.provider_config.region_name,
                 openstack_network=state.provider_config.network,
+                github_app_id=state.github_app_config.app_id,
+                github_installation_id=state.github_app_config.installation_id,
+                github_private_key_secret_uri=str(github_key_secret.id),
             ),
             self.unit,
-        )
-        garm_relation.data[self.unit].update(
-            {
-                "github_app_id": str(state.github_app_config.app_id),
-                "github_installation_id": str(state.github_app_config.installation_id),
-                "github_private_key_secret_uri": str(github_key_secret.id),
-            }
         )
 
 
