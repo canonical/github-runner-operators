@@ -1,11 +1,12 @@
 # Throwaway: tests cloudbase/garm#949 (runner tools for extra architectures) on
 # s390x. Lives only on the test/garm-pr949-s390x branch; never merge it.
 #
-# The garm job runs GARM from the PR on an s390x runner, and GARM boots an
-# s390x LXD container that registers here under RUNNER_LABEL with the runner
-# Canonical builds. The s390x-runner job, queued from the start, is routed to
-# that runner. GitHub publishes no s390x runner, so that job running at all
-# means GARM took the tools from the metadata URL.
+# The garm job runs GARM from the PR on an s390x runner and creates an s390x
+# scale set named RUNNER_LABEL. The s390x-runner job, queued from the start,
+# targets that scale set, so GARM boots an s390x LXD container that registers
+# with the runner Canonical builds and takes the job. GitHub publishes no s390x
+# runner, so that job running at all means GARM took the tools from the
+# metadata URL.
 
 name: GARM PR 949 s390x (throwaway)
 
@@ -17,7 +18,7 @@ on:
 permissions:
   contents: read
 
-# RUNNER_LABEL is fixed, so two runs would race for each other's runners.
+# Runs share the runner VM pool and the E2E App; one at a time keeps them apart.
 concurrency:
   group: garm-pr949-s390x
   cancel-in-progress: true
@@ -27,7 +28,9 @@ env:
   PROVIDER_LXD_SHA: d234a9d9a2e0983a1a83ec12a75528eb1aeda648 # garm-provider-lxd main
   PROVIDER_COMMON_SHA: a63fbe8afd51e1d3e5478eb0e4e7ead4d30088cc # the version #949 vendors
   TOOLS_METADATA_URL: https://api.github.com/repos/canonical/github-actions-runner/releases
-  RUNNER_LABEL: garm-pr949-s390x
+  # Unique per attempt: a cancelled run can leave its scale set registered on
+  # GitHub, and the next run could not create one under the same name.
+  RUNNER_LABEL: garm-pr949-s390x-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   garm:
@@ -56,7 +59,7 @@ jobs:
           # has no public SSH key, and this repo's logs are public.
           limit-access-to-actor: true
 
-      - name: Set up GARM with an s390x pool
+      - name: Set up GARM with an s390x scale set
         env:
           GITHUB_TOKEN: ${{ github.token }}
           E2E_GITHUB_APP_ID: ${{ secrets.E2E_GITHUB_APP_ID }}
@@ -118,10 +121,9 @@ jobs:
 
   s390x-runner:
     name: Job on GARM-spawned s390x runner
-    # Must match RUNNER_LABEL; the env context is not available in runs-on.
-    # The label alone: GARM registers JIT runners with only the pool's tags
-    # and its own ID labels, not self-hosted.
-    runs-on: garm-pr949-s390x
+    # Must match RUNNER_LABEL, the scale set name; the env context is not
+    # available in runs-on. GitHub routes to a scale set by its name alone.
+    runs-on: garm-pr949-s390x-${{ github.run_id }}-${{ github.run_attempt }}
     timeout-minutes: 15
     steps:
       - name: Assert this runs on s390x

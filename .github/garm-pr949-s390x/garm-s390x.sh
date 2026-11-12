@@ -185,7 +185,7 @@ probe_container_network() {
 
 configure_garm() {
   echo "::group::Configure GARM"
-  local password private_key repo_id pool_id
+  local password private_key repo_id scaleset_id
   password="$(random_secret)"
   echo "::add-mask::${password}"
   printf '%s' "$password" > "$WORK/admin-password"
@@ -213,20 +213,23 @@ configure_garm() {
   repo_id="$(garm-cli repo add --owner "${GITHUB_REPOSITORY%%/*}" --name "${GITHUB_REPOSITORY#*/}" \
     --credentials e2e-app --random-webhook-secret --format json | jq -r .id)"
 
-  # No webhook reaches this host, so a warm idle runner is what picks up the
-  # queued job; max 1 keeps GARM from booting more once that runner is consumed.
-  pool_id="$(garm-cli pool add --repo "$repo_id" --provider-name lxd_local \
-    --image "$IMAGE" --flavor default --os-type linux --os-arch s390x \
-    --tags "$RUNNER_LABEL" --min-idle-runners 1 --max-runners 1 --enabled \
+  # A scale set learns of jobs over its message session with GitHub, so no
+  # webhook or idle runner is needed: GARM boots a runner when the job is queued.
+  # GitHub routes jobs to a scale set by its name, which is why it is the label.
+  scaleset_id="$(garm-cli scaleset add --repo "$repo_id" --name "$RUNNER_LABEL" \
+    --provider-name lxd_local --image "$IMAGE" --flavor default \
+    --os-type linux --os-arch s390x --min-idle-runners 0 --max-runners 1 --enabled \
     --format json | jq -r .id)"
-  echo "POOL_ID=${pool_id}" >> "${GITHUB_ENV:-/dev/null}"
-  garm-cli pool show "$pool_id"
+  echo "SCALESET_ID=${scaleset_id}" >> "${GITHUB_ENV:-/dev/null}"
+  garm-cli scaleset show "$scaleset_id"
   echo "::endgroup::"
 }
 
 diagnostics() {
-  echo "::group::GARM runners"
-  garm-cli runner list --long || true
+  echo "::group::GARM scale set runners"
+  if [ -n "${SCALESET_ID:-}" ]; then
+    garm-cli scaleset runner list "$SCALESET_ID" || true
+  fi
   echo "::endgroup::"
   echo "::group::LXD instances"
   sudo lxc list || true
@@ -245,17 +248,25 @@ diagnostics() {
   done
 }
 
-# The VM is ephemeral, so only the GitHub registrations can outlive it. GARM
-# deletes those when it removes its runners; anything it misses is an offline
-# ephemeral runner GitHub reaps on its own.
+# The VM is ephemeral, so only the GitHub registrations can outlive it: the
+# runners, and the scale set itself. GARM only deletes a disabled scale set
+# with no runners left, and deleting it removes its registration on GitHub.
 teardown() {
-  if [ -n "${POOL_ID:-}" ]; then
-    garm-cli pool update "$POOL_ID" --enabled=false --min-idle-runners 0 || true
-  fi
+  [ -n "${SCALESET_ID:-}" ] || return 0
+  garm-cli scaleset update "$SCALESET_ID" --enabled=false || true
   local runner
-  for runner in $(garm-cli runner list --format json 2>/dev/null | jq -r '.[].name'); do
+  for runner in $(scaleset_runners); do
     garm-cli runner delete "$runner" --force-remove-runner || true
   done
+  local deadline=$((SECONDS + 120))
+  while [ -n "$(scaleset_runners)" ] && (( SECONDS < deadline )); do
+    sleep 5
+  done
+  garm-cli scaleset delete "$SCALESET_ID" || true
+}
+
+scaleset_runners() {
+  garm-cli scaleset runner list "$SCALESET_ID" --format json 2>/dev/null | jq -r '.[]?.name'
 }
 
 # This repo's logs are public. GARM's install script runs under set -x, so its
