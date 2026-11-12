@@ -12,6 +12,8 @@
 # E2E_GITHUB_APP_INSTALLATION_ID, E2E_GITHUB_APP_PRIVATE_KEY.
 
 set -euo pipefail
+# The App key, the DB passphrase and the admin password all land in files here.
+umask 077
 
 WORK="${RUNNER_TEMP:-/tmp}/garm-pr949"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -186,9 +188,10 @@ configure_garm() {
   local password private_key repo_id pool_id
   password="$(random_secret)"
   echo "::add-mask::${password}"
+  printf '%s' "$password" > "$WORK/admin-password"
   garm-cli init --name local --url "http://${BRIDGE_IP}:${GARM_PORT}" \
     --username admin --email admin@example.invalid --full-name admin \
-    --password "$password"
+    --password-file "$WORK/admin-password"
 
   # The behaviour under test: the extra-arch tools source on the endpoint.
   garm-cli github endpoint update github.com --tools-metadata-url "$TOOLS_METADATA_URL"
@@ -229,15 +232,15 @@ diagnostics() {
   sudo lxc list || true
   echo "::endgroup::"
   echo "::group::Runner tools GARM resolved (s390x)"
-  sudo journalctl -u "$GARM_UNIT" --no-pager | grep -i -E "s390x|tools" | tail -n 50 || true
+  sudo journalctl -u "$GARM_UNIT" --no-pager | grep -i -E "s390x|tools" | tail -n 50 | redact || true
   echo "::endgroup::"
   echo "::group::GARM log (tail)"
-  sudo journalctl -u "$GARM_UNIT" --no-pager | tail -n 300 || true
+  sudo journalctl -u "$GARM_UNIT" --no-pager | tail -n 300 | redact || true
   echo "::endgroup::"
   local instance
   for instance in $(sudo lxc list --format csv -c n 2>/dev/null); do
     echo "::group::cloud-init output of ${instance}"
-    sudo lxc exec "$instance" -- tail -n 200 /var/log/cloud-init-output.log || true
+    sudo lxc exec "$instance" -- tail -n 200 /var/log/cloud-init-output.log | redact || true
     echo "::endgroup::"
   done
 }
@@ -253,6 +256,14 @@ teardown() {
   for runner in $(garm-cli runner list --format json 2>/dev/null | jq -r '.[].name'); do
     garm-cli runner delete "$runner" --force-remove-runner || true
   done
+}
+
+# This repo's logs are public. GARM's install script runs under set -x, so its
+# output carries the instance's bearer token for GARM's callback/metadata API.
+redact() {
+  sed -E \
+    -e 's/(Bearer|BEARER_TOKEN=|TOKEN=)[[:space:]]*[^[:space:]"'"'"']+/\1[REDACTED]/Ig' \
+    -e 's/("?(token|jwt|password|secret)"?[[:space:]]*[:=][[:space:]]*"?)[^[:space:]",]+/\1[REDACTED]/Ig'
 }
 
 random_secret() {

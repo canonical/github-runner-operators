@@ -52,6 +52,9 @@ jobs:
         with:
           detached: true
           timeout-minutes: 60
+          # The default ("auto") opens the session to anyone when the actor
+          # has no public SSH key, and this repo's logs are public.
+          limit-access-to-actor: true
 
       - name: Set up GARM with an s390x pool
         env:
