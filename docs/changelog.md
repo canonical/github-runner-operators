@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-11-12
 
-- `garm`: stop applying configuration changes when a `garm-configurator` relation publishes an incomplete provider, such as one whose OpenStack password secret is not yet readable. The charm previously restarted GARM with the incomplete provider and recorded it, so the scale sets using that provider failed and later hooks errored. The unit now goes to `Blocked` with `Incomplete provider config: <provider>` and leaves GARM running with its existing provider and scale set configuration until the relation data is complete.
+- `garm`: stop applying configuration changes when a `garm-configurator` relation publishes an incomplete provider, such as one whose OpenStack password secret is not yet readable. The charm previously restarted GARM with the incomplete provider and recorded it, so the scale sets using that provider failed and later hooks error. The unit now goes to `Blocked` with `Incomplete provider config: <provider>` and leaves GARM running with its existing provider and scale set configuration until the relation data is complete.
 
 ## 2026-10-25
 
