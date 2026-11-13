@@ -264,6 +264,16 @@ diagnostics() {
     echo "::group::cloud-init output of ${instance}"
     sudo lxc exec "$instance" -- tail -n 200 /var/log/cloud-init-output.log | redact || true
     echo "::endgroup::"
+    # cloud-init ends at starting the runner service; whether the runner then
+    # connected to GitHub is only in the service's own logs.
+    echo "::group::runner service of ${instance}"
+    sudo lxc exec "$instance" -- sh -c '
+      systemctl status --no-pager "actions.runner.*"
+      journalctl --no-pager -u "actions.runner.*" | tail -n 150
+      for f in /home/*/actions-runner/_diag/Runner_*.log; do
+        echo "== $f"; tail -n 150 "$f"
+      done' 2>&1 | redact || true
+    echo "::endgroup::"
   done
 }
 

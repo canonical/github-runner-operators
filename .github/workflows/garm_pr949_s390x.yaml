@@ -71,8 +71,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_JOB: Job on GARM-spawned s390x runner
-        # Covers GARM's 20 minute bootstrap timeout plus the job itself.
-        timeout-minutes: 40
+        # The runner was installed ~1 minute after the scale set in a good run;
+        # this leaves room for GARM's 20 minute bootstrap timeout plus the job.
+        timeout-minutes: 25
         run: |
           python3 -I - <<'SCRIPT'
           import json, os, sys, time, urllib.request
