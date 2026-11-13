@@ -40,6 +40,7 @@ from charm import (
     GARM_PROVIDERS_SECRET_KEY,
     GARM_SECRETS_LABEL,
     GarmCharm,
+    _relation_value,
 )
 from charm_state import DEBUG_SSH_INTEGRATION_NAME, GARM_CONFIGURATOR_RELATION_NAME
 from garm_api import GarmApiError, GarmConnectionError
@@ -1713,6 +1714,64 @@ def test_github_credential_is_built_from_relation_data(ctx: Context, garm_api: _
             )
         ]
     )
+
+
+def test_github_credential_is_built_from_json_encoded_relation_data(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A configurator unit whose databag values are JSON-encoded, as ops.Relation.save
+        writes them, including a quoted secret URI for the private key.
+    act: Run update-status.
+    assert: The credential is still built, so the writer's JSON wire format does not hide the
+        secret URI or the provider fields from GARM.
+    """
+    key_secret = Secret(tracked_content={"value": "PEMDATA"})
+    saved = {
+        key: json.dumps(value)
+        for key, value in {**_PROVIDER_UNIT_DATA, **_github_unit_data(key_secret.id)}.items()
+    }
+    state = _state(
+        configurator_units_data={0: {**saved, **_SCALESET_UNIT_DATA}},
+        secrets=[key_secret],
+    )
+
+    ctx.run(ctx.on.update_status(), state)
+
+    garm_api.github.return_value.reconcile.assert_called_once_with(
+        [
+            CredentialSpec(
+                name="app-12345-67890",
+                endpoint=DEFAULT_GITHUB_ENDPOINT,
+                app_id=12345,
+                installation_id=67890,
+                private_key="PEMDATA",
+                description=MANAGED_CREDENTIAL_DESCRIPTION,
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param(json.dumps("admin"), "admin", id="json-string"),
+        pytest.param(json.dumps(12345), "12345", id="json-int"),
+        pytest.param(json.dumps(None), "", id="json-null"),
+        pytest.param(
+            "https://ks.example.com:5000/v3", "https://ks.example.com:5000/v3", id="legacy-plain"
+        ),
+        pytest.param("secret://1234-5678", "secret://1234-5678", id="legacy-secret-uri"),
+    ],
+)
+def test_relation_value_decodes_saved_and_legacy_databag_values(raw: str, expected: str):
+    """
+    arrange: A databag value in the JSON form ops.Relation.save writes, or a plain value from
+        an older writer.
+    act: Read it through the relation-value helper.
+    assert: Both forms yield the plain string GARM expects, so a rolling upgrade stays readable.
+    """
+    assert _relation_value({"key": raw}, "key") == expected
 
 
 def test_applications_sharing_a_github_app_yield_one_credential(
