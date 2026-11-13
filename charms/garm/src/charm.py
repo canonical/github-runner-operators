@@ -190,27 +190,12 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     return {}
 
 
-def _decode_relation_value(value: str) -> typing.Any:
-    """Decode one databag value published by ``ops.Relation.save``.
+def _relation_value(data: Mapping[str, str], key: str) -> str:
+    """Return one relation databag value as the plain string GARM expects.
 
     ``Relation.save`` JSON-encodes every field, but a relation can span an upgrade where the
     remote unit still writes plain strings. Falling back to the raw value keeps a mixed-version
     deployment readable.
-
-    Args:
-        value: The raw databag value.
-
-    Returns:
-        The decoded JSON value, or the raw value when it is not JSON.
-    """
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError):
-        return value
-
-
-def _relation_value(data: Mapping[str, str], key: str) -> str:
-    """Return one relation databag value as the plain string GARM expects.
 
     Args:
         data: The unit databag.
@@ -219,7 +204,11 @@ def _relation_value(data: Mapping[str, str], key: str) -> str:
     Returns:
         The decoded value as a string, or an empty string when it is unset.
     """
-    value = _decode_relation_value(data.get(key, ""))
+    raw = data.get(key, "")
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        value = raw
     return "" if value is None else str(value)
 
 
