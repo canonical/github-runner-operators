@@ -1,0 +1,236 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const STATES = [
+	'pending',
+	'in-progress',
+	'in-review',
+	'changes-requested',
+	'approved',
+	'merged',
+	'abandoned'
+];
+
+function repoRoot() {
+	try {
+		return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore']
+		}).trim();
+	} catch {
+		return process.cwd();
+	}
+}
+
+const root = repoRoot();
+const file = path.join(root, '.opencode', 'status.yaml');
+const lockFile = path.join(root, '.opencode', '.status.lock');
+
+function branchTicket() {
+	try {
+		const branch = execFileSync('git', ['branch', '--show-current'], {
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore']
+		}).trim();
+		return branch.replace(/^(foreman|houston)\//, '');
+	} catch {
+		return '';
+	}
+}
+
+function readStatus() {
+	const result = {
+		version: 1,
+		ticket: branchTicket(),
+		branch: null,
+		prBranch: null,
+		worktree: root,
+		state: 'pending',
+		pr: null,
+		prNumber: null,
+		draft: false,
+		note: null,
+		updatedAt: null
+	};
+	try {
+		const text = fs.readFileSync(file, 'utf8');
+		for (const line of text.split(/\r?\n/)) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith('#')) continue;
+			const at = trimmed.indexOf(':');
+			if (at < 0) continue;
+			const key = trimmed.slice(0, at).trim();
+			const raw = trimmed.slice(at + 1).trim();
+			let value = null;
+			if (raw) {
+				try {
+					value = JSON.parse(raw);
+				} catch {
+					value = raw;
+				}
+			}
+			if (key === 'ticket' && typeof value === 'string') result.ticket = value;
+			if (key === 'branch' && typeof value === 'string') result.branch = value;
+			if (key === 'pr_branch' && typeof value === 'string') result.prBranch = value;
+			if (key === 'worktree' && typeof value === 'string') result.worktree = value;
+			if (key === 'state' && STATES.includes(value)) result.state = value;
+			if (key === 'pr' && typeof value === 'string') result.pr = value;
+			if (key === 'pr_number' && typeof value === 'number') result.prNumber = value;
+			if (key === 'draft' && typeof value === 'boolean') result.draft = value;
+			if (key === 'note' && typeof value === 'string') result.note = value;
+			if (key === 'updated_at' && typeof value === 'string') result.updatedAt = value;
+		}
+	} catch {
+		// New status file.
+	}
+	return result;
+}
+
+function branchName() {
+	try {
+		return execFileSync('git', ['branch', '--show-current'], {
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore']
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+function render(status) {
+	const value = (input) => JSON.stringify(input);
+	return [
+		'# Houston delivery status',
+		'',
+		`version: 1`,
+		`ticket: ${value(status.ticket)}`,
+		`branch: ${value(status.branch)}`,
+		`pr_branch: ${value(status.prBranch)}`,
+		`worktree: ${value(status.worktree)}`,
+		`state: ${value(status.state)}`,
+		`pr: ${value(status.pr)}`,
+		`pr_number: ${status.prNumber === null ? 'null' : status.prNumber}`,
+		`draft: ${status.draft ? 'true' : 'false'}`,
+		`note: ${value(status.note)}`,
+		`updated_at: ${value(status.updatedAt)}`,
+		''
+	].join('\n');
+}
+
+function writeStatus(status) {
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	const tmp = `${file}.${process.pid}.tmp`;
+	fs.writeFileSync(tmp, render(status), 'utf8');
+	fs.renameSync(tmp, file);
+}
+
+function withLock(fn) {
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	const started = Date.now();
+	let handle;
+	while (!handle) {
+		try {
+			handle = fs.openSync(lockFile, 'wx');
+		} catch (error) {
+			if (error.code !== 'EEXIST') throw error;
+			try {
+				if (Date.now() - fs.statSync(lockFile).mtimeMs > 10000) fs.unlinkSync(lockFile);
+			} catch {
+				// retry
+			}
+			if (Date.now() - started > 5000) throw new Error('Timed out waiting for status lock');
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+		}
+	}
+	try {
+		return fn();
+	} finally {
+		fs.closeSync(handle);
+		try {
+			fs.unlinkSync(lockFile);
+		} catch {
+			// already gone
+		}
+	}
+}
+
+function parseArgs(args) {
+	const result = {
+		state: null,
+		pr: null,
+		prBranch: null,
+		note: null,
+		hasPr: false,
+		hasPrBranch: false,
+		allowNoPr: false
+	};
+	for (let i = 0; i < args.length; i += 1) {
+		if (args[i] === '--state' && args[i + 1]) result.state = args[++i];
+		else if (args[i] === '--pr' && args[i + 1]) {
+			result.pr = args[++i];
+			result.hasPr = true;
+		} else if (args[i] === '--pr-branch' && args[i + 1]) {
+			result.prBranch = args[++i];
+			result.hasPrBranch = true;
+		} else if (args[i] === '--note' && args[i + 1]) result.note = args[++i];
+		else if (args[i] === '--allow-no-pr') result.allowNoPr = true;
+	}
+	return result;
+}
+
+const rawArgs = process.argv.slice(2);
+let command = rawArgs[0];
+let args = rawArgs.slice(1);
+if (command && command.startsWith('--')) {
+	args = rawArgs;
+	command = 'update';
+}
+
+if (!command || command === 'help' || command === '--help') {
+	console.log(`update_status
+
+  update --state <${STATES.join('|')}> [--pr <url>] [--pr-branch <branch>] [--note "<text>"] [--allow-no-pr]
+  show
+`);
+	process.exit(0);
+}
+
+if (command === 'show') {
+	process.stdout.write(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : render(readStatus()));
+	process.exit(0);
+}
+
+if (command !== 'update') throw new Error(`unknown command: ${command}`);
+const parsed = parseArgs(args);
+if (!parsed.state || !STATES.includes(parsed.state)) {
+	throw new Error(`--state must be one of: ${STATES.join(', ')}`);
+}
+
+withLock(() => {
+	const status = readStatus();
+	status.state = parsed.state;
+	status.branch = branchName() || status.branch;
+	if (parsed.hasPrBranch) status.prBranch = parsed.prBranch;
+	status.worktree = root;
+	if (parsed.hasPr) {
+		if (!/^https?:\/\/\S+$/.test(parsed.pr || '')) throw new Error('--pr must be an http(s) URL');
+		status.pr = parsed.pr;
+		const match = parsed.pr.match(/\/pull\/(\d+)/);
+		status.prNumber = match ? Number(match[1]) : null;
+		status.draft = true;
+		if (!status.prBranch) status.prBranch = status.branch;
+	}
+	if (parsed.note !== null) status.note = parsed.note;
+	if (
+		['in-review', 'changes-requested', 'approved', 'merged'].includes(status.state) &&
+		!status.pr &&
+		!parsed.allowNoPr
+	) {
+		throw new Error(`${status.state} requires --pr <url>`);
+	}
+	status.updatedAt = new Date().toISOString();
+	writeStatus(status);
+	console.log(`status: ${status.state}${status.pr ? ` ${status.pr}` : ''}`);
+});
