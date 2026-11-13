@@ -60,6 +60,14 @@ class ProviderRecordError(Exception):
     """The provider record could not be read or written, so the provider set is unknown."""
 
 
+class BlockedError(Exception):
+    """A configuration problem that needs operator action; ``restart`` blocks the unit."""
+
+
+class InvalidProviderConfigError(BlockedError):
+    """A configurator publishes a provider with empty required fields."""
+
+
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -349,7 +357,19 @@ class GarmCharm(paas_charm.go.Charm):
         )
 
     def restart(self, rerun_migrations: bool = False) -> None:
-        """Configure the wrapper and restart the workload.
+        """Configure the wrapper and restart the workload, blocking on a ``BlockedError``.
+
+        Args:
+            rerun_migrations: Passed through to the parent restart.
+        """
+        try:
+            self._configure_and_reconcile(rerun_migrations)
+        except BlockedError as exc:
+            logger.warning("Blocked: %s", exc)
+            self.update_app_and_unit_status(ops.BlockedStatus(str(exc)))
+
+    def _configure_and_reconcile(self, rerun_migrations: bool) -> None:
+        """Configure the wrapper, restart the workload and reconcile GARM.
 
         Ensures secrets before the readiness gate so they exist on
         install/leader_elected before pebble is ready, then gates on
@@ -359,10 +379,15 @@ class GarmCharm(paas_charm.go.Charm):
         each, in that order. A provider joins the record when a relation publishes it and
         leaves it only when no relation publishes it and no scaleset GARM still holds names
         it. Keep that order: GARM fixes its provider map per process, so a scaleset whose
-        provider was dropped first can never be drained or deleted.
+        provider was dropped first can never be drained or deleted. A related provider with
+        an empty field blocks the hook and leaves GARM running as is.
 
         Args:
             rerun_migrations: Passed through to the parent restart.
+
+        Raises:
+            InvalidProviderConfigError: If a related provider is incomplete, before anything
+                is applied.
         """
         self._ensure_secrets()
 
@@ -384,6 +409,8 @@ class GarmCharm(paas_charm.go.Charm):
             self.update_app_and_unit_status(ops.WaitingStatus("Waiting for GARM secrets"))
             return
 
+        # Raises before anything is applied, so GARM keeps its running configuration rather
+        # than publish and record a provider that would break its scalesets.
         related_providers = self._get_configurator_provider_configs()
         recorded_providers = self._read_provider_record()
         configurator_related = CharmState.from_charm(self).configurator_related
@@ -602,6 +629,10 @@ class GarmCharm(paas_charm.go.Charm):
 
         Returns:
             One ``ProviderConfig`` per configurator application.
+
+        Raises:
+            InvalidProviderConfigError: If a provider has empty required fields, e.g. a
+                password secret not yet readable.
         """
         relations = sorted(
             self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []),
@@ -654,6 +685,16 @@ class GarmCharm(paas_charm.go.Charm):
                     region_name=data.get("openstack_region_name", ""),
                     network=data.get("openstack_network", ""),
                 )
+            )
+
+        incomplete = sorted(
+            config.unit_name
+            for config in configs
+            if not all(config.as_dict()[field] for field in PROVIDER_REQUIRED_FIELDS)
+        )
+        if incomplete:
+            raise InvalidProviderConfigError(
+                f"Incomplete provider config: {', '.join(incomplete)}"
             )
 
         logger.info(

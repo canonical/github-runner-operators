@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-11-12
+
+- `garm`: stop applying configuration changes when a `garm-configurator` relation publishes an incomplete provider, such as one whose OpenStack password secret is not yet readable. The charm previously restarted GARM with the incomplete provider and recorded it, so the scale sets using that provider failed and later hooks error. The unit now goes to `Blocked` with `Incomplete provider config: <provider>` and leaves GARM running with its existing provider and scale set configuration until the relation data is complete.
+
 ## 2026-10-25
 
 - `garm`: bump the GARM workload to reduce the chance of runners getting stuck. GARM now bounds every non-migration PostgreSQL query with a timeout instead of waiting forever on a hung query or row lock, cleans up runners left in `creating` when recording them as `running` fails, and no longer deadlocks when an instance and its scale set are updated concurrently.
