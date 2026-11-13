@@ -218,9 +218,12 @@ configure_garm() {
   # A scale set learns of jobs over its message session with GitHub, so no
   # webhook or idle runner is needed: GARM boots a runner when the job is queued.
   # GitHub routes jobs to a scale set by its name, which is why it is the label.
+  # Canonical's s390x runner, unlike GitHub's builds, is not self-contained and
+  # needs the system .NET 8 runtime, as Canonical's runner images install it.
   scaleset_id="$(garm-cli scaleset add --repo "$repo_id" --name "$RUNNER_LABEL" \
     --provider-name lxd_local --image "$IMAGE" --flavor default \
     --os-type linux --os-arch s390x --min-idle-runners 0 --max-runners 1 --enabled \
+    --extra-specs '{"extra_packages": ["dotnet-runtime-8.0"]}' \
     --format json | jq -r .id)"
   echo "SCALESET_ID=${scaleset_id}" >> "${GITHUB_ENV:-/dev/null}"
   garm-cli scaleset show "$scaleset_id"
