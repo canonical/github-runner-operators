@@ -190,6 +190,28 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     return {}
 
 
+def _relation_value(data: Mapping[str, str], key: str) -> str:
+    """Return one relation databag value as the plain string GARM expects.
+
+    ``Relation.save`` JSON-encodes every field, but a relation can span an upgrade where the
+    remote unit still writes plain strings. Falling back to the raw value keeps a mixed-version
+    deployment readable.
+
+    Args:
+        data: The unit databag.
+        key: The databag key to read.
+
+    Returns:
+        The decoded value as a string, or an empty string when it is unset.
+    """
+    raw = data.get(key, "")
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        value = raw
+    return "" if value is None else str(value)
+
+
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -667,23 +689,23 @@ class GarmCharm(paas_charm.go.Charm):
                 continue
 
             # Resolve password: may be a plain value or a secret URI.
-            password = data.get("openstack_password", "")
+            password = _relation_value(data, "openstack_password")
             unit_name = unit.name.replace("/", "-")
-            password_secret_uri = data.get("openstack_password_secret_uri", "")
+            password_secret_uri = _relation_value(data, "openstack_password_secret_uri")
             if not password and password_secret_uri:
-                password = self._resolve_secret_value(str(password_secret_uri))
+                password = self._resolve_secret_value(password_secret_uri)
 
             configs.append(
                 ProviderConfig(
                     unit_name=unit_name,
-                    auth_url=data.get("openstack_auth_url", ""),
-                    username=data.get("openstack_username", ""),
+                    auth_url=_relation_value(data, "openstack_auth_url"),
+                    username=_relation_value(data, "openstack_username"),
                     password=password,
-                    project_name=data.get("openstack_project_name", ""),
-                    user_domain_name=data.get("openstack_user_domain_name", ""),
-                    project_domain_name=data.get("openstack_project_domain_name", ""),
-                    region_name=data.get("openstack_region_name", ""),
-                    network=data.get("openstack_network", ""),
+                    project_name=_relation_value(data, "openstack_project_name"),
+                    user_domain_name=_relation_value(data, "openstack_user_domain_name"),
+                    project_domain_name=_relation_value(data, "openstack_project_domain_name"),
+                    region_name=_relation_value(data, "openstack_region_name"),
+                    network=_relation_value(data, "openstack_network"),
                 )
             )
 
@@ -1043,9 +1065,9 @@ class GarmCharm(paas_charm.go.Charm):
             data: The relation unit databag.
             unit_name: The configurator unit's name, for log messages.
         """
-        app_id_raw = data.get("github_app_id", "")
-        installation_id_raw = data.get("github_installation_id", "")
-        key_secret_uri = data.get("github_private_key_secret_uri", "")
+        app_id_raw = _relation_value(data, "github_app_id")
+        installation_id_raw = _relation_value(data, "github_installation_id")
+        key_secret_uri = _relation_value(data, "github_private_key_secret_uri")
         if not (app_id_raw and installation_id_raw and key_secret_uri):
             return
         try:
@@ -1065,7 +1087,7 @@ class GarmCharm(paas_charm.go.Charm):
         if dedupe_key in credentials:
             return
 
-        private_key = self._resolve_secret_value(str(key_secret_uri))
+        private_key = self._resolve_secret_value(key_secret_uri)
         if not private_key:
             logger.warning(
                 "Skipping GitHub credential for app %s: private key secret unavailable",

@@ -1715,6 +1715,42 @@ def test_github_credential_is_built_from_relation_data(ctx: Context, garm_api: _
     )
 
 
+def test_github_credential_is_built_from_json_encoded_relation_data(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: A configurator unit whose databag values are JSON-encoded, as ops.Relation.save
+        writes them, including a quoted secret URI for the private key.
+    act: Run update-status.
+    assert: The credential is still built, so the writer's JSON wire format does not hide the
+        secret URI or the provider fields from GARM.
+    """
+    key_secret = Secret(tracked_content={"value": "PEMDATA"})
+    saved = {
+        key: json.dumps(value)
+        for key, value in {**_PROVIDER_UNIT_DATA, **_github_unit_data(key_secret.id)}.items()
+    }
+    state = _state(
+        configurator_units_data={0: {**saved, **_SCALESET_UNIT_DATA}},
+        secrets=[key_secret],
+    )
+
+    ctx.run(ctx.on.update_status(), state)
+
+    garm_api.github.return_value.reconcile.assert_called_once_with(
+        [
+            CredentialSpec(
+                name="app-12345-67890",
+                endpoint=DEFAULT_GITHUB_ENDPOINT,
+                app_id=12345,
+                installation_id=67890,
+                private_key="PEMDATA",
+                description=MANAGED_CREDENTIAL_DESCRIPTION,
+            )
+        ]
+    )
+
+
 def test_applications_sharing_a_github_app_yield_one_credential(
     ctx: Context, garm_api: _GarmApiMocks
 ):
