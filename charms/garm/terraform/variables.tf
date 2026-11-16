@@ -25,6 +25,13 @@ variable "config" {
   default     = {}
 }
 
+variable "database_passphrase" {
+  description = "Existing GARM database encryption passphrase. Stored in a Juju secret and passed to the charm as database-passphrase."
+  type        = string
+  sensitive   = true
+  default     = null
+}
+
 variable "constraints" {
   description = "Juju constraints to apply for this application."
   type        = string
