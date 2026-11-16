@@ -138,12 +138,46 @@ def test_get_data_tracks_unreadable_relation_as_invalid(error: Exception):
     assert data.has_invalid_relations
 
 
+@pytest.mark.parametrize(
+    "scaleset_names",
+    [
+        pytest.param(("scaleset-a", "scaleset-b"), id="distinct-names"),
+        pytest.param(("", ""), id="unset-names"),
+    ],
+)
+def test_get_data_keeps_relations_without_a_scaleset_conflict(
+    scaleset_names: tuple[str, str],
+):
+    """
+    arrange: Two relations publishing different, or not yet published, scaleset names.
+    act: Read the aggregated relation data.
+    assert: Both relations survive, so separate scalesets are not treated as a conflict and an
+        incomplete publish does not hide the relation before the configurator writes its name.
+    """
+    first = _relation(
+        1,
+        "configurator-a",
+        {"configurator-a/0": (_provider(), ScalesetConfig(name=scaleset_names[0]), None)},
+    )
+    second = _relation(
+        2,
+        "configurator-b",
+        {"configurator-b/0": (_provider(), ScalesetConfig(name=scaleset_names[1]), None)},
+    )
+
+    data = GarmConfiguratorRequirer(_charm(first, second)).get_data()
+
+    assert [relation.relation_id for relation in data.relations] == [1, 2]
+    assert data.invalid_relation_ids == frozenset()
+
+
 def test_get_data_marks_every_relation_with_a_conflicting_scaleset_name_invalid():
     """
-    arrange: Two relations publishing the same scaleset name.
+    arrange: Two relations publishing the same scaleset name, plus one publishing another.
     act: Read the aggregated relation data.
-    assert: Neither relation is exposed and both ids are invalid, so GARM blocks on the
-        conflict rather than letting iteration order pick which scaleset to own.
+    assert: Neither conflicting relation is exposed and both ids are invalid while the
+        unrelated relation survives, so GARM blocks on the conflict rather than letting
+        iteration order pick which scaleset to own.
     """
     first = _relation(
         1,
@@ -155,10 +189,15 @@ def test_get_data_marks_every_relation_with_a_conflicting_scaleset_name_invalid(
         "configurator-b",
         {"configurator-b/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
     )
+    third = _relation(
+        3,
+        "configurator-c",
+        {"configurator-c/0": (_provider(), ScalesetConfig(name="other-scaleset"), None)},
+    )
 
-    data = GarmConfiguratorRequirer(_charm(first, second)).get_data()
+    data = GarmConfiguratorRequirer(_charm(first, second, third)).get_data()
 
-    assert data.relations == ()
+    assert [relation.relation_id for relation in data.relations] == [3]
     assert data.invalid_relation_ids == frozenset({1, 2})
     assert data.has_invalid_relations
 

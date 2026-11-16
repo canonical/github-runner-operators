@@ -157,9 +157,12 @@ class ConfiguratorRelation:
 _SCALESET_UNIQUE_FIELDS: typing.Final = ("name",)
 
 
-@pydantic.dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ConfiguratorData:
     """Every ``garm-configurator`` relation unit, aggregated for one reconcile pass.
+
+    The requirer builds this value: it only exposes relations it could load and marks every
+    relation it rejected in ``invalid_relation_ids``.
 
     Attributes:
         relations: One valid entry per related unit.
@@ -169,55 +172,6 @@ class ConfiguratorData:
 
     relations: tuple[ConfiguratorRelation, ...] = ()
     invalid_relation_ids: frozenset[int] = frozenset()
-
-    @pydantic.model_validator(mode="after")
-    def _reject_conflicting_scalesets(self) -> "ConfiguratorData":
-        """Remove every relation that claims a scaleset identity another relation claims.
-
-        A GARM scaleset name identifies exactly one scaleset, so two configurators publishing
-        the same name cannot both be reconciled. Reject all of them (rather than picking a
-        winner by ordering) and record their relation ids so the consumer can report the
-        conflict instead of silently owning the wrong scaleset.
-
-        Returns:
-            The aggregate without the conflicting relations, with their ids marked invalid.
-        """
-        relations_by_identity: dict[tuple[str, ...], list[ConfiguratorRelation]] = {}
-        for relation in self.relations:
-            identity = tuple(
-                getattr(relation.scaleset, field) for field in _SCALESET_UNIQUE_FIELDS
-            )
-            if not any(identity):
-                continue
-            relations_by_identity.setdefault(identity, []).append(relation)
-        conflicting_ids = {
-            relation.relation_id
-            for group in relations_by_identity.values()
-            if len(group) > 1
-            for relation in group
-        }
-        if not conflicting_ids:
-            return self
-        logger.warning(
-            "Ignoring garm-configurator relations with conflicting scaleset %s: relation_ids=%s",
-            "/".join(_SCALESET_UNIQUE_FIELDS),
-            sorted(conflicting_ids),
-        )
-        object.__setattr__(
-            self,
-            "relations",
-            tuple(
-                relation
-                for relation in self.relations
-                if relation.relation_id not in conflicting_ids
-            ),
-        )
-        object.__setattr__(
-            self,
-            "invalid_relation_ids",
-            self.invalid_relation_ids | conflicting_ids,
-        )
-        return self
 
     @property
     def is_empty(self) -> bool:
@@ -278,6 +232,7 @@ class GarmConfiguratorRequirer:
         """
         aggregated: list[ConfiguratorRelation] = []
         invalid_relation_ids: set[int] = set()
+        relations_by_identity: dict[tuple[str, ...], list[ConfiguratorRelation]] = {}
         relations = self._charm.model.relations.get(self._relation_name, [])
         for relation in relations:
             application_name = relation.app.name if relation.app else ""
@@ -293,15 +248,37 @@ class GarmConfiguratorRequirer:
                     )
                     invalid_relation_ids.add(relation.id)
                     continue
-                aggregated.append(
-                    ConfiguratorRelation(
-                        relation_id=relation.id,
-                        application_name=application_name,
-                        unit_name=unit.name,
-                        provider=provider,
-                        scaleset=relation.load(ScalesetConfig, unit, decoder=str),
-                    )
+                configurator_relation = ConfiguratorRelation(
+                    relation_id=relation.id,
+                    application_name=application_name,
+                    unit_name=unit.name,
+                    provider=provider,
+                    scaleset=relation.load(ScalesetConfig, unit, decoder=str),
                 )
+                aggregated.append(configurator_relation)
+                identity = tuple(
+                    getattr(configurator_relation.scaleset, field)
+                    for field in _SCALESET_UNIQUE_FIELDS
+                )
+                if any(identity):
+                    relations_by_identity.setdefault(identity, []).append(configurator_relation)
+        conflicting_ids = {
+            relation.relation_id
+            for group in relations_by_identity.values()
+            if len(group) > 1
+            for relation in group
+        }
+        if conflicting_ids:
+            logger.warning(
+                "Ignoring garm-configurator relations with conflicting scaleset %s: "
+                "relation_ids=%s",
+                "/".join(_SCALESET_UNIQUE_FIELDS),
+                sorted(conflicting_ids),
+            )
+            aggregated = [
+                relation for relation in aggregated if relation.relation_id not in conflicting_ids
+            ]
+            invalid_relation_ids |= conflicting_ids
         return ConfiguratorData(
             relations=tuple(aggregated),
             invalid_relation_ids=frozenset(invalid_relation_ids),
