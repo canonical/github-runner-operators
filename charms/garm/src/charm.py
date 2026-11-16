@@ -882,8 +882,7 @@ class GarmCharm(paas_charm.go.Charm):
             provider_type=PROVIDER_TYPE_LXD,
             lxd_api_url=_relation_value(data, "lxd_api_url"),
             lxd_project_name=_relation_value(data, "lxd_project_name") or "default",
-            lxd_instance_type=_relation_value(data, "lxd_instance_type")
-            or "virtual-machine",
+            lxd_instance_type=_relation_value(data, "lxd_instance_type") or "virtual-machine",
             lxd_secure_boot=_relation_value(data, "lxd_secure_boot").strip().lower() == "true",
             lxd_client_certificate=client_certificate,
             lxd_client_key=client_key,
