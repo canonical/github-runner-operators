@@ -25,6 +25,11 @@ def _make_garm_configurator_relation():
     return Relation(endpoint="garm-configurator")
 
 
+def _relation_value(relation, key: str):
+    """Return a relation value decoded from the JSON form ``Relation.save`` writes."""
+    return json.loads(relation.local_unit_data[key])
+
+
 def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
     return {
         "openstack-auth-url": "https://keystone.example.com:5000/v3",
@@ -86,10 +91,10 @@ def test_configured_image_is_published_without_image_relation():
     assert out.unit_status == ops.ActiveStatus("Ready")
     assert "image" not in garm_out.local_unit_data
     assert garm_out.local_unit_data["image_id"] == "runner-noble-amd64"
-    assert garm_out.local_unit_data["openstack_auth_url"] == (
+    assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
-    assert garm_out.local_unit_data["github_app_id"] == "99999"
+    assert _relation_value(garm_out, "github_app_id") == 99999
 
 
 def test_configured_image_takes_precedence_without_disabling_image_relation():
@@ -211,11 +216,11 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
         "Missing image config or image builder relation"
     )
     assert "image_id" not in garm_out.local_unit_data
-    assert garm_out.local_unit_data["openstack_auth_url"] == (
+    assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
     assert "openstack_password_secret_uri" in garm_out.local_unit_data
-    assert "github_private_key_secret_uri" in garm_out.local_unit_data
+    assert _relation_value(garm_out, "github_private_key_secret_uri")
     relation_id = garm_relation.id
     relation_secrets = {
         secret.label: secret for secret in cleared.secrets if secret.label is not None
@@ -694,23 +699,23 @@ def test_reconcile_writes_full_config_to_garm_relation():
     garm_out = out.get_relation(garm_relation.id)
 
     # Provider config
-    assert garm_out.local_unit_data["openstack_auth_url"] == (
+    assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
-    assert garm_out.local_unit_data["openstack_username"] == "admin"
-    assert "openstack_password" not in garm_out.local_unit_data
-    assert "openstack_password_secret_uri" in garm_out.local_unit_data
-    assert garm_out.local_unit_data["openstack_project_name"] == "myproject"
-    assert garm_out.local_unit_data["openstack_user_domain_name"] == "Default"
-    assert garm_out.local_unit_data["openstack_project_domain_name"] == "Default"
-    assert garm_out.local_unit_data["openstack_region_name"] == "RegionOne"
-    assert garm_out.local_unit_data["openstack_network"] == "external-net"
+    assert _relation_value(garm_out, "openstack_username") == "admin"
+    assert _relation_value(garm_out, "openstack_password") is None
+    assert _relation_value(garm_out, "openstack_password_secret_uri")
+    assert _relation_value(garm_out, "openstack_project_name") == "myproject"
+    assert _relation_value(garm_out, "openstack_user_domain_name") == "Default"
+    assert _relation_value(garm_out, "openstack_project_domain_name") == "Default"
+    assert _relation_value(garm_out, "openstack_region_name") == "RegionOne"
+    assert _relation_value(garm_out, "openstack_network") == "external-net"
 
     # GitHub config
-    assert garm_out.local_unit_data["github_app_id"] == "99999"
-    assert garm_out.local_unit_data["github_installation_id"] == "67890"
+    assert _relation_value(garm_out, "github_app_id") == 99999
+    assert _relation_value(garm_out, "github_installation_id") == 67890
     assert "github_private_key" not in garm_out.local_unit_data
-    assert "github_private_key_secret_uri" in garm_out.local_unit_data
+    assert _relation_value(garm_out, "github_private_key_secret_uri")
 
     # Scaleset config
     assert garm_out.local_unit_data["name"] == "my-scaleset"
@@ -774,8 +779,8 @@ def test_reconcile_writes_garm_data_on_relation_joined():
     garm_out = out.get_relation(garm_relation.id)
     assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
     assert garm_out.local_unit_data["name"] == "my-scaleset"
-    assert garm_out.local_unit_data["github_app_id"] == "99999"
-    assert garm_out.local_unit_data["openstack_username"] == "admin"
+    assert _relation_value(garm_out, "github_app_id") == 99999
+    assert _relation_value(garm_out, "openstack_username") == "admin"
 
 
 def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
