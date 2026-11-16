@@ -18,7 +18,7 @@ jobs:
     runs-on: self-hosted-linux-amd64-noble-tiobe
     services:
       postgres:
-        image: postgres:16.15
+        image: postgres:16.16
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -43,7 +43,7 @@ jobs:
           # Self-hosted runner user cannot write the default /usr/share/dotnet
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       - name: Install linters and Python dependencies
         run: |
