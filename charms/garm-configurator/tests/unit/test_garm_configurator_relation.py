@@ -12,6 +12,17 @@ from garm_configurator_relation import (
 )
 
 
+def _relation(relation_id: int = 1, scaleset_name: str = "my-scaleset") -> ConfiguratorRelation:
+    """Return a minimal valid configurator relation."""
+    return ConfiguratorRelation(
+        relation_id=relation_id,
+        application_name=f"configurator-{relation_id}",
+        unit_name=f"configurator-{relation_id}/0",
+        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
+        scaleset=ScalesetConfig(name=scaleset_name),
+    )
+
+
 @pytest.mark.parametrize(
     "unit_name, expected",
     [
@@ -35,17 +46,6 @@ def test_configurator_relation_provider_name(unit_name: str, expected: str):
     )
 
     assert relation.provider_name == expected
-
-
-def _relation() -> ConfiguratorRelation:
-    """Return a minimal valid configurator relation."""
-    return ConfiguratorRelation(
-        relation_id=1,
-        application_name="configurator",
-        unit_name="configurator/0",
-        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
-        scaleset=ScalesetConfig(),
-    )
 
 
 @pytest.mark.parametrize(
@@ -77,3 +77,47 @@ def test_configurator_data_reports_empty_and_invalid_state(
     """
     assert data.is_empty is expected_empty
     assert data.has_invalid_relations is expected_invalid
+
+
+def test_configurator_data_keeps_relations_with_distinct_scaleset_names():
+    """
+    arrange: Two relations publishing different scaleset names.
+    act: Build the aggregate.
+    assert: Both relations survive, so separate scalesets are not treated as a conflict.
+    """
+    data = ConfiguratorData(relations=(_relation(1, "scaleset-a"), _relation(2, "scaleset-b")))
+
+    assert [relation.scaleset.name for relation in data.relations] == [
+        "scaleset-a",
+        "scaleset-b",
+    ]
+    assert data.invalid_relation_ids == frozenset()
+
+
+def test_configurator_data_rejects_every_relation_sharing_a_scaleset_name():
+    """
+    arrange: Two relations publishing the same scaleset name.
+    act: Build the aggregate.
+    assert: Both relations are removed and their ids recorded as invalid, because a GARM
+        scaleset name must identify exactly one scaleset and picking a winner by order would
+        let the scaleset flip between reconcile hooks.
+    """
+    data = ConfiguratorData(relations=(_relation(1, "my-scaleset"), _relation(2, "my-scaleset")))
+
+    assert data.relations == ()
+    assert data.invalid_relation_ids == frozenset({1, 2})
+    assert data.has_invalid_relations
+    assert not data.is_empty
+
+
+def test_configurator_data_ignores_unset_scaleset_names_when_detecting_conflicts():
+    """
+    arrange: Two relations whose scaleset fields are not published yet.
+    act: Build the aggregate.
+    assert: Neither is treated as a conflict, so an incomplete publish does not hide the
+        relation before the configurator writes its scaleset name.
+    """
+    data = ConfiguratorData(relations=(_relation(1, ""), _relation(2, "")))
+
+    assert [relation.relation_id for relation in data.relations] == [1, 2]
+    assert data.invalid_relation_ids == frozenset()

@@ -12,7 +12,8 @@ The ``GarmConfiguratorRequirer`` aggregates every joined ``garm-configurator`` r
 single ``ConfiguratorData`` value. The ``garm`` charm uses that value to render provider
 configurations and build its scalesets. A unit that has not published a complete provider
 payload is invalid; its relation id is recorded in ``ConfiguratorData.invalid_relation_ids``
-instead of being exposed as an empty provider.
+instead of being exposed as an empty provider. Relations that publish the same scaleset name
+are also invalid: a scaleset name must identify exactly one scaleset in GARM.
 """
 
 import dataclasses
@@ -71,6 +72,10 @@ class ScalesetConfig:
 
     The fields keep the relation's string wire form so the consumer applies its own parsing
     and validation. An empty string means "unset".
+
+    These fields are still published on the unit databag. The configurator runs no workload and
+    always deploys a single unit, so they belong on the application databag instead; that move is
+    deliberately left to a follow-up so this change can stay incremental.
 
     Attributes:
         name: The name of the scaleset.
@@ -147,17 +152,72 @@ class ConfiguratorRelation:
         return self.unit_name.replace("/", "-")
 
 
-@dataclasses.dataclass(frozen=True)
+# A scaleset name identifies the scaleset; a provider can legitimately serve several scalesets,
+# so provider_name is not part of the identity.
+_SCALESET_UNIQUE_FIELDS: typing.Final = ("name",)
+
+
+@pydantic.dataclasses.dataclass(frozen=True)
 class ConfiguratorData:
     """Every ``garm-configurator`` relation unit, aggregated for one reconcile pass.
 
     Attributes:
-        relations: One valid entry per related unit, ordered by relation id then unit name.
-        invalid_relation_ids: Relation ids whose unit databag is incomplete or malformed.
+        relations: One valid entry per related unit.
+        invalid_relation_ids: Relation ids whose unit databag is incomplete, malformed, or
+            conflicts with another relation over a scaleset identity field.
     """
 
     relations: tuple[ConfiguratorRelation, ...] = ()
     invalid_relation_ids: frozenset[int] = frozenset()
+
+    @pydantic.model_validator(mode="after")
+    def _reject_conflicting_scalesets(self) -> "ConfiguratorData":
+        """Remove every relation that claims a scaleset identity another relation claims.
+
+        A GARM scaleset name identifies exactly one scaleset, so two configurators publishing
+        the same name cannot both be reconciled. Reject all of them (rather than picking a
+        winner by ordering) and record their relation ids so the consumer can report the
+        conflict instead of silently owning the wrong scaleset.
+
+        Returns:
+            The aggregate without the conflicting relations, with their ids marked invalid.
+        """
+        relations_by_identity: dict[tuple[str, ...], list[ConfiguratorRelation]] = {}
+        for relation in self.relations:
+            identity = tuple(
+                getattr(relation.scaleset, field) for field in _SCALESET_UNIQUE_FIELDS
+            )
+            if not any(identity):
+                continue
+            relations_by_identity.setdefault(identity, []).append(relation)
+        conflicting_ids = {
+            relation.relation_id
+            for group in relations_by_identity.values()
+            if len(group) > 1
+            for relation in group
+        }
+        if not conflicting_ids:
+            return self
+        logger.warning(
+            "Ignoring garm-configurator relations with conflicting scaleset %s: relation_ids=%s",
+            "/".join(_SCALESET_UNIQUE_FIELDS),
+            sorted(conflicting_ids),
+        )
+        object.__setattr__(
+            self,
+            "relations",
+            tuple(
+                relation
+                for relation in self.relations
+                if relation.relation_id not in conflicting_ids
+            ),
+        )
+        object.__setattr__(
+            self,
+            "invalid_relation_ids",
+            self.invalid_relation_ids | conflicting_ids,
+        )
+        return self
 
     @property
     def is_empty(self) -> bool:
@@ -170,10 +230,11 @@ class ConfiguratorData:
 
     @property
     def has_invalid_relations(self) -> bool:
-        """Whether any relation published an incomplete or malformed databag.
+        """Whether any relation is unusable.
 
         Returns:
-            True when at least one relation id was recorded as invalid.
+            True when at least one relation id was recorded as incomplete, malformed, or
+            conflicting.
         """
         return bool(self.invalid_relation_ids)
 
@@ -207,10 +268,10 @@ class GarmConfiguratorRequirer:
     def get_data(self) -> ConfiguratorData:
         """Aggregate every joined configurator relation into one dataclass.
 
-        Relations and units are sorted so the result is stable across hooks: Juju exposes units
-        as an unordered set, and consumers use first-wins deduplication over this data. A unit
-        whose provider payload cannot be loaded is skipped and its relation id is recorded as
-        invalid, so the consumer never renders a half-written provider.
+        A unit whose provider payload cannot be loaded is skipped and its relation id is recorded
+        as invalid, so the consumer never renders a half-written provider. Relations that publish
+        the same scaleset name are also rejected and marked invalid, so the consumer sees the
+        conflict instead of a winner chosen by iteration order.
 
         Returns:
             The valid relation data for every related unit, plus the ids of invalid relations.
@@ -218,9 +279,9 @@ class GarmConfiguratorRequirer:
         aggregated: list[ConfiguratorRelation] = []
         invalid_relation_ids: set[int] = set()
         relations = self._charm.model.relations.get(self._relation_name, [])
-        for relation in sorted(relations, key=lambda item: item.id):
+        for relation in relations:
             application_name = relation.app.name if relation.app else ""
-            for unit in sorted(relation.units, key=lambda item: item.name):
+            for unit in relation.units:
                 try:
                     provider = relation.load(ProviderConfig, unit)
                 except ValueError:

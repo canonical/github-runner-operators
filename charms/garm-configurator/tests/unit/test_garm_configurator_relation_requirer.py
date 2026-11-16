@@ -1,9 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Scenario tests for the ``garm-configurator`` relation requirer."""
+"""Method-scoped unit tests for the ``garm-configurator`` relation requirer."""
 
-import json
+import types
+from unittest.mock import MagicMock
 
 import ops
 import pytest
@@ -11,190 +12,154 @@ from garm_configurator_relation import (
     GARM_CONFIGURATOR_RELATION_NAME,
     ConfiguratorData,
     GarmConfiguratorRequirer,
+    ProviderConfig,
+    ScalesetConfig,
 )
-from scenario import Context, Relation, State
-
-_META = {
-    "name": "requirer-test",
-    "requires": {
-        GARM_CONFIGURATOR_RELATION_NAME: {"interface": "garm_configurator_v0"},
-        "custom-endpoint": {"interface": "garm_configurator_v0"},
-    },
-}
 
 
-class _RequirerCharm(ops.CharmBase):
-    """Minimal charm exposing the requirer for scenario tests."""
+def _provider(auth_url: str = "https://ks.example.com:5000/v3") -> ProviderConfig:
+    """Return a complete provider configuration."""
+    return ProviderConfig(
+        openstack_auth_url=auth_url,
+        openstack_username="admin",
+        openstack_project_name="myproject",
+        github_app_id=99999,
+        github_installation_id=67890,
+    )
 
-    def __init__(self, *args: object) -> None:
-        super().__init__(*args)
-        self.requirer = GarmConfiguratorRequirer(self)
 
-
-def _provider_data(auth_url: str = "https://ks.example.com:5000/v3") -> dict[str, str]:
-    """Return a complete provider payload in the JSON form ``Relation.save`` writes."""
-    return {
-        "openstack_auth_url": json.dumps(auth_url),
-        "openstack_username": json.dumps("admin"),
-        "openstack_password_secret_uri": json.dumps("secret://password"),
-        "openstack_project_name": json.dumps("myproject"),
-        "openstack_user_domain_name": json.dumps("Default"),
-        "openstack_project_domain_name": json.dumps("Default"),
-        "openstack_region_name": json.dumps("RegionOne"),
-        "openstack_network": json.dumps("external-net"),
-        "github_app_id": json.dumps(99999),
-        "github_installation_id": json.dumps(67890),
-        "github_private_key_secret_uri": json.dumps("secret://github-key"),
-    }
+def _unit(name: str) -> MagicMock:
+    """Return a relation unit mock carrying only the name the requirer reads."""
+    unit = MagicMock(spec=ops.Unit)
+    unit.name = name
+    return unit
 
 
 def _relation(
-    relation_id: int = 1,
-    app_name: str = "configurator",
-    units: dict[int, dict[str, str]] | None = None,
-) -> Relation:
-    return Relation(
-        endpoint=GARM_CONFIGURATOR_RELATION_NAME,
-        id=relation_id,
-        remote_app_name=app_name,
-        remote_units_data=units if units is not None else {0: _provider_data()},
-    )
+    relation_id: int,
+    application_name: str,
+    units: dict[str, tuple[ProviderConfig | None, ScalesetConfig | None, Exception | None]],
+) -> MagicMock:
+    """Return a relation mock whose ``load`` returns the given unit payloads."""
+    relation = MagicMock(spec=ops.Relation)
+    relation.id = relation_id
+    relation.app = types.SimpleNamespace(name=application_name)
+    payloads: dict[
+        MagicMock, tuple[ProviderConfig | None, ScalesetConfig | None, Exception | None]
+    ] = {}
+    relation_units = []
+    for unit_name, payload in units.items():
+        unit = _unit(unit_name)
+        relation_units.append(unit)
+        payloads[unit] = payload
+    relation.units = set(relation_units)
+
+    def load(
+        model: type[ProviderConfig] | type[ScalesetConfig],
+        unit: MagicMock,
+        decoder: type[str] | None = None,
+    ) -> ProviderConfig | ScalesetConfig:
+        provider, scaleset, error = payloads[unit]
+        if error is not None:
+            raise error
+        if model is ProviderConfig:
+            return provider
+        return scaleset
+
+    relation.load.side_effect = load
+    return relation
 
 
-def _get_data(*relations: Relation) -> ConfiguratorData:
-    ctx = Context(_RequirerCharm, meta=_META)
-    state = State(relations=list(relations))
-    with ctx(ctx.on.start(), state) as manager:
-        return manager.charm.requirer.get_data()
+def _charm(
+    *relations: MagicMock, relation_name: str = GARM_CONFIGURATOR_RELATION_NAME
+) -> MagicMock:
+    """Return a charm mock exposing the given relations on one endpoint."""
+    charm = MagicMock(spec=ops.CharmBase)
+    charm.model.relations = {relation_name: list(relations)}
+    return charm
 
 
-def test_get_data_orders_relations_and_units():
+def test_get_data_aggregates_every_relation_unit():
     """
-    arrange: Two relations whose relations and units are supplied out of order.
+    arrange: Two relations, each publishing a provider and a scaleset.
     act: Read the aggregated relation data.
-    assert: Relations are ordered by id then unit name, so first-wins deduplication in the
-        garm charm does not flip between reconcile hooks.
+    assert: Every unit appears with its provider and scaleset, so GARM can render each
+        configurator from one read.
     """
-    relation_b = _relation(
-        relation_id=2,
-        app_name="configurator-b",
-        units={0: {**_provider_data(), "name": "scaleset-b"}},
-    )
+    provider_a = _provider("https://ks-a.example.com:5000/v3")
+    provider_b = _provider("https://ks-b.example.com:5000/v3")
     relation_a = _relation(
-        relation_id=1,
-        app_name="configurator-a",
-        units={
-            1: {**_provider_data(), "name": "scaleset-a1"},
-            0: {**_provider_data(), "name": "scaleset-a0"},
-        },
+        1,
+        "configurator-a",
+        {"configurator-a/0": (provider_a, ScalesetConfig(name="scaleset-a"), None)},
     )
-
-    data = _get_data(relation_b, relation_a)
-
-    assert [(item.relation_id, item.unit_name) for item in data.relations] == [
-        (1, "configurator-a/0"),
-        (1, "configurator-a/1"),
-        (2, "configurator-b/0"),
-    ]
-    assert [item.application_name for item in data.relations] == [
-        "configurator-a",
-        "configurator-a",
+    relation_b = _relation(
+        2,
         "configurator-b",
-    ]
-
-
-def test_get_data_builds_provider_and_scaleset_from_one_databag():
-    """
-    arrange: A relation unit carrying both provider and scaleset fields.
-    act: Read the aggregated relation data.
-    assert: One entry carries a typed provider and scaleset, so GARM can render the provider
-        config and build the scaleset from the same read.
-    """
-    relation = _relation(
-        units={
-            0: {
-                **_provider_data(),
-                "name": "my-scaleset",
-                "provider_name": "configurator-0",
-                "flavor": "m1.large",
-                "os_arch": "amd64",
-                "min_idle_runner": "2",
-                "max_runner": "6",
-                "labels": "lxd,ubuntu",
-                "repo": "my-org/my-repo",
-            }
-        }
+        {"configurator-b/0": (provider_b, ScalesetConfig(name="scaleset-b"), None)},
     )
 
-    item = _get_data(relation).relations[0]
+    data = GarmConfiguratorRequirer(_charm(relation_a, relation_b)).get_data()
 
-    assert item.relation_id == 1
-    assert item.application_name == "configurator"
-    assert item.unit_name == "configurator/0"
-    assert item.provider.openstack_auth_url == "https://ks.example.com:5000/v3"
-    assert item.provider.openstack_username == "admin"
-    assert item.provider.github_app_id == 99999
-    assert item.provider.github_installation_id == 67890
-    assert item.scaleset.name == "my-scaleset"
-    assert item.scaleset.flavor == "m1.large"
-    assert item.scaleset.max_runner == "6"
-    assert item.scaleset.labels == "lxd,ubuntu"
-    assert item.scaleset.repo == "my-org/my-repo"
+    by_unit = {relation.unit_name: relation for relation in data.relations}
+    assert set(by_unit) == {"configurator-a/0", "configurator-b/0"}
+    assert by_unit["configurator-a/0"].application_name == "configurator-a"
+    assert by_unit["configurator-a/0"].provider == provider_a
+    assert by_unit["configurator-a/0"].scaleset.name == "scaleset-a"
+    assert by_unit["configurator-b/0"].provider == provider_b
+    assert by_unit["configurator-b/0"].scaleset.name == "scaleset-b"
 
 
 @pytest.mark.parametrize(
-    "unit_data",
+    "error",
     [
-        pytest.param({"name": "my-scaleset"}, id="no-provider-payload"),
-        pytest.param(
-            {"name": "my-scaleset", "openstack_auth_url": "not-json"},
-            id="not-json-encoded",
-        ),
-        pytest.param(
-            {**_provider_data(), "github_app_id": json.dumps("not-an-int")},
-            id="malformed-provider-field",
-        ),
+        pytest.param(ValueError("missing provider payload"), id="incomplete-databag"),
+        pytest.param(ValueError("not json"), id="malformed-encoding"),
     ],
 )
-def test_get_data_tracks_incomplete_or_malformed_relation_as_invalid(
-    unit_data: dict[str, str],
-):
+def test_get_data_tracks_unreadable_relation_as_invalid(error: Exception):
     """
-    arrange: A unit whose databag is incomplete or malformed.
+    arrange: A unit whose provider payload raises while loading, plus a valid unit.
     act: Read the aggregated relation data.
-    assert: The unit is excluded and its relation id is recorded as invalid, so GARM blocks
-        instead of rendering a half-written provider.
+    assert: The unreadable relation is excluded and its id marked invalid, while the readable
+        one survives, so GARM blocks on the broken configurator without dropping the rest.
     """
-    data = _get_data(_relation(units={0: unit_data}))
+    broken = _relation(1, "configurator-broken", {"broken/0": (None, None, error)})
+    valid = _relation(
+        2,
+        "configurator-valid",
+        {"valid/0": (_provider(), ScalesetConfig(name="scaleset"), None)},
+    )
 
-    assert data.relations == ()
+    data = GarmConfiguratorRequirer(_charm(broken, valid)).get_data()
+
+    assert [relation.unit_name for relation in data.relations] == ["valid/0"]
     assert data.invalid_relation_ids == frozenset({1})
     assert data.has_invalid_relations
-    assert not data.is_empty
 
 
-def test_get_data_keeps_valid_relations_alongside_invalid_ones():
+def test_get_data_marks_every_relation_with_a_conflicting_scaleset_name_invalid():
     """
-    arrange: One complete relation and one relation whose provider payload is missing.
+    arrange: Two relations publishing the same scaleset name.
     act: Read the aggregated relation data.
-    assert: The valid relation is exposed while the invalid relation id is tracked, so GARM
-        can reconcile the usable configurators and report the broken one.
+    assert: Neither relation is exposed and both ids are invalid, so GARM blocks on the
+        conflict rather than letting iteration order pick which scaleset to own.
     """
-    valid = _relation(
-        relation_id=1,
-        app_name="configurator-a",
-        units={0: {**_provider_data(), "name": "valid-scaleset"}},
+    first = _relation(
+        1,
+        "configurator-a",
+        {"configurator-a/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
     )
-    invalid = _relation(
-        relation_id=2,
-        app_name="configurator-b",
-        units={0: {"name": "incomplete-scaleset"}},
+    second = _relation(
+        2,
+        "configurator-b",
+        {"configurator-b/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
     )
 
-    data = _get_data(valid, invalid)
+    data = GarmConfiguratorRequirer(_charm(first, second)).get_data()
 
-    assert [item.scaleset.name for item in data.relations] == ["valid-scaleset"]
-    assert data.invalid_relation_ids == frozenset({2})
+    assert data.relations == ()
+    assert data.invalid_relation_ids == frozenset({1, 2})
     assert data.has_invalid_relations
 
 
@@ -205,11 +170,11 @@ def test_get_data_returns_empty_aggregate_without_relations():
     assert: The aggregate is empty instead of raising, so the garm charm can reconcile before
         a configurator is integrated.
     """
-    data = _get_data()
+    data = GarmConfiguratorRequirer(_charm()).get_data()
 
+    assert data == ConfiguratorData()
     assert data.is_empty
     assert not data.has_invalid_relations
-    assert data.invalid_relation_ids == frozenset()
 
 
 def test_get_data_reads_the_configured_relation_name():
@@ -219,18 +184,16 @@ def test_get_data_reads_the_configured_relation_name():
     assert: The custom relations are aggregated, so the requirer can follow an endpoint the
         charm renames without changing the relation contract.
     """
-    ctx = Context(_RequirerCharm, meta=_META)
-    relation = Relation(
-        endpoint="custom-endpoint",
-        remote_app_name="configurator",
-        remote_units_data={0: {**_provider_data(), "name": "my-scaleset"}},
+    relation = _relation(
+        1,
+        "configurator",
+        {"configurator/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
     )
-    state = State(relations=[relation])
-    with ctx(ctx.on.start(), state) as manager:
-        requirer = GarmConfiguratorRequirer(manager.charm, relation_name="custom-endpoint")
-        data = requirer.get_data()
+    charm = _charm(relation, relation_name="custom-endpoint")
 
-    assert data.relations[0].scaleset.name == "my-scaleset"
+    data = GarmConfiguratorRequirer(charm, relation_name="custom-endpoint").get_data()
+
+    assert [item.scaleset.name for item in data.relations] == ["my-scaleset"]
 
 
 @pytest.mark.parametrize(
@@ -246,7 +209,14 @@ def test_is_related_reports_joined_relations(related: bool, expected: bool):
     act: Check whether the requirer is related.
     assert: The result reflects the endpoint's relations, so event observers can gate on it.
     """
-    ctx = Context(_RequirerCharm, meta=_META)
-    state = State(relations=[_relation()] if related else [])
-    with ctx(ctx.on.start(), state) as manager:
-        assert manager.charm.requirer.is_related is expected
+    relations = (
+        [_relation(1, "configurator", {"configurator/0": (_provider(), ScalesetConfig(), None)})]
+        if related
+        else []
+    )
+
+    assert GarmConfiguratorRequirer(_charm(*relations)).is_related is expected
+
+
+# The `garm` charm does not consume `GarmConfiguratorRequirer` yet. Add a scenario test using the
+# real requirer there once it does; these method-scoped tests cover the aggregation itself.
