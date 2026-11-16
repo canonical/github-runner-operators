@@ -10,41 +10,21 @@ keys.
 
 The ``GarmConfiguratorRequirer`` aggregates every joined ``garm-configurator`` relation into a
 single ``ConfiguratorData`` value. The ``garm`` charm uses that value to render provider
-configurations and build its scalesets.
+configurations and build its scalesets. A unit that has not published a complete provider
+payload is invalid; its relation id is recorded in ``ConfiguratorData.invalid_relation_ids``
+instead of being exposed as an empty provider.
 """
 
 import dataclasses
+import logging
 import typing
-from collections.abc import Iterable, Mapping
 
 import ops
 import pydantic
 
-GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
+logger = logging.getLogger(__name__)
 
-SCALESET_FIELDS: typing.Final = (
-    "name",
-    "provider_name",
-    "image_id",
-    "image_visibility",
-    "security_group",
-    "flavor",
-    "os_arch",
-    "min_idle_runner",
-    "max_runner",
-    "labels",
-    "runner_group",
-    "enable_shell",
-    "pre_install_scripts",
-    "org",
-    "repo",
-    "dockerhub_mirror",
-    "runner_http_proxy",
-    "aproxy_exclude_addresses",
-    "aproxy_redirect_ports",
-    "otel_collector_endpoint",
-    "pre_job_script",
-)
+GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
 @pydantic.dataclasses.dataclass
@@ -52,9 +32,9 @@ class ProviderConfig:
     """Provider and GitHub App credentials published by one ``garm-configurator`` unit.
 
     The field names are the relation databag keys, so they are the wire contract between the
-    configurator and GARM. Every field is optional because a unit publishes the provider
-    payload only once its image and secrets are ready: until then the fields are absent from
-    the databag rather than invalid.
+    configurator and GARM. The auth URL is required: a unit publishes the rest of the provider
+    payload alongside it, so a databag without it is incomplete and treated as invalid rather
+    than as an empty provider.
 
     Attributes:
         openstack_auth_url: Keystone authentication URL.
@@ -71,7 +51,7 @@ class ProviderConfig:
         github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
     """
 
-    openstack_auth_url: str | None = None
+    openstack_auth_url: str
     openstack_username: str | None = None
     openstack_password: str | None = None
     openstack_password_secret_uri: str | None = None
@@ -138,18 +118,6 @@ class ScalesetConfig:
     otel_collector_endpoint: str = ""
     pre_job_script: str = ""
 
-    @classmethod
-    def from_databag(cls, data: Mapping[str, str]) -> "ScalesetConfig":
-        """Build a scaleset config from a relation unit databag.
-
-        Args:
-            data: The relation unit databag.
-
-        Returns:
-            The scaleset fields carried by the databag, with unset fields as empty strings.
-        """
-        return cls(**{name: data.get(name) or "" for name in SCALESET_FIELDS})
-
 
 @dataclasses.dataclass(frozen=True)
 class ConfiguratorRelation:
@@ -184,48 +152,30 @@ class ConfiguratorData:
     """Every ``garm-configurator`` relation unit, aggregated for one reconcile pass.
 
     Attributes:
-        relations: One entry per related unit, ordered by relation id then unit name.
+        relations: One valid entry per related unit, ordered by relation id then unit name.
+        invalid_relation_ids: Relation ids whose unit databag is incomplete or malformed.
     """
 
     relations: tuple[ConfiguratorRelation, ...] = ()
+    invalid_relation_ids: frozenset[int] = frozenset()
 
     @property
     def is_empty(self) -> bool:
-        """Whether no configurator unit is related.
+        """Whether no configurator relation data is present.
 
         Returns:
-            True when the aggregate holds no unit data.
+            True when the aggregate holds neither a valid relation nor an invalid relation id.
         """
-        return not self.relations
+        return not self.relations and not self.invalid_relation_ids
 
+    @property
+    def has_invalid_relations(self) -> bool:
+        """Whether any relation published an incomplete or malformed databag.
 
-def get_providers_data(relations: Iterable[ops.Relation]) -> ConfiguratorData:
-    """Aggregate all ``garm-configurator`` relations into one dataclass.
-
-    Relations and units are sorted so the result is stable across hooks: Juju exposes units
-    as an unordered set, and consumers use first-wins deduplication over this data.
-
-    Args:
-        relations: The joined ``garm-configurator`` relations.
-
-    Returns:
-        The aggregated relation data, one entry per related unit.
-    """
-    aggregated: list[ConfiguratorRelation] = []
-    for relation in sorted(relations, key=lambda item: item.id):
-        application_name = relation.app.name if relation.app else ""
-        for unit in sorted(relation.units, key=lambda item: item.name):
-            data = relation.data[unit]
-            aggregated.append(
-                ConfiguratorRelation(
-                    relation_id=relation.id,
-                    application_name=application_name,
-                    unit_name=unit.name,
-                    provider=relation.load(ProviderConfig, unit),
-                    scaleset=ScalesetConfig.from_databag(data),
-                )
-            )
-    return ConfiguratorData(relations=tuple(aggregated))
+        Returns:
+            True when at least one relation id was recorded as invalid.
+        """
+        return bool(self.invalid_relation_ids)
 
 
 class GarmConfiguratorRequirer:
@@ -257,8 +207,41 @@ class GarmConfiguratorRequirer:
     def get_data(self) -> ConfiguratorData:
         """Aggregate every joined configurator relation into one dataclass.
 
+        Relations and units are sorted so the result is stable across hooks: Juju exposes units
+        as an unordered set, and consumers use first-wins deduplication over this data. A unit
+        whose provider payload cannot be loaded is skipped and its relation id is recorded as
+        invalid, so the consumer never renders a half-written provider.
+
         Returns:
-            The relation data for every related unit, ordered deterministically.
+            The valid relation data for every related unit, plus the ids of invalid relations.
         """
+        aggregated: list[ConfiguratorRelation] = []
+        invalid_relation_ids: set[int] = set()
         relations = self._charm.model.relations.get(self._relation_name, [])
-        return get_providers_data(relations)
+        for relation in sorted(relations, key=lambda item: item.id):
+            application_name = relation.app.name if relation.app else ""
+            for unit in sorted(relation.units, key=lambda item: item.name):
+                try:
+                    provider = relation.load(ProviderConfig, unit)
+                except ValueError:
+                    logger.warning(
+                        "Ignoring incomplete garm-configurator relation data: "
+                        "relation_id=%d unit=%s",
+                        relation.id,
+                        unit.name,
+                    )
+                    invalid_relation_ids.add(relation.id)
+                    continue
+                aggregated.append(
+                    ConfiguratorRelation(
+                        relation_id=relation.id,
+                        application_name=application_name,
+                        unit_name=unit.name,
+                        provider=provider,
+                        scaleset=relation.load(ScalesetConfig, unit, decoder=str),
+                    )
+                )
+        return ConfiguratorData(
+            relations=tuple(aggregated),
+            invalid_relation_ids=frozenset(invalid_relation_ids),
+        )

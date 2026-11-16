@@ -13,39 +13,6 @@ from garm_configurator_relation import (
 
 
 @pytest.mark.parametrize(
-    "databag, expected",
-    [
-        pytest.param(
-            {"name": "my-scaleset", "max_runner": "6", "repo": "my-org/my-repo"},
-            {"name": "my-scaleset", "max_runner": "6", "repo": "my-org/my-repo"},
-            id="reads-set-fields",
-        ),
-        pytest.param(
-            {"name": "my-scaleset"},
-            {"name": "my-scaleset", "max_runner": "", "repo": "", "runner_group": ""},
-            id="leaves-unset-fields-empty",
-        ),
-        pytest.param(
-            {"name": "my-scaleset", "unknown": "ignored"},
-            {"name": "my-scaleset"},
-            id="ignores-unknown-fields",
-        ),
-    ],
-)
-def test_scaleset_config_from_databag(databag: dict[str, str], expected: dict[str, str]):
-    """
-    arrange: A relation unit databag with some scaleset fields set.
-    act: Build the scaleset config.
-    assert: Set fields are read verbatim, unset fields stay empty strings, and unknown fields
-        are ignored, so the consumer can apply its own defaults.
-    """
-    scaleset = ScalesetConfig.from_databag(databag)
-
-    for field, value in expected.items():
-        assert getattr(scaleset, field) == value
-
-
-@pytest.mark.parametrize(
     "unit_name, expected",
     [
         pytest.param("configurator/0", "configurator-0", id="unit-name-with-slash"),
@@ -63,39 +30,50 @@ def test_configurator_relation_provider_name(unit_name: str, expected: str):
         relation_id=1,
         application_name="configurator",
         unit_name=unit_name,
-        provider=ProviderConfig(),
+        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
         scaleset=ScalesetConfig(),
     )
 
     assert relation.provider_name == expected
 
 
-def test_configurator_data_is_empty_without_relations():
-    """
-    arrange: An aggregate with no configurator relations.
-    act: Read its emptiness.
-    assert: It reports empty, so GARM can treat the absence of relations as a real empty
-        state rather than a malformed payload.
-    """
-    assert ConfiguratorData().is_empty
-
-
-def test_configurator_data_is_not_empty_with_a_relation():
-    """
-    arrange: An aggregate holding one configurator relation.
-    act: Read its emptiness.
-    assert: It reports non-empty, so GARM knows there is provider data to reconcile.
-    """
-    data = ConfiguratorData(
-        relations=(
-            ConfiguratorRelation(
-                relation_id=1,
-                application_name="configurator",
-                unit_name="configurator/0",
-                provider=ProviderConfig(),
-                scaleset=ScalesetConfig(),
-            ),
-        )
+def _relation() -> ConfiguratorRelation:
+    """Return a minimal valid configurator relation."""
+    return ConfiguratorRelation(
+        relation_id=1,
+        application_name="configurator",
+        unit_name="configurator/0",
+        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
+        scaleset=ScalesetConfig(),
     )
 
-    assert not data.is_empty
+
+@pytest.mark.parametrize(
+    "data, expected_empty, expected_invalid",
+    [
+        pytest.param(ConfiguratorData(), True, False, id="no-relations"),
+        pytest.param(
+            ConfiguratorData(relations=(_relation(),)),
+            False,
+            False,
+            id="valid-relation",
+        ),
+        pytest.param(
+            ConfiguratorData(invalid_relation_ids=frozenset({1})),
+            False,
+            True,
+            id="only-invalid-relation",
+        ),
+    ],
+)
+def test_configurator_data_reports_empty_and_invalid_state(
+    data: ConfiguratorData, expected_empty: bool, expected_invalid: bool
+):
+    """
+    arrange: An aggregate with no, one valid, or only an invalid configurator relation.
+    act: Read its emptiness and invalid-relation flag.
+    assert: The flags distinguish an empty deployment from one that has valid data to
+        reconcile and from one that must block on an incomplete relation.
+    """
+    assert data.is_empty is expected_empty
+    assert data.has_invalid_relations is expected_invalid

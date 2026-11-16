@@ -31,6 +31,23 @@ class _RequirerCharm(ops.CharmBase):
         self.requirer = GarmConfiguratorRequirer(self)
 
 
+def _provider_data(auth_url: str = "https://ks.example.com:5000/v3") -> dict[str, str]:
+    """Return a complete provider payload in the JSON form ``Relation.save`` writes."""
+    return {
+        "openstack_auth_url": json.dumps(auth_url),
+        "openstack_username": json.dumps("admin"),
+        "openstack_password_secret_uri": json.dumps("secret://password"),
+        "openstack_project_name": json.dumps("myproject"),
+        "openstack_user_domain_name": json.dumps("Default"),
+        "openstack_project_domain_name": json.dumps("Default"),
+        "openstack_region_name": json.dumps("RegionOne"),
+        "openstack_network": json.dumps("external-net"),
+        "github_app_id": json.dumps(99999),
+        "github_installation_id": json.dumps(67890),
+        "github_private_key_secret_uri": json.dumps("secret://github-key"),
+    }
+
+
 def _relation(
     relation_id: int = 1,
     app_name: str = "configurator",
@@ -40,7 +57,7 @@ def _relation(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         id=relation_id,
         remote_app_name=app_name,
-        remote_units_data=units or {0: {}},
+        remote_units_data=units if units is not None else {0: _provider_data()},
     )
 
 
@@ -61,14 +78,14 @@ def test_get_data_orders_relations_and_units():
     relation_b = _relation(
         relation_id=2,
         app_name="configurator-b",
-        units={0: {"name": "scaleset-b"}},
+        units={0: {**_provider_data(), "name": "scaleset-b"}},
     )
     relation_a = _relation(
         relation_id=1,
         app_name="configurator-a",
         units={
-            1: {"name": "scaleset-a1"},
-            0: {"name": "scaleset-a0"},
+            1: {**_provider_data(), "name": "scaleset-a1"},
+            0: {**_provider_data(), "name": "scaleset-a0"},
         },
     )
 
@@ -96,10 +113,7 @@ def test_get_data_builds_provider_and_scaleset_from_one_databag():
     relation = _relation(
         units={
             0: {
-                "openstack_auth_url": json.dumps("https://ks.example.com:5000/v3"),
-                "openstack_username": json.dumps("admin"),
-                "github_app_id": json.dumps(99999),
-                "github_installation_id": json.dumps(67890),
+                **_provider_data(),
                 "name": "my-scaleset",
                 "provider_name": "configurator-0",
                 "flavor": "m1.large",
@@ -128,19 +142,60 @@ def test_get_data_builds_provider_and_scaleset_from_one_databag():
     assert item.scaleset.repo == "my-org/my-repo"
 
 
-def test_get_data_keeps_units_that_have_not_published_their_provider():
+@pytest.mark.parametrize(
+    "unit_data",
+    [
+        pytest.param({"name": "my-scaleset"}, id="no-provider-payload"),
+        pytest.param(
+            {"name": "my-scaleset", "openstack_auth_url": "not-json"},
+            id="not-json-encoded",
+        ),
+        pytest.param(
+            {**_provider_data(), "github_app_id": json.dumps("not-an-int")},
+            id="malformed-provider-field",
+        ),
+    ],
+)
+def test_get_data_tracks_incomplete_or_malformed_relation_as_invalid(
+    unit_data: dict[str, str],
+):
     """
-    arrange: A unit that has published its scaleset fields but not its provider payload yet.
+    arrange: A unit whose databag is incomplete or malformed.
     act: Read the aggregated relation data.
-    assert: The unit is present with an empty provider, so GARM can read the scaleset without
-        treating the half-written relation as a complete provider.
+    assert: The unit is excluded and its relation id is recorded as invalid, so GARM blocks
+        instead of rendering a half-written provider.
     """
-    relation = _relation(units={0: {"name": "my-scaleset"}})
+    data = _get_data(_relation(units={0: unit_data}))
 
-    data = _get_data(relation)
+    assert data.relations == ()
+    assert data.invalid_relation_ids == frozenset({1})
+    assert data.has_invalid_relations
+    assert not data.is_empty
 
-    assert data.relations[0].scaleset.name == "my-scaleset"
-    assert data.relations[0].provider.openstack_auth_url is None
+
+def test_get_data_keeps_valid_relations_alongside_invalid_ones():
+    """
+    arrange: One complete relation and one relation whose provider payload is missing.
+    act: Read the aggregated relation data.
+    assert: The valid relation is exposed while the invalid relation id is tracked, so GARM
+        can reconcile the usable configurators and report the broken one.
+    """
+    valid = _relation(
+        relation_id=1,
+        app_name="configurator-a",
+        units={0: {**_provider_data(), "name": "valid-scaleset"}},
+    )
+    invalid = _relation(
+        relation_id=2,
+        app_name="configurator-b",
+        units={0: {"name": "incomplete-scaleset"}},
+    )
+
+    data = _get_data(valid, invalid)
+
+    assert [item.scaleset.name for item in data.relations] == ["valid-scaleset"]
+    assert data.invalid_relation_ids == frozenset({2})
+    assert data.has_invalid_relations
 
 
 def test_get_data_returns_empty_aggregate_without_relations():
@@ -153,6 +208,8 @@ def test_get_data_returns_empty_aggregate_without_relations():
     data = _get_data()
 
     assert data.is_empty
+    assert not data.has_invalid_relations
+    assert data.invalid_relation_ids == frozenset()
 
 
 def test_get_data_reads_the_configured_relation_name():
@@ -166,7 +223,7 @@ def test_get_data_reads_the_configured_relation_name():
     relation = Relation(
         endpoint="custom-endpoint",
         remote_app_name="configurator",
-        remote_units_data={0: {"name": "my-scaleset"}},
+        remote_units_data={0: {**_provider_data(), "name": "my-scaleset"}},
     )
     state = State(relations=[relation])
     with ctx(ctx.on.start(), state) as manager:
