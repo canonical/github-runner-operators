@@ -34,6 +34,7 @@ except ImportError:
 import garm_template
 from agent_tools import AgentToolsError
 from charm import (
+    DATABASE_PASSPHRASE_CONFIG_NAME,
     GARM_ADMIN_CREDENTIALS_LABEL,
     GARM_PORT,
     GARM_PROVIDERS_LABEL,
@@ -198,6 +199,7 @@ def _state(
     leader: bool = True,
     can_connect: bool = True,
     postgresql_data: dict | None = None,
+    config: dict[str, str] | None = None,
     configurator_related: bool = True,
     configurator_units_data: dict[int, dict] | None = None,
     configurator_relations: typing.Sequence[Relation] | None = None,
@@ -265,6 +267,7 @@ def _state(
             *([_recorded_secret(recorded_providers)] if recorded_providers else []),
         ],
         planned_units=planned_units,
+        config={} if config is None else config,
         **statuses,
     )
 
@@ -403,6 +406,40 @@ def test_existing_secrets_are_not_regenerated(ctx: Context, garm_api: _GarmApiMo
 
     assert _secret_content(out, GARM_SECRETS_LABEL) == _GARM_SECRETS_CONTENT
     assert _secret_content(out, GARM_ADMIN_CREDENTIALS_LABEL) == _ADMIN_CREDENTIALS_CONTENT
+
+
+def test_configured_database_passphrase_is_used(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: The operator supplies the existing database passphrase through a Juju secret.
+    act: Reconcile GARM.
+    assert: The configured value reaches the workload instead of the legacy labelled secret.
+    """
+    configured = Secret(tracked_content={"value": "the-existing-passphrase"})
+    state = _state(
+        config={DATABASE_PASSPHRASE_CONFIG_NAME: configured.id},
+        secrets=[*_owned_secrets(), configured],
+    )
+
+    out = ctx.run(ctx.on.update_status(), state)
+
+    assert _service_environment(out)["GARM_PASSPHRASE"] == "the-existing-passphrase"
+
+
+def test_invalid_configured_database_passphrase_blocks_garm(ctx: Context, garm_api: _GarmApiMocks):
+    """
+    arrange: The configured database secret has no value field.
+    act: Reconcile GARM.
+    assert: GARM waits rather than starting with a potentially wrong passphrase.
+    """
+    configured = Secret(tracked_content={"not-value": "wrong"})
+    state = _state(
+        config={DATABASE_PASSPHRASE_CONFIG_NAME: configured.id},
+        secrets=[*_owned_secrets(), configured],
+    )
+
+    out = ctx.run(ctx.on.update_status(), state)
+
+    assert out.unit_status == ops.WaitingStatus("Waiting for GARM secrets")
 
 
 def test_secrets_are_created_before_the_workload_is_ready(ctx: Context, garm_api: _GarmApiMocks):
