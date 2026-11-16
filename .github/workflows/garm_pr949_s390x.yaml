@@ -1,7 +1,7 @@
 # Throwaway: tests cloudbase/garm#949 (runner tools for extra architectures) on
 # s390x. Lives only on the test/garm-pr949-s390x branch; never merge it.
 #
-# The garm job runs GARM from the PR on an s390x runner and creates an s390x
+# The garm job runs GARM and garm-provider-lxd from main on an s390x runner and creates an s390x
 # scale set named RUNNER_LABEL. The s390x-runner job, queued from the start,
 # targets that scale set, so GARM boots an s390x LXD container that registers
 # with the runner Canonical builds and takes the job. GitHub publishes no s390x
@@ -24,9 +24,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GARM_SHA: e1f820062593559e2850d4d5be9bddad5161930e # cloudbase/garm#949 head
-  PROVIDER_LXD_SHA: d234a9d9a2e0983a1a83ec12a75528eb1aeda648 # garm-provider-lxd main
-  PROVIDER_COMMON_SHA: a63fbe8afd51e1d3e5478eb0e4e7ead4d30088cc # the version #949 vendors
+  # Mains after cloudbase/garm#949 and garm-provider-lxd#25 merged.
+  GARM_SHA: 030a39156879ab0d1197249d72328e3f69f7ad8d
+  PROVIDER_LXD_SHA: e5c4f7d87d2049e29f1e3c9f9cf01c13f057c9fe
   TOOLS_METADATA_URL: https://api.github.com/repos/canonical/github-actions-runner/releases
   # Unique per attempt: a cancelled run can leave its scale set registered on
   # GitHub, and the next run could not create one under the same name.

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Throwaway harness for testing cloudbase/garm#949 on s390x.
 #
-# Runs GARM, built from the PR, on this s390x runner with a patched LXD provider,
+# Runs GARM and garm-provider-lxd, built from main, on this s390x runner,
 # and has it boot one s390x LXD container that registers as a runner of this repo
 # with the tools Canonical publishes. The workflow then routes a job to it.
 #
 # Usage: garm-s390x.sh setup|diagnostics|teardown
 #
-# Required env: GARM_SHA, PROVIDER_LXD_SHA, PROVIDER_COMMON_SHA, RUNNER_LABEL,
+# Required env: GARM_SHA, PROVIDER_LXD_SHA, RUNNER_LABEL,
 # TOOLS_METADATA_URL, GITHUB_REPOSITORY, GITHUB_TOKEN, E2E_GITHUB_APP_ID,
 # E2E_GITHUB_APP_INSTALLATION_ID, E2E_GITHUB_APP_PRIVATE_KEY.
 
@@ -16,7 +16,6 @@ set -euo pipefail
 umask 077
 
 WORK="${RUNNER_TEMP:-/tmp}/garm-pr949"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GARM_PORT=9997
 GARM_UNIT=garm-pr949
 IMAGE="ubuntu:24.04"
@@ -53,18 +52,10 @@ build_garm() {
   echo "::endgroup::"
 }
 
-# The released provider rejects s390x twice: its own LXD arch map, and the
-# GetTools check in garm-provider-common v0.1.9. The patch fixes the first, the
-# common bump to the commit #949 vendors fixes the second.
 build_provider() {
-  echo "::group::Build patched garm-provider-lxd at ${PROVIDER_LXD_SHA}"
+  echo "::group::Build garm-provider-lxd at ${PROVIDER_LXD_SHA}"
   fetch_at cloudbase/garm-provider-lxd "$PROVIDER_LXD_SHA" "$WORK/garm-provider-lxd"
-  (
-    cd "$WORK/garm-provider-lxd"
-    git apply "$HERE/garm-provider-lxd-arches.patch"
-    go get "github.com/cloudbase/garm-provider-common@${PROVIDER_COMMON_SHA}"
-    go build -mod=mod -o "$WORK/garm-provider-lxd.bin" .
-  )
+  (cd "$WORK/garm-provider-lxd" && go build -o "$WORK/garm-provider-lxd.bin" .)
   echo "::endgroup::"
 }
 
@@ -139,7 +130,7 @@ passphrase = "$(random_secret)"
 [[provider]]
 name = "lxd_local"
 provider_type = "external"
-description = "Local LXD with s390x patched provider"
+description = "Local LXD"
   [provider.external]
     provider_executable = "${WORK}/garm-provider-lxd.bin"
     config_file = "${WORK}/garm-provider-lxd.toml"
@@ -230,16 +221,16 @@ configure_garm() {
   echo "::endgroup::"
 }
 
-# GARM fetches the metadata URL unauthenticated, and from a shared egress IP
-# api.github.com often answers 403 (rate limit) until the hourly window resets.
-# GARM retries every ~100s, but any runner it starts before then fails in the
-# provider with no s390x tools, so the scale set waits for them instead.
+# Any runner GARM starts before it has s390x tools fails in the provider, so the
+# scale set waits for them. Main fetches the metadata URL with the endpoint's
+# credentials, so this should pass on GARM's first sync rather than after the
+# unauthenticated 403s an earlier run hit.
 wait_for_s390x_tools() {
   local deadline=$((SECONDS + 900))
   until sudo journalctl -u "$GARM_UNIT" --no-pager \
       | grep -q 'found valid runner tools.*arch=s390x'; do
     if (( SECONDS > deadline )); then
-      echo "::error::GARM found no s390x tools at ${TOOLS_METADATA_URL} within 15 minutes; check the GARM log for 403s (unauthenticated rate limit)."
+      echo "::error::GARM found no s390x tools at ${TOOLS_METADATA_URL} within 15 minutes; check the GARM log for fetch errors."
       return 1
     fi
     sleep 10
