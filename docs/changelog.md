@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-11-16
+
+- `garm-configurator`: add LXD provider support. Set `provider-type=lxd` and the `lxd-api-url`, `lxd-project-name`, `lxd-instance-type`, `lxd-secure-boot`, and certificate secret options to publish an LXD provider to GARM instead of an OpenStack one. OpenStack remains the default, so existing deployments are unchanged.
+- `garm`: render the `garm-provider-lxd` configuration and its client and server certificate files from the `garm-configurator` relation, and create LXD-backed scale sets. The provider includes the `ubuntu` image remote by default, so a scale set image such as `ubuntu:24.04` is pulled from the Ubuntu simplestreams catalogue.
+
 ## 2026-11-12
 
 - `garm`: stop applying configuration changes when a `garm-configurator` relation publishes an incomplete provider, such as one whose OpenStack password secret is not yet readable. The charm previously restarted GARM with the incomplete provider and recorded it, so the scale sets using that provider failed and later hooks error. The unit now goes to `Blocked` with `Incomplete provider config: <provider>` and leaves GARM running with its existing provider and scale set configuration until the relation data is complete.
