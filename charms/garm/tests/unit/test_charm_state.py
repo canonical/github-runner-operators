@@ -6,16 +6,19 @@
 from unittest.mock import MagicMock
 
 import pytest
-
-from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
+from garm_configurator_relation import ConfiguratorData, ConfiguratorRelation
+from garm_configurator_relation import ProviderConfig as RelationProviderConfig
+from garm_configurator_relation import ScalesetConfig
 
 from charm_state import (
     CharmState,
     ProviderConfig,
     RunnerConfig,
     SSHDebugInfo,
+    _get_desired_entities,
     _get_ssh_debug_connections,
 )
+from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
 
 _COMPLETE = {
     "host": "10.0.0.1",
@@ -36,6 +39,7 @@ def _make_charm(units_data=None):
         A MagicMock charm whose ``model.get_relation`` returns the built relation.
     """
     charm = MagicMock()
+    charm.model.relations.get.return_value = []
     if units_data is None:
         charm.model.get_relation.return_value = None
         return charm
@@ -145,27 +149,36 @@ def test_charm_state_from_charm_with_debug_ssh_relation():
     assert state.ssh_debug_connections[0].host == "192.168.1.5"
 
 
-def _charm(units_data):
-    """Build a mock charm whose configurator relation exposes the given unit databags.
+_PROVIDER_FIELDS = frozenset(
+    {"github_app_id", "github_installation_id", "github_private_key_secret_uri"}
+)
 
-    Units carry real, ordered names so the reconciler's stable-sort tie-break is exercised.
-    """
-    charm = MagicMock()
-    relation = MagicMock()
-    relation.id = 0
-    data_map = {}
-    for i, unit_data in enumerate(units_data):
-        unit = MagicMock()
-        unit.name = f"garm-configurator/{i}"
-        data_map[unit] = unit_data
-    relation.units = list(data_map)
-    relation.data = data_map
-    charm.model.relations.get.return_value = [relation]
-    return charm
+
+def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
+    """Build one configurator relation from a flat databag of provider and scaleset fields."""
+    provider_fields = {key: unit_data[key] for key in _PROVIDER_FIELDS if key in unit_data}
+    scaleset_fields = {
+        key: value for key, value in unit_data.items() if key not in _PROVIDER_FIELDS
+    }
+    return ConfiguratorRelation(
+        relation_id=index,
+        application_name="garm-configurator",
+        unit_name=f"garm-configurator/{index}",
+        provider=RelationProviderConfig(
+            openstack_auth_url="https://ks.example.com:5000/v3", **provider_fields
+        ),
+        scaleset=ScalesetConfig(**scaleset_fields),
+    )
 
 
 def _entities(units_data):
-    return CharmState.from_charm(_charm(units_data)).desired_entities
+    configurator_data = ConfiguratorData(
+        relations=tuple(
+            _configurator_relation(index, **unit_data)
+            for index, unit_data in enumerate(units_data)
+        )
+    )
+    return _get_desired_entities(configurator_data)
 
 
 @pytest.mark.parametrize(
@@ -254,9 +267,9 @@ def test_desired_entities_distinguish_org_and_repo_with_same_name():
     [
         {"github_app_id": "1", "github_installation_id": "2"},
         {"org": "canonical", "github_installation_id": "2"},
-        {"org": "canonical", "github_app_id": "x", "github_installation_id": "2"},
+        {"org": "canonical", "github_app_id": "1"},
     ],
-    ids=["no-org-or-repo", "missing-app-id", "non-numeric-id"],
+    ids=["no-org-or-repo", "missing-app-id", "missing-installation-id"],
 )
 def test_desired_entities_skip_incomplete_unit(unit_data):
     """

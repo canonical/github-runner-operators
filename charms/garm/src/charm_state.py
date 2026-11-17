@@ -18,6 +18,12 @@ import typing
 from collections.abc import Mapping
 
 import ops
+from garm_configurator_relation import (
+    ConfiguratorData,
+    ConfiguratorRelation,
+    GarmConfiguratorRequirer,
+    ScalesetConfig,
+)
 
 from entity_reconciler import EntitySpec
 
@@ -247,7 +253,7 @@ def _get_ssh_debug_connections(charm: ops.CharmBase) -> list[SSHDebugInfo]:
     return sorted(connections, key=lambda c: (c.host, c.port))
 
 
-def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
+def _get_desired_entities(configurator_data: ConfiguratorData) -> list[EntitySpec]:
     """Build the desired GARM org/repo entities from configurator relation data.
 
     Each entity is bound to the GitHub App credential the github reconciler creates for the same
@@ -255,61 +261,46 @@ def _get_desired_entities(charm: ops.CharmBase) -> list[EntitySpec]:
     lacking the App ids is skipped — its credential name cannot be derived.
 
     Args:
-        charm: The charm instance.
+        configurator_data: The aggregated garm-configurator relation data.
 
     Returns:
         The full desired set of entity specs.
     """
     entities: dict[tuple[str, str], EntitySpec] = {}
-    # Iterate relations and units in a stable order so the "keep the first" tie-break below is
-    # deterministic: relation.units is an unordered set, so without sorting two units naming the
-    # same entity with different credentials would flip-flop across reconciles.
-    relations = sorted(
-        charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []), key=lambda r: r.id
-    )
-    for relation in relations:
-        for unit in sorted(relation.units, key=lambda unit: unit.name):
-            _add_desired_entity(entities, relation.data[unit], unit.name)
+    # Sort relations and units so the "keep the first" tie-break below is deterministic:
+    # the requirer exposes an unordered tuple, so without sorting two units naming the same
+    # entity with different credentials would flip-flop across reconciles.
+    for relation in sorted(
+        configurator_data.relations,
+        key=lambda relation: (relation.relation_id, relation.unit_name),
+    ):
+        _add_desired_entity(entities, relation)
     return list(entities.values())
 
 
 def _add_desired_entity(
-    entities: dict[tuple[str, str], EntitySpec], data: Mapping[str, str], unit_name: str
+    entities: dict[tuple[str, str], EntitySpec], relation: ConfiguratorRelation
 ) -> None:
     """Add the entity described by one configurator unit to the desired set.
 
-    Skips the unit (quietly, except for malformed ids) when it names no org/repo or
-    its GitHub App ids are unusable. On a duplicate (type, name), keeps the first
-    spec seen and warns if the later one derives a different credential.
+    Skips the unit quietly when it names no org/repo or its GitHub App ids are absent.
+    On a duplicate (type, name), keeps the first spec seen and warns if the later one
+    derives a different credential.
 
     Args:
         entities: The accumulating desired entities, keyed by (entity_type, entity_name).
-        data: The relation unit databag.
-        unit_name: The configurator unit's name, for log messages.
+        relation: The configurator relation to add.
     """
-    entity = resolve_entity(data)
+    entity = resolve_entity(relation.scaleset)
     if entity is None:
         return
     entity_type, entity_name = entity
 
-    app_id_raw = data.get("github_app_id", "")
-    installation_id_raw = data.get("github_installation_id", "")
-    # Skip quietly while the App ids are merely absent (the configurator publishes the
-    # entity name before them during bring-up); warn only on malformed values.
-    if not (app_id_raw and installation_id_raw):
-        return
-    try:
-        app_id = int(app_id_raw)
-        installation_id = int(installation_id_raw)
-    except ValueError:
-        logger.warning(
-            "Skipping entity %s from %s: non-numeric app/installation id "
-            "(app_id=%r, installation_id=%r)",
-            entity_name,
-            unit_name,
-            app_id_raw,
-            installation_id_raw,
-        )
+    app_id = relation.provider.github_app_id
+    installation_id = relation.provider.github_installation_id
+    # Skip quietly while the App ids are absent (the configurator publishes the entity name
+    # before them during bring-up). The requirer rejects malformed ids as an invalid relation.
+    if app_id is None or installation_id is None:
         return
 
     # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
@@ -335,22 +326,20 @@ def _add_desired_entity(
     )
 
 
-def resolve_entity(data: Mapping[str, str]) -> tuple[str, str] | None:
+def resolve_entity(data: ScalesetConfig) -> tuple[str, str] | None:
     """Resolve the GARM entity a configurator unit names from its org/repo fields.
 
     Args:
-        data: The relation unit databag.
+        data: The configurator unit's scaleset fields.
 
     Returns:
         ``("organization", org)`` or ``("repository", repo)``, or None when
         the unit names neither an org nor a repo.
     """
-    org = data.get("org", "")
-    if org:
-        return "organization", org
-    repo = data.get("repo", "")
-    if repo:
-        return "repository", repo
+    if data.org:
+        return "organization", data.org
+    if data.repo:
+        return "repository", data.repo
     return None
 
 
@@ -369,21 +358,28 @@ class CharmState:
     configurator_related: bool
 
     @classmethod
-    def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
+    def from_charm(
+        cls,
+        charm: ops.CharmBase,
+        configurator_data: ConfiguratorData | None = None,
+    ) -> "CharmState":
         """Build CharmState from the current charm instance.
 
         Args:
             charm: The charm instance.
+            configurator_data: The already-read configurator relation data, or None to read it
+                from the charm.
 
         Returns:
             Current CharmState.
         """
+        requirer = GarmConfiguratorRequirer(charm)
+        if configurator_data is None:
+            configurator_data = requirer.get_data()
         return cls(
             ssh_debug_connections=_get_ssh_debug_connections(charm),
-            desired_entities=_get_desired_entities(charm),
-            configurator_related=bool(
-                charm.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, [])
-            ),
+            desired_entities=_get_desired_entities(configurator_data),
+            configurator_related=requirer.is_related,
         )
 
 
