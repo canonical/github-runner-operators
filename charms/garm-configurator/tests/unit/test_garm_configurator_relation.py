@@ -77,3 +77,7 @@ def test_configurator_data_reports_empty_and_invalid_state(
     """
     assert data.is_empty is expected_empty
     assert data.has_invalid_relations is expected_invalid
+
+
+# The `garm` charm does not consume `GarmConfiguratorRequirer` yet. Cover its aggregation with
+# scenario tests once it does; until then there is no real charm to exercise it through.
