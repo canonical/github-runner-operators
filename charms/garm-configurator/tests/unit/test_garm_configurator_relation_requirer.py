@@ -10,7 +10,6 @@ import ops
 import pytest
 from garm_configurator_relation import (
     GARM_CONFIGURATOR_RELATION_NAME,
-    ConfiguratorData,
     GarmConfiguratorRequirer,
     ProviderConfig,
     ScalesetConfig,
@@ -79,160 +78,142 @@ def _charm(
     return charm
 
 
-def test_get_data_aggregates_every_relation_unit():
-    """
-    arrange: Two relations, each publishing a provider and a scaleset.
-    act: Read the aggregated relation data.
-    assert: Every unit appears with its provider and scaleset, so GARM can render each
-        configurator from one read.
-    """
-    provider_a = _provider("https://ks-a.example.com:5000/v3")
-    provider_b = _provider("https://ks-b.example.com:5000/v3")
-    relation_a = _relation(
-        1,
-        "configurator-a",
-        {"configurator-a/0": (provider_a, ScalesetConfig(name="scaleset-a"), None)},
-    )
-    relation_b = _relation(
-        2,
-        "configurator-b",
-        {"configurator-b/0": (provider_b, ScalesetConfig(name="scaleset-b"), None)},
-    )
-
-    data = GarmConfiguratorRequirer(_charm(relation_a, relation_b)).get_data()
-
-    by_unit = {relation.unit_name: relation for relation in data.relations}
-    assert set(by_unit) == {"configurator-a/0", "configurator-b/0"}
-    assert by_unit["configurator-a/0"].application_name == "configurator-a"
-    assert by_unit["configurator-a/0"].provider == provider_a
-    assert by_unit["configurator-a/0"].scaleset.name == "scaleset-a"
-    assert by_unit["configurator-b/0"].provider == provider_b
-    assert by_unit["configurator-b/0"].scaleset.name == "scaleset-b"
+def _relations_from_specs(
+    specs: list[tuple[int, str, str, str | None, Exception | None]],
+) -> list[MagicMock]:
+    """Return one relation mock per (id, application, unit, scaleset name, load error) spec."""
+    relations = []
+    for relation_id, application_name, unit_name, scaleset_name, error in specs:
+        if error is not None:
+            payload = (None, None, error)
+        else:
+            payload = (_provider(), ScalesetConfig(name=scaleset_name or ""), None)
+        relations.append(_relation(relation_id, application_name, {unit_name: payload}))
+    return relations
 
 
 @pytest.mark.parametrize(
-    "error",
+    "specs, relation_name, expected_unit_names",
     [
-        pytest.param(ValueError("missing provider payload"), id="incomplete-databag"),
-        pytest.param(ValueError("not json"), id="malformed-encoding"),
+        pytest.param(
+            [
+                (1, "configurator-a", "configurator-a/0", "scaleset-a", None),
+                (2, "configurator-b", "configurator-b/0", "scaleset-b", None),
+            ],
+            GARM_CONFIGURATOR_RELATION_NAME,
+            ["configurator-a/0", "configurator-b/0"],
+            id="every-relation-unit",
+        ),
+        pytest.param(
+            [
+                (1, "configurator-a", "configurator-a/0", "", None),
+                (2, "configurator-b", "configurator-b/0", "", None),
+            ],
+            GARM_CONFIGURATOR_RELATION_NAME,
+            ["configurator-a/0", "configurator-b/0"],
+            id="unset-scaleset-names",
+        ),
+        pytest.param([], GARM_CONFIGURATOR_RELATION_NAME, [], id="no-relations"),
+        pytest.param(
+            [(1, "configurator", "configurator/0", "my-scaleset", None)],
+            "custom-endpoint",
+            ["configurator/0"],
+            id="custom-relation-name",
+        ),
     ],
 )
-def test_get_data_tracks_unreadable_relation_as_invalid(error: Exception):
-    """
-    arrange: A unit whose provider payload raises while loading, plus a valid unit.
-    act: Read the aggregated relation data.
-    assert: The unreadable relation is excluded and its id marked invalid, while the readable
-        one survives, so GARM blocks on the broken configurator without dropping the rest.
-    """
-    broken = _relation(1, "configurator-broken", {"broken/0": (None, None, error)})
-    valid = _relation(
-        2,
-        "configurator-valid",
-        {"valid/0": (_provider(), ScalesetConfig(name="scaleset"), None)},
-    )
-
-    data = GarmConfiguratorRequirer(_charm(broken, valid)).get_data()
-
-    assert [relation.unit_name for relation in data.relations] == ["valid/0"]
-    assert data.invalid_relation_ids == frozenset({1})
-    assert data.has_invalid_relations
-
-
-@pytest.mark.parametrize(
-    "scaleset_names",
-    [
-        pytest.param(("scaleset-a", "scaleset-b"), id="distinct-names"),
-        pytest.param(("", ""), id="unset-names"),
-    ],
-)
-def test_get_data_keeps_relations_without_a_scaleset_conflict(
-    scaleset_names: tuple[str, str],
+def test_get_data_aggregates_valid_relations(
+    specs: list[tuple[int, str, str, str | None, Exception | None]],
+    relation_name: str,
+    expected_unit_names: list[str],
 ):
     """
-    arrange: Two relations publishing different, or not yet published, scaleset names.
+    arrange: One or more relations publishing valid data, possibly on a custom endpoint, or no
+        relation at all.
     act: Read the aggregated relation data.
-    assert: Both relations survive, so separate scalesets are not treated as a conflict and an
-        incomplete publish does not hide the relation before the configurator writes its name.
+    assert: Every relation unit keeps its provider, application, and scaleset; two relations
+        may share an unset scaleset name without conflicting, and no relation yields an empty
+        aggregate instead of raising, so GARM can render each configurator from one read.
     """
-    first = _relation(
-        1,
-        "configurator-a",
-        {"configurator-a/0": (_provider(), ScalesetConfig(name=scaleset_names[0]), None)},
-    )
-    second = _relation(
-        2,
-        "configurator-b",
-        {"configurator-b/0": (_provider(), ScalesetConfig(name=scaleset_names[1]), None)},
-    )
+    data = GarmConfiguratorRequirer(
+        _charm(*_relations_from_specs(specs), relation_name=relation_name),
+        relation_name=relation_name,
+    ).get_data()
 
-    data = GarmConfiguratorRequirer(_charm(first, second)).get_data()
-
-    assert [relation.relation_id for relation in data.relations] == [1, 2]
+    assert [relation.unit_name for relation in data.relations] == expected_unit_names
+    assert {relation.unit_name: relation.application_name for relation in data.relations} == {
+        unit_name: application_name for _, application_name, unit_name, _, _ in specs
+    }
+    assert {relation.unit_name: relation.scaleset.name for relation in data.relations} == {
+        unit_name: scaleset_name or "" for _, _, unit_name, scaleset_name, _ in specs
+    }
+    assert all(relation.provider == _provider() for relation in data.relations)
     assert data.invalid_relation_ids == frozenset()
+    assert data.is_empty is (not expected_unit_names)
 
 
-def test_get_data_marks_every_relation_with_a_conflicting_scaleset_name_invalid():
+@pytest.mark.parametrize(
+    "specs, expected_unit_names, expected_invalid_ids",
+    [
+        pytest.param(
+            [
+                (
+                    1,
+                    "configurator-broken",
+                    "broken/0",
+                    None,
+                    ValueError("missing provider payload"),
+                ),
+                (2, "configurator-valid", "valid/0", "scaleset", None),
+            ],
+            ["valid/0"],
+            frozenset({1}),
+            id="incomplete-databag",
+        ),
+        pytest.param(
+            [
+                (1, "configurator-broken", "broken/0", None, ValueError("not json")),
+                (2, "configurator-valid", "valid/0", "scaleset", None),
+            ],
+            ["valid/0"],
+            frozenset({1}),
+            id="malformed-encoding",
+        ),
+        pytest.param(
+            [
+                (1, "configurator-a", "configurator-a/0", "my-scaleset", None),
+                (2, "configurator-b", "configurator-b/0", "my-scaleset", None),
+                (3, "configurator-c", "configurator-c/0", "other-scaleset", None),
+            ],
+            ["configurator-c/0"],
+            frozenset({1, 2}),
+            id="conflicting-scaleset-name",
+        ),
+    ],
+)
+def test_get_data_rejects_invalid_relations(
+    specs: list[tuple[int, str, str, str | None, Exception | None]],
+    expected_unit_names: list[str],
+    expected_invalid_ids: frozenset[int],
+):
     """
-    arrange: Two relations publishing the same scaleset name, plus one publishing another.
+    arrange: A relation whose provider payload cannot be loaded, or relations publishing the
+        same scaleset name, alongside valid relations.
     act: Read the aggregated relation data.
-    assert: Neither conflicting relation is exposed and both ids are invalid while the
-        unrelated relation survives, so GARM blocks on the conflict rather than letting
-        iteration order pick which scaleset to own.
+    assert: The invalid relations are excluded and their ids marked invalid while the valid
+        relations survive, so GARM blocks on a broken configurator without dropping the rest
+        and never lets iteration order pick which conflicting scaleset to own.
     """
-    first = _relation(
-        1,
-        "configurator-a",
-        {"configurator-a/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
-    )
-    second = _relation(
-        2,
-        "configurator-b",
-        {"configurator-b/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
-    )
-    third = _relation(
-        3,
-        "configurator-c",
-        {"configurator-c/0": (_provider(), ScalesetConfig(name="other-scaleset"), None)},
-    )
+    data = GarmConfiguratorRequirer(_charm(*_relations_from_specs(specs))).get_data()
 
-    data = GarmConfiguratorRequirer(_charm(first, second, third)).get_data()
-
-    assert [relation.relation_id for relation in data.relations] == [3]
-    assert data.invalid_relation_ids == frozenset({1, 2})
+    assert [relation.unit_name for relation in data.relations] == expected_unit_names
+    assert {relation.unit_name: relation.scaleset.name for relation in data.relations} == {
+        unit_name: scaleset_name or ""
+        for _, _, unit_name, scaleset_name, _ in specs
+        if unit_name in expected_unit_names
+    }
+    assert data.invalid_relation_ids == expected_invalid_ids
     assert data.has_invalid_relations
-
-
-def test_get_data_returns_empty_aggregate_without_relations():
-    """
-    arrange: A charm with no garm-configurator relation.
-    act: Read the aggregated relation data.
-    assert: The aggregate is empty instead of raising, so the garm charm can reconcile before
-        a configurator is integrated.
-    """
-    data = GarmConfiguratorRequirer(_charm()).get_data()
-
-    assert data == ConfiguratorData()
-    assert data.is_empty
-    assert not data.has_invalid_relations
-
-
-def test_get_data_reads_the_configured_relation_name():
-    """
-    arrange: A charm whose model holds relations on a custom endpoint name.
-    act: Read the aggregated relation data through a requirer configured for that endpoint.
-    assert: The custom relations are aggregated, so the requirer can follow an endpoint the
-        charm renames without changing the relation contract.
-    """
-    relation = _relation(
-        1,
-        "configurator",
-        {"configurator/0": (_provider(), ScalesetConfig(name="my-scaleset"), None)},
-    )
-    charm = _charm(relation, relation_name="custom-endpoint")
-
-    data = GarmConfiguratorRequirer(charm, relation_name="custom-endpoint").get_data()
-
-    assert [item.scaleset.name for item in data.relations] == ["my-scaleset"]
 
 
 @pytest.mark.parametrize(
