@@ -267,13 +267,7 @@ def _get_desired_entities(configurator_data: ConfiguratorData) -> list[EntitySpe
         The full desired set of entity specs.
     """
     entities: dict[tuple[str, str], EntitySpec] = {}
-    # Sort relations and units so the "keep the first" tie-break below is deterministic:
-    # the requirer exposes an unordered tuple, so without sorting two units naming the same
-    # entity with different credentials would flip-flop across reconciles.
-    for relation in sorted(
-        configurator_data.relations,
-        key=lambda relation: (relation.relation_id, relation.unit_name),
-    ):
+    for relation in configurator_data.relations:
         _add_desired_entity(entities, relation)
     return list(entities.values())
 
@@ -304,8 +298,7 @@ def _add_desired_entity(
         return
 
     # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
-    # the first spec seen (iteration is ordered in _get_desired_entities) and warn if a
-    # later one derives a different credential.
+    # the first spec seen and warn if a later one derives a different credential.
     key = (entity_type, entity_name)
     credentials_name = credential_name(app_id, installation_id)
     existing = entities.get(key)

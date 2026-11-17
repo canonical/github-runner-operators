@@ -945,13 +945,7 @@ class GarmCharm(paas_charm.go.Charm):
     ) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
-        # Sorted, because the reconciler's dedupe is first-wins: an unstable order lets the
-        # winning spec flip between hooks. A flip now changes the target scaleset name, which
-        # would create a replacement and retire the live one on every flip.
-        for relation in sorted(
-            configurator_data.relations,
-            key=lambda relation: (relation.relation_id, relation.unit_name),
-        ):
+        for relation in configurator_data.relations:
             spec = self._build_scaleset_spec(relation, template_id)
             if spec is not None:
                 specs.append(spec)
@@ -1039,12 +1033,7 @@ class GarmCharm(paas_charm.go.Charm):
             The full desired set of GitHub credential specs.
         """
         credentials: dict[tuple[int, int], CredentialSpec] = {}
-        # Sorted for the same reason as `_build_desired_scalesets`: the dedupe
-        # below is first-wins over an unordered relation set.
-        for relation in sorted(
-            configurator_data.relations,
-            key=lambda relation: (relation.relation_id, relation.unit_name),
-        ):
+        for relation in configurator_data.relations:
             self._add_unit_credential(credentials, relation)
         return list(credentials.values())
 
