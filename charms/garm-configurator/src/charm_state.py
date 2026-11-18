@@ -520,9 +520,8 @@ class CharmState:
         github_app_config: GitHub App configuration.
         scaleset_config: Scaleset configuration.
         runner_config: Optional runner-level configuration.
-        image: OpenStack image name or ID from config or the image builder relation.
         image_relation: The image builder relation, when connected.
-        image_overrides_builder: Whether configured image takes precedence over the builder.
+        image_configuration: The configured OpenStack image name or ID, if any.
     """
 
     def __init__(
@@ -532,9 +531,8 @@ class CharmState:
         github_app_config: GithubAppConfig,
         scaleset_config: ScalesetConfig,
         runner_config: RunnerConfig,
-        image: str | None,
         image_relation: ops.Relation | None,
-        image_overrides_builder: bool,
+        image_configuration: str | None,
     ) -> None:
         """Initialize the charm state.
 
@@ -543,17 +541,25 @@ class CharmState:
             github_app_config: The GitHub App configuration.
             scaleset_config: The scaleset configuration.
             runner_config: The optional runner configuration.
-            image: The OpenStack image name or ID from config or the image builder relation.
             image_relation: The image builder relation, when connected.
-            image_overrides_builder: Whether configured image takes precedence over the builder.
+            image_configuration: The configured OpenStack image name or ID, if any.
         """
         self.provider_config = provider_config
         self.github_app_config = github_app_config
         self.scaleset_config = scaleset_config
         self.runner_config = runner_config
-        self.image = image
         self.image_relation = image_relation
-        self.image_overrides_builder = image_overrides_builder
+        self.image_configuration = image_configuration
+
+    @property
+    def image(self) -> str | None:
+        """Return the configured image, or the image published by the builder."""
+        return self.image_configuration or _get_image_id_from_relation(self.image_relation)
+
+    @property
+    def image_overrides_builder(self) -> bool:
+        """Return whether a configured image takes precedence over the builder."""
+        return bool(self.image_configuration and self.image_relation)
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "CharmState":
@@ -573,16 +579,14 @@ class CharmState:
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
         image_relation = charm.model.get_relation(IMAGE_RELATION_NAME)
-        configured_image = _get_optional_string_config(charm, SCALESET_IMAGE_CONFIG_NAME)
-        related_image = _get_image_id_from_relation(image_relation)
+        image_configuration = _get_optional_string_config(charm, SCALESET_IMAGE_CONFIG_NAME)
         return cls(
             provider_config=provider_config,
             github_app_config=github_app_config,
             scaleset_config=scaleset_config,
             runner_config=runner_config,
-            image=configured_image or related_image,
             image_relation=image_relation,
-            image_overrides_builder=bool(configured_image and image_relation),
+            image_configuration=image_configuration,
         )
 
 
