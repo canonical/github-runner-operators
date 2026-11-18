@@ -277,9 +277,9 @@ def _add_desired_entity(
 ) -> None:
     """Add the entity described by one configurator unit to the desired set.
 
-    Skips the unit quietly when it names no org/repo or its GitHub App ids are absent.
-    On a duplicate (type, name), keeps the first spec seen and warns if the later one
-    derives a different credential.
+    Skips the unit when it names no org/repo or its GitHub App ids are absent, logging the
+    latter so a stalled bring-up is visible. On a duplicate (type, name), keeps the first
+    spec seen and warns if the later one derives a different credential.
 
     Args:
         entities: The accumulating desired entities, keyed by (entity_type, entity_name).
@@ -292,9 +292,14 @@ def _add_desired_entity(
 
     app_id = relation.provider.github_app_id
     installation_id = relation.provider.github_installation_id
-    # Skip quietly while the App ids are absent (the configurator publishes the entity name
-    # before them during bring-up). The requirer rejects malformed ids as an invalid relation.
+    # Skip while the App ids are absent (the configurator publishes the entity name before
+    # them during bring-up). The requirer rejects malformed ids as an invalid relation.
     if app_id is None or installation_id is None:
+        logger.info(
+            "Skipping entity %s '%s': GitHub App ids not yet published",
+            entity_type,
+            entity_name,
+        )
         return
 
     # Dedupe by (type, name) so an org and a repo sharing a raw name don't collide. Keep
@@ -343,35 +348,35 @@ class CharmState:
     Attributes:
         ssh_debug_connections: SSH debug connection info from the debug-ssh relation.
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
+        configurator_data: The aggregated garm-configurator relation data.
         configurator_related: Whether a garm-configurator relation is present.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
     desired_entities: list[EntitySpec]
+    configurator_data: ConfiguratorData
     configurator_related: bool
 
     @classmethod
     def from_charm(
         cls,
         charm: ops.CharmBase,
-        configurator_data: ConfiguratorData | None = None,
+        requirer: GarmConfiguratorRequirer,
     ) -> "CharmState":
         """Build CharmState from the current charm instance.
 
         Args:
             charm: The charm instance.
-            configurator_data: The already-read configurator relation data, or None to read it
-                from the charm.
+            requirer: The configurator relation requirer owned by the charm.
 
         Returns:
             Current CharmState.
         """
-        requirer = GarmConfiguratorRequirer(charm)
-        if configurator_data is None:
-            configurator_data = requirer.get_data()
+        configurator_data = requirer.get_data()
         return cls(
             ssh_debug_connections=_get_ssh_debug_connections(charm),
             desired_entities=_get_desired_entities(configurator_data),
+            configurator_data=configurator_data,
             configurator_related=requirer.is_related,
         )
 

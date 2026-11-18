@@ -73,6 +73,10 @@ class InvalidProviderConfigError(BlockedError):
     """A configurator publishes a provider with empty required fields."""
 
 
+class InvalidConfiguratorRelationError(BlockedError):
+    """A configurator relation is incomplete or conflicts with another relation."""
+
+
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -392,6 +396,8 @@ class GarmCharm(paas_charm.go.Charm):
             rerun_migrations: Passed through to the parent restart.
 
         Raises:
+            InvalidConfiguratorRelationError: If a related configurator relation is incomplete
+                or conflicts with another, before anything is applied.
             InvalidProviderConfigError: If a related provider is incomplete, before anything
                 is applied.
         """
@@ -417,12 +423,12 @@ class GarmCharm(paas_charm.go.Charm):
 
         # Read the relations once per hook so publishing, reconciling and recording all see
         # the same configurator payload.
-        configurator_data = self._configurator_requirer.get_data()
+        charm_state = CharmState.from_charm(self, self._configurator_requirer)
         # Raises before anything is applied, so GARM keeps its running configuration rather
         # than publish and record a provider that would break its scalesets.
-        related_providers = self._get_configurator_provider_configs(configurator_data)
+        related_providers = self._get_configurator_provider_configs(charm_state.configurator_data)
         recorded_providers = self._read_provider_record()
-        configurator_related = self._configurator_requirer.is_related
+        configurator_related = charm_state.configurator_related
         # The record is published even with no relation left: a drain outlives the relation,
         # and a replaced pod must start GARM with the providers that drain needs. An empty
         # set is published the same way, so the workload converges on what the relations and
@@ -469,7 +475,7 @@ class GarmCharm(paas_charm.go.Charm):
         # referenced, and it must not be buried by the framework reporting active afterward.
         # An empty desired state is a real one — with no configurator left the workload runs
         # with no providers, and the pass reconciles that to zero.
-        live_scalesets = self._reconcile_garm_state(configurator_data)
+        live_scalesets = self._reconcile_garm_state(charm_state)
         self._save_provider_record(
             self._trimmed_providers(published_providers, related_providers, live_scalesets)
         )
@@ -663,15 +669,16 @@ class GarmCharm(paas_charm.go.Charm):
             One ``ProviderConfig`` per configurator relation unit, ordered by provider name.
 
         Raises:
-            InvalidProviderConfigError: If a relation is incomplete or conflicts with another
-                over a scaleset, or a provider has empty required fields, e.g. a password
-                secret not yet readable.
+            InvalidConfiguratorRelationError: If a relation is incomplete or conflicts with
+                another over a scaleset.
+            InvalidProviderConfigError: If a provider has empty required fields, e.g. a
+                password secret not yet readable.
         """
         if configurator_data.has_invalid_relations:
             relation_ids = ", ".join(
                 str(relation_id) for relation_id in sorted(configurator_data.invalid_relation_ids)
             )
-            raise InvalidProviderConfigError(
+            raise InvalidConfiguratorRelationError(
                 f"Invalid garm-configurator relation data: {relation_ids}"
             )
         if not configurator_data.relations:
@@ -1081,7 +1088,7 @@ class GarmCharm(paas_charm.go.Charm):
             description=MANAGED_CREDENTIAL_DESCRIPTION,
         )
 
-    def _reconcile_garm_state(self, configurator_data: ConfiguratorData) -> list[ScaleSet] | None:
+    def _reconcile_garm_state(self, charm_state: CharmState) -> list[ScaleSet] | None:
         """Make GARM match the charm's desired state: its own config, then its resources.
 
         The steps are ordered, not independent: GARM rejects every operational call with
@@ -1090,6 +1097,9 @@ class GarmCharm(paas_charm.go.Charm):
         authenticated client configures the URLs and reconciles credentials, then entities,
         then scalesets. The ``github_linux_charmed`` template is ensured before scalesets so each
         scaleset can reference it.
+
+        Args:
+            charm_state: The charm state read once for this reconcile pass.
 
         Returns:
             The scalesets GARM still holds after the pass, or None when the pass could not
@@ -1106,7 +1116,6 @@ class GarmCharm(paas_charm.go.Charm):
         # _get_garm_url() which depends on charm config that is not set for the local API.
         base_url = GARM_LOCAL_API_BASE_URL
         try:
-            charm_state = CharmState.from_charm(self, configurator_data)
             auth_client = GarmAuthenticatedClient.from_login(
                 base_url, admin_creds["username"], admin_creds["password"]
             )
@@ -1121,12 +1130,12 @@ class GarmCharm(paas_charm.go.Charm):
             self._ensure_controller_urls(auth_client)
             agent_mode = self._ensure_agent_tools(auth_client)
             GithubReconciler(auth_client).reconcile(
-                self._build_desired_credentials(configurator_data)
+                self._build_desired_credentials(charm_state.configurator_data)
             )
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
             replacing, surviving_scalesets = ScalesetReconciler(auth_client).reconcile(
-                self._build_desired_scalesets(configurator_data, template_id)
+                self._build_desired_scalesets(charm_state.configurator_data, template_id)
             )
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
