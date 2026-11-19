@@ -204,12 +204,12 @@ def test_clearing_configured_image_falls_back_to_image_relation():
     assert _scaleset_value(cleared.get_relation(garm_relation.id), "image_id") == "legacy-uuid"
 
 
-def test_clearing_configured_image_without_relation_withdraws_only_image():
+def test_clearing_configured_image_without_relation_withdraws_payload():
     """
     arrange: A configured image has published a complete GARM relation payload.
     act: Clear the image config while no image builder relation exists.
-    assert: The charm blocks and withdraws only the image, retaining credentials so GARM
-        can remove the old scale set.
+    assert: The charm blocks and withdraws its whole payload, because the relation contract
+        marks the image required and an older payload would keep advertising the removed image.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -236,12 +236,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert cleared.unit_status == ops.BlockedStatus(
         "Missing image config or image builder relation"
     )
-    assert _scaleset_value_or_empty(garm_out, "image_id") == ""
-    assert _relation_value(garm_out, "openstack_auth_url") == (
-        "https://keystone.example.com:5000/v3"
-    )
-    assert "openstack_password_secret_uri" in _relation_section(garm_out, "provider")
-    assert _relation_value(garm_out, "github_private_key_secret_uri")
+    assert garm_out.local_app_data == {}
     relation_id = garm_relation.id
     relation_secrets = {
         secret.label: secret for secret in cleared.secrets if secret.label is not None
@@ -683,6 +678,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
     config["labels"] = "self-hosted,linux"
     config["pre-install-scripts"] = "echo hello"
     garm_relation = _make_garm_configurator_relation()
@@ -773,12 +769,12 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert _scaleset_value(garm_out, "image_id") == "abc-image-uuid"
 
 
-def test_reconcile_writes_garm_data_without_image_uuid():
+def test_reconcile_withholds_garm_data_without_image_uuid():
     """
     arrange: All configs valid, garm relation joined, but image relation has NO UUID.
     act: config-changed fires.
-    assert: The model-based saves write the scaleset fields and the provider payload with an
-        empty image ID, so GARM can still resolve the provider while no scaleset is created.
+    assert: Nothing is published, because the image is required by the relation contract and a
+        partial payload would make GARM reject the relation.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -793,13 +789,8 @@ def test_reconcile_writes_garm_data_without_image_uuid():
     )
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
-    assert _scaleset_value(garm_out, "name") == "my-scaleset"
-    assert _scaleset_value_or_empty(garm_out, "image_id") == ""
-    assert _relation_value(garm_out, "github_app_id") == 99999
-    assert _relation_value(garm_out, "openstack_auth_url") == (
-        "https://keystone.example.com:5000/v3"
-    )
-    assert _relation_value(garm_out, "openstack_password_secret_uri")
+    assert out.unit_status == ops.WaitingStatus("Waiting for image UUID from image builder")
+    assert garm_out.local_app_data == {}
 
 
 def test_non_leader_is_blocked_and_publishes_nothing():
@@ -1003,6 +994,7 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
     config["dockerhub-mirror"] = "https://mirror.example.com"
     config["runner-http-proxy"] = "http://proxy.example.com:3128"
     config["aproxy-exclude-addresses"] = (
@@ -1043,9 +1035,11 @@ def test_runner_config_fields_empty_when_unset():
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
     garm_relation = _make_garm_configurator_relation()
     state = State(
-        config=_valid_config(secret, pk_secret),
+        config=config,
         secrets=[secret, pk_secret],
         relations=[garm_relation],
         leader=True,
@@ -1082,6 +1076,7 @@ def test_enable_shell_written_to_garm_configurator_relation(configured, expected
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
     if configured is not None:
         config["enable-shell"] = configured
     garm_relation = _make_garm_configurator_relation()
@@ -1110,6 +1105,7 @@ def test_image_visibility_written_to_garm_configurator_relation(configured, expe
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
     if configured is not None:
         config["image-visibility"] = configured
     garm_relation = _make_garm_configurator_relation()
@@ -1141,6 +1137,7 @@ def test_security_group_written_to_garm_configurator_relation(configured, expect
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
     if configured is not None:
         config["security-group"] = configured
     garm_relation = _make_garm_configurator_relation()

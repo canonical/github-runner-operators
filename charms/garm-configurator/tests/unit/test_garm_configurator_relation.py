@@ -6,6 +6,7 @@
 import dataclasses
 from types import SimpleNamespace
 
+import pydantic
 import pytest
 from garm_configurator_relation import (
     ConfiguratorApplicationData,
@@ -17,18 +18,46 @@ from garm_configurator_relation import (
 )
 
 
+def _provider(**overrides) -> ProviderConfig:
+    """Return a complete provider payload, with the given fields overridden."""
+    values = {
+        "openstack_auth_url": "https://ks.example.com:5000/v3",
+        "openstack_username": "admin",
+        "openstack_password_secret_uri": "secret:openstack-password",
+        "openstack_project_name": "myproject",
+        "openstack_user_domain_name": "Default",
+        "openstack_project_domain_name": "Default",
+        "openstack_region_name": "RegionOne",
+        "openstack_network": "external-net",
+        "github_app_id": 123,
+        "github_installation_id": 456,
+        "github_private_key_secret_uri": "secret:github-private-key",
+    }
+    values.update(overrides)
+    return ProviderConfig(**values)
+
+
+def _scaleset(**overrides) -> ScalesetConfig:
+    """Return a complete scaleset payload, with the given fields overridden."""
+    values = {
+        "name": "my-scaleset",
+        "provider_name": "configurator-0",
+        "image_id": "ubuntu:24.04",
+        "flavor": "m1.large",
+        "os_arch": "amd64",
+        "repo": "myorg/myrepo",
+    }
+    values.update(overrides)
+    return ScalesetConfig(**values)
+
+
 def _relation(relation_id: int = 1, scaleset_name: str = "my-scaleset") -> ConfiguratorRelation:
     """Return a minimal valid configurator relation."""
     return ConfiguratorRelation(
         relation_id=relation_id,
         application_name=f"configurator-{relation_id}",
-        provider=ProviderConfig(
-            openstack_auth_url="https://ks.example.com:5000/v3",
-        ),
-        scaleset=ScalesetConfig(
-            name=scaleset_name,
-            provider_name=f"configurator-{relation_id}-0",
-        ),
+        provider=_provider(),
+        scaleset=_scaleset(name=scaleset_name, provider_name=f"configurator-{relation_id}-0"),
     )
 
 
@@ -95,11 +124,8 @@ def test_application_data_nests_provider_and_scaleset():
         only its own fields, so consumers parse the two concerns separately.
     """
     application_data = ConfiguratorApplicationData(
-        provider=ProviderConfig(
-            openstack_auth_url="https://ks.example.com:5000/v3",
-            github_app_id=123,
-        ),
-        scaleset=ScalesetConfig(
+        provider=_provider(github_app_id=123),
+        scaleset=_scaleset(
             name="my-scaleset",
             provider_name="configurator-0",
             image_id="ubuntu:24.04",
@@ -112,17 +138,17 @@ def test_application_data_nests_provider_and_scaleset():
     assert set(nested) == {"provider", "scaleset"}
     assert nested["provider"] == {
         "openstack_auth_url": "https://ks.example.com:5000/v3",
-        "openstack_username": None,
+        "openstack_username": "admin",
         "openstack_password": None,
-        "openstack_password_secret_uri": None,
-        "openstack_project_name": None,
-        "openstack_user_domain_name": None,
-        "openstack_project_domain_name": None,
-        "openstack_region_name": None,
-        "openstack_network": None,
+        "openstack_password_secret_uri": "secret:openstack-password",
+        "openstack_project_name": "myproject",
+        "openstack_user_domain_name": "Default",
+        "openstack_project_domain_name": "Default",
+        "openstack_region_name": "RegionOne",
+        "openstack_network": "external-net",
         "github_app_id": 123,
-        "github_installation_id": None,
-        "github_private_key_secret_uri": None,
+        "github_installation_id": 456,
+        "github_private_key_secret_uri": "secret:github-private-key",
     }
     assert nested["scaleset"]["name"] == "my-scaleset"
     assert nested["scaleset"]["provider_name"] == "configurator-0"
@@ -142,10 +168,20 @@ class _FakeRelation:
 
     id = 1
 
-    def __init__(self, application_data: ConfiguratorApplicationData | None = None) -> None:
+    def __init__(
+        self,
+        application_data: ConfiguratorApplicationData | None = None,
+        *,
+        validates: bool = True,
+    ) -> None:
         self.app = _FakeApp()
-        self.data = {self.app: {"published": "true"}} if application_data is not None else {}
+        self.data = (
+            {self.app: {"published": "true"}}
+            if application_data is not None or not validates
+            else {}
+        )
         self._application_data = application_data
+        self._validates = validates
         self.loaded_entity = None
 
     def load(self, cls, entity, *args, **kwargs):
@@ -153,7 +189,7 @@ class _FakeRelation:
         if cls is not ConfiguratorApplicationData:
             raise AssertionError(f"unexpected databag load for {cls.__name__}")
         self.loaded_entity = entity
-        if self._application_data is None:
+        if self._application_data is None or not self._validates:
             raise ValueError("incomplete application databag")
         return self._application_data
 
@@ -167,14 +203,12 @@ def test_requirer_reads_nested_provider_and_scaleset():
         nested value unchanged, so the configurator's single save remains the source of truth.
     """
     application_data = ConfiguratorApplicationData(
-        provider=ProviderConfig(
-            openstack_auth_url="https://ks.example.com:5000/v3",
-            github_app_id=123,
-        ),
-        scaleset=ScalesetConfig(
+        provider=_provider(github_app_id=123),
+        scaleset=_scaleset(
             name="my-scaleset",
             provider_name="configurator-0",
             org="myorg",
+            repo="",
             max_runner="6",
         ),
     )
@@ -209,3 +243,121 @@ def test_requirer_marks_relation_without_application_data_invalid():
     assert data.invalid_relation_ids == frozenset({relation.id})
     assert not data.is_empty
     assert data.has_invalid_relations
+
+
+def test_scaleset_optional_fields_have_garm_defaults():
+    """
+    arrange: A scaleset payload with only the fields GARM cannot create the scaleset without.
+    act: Read the optional fields.
+    assert: They carry the GARM defaults, so a databag that omits them is valid instead of
+        invalid or an empty scaleset.
+    """
+    scaleset = _scaleset()
+
+    assert scaleset.min_idle_runner == "0"
+    assert scaleset.max_runner == "1"
+    assert scaleset.labels == ""
+    assert scaleset.runner_group == "Default"
+    assert scaleset.enable_shell == "false"
+    assert scaleset.pre_install_scripts == ""
+    assert scaleset.image_visibility == ""
+    assert scaleset.security_group == ""
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["name", "provider_name", "image_id", "flavor", "os_arch"],
+)
+def test_scaleset_required_field_must_be_present_and_not_blank(field: str):
+    """
+    arrange: A scaleset payload missing one of the fields scaleset creation depends on, first
+        omitted and then blank.
+    act: Build the scaleset payload.
+    assert: Both forms are rejected, so a consumer never creates a scaleset from a partial or
+        empty required value.
+    """
+    missing = {
+        key: value for key, value in dataclasses.asdict(_scaleset()).items() if key != field
+    }
+    with pytest.raises(pydantic.ValidationError):
+        ScalesetConfig(**missing)
+    with pytest.raises(pydantic.ValidationError):
+        _scaleset(**{field: "   "})
+
+
+@pytest.mark.parametrize(
+    "entity",
+    [{}, {"org": "myorg", "repo": "myorg/myrepo"}],
+    ids=["neither-org-nor-repo", "both-org-and-repo"],
+)
+def test_scaleset_requires_exactly_one_entity(entity: dict):
+    """
+    arrange: A scaleset payload naming neither or both of the mutually exclusive entity fields.
+    act: Build the scaleset payload.
+    assert: It is rejected, because GARM registers runners to exactly one org or repo.
+    """
+    data = dataclasses.asdict(_scaleset()) | {"org": "", "repo": ""} | entity
+    with pytest.raises(pydantic.ValidationError):
+        ScalesetConfig(**data)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "openstack_auth_url",
+        "openstack_username",
+        "openstack_project_name",
+        "openstack_user_domain_name",
+        "openstack_project_domain_name",
+        "openstack_region_name",
+        "openstack_network",
+        "github_private_key_secret_uri",
+    ],
+)
+def test_provider_required_field_must_be_present_and_not_blank(field: str):
+    """
+    arrange: A provider payload missing one of the fields provider or credential creation
+        depends on, first omitted and then blank.
+    act: Build the provider payload.
+    assert: Both forms are rejected, so a consumer never renders a provider from a partial or
+        empty required value.
+    """
+    missing = {
+        key: value for key, value in dataclasses.asdict(_provider()).items() if key != field
+    }
+    with pytest.raises(pydantic.ValidationError):
+        ProviderConfig(**missing)
+    with pytest.raises(pydantic.ValidationError):
+        _provider(**{field: "   "})
+
+
+def test_provider_requires_a_password_source():
+    """
+    arrange: A provider payload with neither an inline password nor a password secret URI.
+    act: Build the provider payload.
+    assert: It is rejected, because GARM cannot authenticate to Keystone without one; either
+        source is accepted on its own.
+    """
+    with pytest.raises(pydantic.ValidationError):
+        _provider(openstack_password=None, openstack_password_secret_uri=None)
+
+    assert _provider(
+        openstack_password_secret_uri=None, openstack_password="pass"
+    ).openstack_password
+    assert _provider().openstack_password_secret_uri
+
+
+def test_requirer_marks_incomplete_payload_invalid():
+    """
+    arrange: A configurator relation whose published payload cannot satisfy the required fields.
+    act: Aggregate the relation data.
+    assert: The relation id is reported invalid and no partial provider is exposed, so GARM
+        blocks instead of rendering a partially configured provider.
+    """
+    relation = _FakeRelation(validates=False)
+    charm = SimpleNamespace(model=SimpleNamespace(relations={"garm-configurator": [relation]}))
+
+    data = GarmConfiguratorRequirer(charm).get_data()
+
+    assert data.relations == ()
+    assert data.invalid_relation_ids == frozenset({relation.id})
