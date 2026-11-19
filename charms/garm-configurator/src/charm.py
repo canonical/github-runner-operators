@@ -135,14 +135,18 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Builds one ``RelationProviderConfig`` holding the scaleset fields, runner options,
         image reference, and OpenStack/GitHub App credentials, then writes it with a single
-        ``ops.Relation.save`` call. The ``image_id`` field carries either an OpenStack image
-        name or ID for compatibility.
-        The optional ``org`` and ``repo`` fields are included only when set.
+        ``ops.Relation.save`` call. ``Relation.save`` persists every model field, so an unset
+        optional field is published as an empty string rather than omitted; consumers treat the
+        empty string as "unset". The ``image_id`` field carries either an OpenStack image name
+        or ID for compatibility.
 
         When this unit holds leadership, also provisions Juju secrets for the OpenStack
         password and GitHub App private key and writes their secret URIs alongside the
-        credential fields. Without leadership the credentials are still published, but the
-        secret URIs are left unset for the leader to fill in.
+        credential fields. Secret provisioning is gated on the relation existing and the unit
+        being the leader, not on an image being available, so credentials can be published
+        before an image is configured and are retained when an image is withdrawn. Without
+        leadership the credentials are still published, but the secret URIs are left unset for
+        the leader to fill in.
 
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).

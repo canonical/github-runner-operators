@@ -27,7 +27,8 @@ def _make_garm_configurator_relation():
 
 def _relation_value(relation, key: str):
     """Return a relation value decoded from the JSON form ``Relation.save`` writes."""
-    return json.loads(relation.local_unit_data[key])
+    value = relation.local_unit_data.get(key)
+    return "" if value is None else json.loads(value)
 
 
 def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
@@ -793,7 +794,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         Image UUID is present, garm relation is joined.
     act: config-changed fires.
     assert: org, runner_group, and pre_install_scripts are present in the
-        garm relation data. repo is absent.
+        garm relation data. repo is published as an empty string.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -968,11 +969,11 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     assert _relation_value(rel_out, "pre_job_script") == "echo start"
 
 
-def test_runner_config_fields_absent_when_unset():
+def test_runner_config_fields_empty_when_unset():
     """
     arrange: Valid config with no runner config options set.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The six runner config keys are absent from the databag.
+    assert: The six runner config keys are published as empty strings.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
