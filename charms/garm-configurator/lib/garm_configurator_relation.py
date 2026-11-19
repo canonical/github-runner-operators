@@ -286,9 +286,7 @@ class GarmConfiguratorRequirer:
             application_name = relation.app.name if relation.app else ""
             for unit in relation.units:
                 try:
-                    provider = relation.load(
-                        ProviderConfig, unit, decoder=_decode_relation_value
-                    )
+                    provider = relation.load(ProviderConfig, unit, decoder=_decode_relation_value)
                 except ValueError:
                     logger.warning(
                         "Ignoring incomplete garm-configurator relation data: "
@@ -364,4 +362,3 @@ def _decode_relation_value(value: str) -> typing.Any:
     if decoded is None or isinstance(decoded, str):
         return decoded
     return value
-
