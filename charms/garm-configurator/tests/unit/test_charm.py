@@ -26,8 +26,8 @@ def _make_garm_configurator_relation():
 
 
 def _relation_value(relation, key: str):
-    """Return a relation value decoded from the JSON form ``Relation.save`` writes."""
-    value = relation.local_unit_data.get(key)
+    """Return an application databag value decoded from the JSON form ``Relation.save`` writes."""
+    value = relation.local_app_data.get(key)
     return "" if value is None else json.loads(value)
 
 
@@ -53,6 +53,32 @@ def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
     }
 
 
+def test_non_leader_is_blocked_and_publishes_nothing():
+    """
+    arrange: A fully valid config on a non-leader unit with a joined garm-configurator relation.
+    act: Run config-changed.
+    assert: The unit blocks before parsing config or writing relations, so the leader remains
+        the single writer of the application databag.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    garm_relation = _make_garm_configurator_relation()
+    state = State(
+        leader=False,
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[garm_relation],
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert out.unit_status == ops.BlockedStatus(
+        "Non-leader unit: configurator data is published by the leader"
+    )
+    assert out.get_relation(garm_relation.id).local_app_data == {}
+
+
 def test_charm_blocked_with_valid_config_no_image_source():
     """
     arrange: All configs are valid but no image builder relation.
@@ -62,7 +88,9 @@ def test_charm_blocked_with_valid_config_no_image_source():
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
-    state = State(config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret])
+    state = State(
+        leader=True, config=_valid_config(secret, pk_secret), secrets=[secret, pk_secret]
+    )
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus("Missing image config or image builder relation")
 
@@ -90,7 +118,7 @@ def test_configured_image_is_published_without_image_relation():
 
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.ActiveStatus("Ready")
-    assert "image" not in garm_out.local_unit_data
+    assert "image" not in garm_out.local_app_data
     assert _relation_value(garm_out, "image_id") == "runner-noble-amd64"
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
@@ -222,7 +250,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
-    assert "openstack_password_secret_uri" in garm_out.local_unit_data
+    assert "openstack_password_secret_uri" in garm_out.local_app_data
     assert _relation_value(garm_out, "github_private_key_secret_uri")
     relation_id = garm_relation.id
     relation_secrets = {
@@ -346,7 +374,7 @@ def test_charm_blocked_invalid_config(config_mutations: dict, expected_message: 
             del config[key]
         else:
             config[key] = value
-    state = State(config=config, secrets=[secret, pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(expected_message)
 
@@ -363,7 +391,7 @@ def test_charm_logs_invalid_config_detail(caplog: pytest.LogCaptureFixture):
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
     del config["openstack-auth-url"]
-    state = State(config=config, secrets=[secret, pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, pk_secret])
     ctx.run(ctx.on.config_changed(), state)
     assert any(
         record.levelname == "WARNING"
@@ -382,7 +410,7 @@ def test_charm_blocked_password_secret_missing_value_key():
     secret = Secret(tracked_content={"wrong-key": "data"})
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
-    state = State(config=config, secrets=[secret, pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(
         "openstack-password secret is invalid or missing 'value' key"
@@ -399,7 +427,7 @@ def test_charm_blocked_password_secret_not_found():
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
-    state = State(config=config, secrets=[pk_secret])
+    state = State(leader=True, config=config, secrets=[pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(
         "openstack-password secret is invalid or missing 'value' key"
@@ -418,7 +446,7 @@ def test_charm_not_blocked_with_http_auth_url():
     config = _valid_config(secret, pk_secret)
     config["openstack-auth-url"] = "http://keystone.local:5000/v3"
     config["image"] = "runner-noble-amd64"
-    state = State(config=config, secrets=[secret, pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
 
@@ -433,7 +461,7 @@ def test_charm_blocked_github_app_private_key_secret_missing_value_key():
     secret = _make_secret()
     bad_pk_secret = Secret(tracked_content={"wrong-key": "data"})
     config = _valid_config(secret, bad_pk_secret)
-    state = State(config=config, secrets=[secret, bad_pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, bad_pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(
         "github-app-private-key secret is invalid or missing 'value' key"
@@ -450,7 +478,7 @@ def test_charm_blocked_github_app_private_key_secret_not_found():
     secret = _make_secret()
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
-    state = State(config=config, secrets=[secret])
+    state = State(leader=True, config=config, secrets=[secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.BlockedStatus(
         "github-app-private-key secret is invalid or missing 'value' key"
@@ -471,7 +499,9 @@ def test_charm_active_with_org_and_runner_group():
     config["org"] = "myorg"
     config["runner-group"] = "my-group"
     image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
-    state = State(config=config, secrets=[secret, pk_secret], relations=[image_relation])
+    state = State(
+        leader=True, config=config, secrets=[secret, pk_secret], relations=[image_relation]
+    )
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
 
@@ -489,7 +519,9 @@ def test_charm_active_with_org_only():
     del config["repo"]
     config["org"] = "myorg"
     image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
-    state = State(config=config, secrets=[secret, pk_secret], relations=[image_relation])
+    state = State(
+        leader=True, config=config, secrets=[secret, pk_secret], relations=[image_relation]
+    )
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ops.ActiveStatus("Ready")
 
@@ -505,6 +537,7 @@ def test_reconcile_writes_openstack_credentials_to_image_relation():
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image")
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -532,6 +565,7 @@ def test_reconcile_writes_credentials_on_secret_changed():
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image")
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -552,6 +586,7 @@ def test_reconcile_writes_credentials_on_config_changed_with_existing_relation()
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image")
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -575,6 +610,7 @@ def test_reconcile_does_not_write_credentials_when_config_invalid():
     del config["openstack-auth-url"]
     image_relation = Relation(endpoint="image")
     state = State(
+        leader=True,
         config=config,
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -595,6 +631,7 @@ def test_status_waiting_when_image_relation_has_no_uuid():
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image")
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -614,6 +651,7 @@ def test_status_active_when_image_uuid_is_present():
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -634,6 +672,7 @@ def test_status_blocked_on_relation_broken():
     pk_secret = _make_private_key_secret()
     image_relation = Relation(endpoint="image")
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation],
@@ -646,7 +685,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     """
     arrange: Valid config and an active garm-configurator relation.
     act: Run config-changed.
-    assert: The charm writes all expected scaleset fields to local unit relation data.
+    assert: The charm writes all expected scaleset fields to the application databag.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -656,6 +695,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     config["pre-install-scripts"] = "echo hello"
     garm_relation = _make_garm_configurator_relation()
     state = State(
+        leader=True,
         config=config,
         secrets=[secret, pk_secret],
         relations=[garm_relation],
@@ -685,7 +725,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     arrange: All configs valid, image relation has a UUID, garm relation is joined.
     act: config-changed fires (holistic reconcile).
     assert: The full config payload (provider, github, scaleset, image_id) is written
-        to the garm-configurator relation's local unit data.
+        to the garm-configurator relation's application databag.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -717,7 +757,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     # GitHub config
     assert _relation_value(garm_out, "github_app_id") == 99999
     assert _relation_value(garm_out, "github_installation_id") == 67890
-    assert "github_private_key" not in garm_out.local_unit_data
+    assert "github_private_key" not in garm_out.local_app_data
     assert _relation_value(garm_out, "github_private_key_secret_uri")
 
     # Scaleset config
@@ -767,7 +807,7 @@ def test_reconcile_writes_garm_data_on_relation_joined():
     """
     arrange: All configs valid, image has UUID, garm relation just joined.
     act: relation_joined fires.
-    assert: Config payload is written to the garm relation's local unit data.
+    assert: Config payload is written to the relation's application databag.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -907,7 +947,7 @@ def test_charm_blocked_invalid_runner_config(
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
     config[config_key] = bad_value
-    state = State(config=config, secrets=[secret, pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert isinstance(out.unit_status, ops.BlockedStatus)
     assert expected_fragment in out.unit_status.message
@@ -924,7 +964,7 @@ def test_runner_config_aproxy_options_require_proxy():
     pk_secret = _make_private_key_secret()
     config = _valid_config(secret, pk_secret)
     config["aproxy-redirect-ports"] = "80,443"
-    state = State(config=config, secrets=[secret, pk_secret])
+    state = State(leader=True, config=config, secrets=[secret, pk_secret])
     out = ctx.run(ctx.on.config_changed(), state)
     assert isinstance(out.unit_status, ops.BlockedStatus)
     assert "require runner-http-proxy to be set" in out.unit_status.message
@@ -950,6 +990,7 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     config["pre-job-script"] = "  echo start  "
     garm_relation = _make_garm_configurator_relation()
     state = State(
+        leader=True,
         config=config,
         secrets=[secret, pk_secret],
         relations=[garm_relation],
@@ -980,6 +1021,7 @@ def test_runner_config_fields_empty_when_unset():
     pk_secret = _make_private_key_secret()
     garm_relation = _make_garm_configurator_relation()
     state = State(
+        leader=True,
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[garm_relation],
@@ -1019,7 +1061,9 @@ def test_enable_shell_written_to_garm_configurator_relation(configured, expected
     if configured is not None:
         config["enable-shell"] = configured
     garm_relation = _make_garm_configurator_relation()
-    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+    state = State(
+        leader=True, config=config, secrets=[secret, pk_secret], relations=[garm_relation]
+    )
 
     out = ctx.run(ctx.on.config_changed(), state)
 
@@ -1045,7 +1089,9 @@ def test_image_visibility_written_to_garm_configurator_relation(configured, expe
     if configured is not None:
         config["image-visibility"] = configured
     garm_relation = _make_garm_configurator_relation()
-    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+    state = State(
+        leader=True, config=config, secrets=[secret, pk_secret], relations=[garm_relation]
+    )
 
     out = ctx.run(ctx.on.config_changed(), state)
 
@@ -1071,7 +1117,9 @@ def test_security_group_written_to_garm_configurator_relation(configured, expect
     if configured is not None:
         config["security-group"] = configured
     garm_relation = _make_garm_configurator_relation()
-    state = State(config=config, secrets=[secret, pk_secret], relations=[garm_relation])
+    state = State(
+        leader=True, config=config, secrets=[secret, pk_secret], relations=[garm_relation]
+    )
 
     out = ctx.run(ctx.on.config_changed(), state)
 

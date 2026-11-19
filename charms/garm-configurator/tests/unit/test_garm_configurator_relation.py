@@ -3,10 +3,13 @@
 
 """Unit tests for the ``garm-configurator`` relation dataclasses."""
 
+from types import SimpleNamespace
+
 import pytest
 from garm_configurator_relation import (
     ConfiguratorData,
     ConfiguratorRelation,
+    GarmConfiguratorRequirer,
     ProviderConfig,
     ScalesetConfig,
 )
@@ -17,35 +20,24 @@ def _relation(relation_id: int = 1, scaleset_name: str = "my-scaleset") -> Confi
     return ConfiguratorRelation(
         relation_id=relation_id,
         application_name=f"configurator-{relation_id}",
-        unit_name=f"configurator-{relation_id}/0",
-        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
+        provider=ProviderConfig(
+            openstack_auth_url="https://ks.example.com:5000/v3",
+            provider_name=f"configurator-{relation_id}-0",
+        ),
         scaleset=ScalesetConfig(name=scaleset_name),
     )
 
 
-@pytest.mark.parametrize(
-    "unit_name, expected",
-    [
-        pytest.param("configurator/0", "configurator-0", id="unit-name-with-slash"),
-        pytest.param("configurator", "configurator", id="unit-name-without-slash"),
-    ],
-)
-def test_configurator_relation_provider_name(unit_name: str, expected: str):
+def test_configurator_relation_provider_name():
     """
-    arrange: A configurator relation whose unit name may contain a slash.
+    arrange: A configurator relation whose application databag carries a provider name.
     act: Read its provider name.
-    assert: The slash becomes a dash, matching GARM's provider registry and the provider name
-        its scalesets reference.
+    assert: The name is the one the configurator published, matching GARM's provider registry
+        and the provider name its scalesets reference.
     """
-    relation = ConfiguratorRelation(
-        relation_id=1,
-        application_name="configurator",
-        unit_name=unit_name,
-        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
-        scaleset=ScalesetConfig(),
-    )
+    relation = _relation(relation_id=3)
 
-    assert relation.provider_name == expected
+    assert relation.provider_name == "configurator-3-0"
 
 
 @pytest.mark.parametrize(
@@ -79,5 +71,71 @@ def test_configurator_data_reports_empty_and_invalid_state(
     assert data.has_invalid_relations is expected_invalid
 
 
-# The `garm` charm does not consume `GarmConfiguratorRequirer` yet. Cover its aggregation with
-# scenario tests once it does; until then there is no real charm to exercise it through.
+class _FakeApp:
+    """Minimal related application for exercising the requirer without a live model."""
+
+    name = "configurator"
+
+
+class _FakeRelation:
+    """Relation whose application databag either holds a payload or is still empty."""
+
+    id = 1
+
+    def __init__(self, provider: ProviderConfig | None = None) -> None:
+        self.app = _FakeApp()
+        self.data = {self.app: {"published": "true"}} if provider is not None else {}
+        self._provider = provider
+        self.loaded_entity = None
+
+    def load(self, cls, entity, *args, **kwargs):
+        """Return the provider payload only; the scaleset view must be derived from it."""
+        if cls is not ProviderConfig:
+            raise AssertionError(f"unexpected databag load for {cls.__name__}")
+        self.loaded_entity = entity
+        return self._provider
+
+
+def test_requirer_derives_scaleset_view_from_provider_payload():
+    """
+    arrange: A configurator relation whose application payload also carries the basic fields.
+    act: Aggregate the relation data.
+    assert: The payload is read from the application databag and the scaleset view carries the
+        same basic fields without re-reading the databag, so the configurator's single save
+        remains the source of truth.
+    """
+    provider = ProviderConfig(
+        openstack_auth_url="https://ks.example.com:5000/v3",
+        provider_name="configurator-0",
+        name="my-scaleset",
+        org="myorg",
+        max_runner="6",
+    )
+    relation = _FakeRelation(provider)
+    charm = SimpleNamespace(model=SimpleNamespace(relations={"garm-configurator": [relation]}))
+
+    data = GarmConfiguratorRequirer(charm).get_data()
+
+    assert relation.loaded_entity is relation.app
+    assert len(data.relations) == 1
+    assert data.relations[0].application_name == "configurator"
+    assert data.relations[0].provider_name == "configurator-0"
+    assert data.relations[0].scaleset.name == "my-scaleset"
+    assert data.relations[0].scaleset.org == "myorg"
+    assert data.relations[0].scaleset.max_runner == "6"
+
+
+def test_requirer_ignores_relation_without_application_data():
+    """
+    arrange: A configurator relation whose leader has not published an application payload.
+    act: Aggregate the relation data.
+    assert: The relation is neither exposed nor marked invalid, so GARM waits for the first
+        publish instead of blocking on an unfinished relation.
+    """
+    relation = _FakeRelation()
+    charm = SimpleNamespace(model=SimpleNamespace(relations={"garm-configurator": [relation]}))
+
+    data = GarmConfiguratorRequirer(charm).get_data()
+
+    assert data.is_empty
+    assert not data.has_invalid_relations
