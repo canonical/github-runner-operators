@@ -4,6 +4,7 @@
 """Unit tests for charm_state.py."""
 
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -162,6 +163,39 @@ _PROVIDER_FIELDS = frozenset(
     {"github_app_id", "github_installation_id", "github_private_key_secret_uri"}
 )
 
+_DEFAULT_PROVIDER = {
+    "openstack_auth_url": "https://ks.example.com:5000/v3",
+    "openstack_username": "admin",
+    "openstack_password_secret_uri": "secret:openstack-password",
+    "openstack_project_name": "myproject",
+    "openstack_user_domain_name": "Default",
+    "openstack_project_domain_name": "Default",
+    "openstack_region_name": "RegionOne",
+    "openstack_network": "external-net",
+    "github_app_id": 1,
+    "github_installation_id": 2,
+    "github_private_key_secret_uri": "secret:github-private-key",
+}
+
+_DEFAULT_SCALESET = {
+    "name": "my-scaleset",
+    "provider_name": "garm-configurator-0",
+    "image_id": "img-1",
+    "flavor": "m1.large",
+    "os_arch": "amd64",
+    "repo": "myorg/myrepo",
+}
+
+
+def _provider_config(**overrides) -> RelationProviderConfig:
+    """Return a complete provider payload with the given fields overridden."""
+    return RelationProviderConfig(**(_DEFAULT_PROVIDER | overrides))
+
+
+def _scaleset_config(**overrides) -> ScalesetConfig:
+    """Return a complete scaleset payload with the given fields overridden."""
+    return ScalesetConfig(**(_DEFAULT_SCALESET | overrides))
+
 
 def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
     """Build one configurator relation from a flat databag of provider and scaleset fields."""
@@ -169,13 +203,15 @@ def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
     scaleset_fields = {
         key: value for key, value in unit_data.items() if key not in _PROVIDER_FIELDS
     }
+    if "org" in scaleset_fields and "repo" not in scaleset_fields:
+        scaleset_fields["repo"] = ""
+    elif "repo" in scaleset_fields and "org" not in scaleset_fields:
+        scaleset_fields["org"] = ""
     return ConfiguratorRelation(
         relation_id=index,
         application_name="garm-configurator",
-        provider=RelationProviderConfig(
-            openstack_auth_url="https://ks.example.com:5000/v3", **provider_fields
-        ),
-        scaleset=ScalesetConfig(**scaleset_fields),
+        provider=_provider_config(**provider_fields),
+        scaleset=_scaleset_config(**scaleset_fields),
     )
 
 
@@ -216,14 +252,30 @@ def test_charm_state_from_charm_uses_the_provided_requirer():
     ]
 
 
+def _incomplete_entities(provider_overrides, scaleset_overrides):
+    """Build entities from a defensive relation whose provider or scaleset is incomplete."""
+    relation = ConfiguratorRelation(
+        relation_id=0,
+        application_name="garm-configurator",
+        provider=SimpleNamespace(**(_DEFAULT_PROVIDER | provider_overrides)),
+        scaleset=SimpleNamespace(**(_DEFAULT_SCALESET | scaleset_overrides)),
+    )
+    return _get_desired_entities(ConfiguratorData(relations=(relation,)))
+
+
 def test_desired_entities_log_skipped_unit_without_app_ids(caplog):
     """
     arrange: A configurator unit naming an org but without GitHub App ids.
     act: Build the desired entities.
     assert: The unit is skipped and the skip is logged so a stalled bring-up is visible.
+        The strict relation model rejects this payload, but the consumer still tolerates it
+        defensively.
     """
     with caplog.at_level(logging.INFO):
-        entities = _entities([{"org": "canonical"}])
+        entities = _incomplete_entities(
+            {"github_app_id": None, "github_installation_id": None},
+            {"org": "canonical", "repo": ""},
+        )
 
     assert entities == []
     assert "Skipping entity organization 'canonical': GitHub App ids not yet published" in (
@@ -313,21 +365,27 @@ def test_desired_entities_distinguish_org_and_repo_with_same_name():
 
 
 @pytest.mark.parametrize(
-    "unit_data",
+    "provider_overrides, scaleset_overrides",
     [
-        {"github_app_id": "1", "github_installation_id": "2"},
-        {"org": "canonical", "github_installation_id": "2"},
-        {"org": "canonical", "github_app_id": "1"},
+        pytest.param({}, {"org": "", "repo": ""}, id="no-org-or-repo"),
+        pytest.param(
+            {"github_app_id": None}, {"org": "canonical", "repo": ""}, id="missing-app-id"
+        ),
+        pytest.param(
+            {"github_installation_id": None},
+            {"org": "canonical", "repo": ""},
+            id="missing-installation-id",
+        ),
     ],
-    ids=["no-org-or-repo", "missing-app-id", "missing-installation-id"],
 )
-def test_desired_entities_skip_incomplete_unit(unit_data):
+def test_desired_entities_skip_incomplete_unit(provider_overrides, scaleset_overrides):
     """
     arrange: A configurator unit lacking an entity name or valid GitHub App ids.
     act: Build CharmState.desired_entities.
-    assert: No entity is built.
+    assert: No entity is built. The strict relation model rejects these payloads, but the
+        consumer still tolerates them defensively.
     """
-    assert _entities([unit_data]) == []
+    assert _incomplete_entities(provider_overrides, scaleset_overrides) == []
 
 
 def test_runner_config_from_databag_and_has_config():

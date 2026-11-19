@@ -97,6 +97,9 @@ _PROVIDER_VALUES = {
     "openstack_project_domain_name": "Default",
     "openstack_region_name": "RegionOne",
     "openstack_network": "net1",
+    "github_app_id": "12345",
+    "github_installation_id": "67890",
+    "github_private_key_secret_uri": "secret:github-private-key",
 }
 
 _SCALESET_VALUES = {
@@ -1234,12 +1237,12 @@ def test_related_configurator_credentials_replace_the_recorded_ones(
     assert providers[0]["password"] == _PROVIDER_VALUES["openstack_password"]
 
 
-def test_incomplete_related_provider_blocks_the_update(ctx: Context, garm_api: _GarmApiMocks):
+def test_provider_without_password_invalidates_relation(ctx: Context, garm_api: _GarmApiMocks):
     """
     arrange: A configurator publishes its provider with an empty password, as when its
         password secret is not readable yet, over a record holding the complete provider.
     act: Reconcile.
-    assert: The unit blocks naming the provider, and nothing is applied: GARM is not
+    assert: The unit blocks on the invalid relation, and nothing is applied: GARM is not
         restarted or reconciled and the record is not rewritten, so the running configuration
         is held instead of breaking the provider's scalesets and poisoning the record.
     """
@@ -1250,7 +1253,8 @@ def test_incomplete_related_provider_blocks_the_update(ctx: Context, garm_api: _
 
     out = ctx.run(ctx.on.update_status(), state)
 
-    assert out.unit_status == ops.BlockedStatus("Incomplete provider config: garm-configurator-0")
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
     assert "garm-command" not in out.get_container(CONTAINER_NAME).layers
     garm_api.auth.from_login.assert_not_called()
     assert _secret_content(out, GARM_PROVIDERS_LABEL) == _secret_content(
@@ -1912,25 +1916,13 @@ def test_applications_sharing_a_github_app_yield_one_credential(
     assert len(credentials) == 1
 
 
-@pytest.mark.parametrize(
-    "github_data",
-    [
-        pytest.param(_provider_data(github_app_id="1"), id="missing-fields"),
-        pytest.param(
-            _provider_data(**_github_provider_values("secret:unavailable")),
-            id="unreadable-key-secret",
-        ),
-    ],
-)
-def test_incomplete_github_config_yields_no_credential(
-    ctx: Context, garm_api: _GarmApiMocks, github_data: dict
-):
+def test_unreadable_github_key_yields_no_credential(ctx: Context, garm_api: _GarmApiMocks):
     """
-    arrange: A configurator application whose GitHub App fields are incomplete or name a
-        private-key secret this unit cannot read.
+    arrange: A configurator application naming a private-key secret this unit cannot read.
     act: Run update-status.
     assert: No credential is built — GARM rejects a partial one.
     """
+    github_data = _provider_data(**_github_provider_values("secret:unavailable"))
     state = _state(configurator_app_data={**github_data, **_SCALESET_UNIT_DATA})
 
     ctx.run(ctx.on.update_status(), state)
@@ -1958,30 +1950,22 @@ def test_scaleset_is_built_from_relation_data(ctx: Context, garm_api: _GarmApiMo
     assert scaleset.template_id == _TEMPLATE_ID
 
 
-def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_api: _GarmApiMocks):
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"image": "stable-image"}],
+    ids=["missing-image-id", "stale-image-key"],
+)
+def test_scaleset_without_image_id_invalidates_the_relation(
+    ctx: Context, garm_api: _GarmApiMocks, extra: dict[str, str]
+):
     """
-    arrange: A downgraded configurator withdraws image_id while a stale image key remains.
+    arrange: A configurator publishes a scaleset without the image those scalesets require,
+        optionally with the old stale image key instead.
     act: Run update-status.
-    assert: GARM ignores the stale key and removes the scale set.
+    assert: The relation is invalid, so GARM blocks and neither renders a provider nor
+        reconciles scalesets from a partial payload.
     """
-    scaleset = _scaleset_values(image="stable-image")
-    scaleset.pop("image_id")
-    data = {**_PROVIDER_UNIT_DATA, "scaleset": json.dumps(scaleset)}
-
-    ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
-
-    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
-
-
-def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api: _GarmApiMocks):
-    """
-    arrange: A configurator publishes complete provider data and a scale-set payload without an
-        image, representing withdrawal of its previous image reference.
-    act: Run update-status.
-    assert: GARM remains provider-ready and reconciles an empty scale-set list, removing the old
-        scale set instead of waiting for configurator data.
-    """
-    scaleset = _scaleset_values()
+    scaleset = _scaleset_values(**extra)
     scaleset.pop("image_id")
 
     out = ctx.run(
@@ -1994,8 +1978,9 @@ def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api:
         ),
     )
 
-    garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
-    assert out.unit_status == ops.ActiveStatus()
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
+    garm_api.scaleset.assert_not_called()
 
 
 # --- Controller URLs ----------------------------------------------------------------------

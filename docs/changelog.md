@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-11-19
+
+- `garm-configurator`: define and enforce which `garm-configurator` relation fields are required. The scaleset name, provider name, image, flavor, architecture, and one of `repo` or `org`, along with the OpenStack credentials and GitHub App credentials, are now required; a payload that omits one or leaves it blank is invalid and the `garm` charm blocks instead of creating a partial provider or scale set. The idle-runner, max-runner, label, runner-group, pre-install-script, and runner networking options keep documented defaults and stay optional. The configurator now withholds its relation payload until every required value, including the image, is available, so a deployment waiting on its image builder no longer publishes an incomplete configuration.
+
 ## 2026-11-12
 
 - `garm`: stop applying configuration changes when a `garm-configurator` relation publishes an incomplete provider, such as one whose OpenStack password secret is not yet readable. The charm previously restarted GARM with the incomplete provider and recorded it, so the scale sets using that provider failed and later hooks error. The unit now goes to `Blocked` with `Incomplete provider config: <provider>` and leaves GARM running with its existing provider and scale set configuration until the relation data is complete.

@@ -49,9 +49,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Only the leader unit publishes configurator data, so a non-leader blocks before doing
         any work. The leader reads the current charm state, forwards OpenStack credentials to
-        the image-builder relation, publishes scaleset configuration (and secrets when the image
-        reference is available) to the garm-configurator relations' application databags, then
-        sets unit status to reflect readiness.
+        the image-builder relation, publishes the complete scaleset configuration (with secrets)
+        to the garm-configurator relations' application databags once every required value,
+        including the image, is available, then sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
@@ -155,6 +155,12 @@ class GarmConfiguratorCharm(ops.CharmBase):
         published before an image is configured and are retained when an image is withdrawn.
         Only the leader reaches this method, so the application databag has a single writer.
 
+        The relation contract marks the fields that block provider or scaleset creation as
+        required. The configurator therefore publishes nothing until every one of them is
+        available: while the image builder has not supplied an image yet, it withdraws any
+        previously published payload instead of writing one the consumer would reject as
+        incomplete.
+
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
 
@@ -163,6 +169,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
+            return
+        if state.image is None:
+            self._withdraw_garm_relation(garm_relation)
             return
 
         password_secret = self._ensure_relation_secret(
@@ -175,13 +184,15 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "configurator-github-key",
             state.github_app_config.private_key,
         )
+        if password_secret is None or github_key_secret is None:
+            return
 
         pre_install = state.scaleset_config.pre_install_scripts
         rc = state.runner_config
         scaleset_data: dict[str, str] = {
             "name": state.scaleset_config.name,
             "provider_name": state.provider_config.provider_name,
-            "image_id": state.image or "",
+            "image_id": state.image,
             "image_visibility": state.scaleset_config.image_visibility or "",
             "security_group": state.scaleset_config.security_group,
             "flavor": state.scaleset_config.flavor,
@@ -211,9 +222,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 provider=RelationProviderConfig(
                     openstack_auth_url=state.provider_config.auth_url,
                     openstack_username=state.provider_config.username,
-                    openstack_password_secret_uri=(
-                        str(password_secret.id) if password_secret is not None else None
-                    ),
+                    openstack_password_secret_uri=str(password_secret.id),
                     openstack_project_name=state.provider_config.project_name,
                     openstack_user_domain_name=state.provider_config.user_domain_name,
                     openstack_project_domain_name=state.provider_config.project_domain_name,
@@ -221,14 +230,28 @@ class GarmConfiguratorCharm(ops.CharmBase):
                     openstack_network=state.provider_config.network,
                     github_app_id=state.github_app_config.app_id,
                     github_installation_id=state.github_app_config.installation_id,
-                    github_private_key_secret_uri=(
-                        str(github_key_secret.id) if github_key_secret is not None else None
-                    ),
+                    github_private_key_secret_uri=str(github_key_secret.id),
                 ),
                 scaleset=RelationScalesetConfig(**scaleset_data),
             ),
             self.app,
         )
+
+    def _withdraw_garm_relation(self, relation: ops.Relation) -> None:
+        """Remove this application's payload from the garm-configurator relation.
+
+        Used while a required value, such as the runner image, is not available. Leaving an
+        older payload in place would keep publishing a configuration the operator has already
+        changed, and writing a partial one would make the consumer reject the relation.
+
+        Args:
+            relation: The garm-configurator relation to withdraw from.
+        """
+        if relation.data[self.app]:
+            logger.info(
+                "Withdrawing garm-configurator relation data until required values are available"
+            )
+            relation.data[self.app].clear()
 
 
 if __name__ == "__main__":
