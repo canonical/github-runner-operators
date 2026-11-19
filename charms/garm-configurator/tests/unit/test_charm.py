@@ -90,7 +90,7 @@ def test_configured_image_is_published_without_image_relation():
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.ActiveStatus("Ready")
     assert "image" not in garm_out.local_unit_data
-    assert garm_out.local_unit_data["image_id"] == "runner-noble-amd64"
+    assert _relation_value(garm_out, "image_id") == "runner-noble-amd64"
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
@@ -121,7 +121,9 @@ def test_configured_image_takes_precedence_without_disabling_image_relation():
     out = ctx.run(ctx.on.config_changed(), state)
 
     assert out.unit_status == ops.ActiveStatus("Ready; configured image overrides image builder")
-    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == ("runner-noble-amd64")
+    assert _relation_value(out.get_relation(garm_relation.id), "image_id") == (
+        "runner-noble-amd64"
+    )
     assert out.get_relation(image_relation.id).local_unit_data["project_name"] == "myproject"
 
 
@@ -148,7 +150,7 @@ def test_blank_configured_image_falls_back_to_image_relation():
     out = ctx.run(ctx.on.config_changed(), state)
 
     assert out.unit_status == ops.ActiveStatus("Ready")
-    assert out.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+    assert _relation_value(out.get_relation(garm_relation.id), "image_id") == "legacy-uuid"
 
 
 def test_clearing_configured_image_falls_back_to_image_relation():
@@ -180,7 +182,7 @@ def test_clearing_configured_image_falls_back_to_image_relation():
     )
 
     assert cleared.unit_status == ops.ActiveStatus("Ready")
-    assert cleared.get_relation(garm_relation.id).local_unit_data["image_id"] == "legacy-uuid"
+    assert _relation_value(cleared.get_relation(garm_relation.id), "image_id") == "legacy-uuid"
 
 
 def test_clearing_configured_image_without_relation_withdraws_only_image():
@@ -215,7 +217,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert cleared.unit_status == ops.BlockedStatus(
         "Missing image config or image builder relation"
     )
-    assert "image_id" not in garm_out.local_unit_data
+    assert _relation_value(garm_out, "image_id") == ""
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
@@ -674,7 +676,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
         "repo": "myorg/myrepo",
     }
     for key, value in expected_relation_data.items():
-        assert rel_out.local_unit_data[key] == value
+        assert _relation_value(rel_out, key) == value
 
 
 def test_reconcile_writes_full_config_to_garm_relation():
@@ -718,26 +720,25 @@ def test_reconcile_writes_full_config_to_garm_relation():
     assert _relation_value(garm_out, "github_private_key_secret_uri")
 
     # Scaleset config
-    assert garm_out.local_unit_data["name"] == "my-scaleset"
-    assert garm_out.local_unit_data["flavor"] == "m1.large"
-    assert garm_out.local_unit_data["os_arch"] == "amd64"
-    assert garm_out.local_unit_data["min_idle_runner"] == "0"
-    assert garm_out.local_unit_data["max_runner"] == "5"
-    assert garm_out.local_unit_data["repo"] == "myorg/myrepo"
-    assert garm_out.local_unit_data["runner_group"] == "Default"
-    assert "org" not in garm_out.local_unit_data
+    assert _relation_value(garm_out, "name") == "my-scaleset"
+    assert _relation_value(garm_out, "flavor") == "m1.large"
+    assert _relation_value(garm_out, "os_arch") == "amd64"
+    assert _relation_value(garm_out, "min_idle_runner") == "0"
+    assert _relation_value(garm_out, "max_runner") == "5"
+    assert _relation_value(garm_out, "repo") == "myorg/myrepo"
+    assert _relation_value(garm_out, "runner_group") == "Default"
+    assert _relation_value(garm_out, "org") == ""
 
     # Image UUID
-    assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
+    assert _relation_value(garm_out, "image_id") == "abc-image-uuid"
 
 
-def test_reconcile_does_not_write_garm_data_without_image_uuid():
+def test_reconcile_writes_garm_data_without_image_uuid():
     """
     arrange: All configs valid, garm relation joined, but image relation has NO UUID.
     act: config-changed fires.
-    assert: Basic scaleset fields are written but secret-dependent fields
-        (openstack credentials, github credentials) are not, since secrets
-        are only provisioned once the image UUID is available.
+    assert: The single save writes the basic scaleset fields and the provider payload with an
+        empty image ID, so GARM can still resolve the provider while no scaleset is created.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -748,14 +749,17 @@ def test_reconcile_does_not_write_garm_data_without_image_uuid():
         config=_valid_config(secret, pk_secret),
         secrets=[secret, pk_secret],
         relations=[image_relation, garm_relation],
+        leader=True,
     )
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
-    assert garm_out.local_unit_data["name"] == "my-scaleset"
-    # image_id is empty string when no UUID yet; ops-scenario omits empty strings
-    assert "image_id" not in garm_out.local_unit_data
-    assert "github_app_id" not in garm_out.local_unit_data
-    assert "openstack_auth_url" not in garm_out.local_unit_data
+    assert _relation_value(garm_out, "name") == "my-scaleset"
+    assert _relation_value(garm_out, "image_id") == ""
+    assert _relation_value(garm_out, "github_app_id") == 99999
+    assert _relation_value(garm_out, "openstack_auth_url") == (
+        "https://keystone.example.com:5000/v3"
+    )
+    assert _relation_value(garm_out, "openstack_password_secret_uri")
 
 
 def test_reconcile_writes_garm_data_on_relation_joined():
@@ -777,8 +781,8 @@ def test_reconcile_writes_garm_data_on_relation_joined():
     )
     out = ctx.run(ctx.on.relation_joined(garm_relation), state)
     garm_out = out.get_relation(garm_relation.id)
-    assert garm_out.local_unit_data["image_id"] == "abc-image-uuid"
-    assert garm_out.local_unit_data["name"] == "my-scaleset"
+    assert _relation_value(garm_out, "image_id") == "abc-image-uuid"
+    assert _relation_value(garm_out, "name") == "my-scaleset"
     assert _relation_value(garm_out, "github_app_id") == 99999
     assert _relation_value(garm_out, "openstack_username") == "admin"
 
@@ -810,12 +814,12 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
 
-    assert garm_out.local_unit_data["org"] == "myorg"
-    assert garm_out.local_unit_data["runner_group"] == "my-group"
-    assert garm_out.local_unit_data["pre_install_scripts"] == json.dumps(
+    assert _relation_value(garm_out, "org") == "myorg"
+    assert _relation_value(garm_out, "runner_group") == "my-group"
+    assert _relation_value(garm_out, "pre_install_scripts") == json.dumps(
         {"pre_install.sh": '{"setup.sh": "#!/bin/bash\\necho hello"}'}
     )
-    assert "repo" not in garm_out.local_unit_data
+    assert _relation_value(garm_out, "repo") == ""
 
 
 @pytest.mark.parametrize(
@@ -953,15 +957,15 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     out = ctx.run(ctx.on.config_changed(), state)
 
     rel_out = out.get_relation(garm_relation.id)
-    assert rel_out.local_unit_data["dockerhub_mirror"] == "https://mirror.example.com"
-    assert rel_out.local_unit_data["runner_http_proxy"] == "http://proxy.example.com:3128"
+    assert _relation_value(rel_out, "dockerhub_mirror") == "https://mirror.example.com"
+    assert _relation_value(rel_out, "runner_http_proxy") == "http://proxy.example.com:3128"
     assert (
-        rel_out.local_unit_data["aproxy_exclude_addresses"]
+        _relation_value(rel_out, "aproxy_exclude_addresses")
         == "10.0.0.1,10.0.1.42/16,10.0.0.0-10.141.167.255,192.168.0.0/16"
     )
-    assert rel_out.local_unit_data["aproxy_redirect_ports"] == "80,443,8000-9000"
-    assert rel_out.local_unit_data["otel_collector_endpoint"] == "http://otel.example.com:4317"
-    assert rel_out.local_unit_data["pre_job_script"] == "echo start"
+    assert _relation_value(rel_out, "aproxy_redirect_ports") == "80,443,8000-9000"
+    assert _relation_value(rel_out, "otel_collector_endpoint") == "http://otel.example.com:4317"
+    assert _relation_value(rel_out, "pre_job_script") == "echo start"
 
 
 def test_runner_config_fields_absent_when_unset():
@@ -991,7 +995,7 @@ def test_runner_config_fields_absent_when_unset():
         "otel_collector_endpoint",
         "pre_job_script",
     ):
-        assert rel_out.local_unit_data.get(key, "") == ""
+        assert _relation_value(rel_out, key) == ""
 
 
 @pytest.mark.parametrize(
@@ -1018,7 +1022,7 @@ def test_enable_shell_written_to_garm_configurator_relation(configured, expected
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.get_relation(garm_relation.id).local_unit_data["enable_shell"] == expected
+    assert _relation_value(out.get_relation(garm_relation.id), "enable_shell") == expected
 
 
 @pytest.mark.parametrize(
@@ -1044,9 +1048,7 @@ def test_image_visibility_written_to_garm_configurator_relation(configured, expe
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.get_relation(garm_relation.id).local_unit_data.get("image_visibility", "") == (
-        expected
-    )
+    assert _relation_value(out.get_relation(garm_relation.id), "image_visibility") == (expected)
 
 
 @pytest.mark.parametrize(
@@ -1072,6 +1074,4 @@ def test_security_group_written_to_garm_configurator_relation(configured, expect
 
     out = ctx.run(ctx.on.config_changed(), state)
 
-    assert out.get_relation(garm_relation.id).local_unit_data.get("security_group", "") == (
-        expected
-    )
+    assert _relation_value(out.get_relation(garm_relation.id), "security_group") == (expected)
