@@ -19,6 +19,11 @@ not published a complete provider payload is invalid; its relation id is recorde
 ``ConfiguratorData.invalid_relation_ids`` instead of being exposed as an empty provider.
 Relations that publish the same scaleset name are also invalid: a scaleset name must identify
 exactly one scaleset in GARM.
+
+The models distinguish the fields that block provider or scaleset creation (required, with no
+default) from the fields GARM can default (optional, with the default shown on the field). A
+payload missing a required field, or carrying a blank value for one, does not validate, so the
+consumer never renders a provider or scaleset from a partial databag.
 """
 
 import dataclasses
@@ -30,6 +35,25 @@ import pydantic
 
 logger = logging.getLogger(__name__)
 
+
+def _reject_blank(value: str, info: pydantic.ValidationInfo) -> str:
+    """Reject a required string that is empty or whitespace-only.
+
+    Args:
+        value: The field value.
+        info: Pydantic validation context.
+
+    Raises:
+        ValueError: If the value has no non-whitespace content.
+
+    Returns:
+        The unchanged value, so optional whitespace is preserved where it is meaningful.
+    """
+    if not value.strip():
+        raise ValueError(f"{info.field_name} must not be empty")
+    return value
+
+
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
@@ -39,15 +63,15 @@ class ProviderConfig:
 
     This is the nested ``provider`` value of the application databag. The field names are the
     keys inside that value, so they are the wire contract between the configurator and GARM.
-    The auth URL is required: an application publishes the rest of the provider payload
-    alongside it, so a databag without it is incomplete and treated as invalid rather than as an
-    empty provider.
+
+    The OpenStack credentials, the GitHub App ids, and the private-key secret URI are required:
+    GARM cannot create a provider, credential, entity, or scaleset without them. A payload that
+    omits one, or leaves it blank, is invalid. The password is required too, either inline for
+    backwards compatibility or through the secret URI the configurator publishes.
 
     Attributes:
         openstack_auth_url: Keystone authentication URL.
         openstack_username: OpenStack username.
-        openstack_password: Legacy plaintext password, or None when the secret URI is used.
-        openstack_password_secret_uri: Juju secret URI holding the password.
         openstack_project_name: OpenStack project (tenant).
         openstack_user_domain_name: Domain of the user.
         openstack_project_domain_name: Domain of the project.
@@ -56,23 +80,52 @@ class ProviderConfig:
         github_app_id: GitHub App ID.
         github_installation_id: GitHub App installation ID.
         github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
+        openstack_password: Inline OpenStack password, superseded by the secret URI.
+        openstack_password_secret_uri: Juju secret URI holding the OpenStack password.
     """
 
     openstack_auth_url: str
-    openstack_username: str | None = None
+    openstack_username: str
+    openstack_project_name: str
+    openstack_user_domain_name: str
+    openstack_project_domain_name: str
+    openstack_region_name: str
+    openstack_network: str
+    github_app_id: int
+    github_installation_id: int
+    github_private_key_secret_uri: str
     openstack_password: str | None = None
     openstack_password_secret_uri: str | None = None
-    openstack_project_name: str | None = None
-    openstack_user_domain_name: str | None = None
-    openstack_project_domain_name: str | None = None
-    openstack_region_name: str | None = None
-    openstack_network: str | None = None
-    github_app_id: int | None = None
-    github_installation_id: int | None = None
-    github_private_key_secret_uri: str | None = None
+
+    _validate_required_strings = pydantic.field_validator(
+        "openstack_auth_url",
+        "openstack_username",
+        "openstack_project_name",
+        "openstack_user_domain_name",
+        "openstack_project_domain_name",
+        "openstack_region_name",
+        "openstack_network",
+        "github_private_key_secret_uri",
+    )(_reject_blank)
+
+    @pydantic.model_validator(mode="after")
+    def _require_password_source(self) -> "ProviderConfig":
+        """Require the password inline or through a secret URI.
+
+        Raises:
+            ValueError: If neither password source is published.
+
+        Returns:
+            The validated provider configuration.
+        """
+        if not (self.openstack_password or self.openstack_password_secret_uri):
+            raise ValueError(
+                "one of openstack_password or openstack_password_secret_uri is required"
+            )
+        return self
 
 
-@dataclasses.dataclass(frozen=True)
+@pydantic.dataclasses.dataclass(frozen=True)
 class ScalesetConfig:
     """Scaleset and runner fields published by one ``garm-configurator`` application.
 
@@ -83,14 +136,20 @@ class ScalesetConfig:
     These fields are published on the application databag by the configurator's leader unit, so
     every unit of a deployment sees one consistent payload.
 
+    A scaleset cannot be created without a name, provider, image, flavor, and architecture; those
+    fields are required and must not be blank. It also needs an entity to register runners to,
+    so exactly one of ``org`` or ``repo`` must be set. The remaining fields have the defaults
+    shown on the field, because GARM or the configurator's own config supplies a sensible value
+    when they are omitted.
+
     Attributes:
         name: The name of the scaleset.
         provider_name: The GARM provider the scaleset runs on.
         image_id: Image name or ID used for runners.
-        image_visibility: Glance visibility used for an image-name lookup.
-        security_group: Security group attached to runner instances.
         flavor: Runner flavor.
         os_arch: Runner CPU architecture.
+        image_visibility: Glance visibility used for an image-name lookup.
+        security_group: Security group attached to runner instances.
         min_idle_runner: Minimum number of idle runners.
         max_runner: Maximum number of runners.
         labels: Comma-separated runner labels.
@@ -107,18 +166,18 @@ class ScalesetConfig:
         pre_job_script: Bash script appended to the runner pre-job hook.
     """
 
-    name: str = ""
-    provider_name: str = ""
-    image_id: str = ""
+    name: str
+    provider_name: str
+    image_id: str
+    flavor: str
+    os_arch: str
     image_visibility: str = ""
     security_group: str = ""
-    flavor: str = ""
-    os_arch: str = ""
-    min_idle_runner: str = ""
-    max_runner: str = ""
+    min_idle_runner: str = "0"
+    max_runner: str = "1"
     labels: str = ""
-    runner_group: str = ""
-    enable_shell: str = ""
+    runner_group: str = "Default"
+    enable_shell: str = "false"
     pre_install_scripts: str = ""
     org: str = ""
     repo: str = ""
@@ -128,6 +187,28 @@ class ScalesetConfig:
     aproxy_redirect_ports: str = ""
     otel_collector_endpoint: str = ""
     pre_job_script: str = ""
+
+    _validate_required_strings = pydantic.field_validator(
+        "name",
+        "provider_name",
+        "image_id",
+        "flavor",
+        "os_arch",
+    )(_reject_blank)
+
+    @pydantic.model_validator(mode="after")
+    def _require_exactly_one_entity(self) -> "ScalesetConfig":
+        """Require exactly one of the mutually exclusive entity fields.
+
+        Raises:
+            ValueError: If neither or both of ``org`` and ``repo`` are set.
+
+        Returns:
+            The validated scaleset configuration.
+        """
+        if bool(self.org) == bool(self.repo):
+            raise ValueError("exactly one of org or repo is required")
+        return self
 
 
 @pydantic.dataclasses.dataclass
