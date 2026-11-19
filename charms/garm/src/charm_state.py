@@ -94,7 +94,7 @@ class RunnerConfig:
         """Build a config from a relation databag, ignoring missing keys.
 
         Args:
-            data: The relation unit databag (or any mapping).
+            data: The relation databag (or any mapping).
 
         Returns:
             A RunnerConfig with each field taken from its databag key, "" if absent, and the
@@ -257,8 +257,8 @@ def _get_desired_entities(configurator_data: ConfiguratorData) -> list[EntitySpe
     """Build the desired GARM org/repo entities from configurator relation data.
 
     Each entity is bound to the GitHub App credential the github reconciler creates for the same
-    configurator unit (``app-<app_id>-<installation_id>``). A unit naming an org or repo but
-    lacking the App ids is skipped — its credential name cannot be derived.
+    configurator application (``app-<app_id>-<installation_id>``). An application naming an org
+    or repo but lacking the App ids is skipped — its credential name cannot be derived.
 
     Args:
         configurator_data: The aggregated garm-configurator relation data.
@@ -275,11 +275,11 @@ def _get_desired_entities(configurator_data: ConfiguratorData) -> list[EntitySpe
 def _add_desired_entity(
     entities: dict[tuple[str, str], EntitySpec], relation: ConfiguratorRelation
 ) -> None:
-    """Add the entity described by one configurator unit to the desired set.
+    """Add the entity described by one configurator application to the desired set.
 
-    Skips the unit when it names no org/repo or its GitHub App ids are absent, logging the
-    latter so a stalled bring-up is visible. On a duplicate (type, name), keeps the first
-    spec seen and warns if the later one derives a different credential.
+    Skips the application when it names no org/repo or its GitHub App ids are absent,
+    logging the latter so a stalled bring-up is visible. On a duplicate (type, name), keeps
+    the first spec seen and warns if the later one derives a different credential.
 
     Args:
         entities: The accumulating desired entities, keyed by (entity_type, entity_name).
@@ -325,10 +325,10 @@ def _add_desired_entity(
 
 
 def resolve_entity(data: ScalesetConfig) -> tuple[str, str] | None:
-    """Resolve the GARM entity a configurator unit names from its org/repo fields.
+    """Resolve the GARM entity a configurator application names from its org/repo fields.
 
     Args:
-        data: The configurator unit's scaleset fields.
+        data: The configurator application's scaleset fields.
 
     Returns:
         ``("organization", org)`` or ``("repository", repo)``, or None when
