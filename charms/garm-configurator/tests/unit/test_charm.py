@@ -25,10 +25,18 @@ def _make_garm_configurator_relation():
     return Relation(endpoint="garm-configurator")
 
 
+def _relation_section(relation, section: str) -> dict:
+    """Return a nested application databag value decoded from its JSON form."""
+    return json.loads(relation.local_app_data[section])
+
+
 def _relation_value(relation, key: str):
-    """Return an application databag value decoded from the JSON form ``Relation.save`` writes."""
-    value = relation.local_app_data.get(key)
-    return "" if value is None else json.loads(value)
+    """Return a value from the nested ``provider`` or ``scaleset`` application databag value."""
+    for section in ("provider", "scaleset"):
+        data = _relation_section(relation, section)
+        if key in data:
+            return data[key]
+    raise KeyError(key)
 
 
 def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
@@ -118,7 +126,7 @@ def test_configured_image_is_published_without_image_relation():
 
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.ActiveStatus("Ready")
-    assert "image" not in garm_out.local_app_data
+    assert "image" not in _relation_section(garm_out, "scaleset")
     assert _relation_value(garm_out, "image_id") == "runner-noble-amd64"
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
@@ -250,7 +258,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
-    assert "openstack_password_secret_uri" in garm_out.local_app_data
+    assert "openstack_password_secret_uri" in _relation_section(garm_out, "provider")
     assert _relation_value(garm_out, "github_private_key_secret_uri")
     relation_id = garm_relation.id
     relation_secrets = {
@@ -741,6 +749,12 @@ def test_reconcile_writes_full_config_to_garm_relation():
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
 
+    assert set(garm_out.local_app_data) == {"provider", "scaleset"}
+    provider_data = _relation_section(garm_out, "provider")
+    scaleset_data = _relation_section(garm_out, "scaleset")
+    assert "name" not in provider_data
+    assert "openstack_auth_url" not in scaleset_data
+
     # Provider config
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
@@ -757,7 +771,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     # GitHub config
     assert _relation_value(garm_out, "github_app_id") == 99999
     assert _relation_value(garm_out, "github_installation_id") == 67890
-    assert "github_private_key" not in garm_out.local_app_data
+    assert "github_private_key" not in provider_data
     assert _relation_value(garm_out, "github_private_key_secret_uri")
 
     # Scaleset config
@@ -834,7 +848,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         Image UUID is present, garm relation is joined.
     act: config-changed fires.
     assert: org, runner_group, and pre_install_scripts are present in the
-        garm relation data. repo is published as an empty string.
+        garm relation data. repo is absent.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -1010,11 +1024,11 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     assert _relation_value(rel_out, "pre_job_script") == "echo start"
 
 
-def test_runner_config_fields_empty_when_unset():
+def test_runner_config_fields_absent_when_unset():
     """
     arrange: Valid config with no runner config options set.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The six runner config keys are published as empty strings.
+    assert: The six runner config keys are absent from the databag.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
