@@ -6,9 +6,10 @@
 The ``garm-configurator`` charm owns the relation contract and publishes one provider
 configuration per application with ``ops.Relation.save``. The models live with the charm so
 consumers can share the same definitions and use ``ops.Relation.load`` instead of hand-writing
-databag keys. ``ProviderConfig`` models the complete published payload (scaleset fields, runner
-options, and provider credentials), so the configurator writes it with a single
-``ops.Relation.save`` call.
+databag keys. The application databag holds two nested values: ``provider`` (the provider and
+GitHub App credentials) and ``scaleset`` (the scaleset and runner fields).
+``ConfiguratorApplicationData`` is the write model that nests both, so the configurator writes
+the complete payload with a single ``ops.Relation.save`` call.
 
 The payload lives on the application databag: the configurator's leader unit writes it once for
 the whole application. The ``GarmConfiguratorRequirer`` aggregates every joined
@@ -21,7 +22,6 @@ exactly one scaleset in GARM.
 """
 
 import dataclasses
-import json
 import logging
 import typing
 
@@ -35,14 +35,13 @@ GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 @pydantic.dataclasses.dataclass
 class ProviderConfig:
-    """Complete relation payload published by one ``garm-configurator`` application.
+    """Provider and GitHub App credentials published by one ``garm-configurator`` application.
 
-    This is the write model for the relation: the configurator fills the scaleset and runner
-    fields plus the provider and GitHub App credentials and publishes it with one
-    ``ops.Relation.save`` to the application databag. The field names are the relation databag
-    keys, so they are the wire contract between the configurator and GARM. The auth URL is
-    required: an application publishes the rest of the provider payload alongside it, so a
-    databag without it is incomplete and treated as invalid rather than as an empty provider.
+    This is the nested ``provider`` value of the application databag. The field names are the
+    keys inside that value, so they are the wire contract between the configurator and GARM.
+    The auth URL is required: an application publishes the rest of the provider payload
+    alongside it, so a databag without it is incomplete and treated as invalid rather than as an
+    empty provider.
 
     Attributes:
         openstack_auth_url: Keystone authentication URL.
@@ -57,27 +56,6 @@ class ProviderConfig:
         github_app_id: GitHub App ID.
         github_installation_id: GitHub App installation ID.
         github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
-        name: The name of the scaleset.
-        provider_name: The GARM provider the scaleset runs on.
-        image_id: Image name or ID used for runners.
-        image_visibility: Glance visibility used for an image-name lookup.
-        security_group: Security group attached to runner instances.
-        flavor: Runner flavor.
-        os_arch: Runner CPU architecture.
-        min_idle_runner: Minimum number of idle runners.
-        max_runner: Maximum number of runners.
-        labels: Comma-separated runner labels.
-        runner_group: Runner group for org registration.
-        enable_shell: Whether GARM's remote shell is enabled, as a boolean string.
-        pre_install_scripts: JSON object of pre-install script name to script body.
-        org: Organization the runners register to.
-        repo: Repository the runners register to.
-        dockerhub_mirror: Docker registry mirror URL.
-        runner_http_proxy: Upstream HTTP proxy for runners.
-        aproxy_exclude_addresses: Comma-separated IPv4 addresses, CIDRs, or ranges to bypass.
-        aproxy_redirect_ports: Comma-separated ports or port ranges to forward.
-        otel_collector_endpoint: OTEL exporter endpoint.
-        pre_job_script: Bash script appended to the runner pre-job hook.
     """
 
     openstack_auth_url: str
@@ -92,36 +70,15 @@ class ProviderConfig:
     github_app_id: int | None = None
     github_installation_id: int | None = None
     github_private_key_secret_uri: str | None = None
-    name: str = ""
-    provider_name: str = ""
-    image_id: str = ""
-    image_visibility: str = ""
-    security_group: str = ""
-    flavor: str = ""
-    os_arch: str = ""
-    min_idle_runner: str = ""
-    max_runner: str = ""
-    labels: str = ""
-    runner_group: str = ""
-    enable_shell: str = ""
-    pre_install_scripts: str = ""
-    org: str = ""
-    repo: str = ""
-    dockerhub_mirror: str = ""
-    runner_http_proxy: str = ""
-    aproxy_exclude_addresses: str = ""
-    aproxy_redirect_ports: str = ""
-    otel_collector_endpoint: str = ""
-    pre_job_script: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
 class ScalesetConfig:
     """Scaleset and runner fields published by one ``garm-configurator`` application.
 
-    The requirer derives this view from the ``ProviderConfig`` it loads from the application
-    databag, so consumers apply their own parsing and validation without re-reading the
-    databag. The fields keep the relation's string wire form; an empty string means "unset".
+    This is the nested ``scaleset`` value of the application databag. The requirer exposes it
+    as-is, so consumers apply their own parsing and validation without re-reading the databag.
+    The fields keep the relation's string wire form; an empty string means "unset".
 
     These fields are published on the application databag by the configurator's leader unit, so
     every unit of a deployment sees one consistent payload.
@@ -173,6 +130,23 @@ class ScalesetConfig:
     pre_job_script: str = ""
 
 
+@pydantic.dataclasses.dataclass
+class ConfiguratorApplicationData:
+    """Complete application databag payload published by one ``garm-configurator`` application.
+
+    This is the write model for the relation: the configurator fills both nested values and
+    publishes them with one ``ops.Relation.save``, so the application databag holds a
+    ``provider`` object and a ``scaleset`` object instead of a flat set of keys.
+
+    Attributes:
+        provider: The provider and GitHub App credentials.
+        scaleset: The scaleset and runner fields.
+    """
+
+    provider: ProviderConfig
+    scaleset: ScalesetConfig
+
+
 @dataclasses.dataclass(frozen=True)
 class ConfiguratorRelation:
     """Relation data published by one ``garm-configurator`` application.
@@ -194,10 +168,10 @@ class ConfiguratorRelation:
         """Return the GARM provider name published by the configurator.
 
         Returns:
-            The provider name the configurator wrote to its application databag, matching
+            The provider name the configurator wrote to the ``scaleset`` value, matching
             GARM's provider registry and the name its scalesets reference.
         """
-        return self.provider.provider_name
+        return self.scaleset.provider_name
 
 
 # A scaleset name identifies the scaleset; a provider can legitimately serve several scalesets,
@@ -300,9 +274,7 @@ class GarmConfiguratorRequirer:
                 )
                 continue
             try:
-                provider = relation.load(
-                    ProviderConfig, application, decoder=_decode_relation_value
-                )
+                application_data = relation.load(ConfiguratorApplicationData, application)
             except ValueError:
                 logger.warning(
                     "Ignoring incomplete garm-configurator relation data: relation_id=%d app=%s",
@@ -314,13 +286,8 @@ class GarmConfiguratorRequirer:
             configurator_relation = ConfiguratorRelation(
                 relation_id=relation.id,
                 application_name=application.name,
-                provider=provider,
-                scaleset=ScalesetConfig(
-                    **{
-                        field.name: getattr(provider, field.name)
-                        for field in dataclasses.fields(ScalesetConfig)
-                    }
-                ),
+                provider=application_data.provider,
+                scaleset=application_data.scaleset,
             )
             aggregated.append(configurator_relation)
             identity = tuple(
@@ -349,29 +316,3 @@ class GarmConfiguratorRequirer:
             relations=tuple(aggregated),
             invalid_relation_ids=frozenset(invalid_relation_ids),
         )
-
-
-def _decode_relation_value(value: str) -> typing.Any:
-    """Decode one relation databag value, tolerating data from an older configurator.
-
-    ``ops.Relation.save`` JSON-encodes every value, but a configurator upgraded from a charm
-    that still wrote raw strings only republishes on its next reconcile. Decoding with a
-    fallback lets the consumer read both forms without treating the relation as invalid.
-
-    Only JSON strings and null are returned as decoded values; numeric JSON stays in its raw
-    string form so string fields (the scaleset fields keep their string wire form) are not
-    rejected and integer fields still receive a value pydantic can coerce.
-
-    Args:
-        value: The raw string stored in the relation databag.
-
-    Returns:
-        The decoded string or None, or the raw string for any other value.
-    """
-    try:
-        decoded = json.loads(value)
-    except (json.JSONDecodeError, TypeError):
-        return value
-    if decoded is None or isinstance(decoded, str):
-        return decoded
-    return value

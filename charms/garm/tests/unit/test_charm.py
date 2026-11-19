@@ -99,20 +99,7 @@ _PROVIDER_VALUES = {
     "openstack_network": "net1",
 }
 
-
-def _provider_data(**overrides: str) -> dict[str, str]:
-    """Return provider fields JSON-encoded the way the configurator publishes them."""
-    values = {
-        **_PROVIDER_VALUES,
-        "provider_name": "garm-configurator-0",
-        **overrides,
-    }
-    return {key: json.dumps(value) for key, value in values.items()}
-
-
-_PROVIDER_UNIT_DATA = _provider_data()
-
-_SCALESET_UNIT_DATA = {
+_SCALESET_VALUES = {
     "name": "my-scaleset",
     "provider_name": "garm-configurator-0",
     "image_id": "img-1",
@@ -122,6 +109,31 @@ _SCALESET_UNIT_DATA = {
     "min_idle_runner": "1",
     "repo": "myorg/myrepo",
 }
+
+
+def _provider_values(**overrides: str) -> dict[str, str]:
+    """Return the provider fields a configurator application publishes."""
+    return {**_PROVIDER_VALUES, **overrides}
+
+
+def _scaleset_values(**overrides: str) -> dict[str, str]:
+    """Return the scaleset fields a configurator application publishes."""
+    return {**_SCALESET_VALUES, **overrides}
+
+
+def _provider_data(**overrides: str) -> dict[str, str]:
+    """Return the nested ``provider`` value JSON-encoded the way the configurator publishes it."""
+    return {"provider": json.dumps(_provider_values(**overrides))}
+
+
+def _scaleset_data(**overrides: str) -> dict[str, str]:
+    """Return the nested ``scaleset`` value JSON-encoded the way the configurator publishes it."""
+    return {"scaleset": json.dumps(_scaleset_values(**overrides))}
+
+
+_PROVIDER_UNIT_DATA = _provider_data()
+
+_SCALESET_UNIT_DATA = _scaleset_data()
 
 _TEMPLATE_ID = 99
 _AGENT_VERSION = "v0.1.1"
@@ -321,10 +333,8 @@ def _configurator_relation(app_name: str) -> Relation:
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name=app_name,
         remote_app_data={
-            **_provider_data(provider_name=f"{app_name}-0"),
-            **_SCALESET_UNIT_DATA,
-            "name": f"scaleset-{app_name}",
-            "provider_name": f"{app_name}-0",
+            **_PROVIDER_UNIT_DATA,
+            **_scaleset_data(name=f"scaleset-{app_name}", provider_name=f"{app_name}-0"),
         },
     )
 
@@ -576,23 +586,16 @@ def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api
             endpoint=GARM_CONFIGURATOR_RELATION_NAME,
             remote_app_name="configurator-a",
             remote_app_data={
-                **_provider_data(provider_name="configurator-a-0"),
-                **_SCALESET_UNIT_DATA,
-                "name": "scaleset-a",
-                "provider_name": "configurator-a-0",
+                **_PROVIDER_UNIT_DATA,
+                **_scaleset_data(name="scaleset-a", provider_name="configurator-a-0"),
             },
         ),
         Relation(
             endpoint=GARM_CONFIGURATOR_RELATION_NAME,
             remote_app_name="configurator-b",
             remote_app_data={
-                **_provider_data(
-                    openstack_auth_url="https://ks2.example.com:5000/v3",
-                    provider_name="configurator-b-0",
-                ),
-                **_SCALESET_UNIT_DATA,
-                "name": "scaleset-b",
-                "provider_name": "configurator-b-0",
+                **_provider_data(openstack_auth_url="https://ks2.example.com:5000/v3"),
+                **_scaleset_data(name="scaleset-b", provider_name="configurator-b-0"),
             },
         ),
     ]
@@ -1263,10 +1266,13 @@ def test_invalid_configurator_relation_blocks_the_update(ctx: Context, garm_api:
     assert: The unit blocks on the invalid relation and nothing is applied, so a partial
         provider is never rendered and its scalesets are not pruned.
     """
-    provider_data = _provider_data()
-    provider_data.pop("openstack_auth_url")
+    provider = _provider_values()
+    provider.pop("openstack_auth_url")
     state = _state(
-        configurator_app_data={**provider_data, **_SCALESET_UNIT_DATA},
+        configurator_app_data={
+            "provider": json.dumps(provider),
+            **_SCALESET_UNIT_DATA,
+        },
         recorded_providers=[_provider_config("garm-configurator-0")],
     )
 
@@ -1292,18 +1298,16 @@ def test_conflicting_configurator_scalesets_block_the_update(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name="configurator-a",
         remote_app_data={
-            **_provider_data(provider_name="configurator-a-0"),
-            **_SCALESET_UNIT_DATA,
-            "provider_name": "configurator-a-0",
+            **_PROVIDER_UNIT_DATA,
+            **_scaleset_data(provider_name="configurator-a-0"),
         },
     )
     second = Relation(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name="configurator-b",
         remote_app_data={
-            **_provider_data(provider_name="configurator-b-0"),
-            **_SCALESET_UNIT_DATA,
-            "provider_name": "configurator-b-0",
+            **_PROVIDER_UNIT_DATA,
+            **_scaleset_data(provider_name="configurator-b-0"),
         },
     )
 
@@ -1791,15 +1795,14 @@ def test_charmed_template_error_degrades_to_waiting(ctx: Context, garm_api: _Gar
 # --- Desired state from relation data -----------------------------------------------------
 
 
-def _github_unit_data(secret_id: str, app_id: str = "12345", installation_id: str = "67890"):
-    """Build the GitHub App fields a configurator application publishes."""
+def _github_provider_values(
+    secret_id: str, app_id: str = "12345", installation_id: str = "67890"
+) -> dict[str, str]:
+    """Build the GitHub App provider fields a configurator application publishes."""
     return {
-        key: json.dumps(value)
-        for key, value in {
-            "github_app_id": app_id,
-            "github_installation_id": installation_id,
-            "github_private_key_secret_uri": secret_id,
-        }.items()
+        "github_app_id": app_id,
+        "github_installation_id": installation_id,
+        "github_private_key_secret_uri": secret_id,
     }
 
 
@@ -1813,7 +1816,10 @@ def test_github_credential_is_built_from_relation_data(ctx: Context, garm_api: _
     """
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
     state = _state(
-        configurator_app_data={**_PROVIDER_UNIT_DATA, **_github_unit_data(key_secret.id)},
+        configurator_app_data={
+            **_provider_data(**_github_provider_values(key_secret.id)),
+            **_SCALESET_UNIT_DATA,
+        },
         secrets=[key_secret],
     )
 
@@ -1846,8 +1852,7 @@ def test_github_credential_is_built_from_json_encoded_relation_data(
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
     state = _state(
         configurator_app_data={
-            **_PROVIDER_UNIT_DATA,
-            **_github_unit_data(key_secret.id),
+            **_provider_data(**_github_provider_values(key_secret.id)),
             **_SCALESET_UNIT_DATA,
         },
         secrets=[key_secret],
@@ -1878,23 +1883,23 @@ def test_applications_sharing_a_github_app_yield_one_credential(
     assert: They collapse to a single credential.
     """
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
-    github_data = _github_unit_data(key_secret.id, "1", "2")
+    github_data = _github_provider_values(key_secret.id, "1", "2")
     state = _state(
         configurator_relations=[
             Relation(
                 endpoint=GARM_CONFIGURATOR_RELATION_NAME,
                 remote_app_name="configurator-a",
                 remote_app_data={
-                    **_provider_data(provider_name="configurator-a-0"),
-                    **github_data,
+                    **_provider_data(**github_data),
+                    **_scaleset_data(name="scaleset-a", provider_name="configurator-a-0"),
                 },
             ),
             Relation(
                 endpoint=GARM_CONFIGURATOR_RELATION_NAME,
                 remote_app_name="configurator-b",
                 remote_app_data={
-                    **_provider_data(provider_name="configurator-b-0"),
-                    **github_data,
+                    **_provider_data(**github_data),
+                    **_scaleset_data(name="scaleset-b", provider_name="configurator-b-0"),
                 },
             ),
         ],
@@ -1910,8 +1915,11 @@ def test_applications_sharing_a_github_app_yield_one_credential(
 @pytest.mark.parametrize(
     "github_data",
     [
-        pytest.param({"github_app_id": json.dumps("1")}, id="missing-fields"),
-        pytest.param(_github_unit_data("secret:unavailable"), id="unreadable-key-secret"),
+        pytest.param(_provider_data(github_app_id="1"), id="missing-fields"),
+        pytest.param(
+            _provider_data(**_github_provider_values("secret:unavailable")),
+            id="unreadable-key-secret",
+        ),
     ],
 )
 def test_incomplete_github_config_yields_no_credential(
@@ -1923,7 +1931,7 @@ def test_incomplete_github_config_yields_no_credential(
     act: Run update-status.
     assert: No credential is built — GARM rejects a partial one.
     """
-    state = _state(configurator_app_data={**_PROVIDER_UNIT_DATA, **github_data})
+    state = _state(configurator_app_data={**github_data, **_SCALESET_UNIT_DATA})
 
     ctx.run(ctx.on.update_status(), state)
 
@@ -1956,9 +1964,9 @@ def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_ap
     act: Run update-status.
     assert: GARM ignores the stale key and removes the scale set.
     """
-    scaleset_data = {**_SCALESET_UNIT_DATA, "image": "stable-image"}
-    scaleset_data.pop("image_id")
-    data = {**_PROVIDER_UNIT_DATA, **scaleset_data}
+    scaleset = _scaleset_values(image="stable-image")
+    scaleset.pop("image_id")
+    data = {**_PROVIDER_UNIT_DATA, "scaleset": json.dumps(scaleset)}
 
     ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
@@ -1973,12 +1981,17 @@ def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api:
     assert: GARM remains provider-ready and reconciles an empty scale-set list, removing the old
         scale set instead of waiting for configurator data.
     """
-    scaleset_data = {**_SCALESET_UNIT_DATA}
-    scaleset_data.pop("image_id")
+    scaleset = _scaleset_values()
+    scaleset.pop("image_id")
 
     out = ctx.run(
         ctx.on.update_status(),
-        _state(configurator_app_data={**_PROVIDER_UNIT_DATA, **scaleset_data}),
+        _state(
+            configurator_app_data={
+                **_PROVIDER_UNIT_DATA,
+                "scaleset": json.dumps(scaleset),
+            }
+        ),
     )
 
     garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
@@ -2101,9 +2114,8 @@ def test_remote_shell_follows_the_configurator_databag(
     act: Run update-status.
     assert: The scaleset spec carries the requested setting, defaulting to off.
     """
-    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
-    if databag_value is not None:
-        data["enable_shell"] = databag_value
+    scaleset = {} if databag_value is None else {"enable_shell": databag_value}
+    data = {**_PROVIDER_UNIT_DATA, **_scaleset_data(**scaleset)}
     ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
@@ -2124,9 +2136,8 @@ def test_image_visibility_follows_the_configurator_databag(
     act: Run update-status.
     assert: The scaleset spec carries the visibility, or none so the provider default applies.
     """
-    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
-    if databag_value is not None:
-        data["image_visibility"] = databag_value
+    scaleset = {} if databag_value is None else {"image_visibility": databag_value}
+    data = {**_PROVIDER_UNIT_DATA, **_scaleset_data(**scaleset)}
     ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
@@ -2147,9 +2158,8 @@ def test_security_group_follows_the_configurator_databag(
     act: Run update-status.
     assert: The scaleset spec carries the group, or none so the provider's default applies.
     """
-    data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
-    if databag_value is not None:
-        data["security_group"] = databag_value
+    scaleset = {} if databag_value is None else {"security_group": databag_value}
+    data = {**_PROVIDER_UNIT_DATA, **_scaleset_data(**scaleset)}
     ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
