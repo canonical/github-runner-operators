@@ -167,9 +167,18 @@ def test_render_aproxy_pre_install_script_falls_back_to_iptables_for_focal():
     assert "elif command -v iptables >/dev/null 2>&1; then" in result
     assert "iptables -t nat -N APROXY_GARM 2>/dev/null || true" in result
     assert "iptables -t nat -A APROXY_GARM -d 10.0.0.0/8 -j RETURN" in result
-    assert "iptables -t nat -A APROXY_GARM -m iprange --dst-range 10.0.0.0-10.141.167.255 -j RETURN" in result
-    assert "iptables -t nat -A APROXY_GARM -p tcp --dport 1:3127 -j DNAT --to-destination $default_ipv4:54969" in result
-    assert "iptables -t nat -A APROXY_GARM -p tcp --dport 3129:65535 -j DNAT --to-destination $default_ipv4:54969" in result
+    assert (
+        "iptables -t nat -A APROXY_GARM -m iprange --dst-range 10.0.0.0-10.141.167.255 -j RETURN"
+        in result
+    )
+    assert (
+        "iptables -t nat -A APROXY_GARM -p tcp --dport 1:3127 -j DNAT --to-destination $default_ipv4:54969"
+        in result
+    )
+    assert (
+        "iptables -t nat -A APROXY_GARM -p tcp --dport 3129:65535 -j DNAT --to-destination $default_ipv4:54969"
+        in result
+    )
 
 
 def test_render_aproxy_pre_install_script_happy_path():

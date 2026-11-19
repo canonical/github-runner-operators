@@ -35,6 +35,14 @@ config:
 extensions:
   - go-framework
 
+parts:
+  # The go-framework extension owns the charm part, so this no-op part installs git for
+  # the git-sourced garm-configurator relation dependency.
+  build-deps:
+    plugin: nil
+    build-packages:
+      - git
+
 requires:
   postgresql:
     interface: postgresql_client

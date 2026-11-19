@@ -3,19 +3,27 @@
 
 """Unit tests for charm_state.py."""
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
-
-from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
+from garm_configurator_relation import (
+    ConfiguratorData,
+    ConfiguratorRelation,
+    GarmConfiguratorRequirer,
+)
+from garm_configurator_relation import ProviderConfig as RelationProviderConfig
+from garm_configurator_relation import ScalesetConfig
 
 from charm_state import (
     CharmState,
     ProviderConfig,
     RunnerConfig,
     SSHDebugInfo,
+    _get_desired_entities,
     _get_ssh_debug_connections,
 )
+from garm_entrypoint import PROVIDER_REQUIRED_FIELDS
 
 _COMPLETE = {
     "host": "10.0.0.1",
@@ -36,6 +44,7 @@ def _make_charm(units_data=None):
         A MagicMock charm whose ``model.get_relation`` returns the built relation.
     """
     charm = MagicMock()
+    charm.model.relations.get.return_value = []
     if units_data is None:
         charm.model.get_relation.return_value = None
         return charm
@@ -117,8 +126,11 @@ def test_charm_state_from_charm_no_debug_ssh_relation():
     assert: ssh_debug_connections is empty.
     """
     charm = _make_charm(None)
-    state = CharmState.from_charm(charm)
+    requirer = GarmConfiguratorRequirer(charm)
+    state = CharmState.from_charm(charm, requirer)
     assert state.ssh_debug_connections == []
+    assert state.configurator_data == ConfiguratorData()
+    assert state.configurator_related is False
 
 
 def test_charm_state_from_charm_with_debug_ssh_relation():
@@ -138,34 +150,86 @@ def test_charm_state_from_charm_with_debug_ssh_relation():
         ]
     )
 
-    state = CharmState.from_charm(charm)
+    requirer = GarmConfiguratorRequirer(charm)
+    state = CharmState.from_charm(charm, requirer)
 
     assert len(state.ssh_debug_connections) == 1
     assert isinstance(state.ssh_debug_connections[0], SSHDebugInfo)
     assert state.ssh_debug_connections[0].host == "192.168.1.5"
 
 
-def _charm(units_data):
-    """Build a mock charm whose configurator relation exposes the given unit databags.
+_PROVIDER_FIELDS = frozenset(
+    {"github_app_id", "github_installation_id", "github_private_key_secret_uri"}
+)
 
-    Units carry real, ordered names so the reconciler's stable-sort tie-break is exercised.
-    """
-    charm = MagicMock()
-    relation = MagicMock()
-    relation.id = 0
-    data_map = {}
-    for i, unit_data in enumerate(units_data):
-        unit = MagicMock()
-        unit.name = f"garm-configurator/{i}"
-        data_map[unit] = unit_data
-    relation.units = list(data_map)
-    relation.data = data_map
-    charm.model.relations.get.return_value = [relation]
-    return charm
+
+def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
+    """Build one configurator relation from a flat databag of provider and scaleset fields."""
+    provider_fields = {key: unit_data[key] for key in _PROVIDER_FIELDS if key in unit_data}
+    scaleset_fields = {
+        key: value for key, value in unit_data.items() if key not in _PROVIDER_FIELDS
+    }
+    return ConfiguratorRelation(
+        relation_id=index,
+        application_name="garm-configurator",
+        unit_name=f"garm-configurator/{index}",
+        provider=RelationProviderConfig(
+            openstack_auth_url="https://ks.example.com:5000/v3", **provider_fields
+        ),
+        scaleset=ScalesetConfig(**scaleset_fields),
+    )
 
 
 def _entities(units_data):
-    return CharmState.from_charm(_charm(units_data)).desired_entities
+    configurator_data = ConfiguratorData(
+        relations=tuple(
+            _configurator_relation(index, **unit_data)
+            for index, unit_data in enumerate(units_data)
+        )
+    )
+    return _get_desired_entities(configurator_data)
+
+
+def test_charm_state_from_charm_uses_the_provided_requirer():
+    """
+    arrange: A requirer reporting a configurator relation that names an org and app ids.
+    act: Call CharmState.from_charm() with that requirer.
+    assert: The state carries the requirer's data and related flag, so the charm owns the
+        requirer and from_charm does not construct a second one.
+    """
+    requirer = MagicMock()
+    requirer.get_data.return_value = ConfiguratorData(
+        relations=(
+            _configurator_relation(
+                0, org="canonical", github_app_id="1", github_installation_id="2"
+            ),
+        )
+    )
+    requirer.is_related = True
+    charm = _make_charm(None)
+
+    state = CharmState.from_charm(charm, requirer)
+
+    assert state.configurator_related is True
+    assert state.configurator_data.relations[0].scaleset.org == "canonical"
+    assert [(e.entity_type, e.entity_name) for e in state.desired_entities] == [
+        ("organization", "canonical")
+    ]
+
+
+def test_desired_entities_log_skipped_unit_without_app_ids(caplog):
+    """
+    arrange: A configurator unit naming an org but without GitHub App ids.
+    act: Build the desired entities.
+    assert: The unit is skipped and the skip is logged so a stalled bring-up is visible.
+    """
+    with caplog.at_level(logging.INFO):
+        entities = _entities([{"org": "canonical"}])
+
+    assert entities == []
+    assert "Skipping entity organization 'canonical': GitHub App ids not yet published" in (
+        caplog.text
+    )
 
 
 @pytest.mark.parametrize(
@@ -254,9 +318,9 @@ def test_desired_entities_distinguish_org_and_repo_with_same_name():
     [
         {"github_app_id": "1", "github_installation_id": "2"},
         {"org": "canonical", "github_installation_id": "2"},
-        {"org": "canonical", "github_app_id": "x", "github_installation_id": "2"},
+        {"org": "canonical", "github_app_id": "1"},
     ],
-    ids=["no-org-or-repo", "missing-app-id", "non-numeric-id"],
+    ids=["no-org-or-repo", "missing-app-id", "missing-installation-id"],
 )
 def test_desired_entities_skip_incomplete_unit(unit_data):
     """

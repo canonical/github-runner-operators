@@ -11,10 +11,14 @@ import os
 import secrets
 import string
 import typing
-from collections.abc import Mapping
 
 import ops
 import paas_charm.go
+from garm_configurator_relation import (
+    ConfiguratorData,
+    ConfiguratorRelation,
+    GarmConfiguratorRequirer,
+)
 from paas_charm.app import WorkloadConfig
 from paas_charm.charm_utils import block_if_invalid_data
 
@@ -67,6 +71,10 @@ class BlockedError(Exception):
 
 class InvalidProviderConfigError(BlockedError):
     """A configurator publishes a provider with empty required fields."""
+
+
+class InvalidConfiguratorRelationError(BlockedError):
+    """A configurator relation is incomplete or conflicts with another relation."""
 
 
 CONTAINER_NAME: typing.Final[str] = "app"
@@ -191,28 +199,6 @@ def _parse_pre_install_scripts(raw: str) -> dict[str, str]:
     return {}
 
 
-def _relation_value(data: Mapping[str, str], key: str) -> str:
-    """Return one relation databag value as the plain string GARM expects.
-
-    ``Relation.save`` JSON-encodes every field, but a relation can span an upgrade where the
-    remote unit still writes plain strings. Falling back to the raw value keeps a mixed-version
-    deployment readable.
-
-    Args:
-        data: The unit databag.
-        key: The databag key to read.
-
-    Returns:
-        The decoded value as a string, or an empty string when it is unset.
-    """
-    raw = data.get(key, "")
-    try:
-        value = json.loads(raw)
-    except (TypeError, ValueError):
-        value = raw
-    return "" if value is None else str(value)
-
-
 class GarmCharm(paas_charm.go.Charm):
     """GARM charm — manages the GARM service via Pebble."""
 
@@ -223,6 +209,7 @@ class GarmCharm(paas_charm.go.Charm):
             args: Passed through to CharmBase.
         """
         super().__init__(*args)
+        self._configurator_requirer = GarmConfiguratorRequirer(self)
         self.framework.observe(self.on.install, self._reconcile)
         self.framework.observe(self.on.leader_elected, self._reconcile)
         self.framework.observe(
@@ -409,6 +396,8 @@ class GarmCharm(paas_charm.go.Charm):
             rerun_migrations: Passed through to the parent restart.
 
         Raises:
+            InvalidConfiguratorRelationError: If a related configurator relation is incomplete
+                or conflicts with another, before anything is applied.
             InvalidProviderConfigError: If a related provider is incomplete, before anything
                 is applied.
         """
@@ -432,11 +421,14 @@ class GarmCharm(paas_charm.go.Charm):
             self.update_app_and_unit_status(ops.WaitingStatus("Waiting for GARM secrets"))
             return
 
+        # Read the relations once per hook so publishing, reconciling and recording all see
+        # the same configurator payload.
+        charm_state = CharmState.from_charm(self, self._configurator_requirer)
         # Raises before anything is applied, so GARM keeps its running configuration rather
         # than publish and record a provider that would break its scalesets.
-        related_providers = self._get_configurator_provider_configs()
+        related_providers = self._get_configurator_provider_configs(charm_state.configurator_data)
         recorded_providers = self._read_provider_record()
-        configurator_related = CharmState.from_charm(self).configurator_related
+        configurator_related = charm_state.configurator_related
         # The record is published even with no relation left: a drain outlives the relation,
         # and a replaced pod must start GARM with the providers that drain needs. An empty
         # set is published the same way, so the workload converges on what the relations and
@@ -483,7 +475,7 @@ class GarmCharm(paas_charm.go.Charm):
         # referenced, and it must not be buried by the framework reporting active afterward.
         # An empty desired state is a real one — with no configurator left the workload runs
         # with no providers, and the pass reconciles that to zero.
-        live_scalesets = self._reconcile_garm_state()
+        live_scalesets = self._reconcile_garm_state(charm_state)
         self._save_provider_record(
             self._trimmed_providers(published_providers, related_providers, live_scalesets)
         )
@@ -661,77 +653,57 @@ class GarmCharm(paas_charm.go.Charm):
         return None
 
     def _get_configurator_provider_configs(
-        self,
+        self, configurator_data: ConfiguratorData
     ) -> list[ProviderConfig]:
-        """Read OpenStack provider configs from all Configurator applications.
+        """Read OpenStack provider configs from all configurator relation units.
 
-        Each Configurator application is expected to have one unit, which
-        writes its provider config to unit-level relation data on the
-        ``garm-configurator`` endpoint. If an application has multiple units,
-        its first unit by name is used. This method collects one config from
-        each application, keyed by unit name for TOML provider naming.
-
-        Passwords stored as Juju secret URIs are resolved at this point
-        so that the plaintext value is available for the provider's
+        The requirer aggregates every related unit, so each unit yields one provider keyed
+        by its name for TOML provider naming. Passwords stored as Juju secret URIs are
+        resolved at this point so that the plaintext value is available for the provider's
         clouds.yaml file.
 
+        Args:
+            configurator_data: The aggregated garm-configurator relation data.
+
         Returns:
-            One ``ProviderConfig`` per configurator application.
+            One ``ProviderConfig`` per configurator relation unit, ordered by provider name.
 
         Raises:
+            InvalidConfiguratorRelationError: If a relation is incomplete or conflicts with
+                another over a scaleset.
             InvalidProviderConfigError: If a provider has empty required fields, e.g. a
                 password secret not yet readable.
         """
-        relations = sorted(
-            self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []),
-            key=lambda relation: relation.id,
-        )
-        if not relations:
+        if configurator_data.has_invalid_relations:
+            relation_ids = ", ".join(
+                str(relation_id) for relation_id in sorted(configurator_data.invalid_relation_ids)
+            )
+            raise InvalidConfiguratorRelationError(
+                f"Invalid garm-configurator relation data: {relation_ids}"
+            )
+        if not configurator_data.relations:
             logger.info("GARM configurator relation not available; provider_count=0")
             return []
 
         configs: list[ProviderConfig] = []
-        for relation in relations:
-            units = sorted(relation.units, key=lambda unit: unit.name)
-            if not units:
-                logger.warning(
-                    "GARM configurator application has no units: relation_id=%d",
-                    relation.id,
-                )
-                continue
-            if len(units) > 1:
-                logger.warning(
-                    "GARM configurator application has multiple units; using first unit: "
-                    "relation_id=%d unit_count=%d unit=%s",
-                    relation.id,
-                    len(units),
-                    units[0].name,
-                )
-
-            unit = units[0]
-            data = relation.data[unit]
-            # Only include units that have sent the full provider config
-            if "openstack_auth_url" not in data:
-                continue
-
+        for relation in configurator_data.relations:
+            provider = relation.provider
             # Resolve password: may be a plain value or a secret URI.
-            password = _relation_value(data, "openstack_password")
-            unit_name = unit.name.replace("/", "-")
-            password_secret_uri = _relation_value(data, "openstack_password_secret_uri")
-            if not password and password_secret_uri:
-                password = self._resolve_secret_value(password_secret_uri)
+            password = provider.openstack_password or ""
+            if not password and provider.openstack_password_secret_uri:
+                password = self._resolve_secret_value(provider.openstack_password_secret_uri)
 
             configs.append(
                 ProviderConfig(
-                    unit_name=unit_name,
-                    auth_url=_relation_value(data, "openstack_auth_url"),
-                    username=_relation_value(data, "openstack_username"),
+                    unit_name=relation.provider_name,
+                    auth_url=provider.openstack_auth_url,
+                    username=provider.openstack_username or "",
                     password=password,
-                    project_name=_relation_value(data, "openstack_project_name"),
-                    user_domain_name=_relation_value(data, "openstack_user_domain_name"),
-                    project_domain_name=_relation_value(data, "openstack_project_domain_name"),
-                    region_name=_relation_value(data, "openstack_region_name"),
-                    network=_relation_value(data, "openstack_network"),
+                    project_name=provider.openstack_project_name or "",
+                    user_domain_name=provider.openstack_user_domain_name or "",
+                    project_domain_name=provider.openstack_project_domain_name or "",
+                    region_name=provider.openstack_region_name or "",
+                    network=provider.openstack_network or "",
                 )
             )
 
@@ -747,10 +719,10 @@ class GarmCharm(paas_charm.go.Charm):
 
         logger.info(
             "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
-            sum(len(relation.units) for relation in relations),
+            len(configurator_data.relations),
             len(configs),
         )
-        return configs
+        return sorted(configs, key=lambda config: config.unit_name)
 
     def _published_providers(
         self, related: list[ProviderConfig], recorded: dict[str, ProviderConfig]
@@ -975,59 +947,57 @@ class GarmCharm(paas_charm.go.Charm):
             logger.warning("GARM first-run check failed (error out for retry): %s", exc)
             raise
 
-    def _build_desired_scalesets(self, template_id: int | None) -> list[ScalesetSpec]:
+    def _build_desired_scalesets(
+        self, configurator_data: ConfiguratorData, template_id: int | None
+    ) -> list[ScalesetSpec]:
         """Build the desired scaleset list from all garm-configurator relation units."""
         specs = []
-        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
-            # Sorted, because `relation.units` is a set: the reconciler's dedupe is
-            # first-wins, so an unstable order lets the winning spec flip between hooks.
-            # A flip now changes the target scaleset name, which would create a
-            # replacement and retire the live one on every flip.
-            for unit in sorted(relation.units, key=lambda unit: unit.name):
-                spec = self._build_scaleset_spec(relation.data[unit], template_id)
-                if spec is not None:
-                    specs.append(spec)
+        for relation in configurator_data.relations:
+            spec = self._build_scaleset_spec(relation, template_id)
+            if spec is not None:
+                specs.append(spec)
         return specs
 
     @staticmethod
     def _build_scaleset_spec(
-        data: Mapping[str, str], template_id: int | None
+        relation: ConfiguratorRelation, template_id: int | None
     ) -> ScalesetSpec | None:
-        """Build the scaleset spec described by one configurator unit's databag.
+        """Build the scaleset spec described by one configurator relation.
 
         Args:
-            data: The relation unit databag.
+            relation: The configurator relation to build the spec from.
             template_id: The charmed runner template the scaleset references.
 
         Returns:
-            The spec, or None when the databag names no scaleset or is incomplete
+            The spec, or None when the relation names no scaleset or is incomplete
             or invalid, so the caller can skip the unit. Skips are logged except
             for malformed ``min_idle_runner``/``max_runner`` values, which skip
             silently.
         """
-        name = data.get("name", "")
+        scaleset = relation.scaleset
+        name = scaleset.name
         if not name:
             return None
 
-        entity = resolve_entity(data)
+        entity = resolve_entity(scaleset)
         if entity is None:
             logger.warning("Skipping scaleset %s: neither org nor repo specified", name)
             return None
         entity_type, entity_name = entity
 
         required = {
-            "provider_name": data.get("provider_name", ""),
-            "image": data.get("image_id", ""),
-            "flavor": data.get("flavor", ""),
-            "os_arch": data.get("os_arch", ""),
-            "max_runner": data.get("max_runner", ""),
+            "provider_name": scaleset.provider_name,
+            "image": scaleset.image_id,
+            "flavor": scaleset.flavor,
+            "os_arch": scaleset.os_arch,
+            "max_runner": scaleset.max_runner,
         }
         missing = [field for field, value in required.items() if not value]
         if missing:
             logger.warning("Skipping scaleset %s: missing required fields %s", name, missing)
             return None
         try:
-            min_idle = int(data.get("min_idle_runner", "0"))
+            min_idle = int(scaleset.min_idle_runner or "0")
             max_runners = int(required["max_runner"])
         except ValueError:
             return None
@@ -1042,17 +1012,19 @@ class GarmCharm(paas_charm.go.Charm):
             max_runners=max_runners,
             entity_type=entity_type,
             entity_name=entity_name,
-            labels=[label.strip() for label in data.get("labels", "").split(",") if label.strip()],
-            runner_group=data.get("runner_group", ""),
-            enable_shell=data.get("enable_shell", "") == "true",
-            pre_install_scripts=_parse_pre_install_scripts(data.get("pre_install_scripts", "")),
+            labels=[label.strip() for label in scaleset.labels.split(",") if label.strip()],
+            runner_group=scaleset.runner_group,
+            enable_shell=scaleset.enable_shell == "true",
+            pre_install_scripts=_parse_pre_install_scripts(scaleset.pre_install_scripts),
             template_id=template_id,
-            runner_config=RunnerConfig.from_databag(data),
-            image_visibility=data.get("image_visibility", "").strip(),
-            security_group=data.get("security_group", "").strip(),
+            runner_config=RunnerConfig.from_databag(dataclasses.asdict(scaleset)),
+            image_visibility=scaleset.image_visibility.strip(),
+            security_group=scaleset.security_group.strip(),
         )
 
-    def _build_desired_credentials(self) -> list[CredentialSpec]:
+    def _build_desired_credentials(
+        self, configurator_data: ConfiguratorData
+    ) -> list[CredentialSpec]:
         """Build desired GitHub credentials from configurator relation data.
 
         Credentials are deduped per (app_id, installation_id) so multiple configurator
@@ -1061,52 +1033,38 @@ class GarmCharm(paas_charm.go.Charm):
         — never from plaintext relation data. Credentials attach to GARM's built-in
         ``github.com`` endpoint.
 
+        Args:
+            configurator_data: The aggregated garm-configurator relation data.
+
         Returns:
             The full desired set of GitHub credential specs.
         """
         credentials: dict[tuple[int, int], CredentialSpec] = {}
-        for relation in self.model.relations.get(GARM_CONFIGURATOR_RELATION_NAME, []):
-            # Sorted for the same reason as `_build_desired_scalesets`: the dedupe
-            # below is first-wins over an unordered set.
-            for unit in sorted(relation.units, key=lambda unit: unit.name):
-                self._add_unit_credential(credentials, relation.data[unit], unit.name)
+        for relation in configurator_data.relations:
+            self._add_unit_credential(credentials, relation)
         return list(credentials.values())
 
     def _add_unit_credential(
         self,
         credentials: dict[tuple[int, int], CredentialSpec],
-        data: Mapping[str, str],
-        unit_name: str,
+        relation: ConfiguratorRelation,
     ) -> None:
-        """Add the GitHub credential described by one configurator unit.
+        """Add the GitHub credential described by one configurator relation.
 
         The unit is skipped — quietly — when its (app_id, installation_id) pair
-        was already provided by an earlier unit (the dedupe) or its App fields
-        are merely absent, and with a warning when the ids are malformed or the
-        private-key secret is unreadable.
+        was already provided by an earlier unit (the dedupe), its App fields are
+        merely absent, or the private-key secret is unreadable.
 
         Args:
             credentials: The accumulating desired credentials, keyed by
                 (app_id, installation_id).
-            data: The relation unit databag.
-            unit_name: The configurator unit's name, for log messages.
+            relation: The configurator relation to add.
         """
-        app_id_raw = _relation_value(data, "github_app_id")
-        installation_id_raw = _relation_value(data, "github_installation_id")
-        key_secret_uri = _relation_value(data, "github_private_key_secret_uri")
-        if not (app_id_raw and installation_id_raw and key_secret_uri):
-            return
-        try:
-            app_id = int(app_id_raw)
-            installation_id = int(installation_id_raw)
-        except ValueError:
-            logger.warning(
-                "Skipping GitHub credential from %s: non-numeric app/installation id "
-                "(app_id=%r, installation_id=%r)",
-                unit_name,
-                app_id_raw,
-                installation_id_raw,
-            )
+        provider = relation.provider
+        app_id = provider.github_app_id
+        installation_id = provider.github_installation_id
+        key_secret_uri = provider.github_private_key_secret_uri
+        if app_id is None or installation_id is None or not key_secret_uri:
             return
 
         dedupe_key = (app_id, installation_id)
@@ -1130,7 +1088,7 @@ class GarmCharm(paas_charm.go.Charm):
             description=MANAGED_CREDENTIAL_DESCRIPTION,
         )
 
-    def _reconcile_garm_state(self) -> list[ScaleSet] | None:
+    def _reconcile_garm_state(self, charm_state: CharmState) -> list[ScaleSet] | None:
         """Make GARM match the charm's desired state: its own config, then its resources.
 
         The steps are ordered, not independent: GARM rejects every operational call with
@@ -1139,6 +1097,9 @@ class GarmCharm(paas_charm.go.Charm):
         authenticated client configures the URLs and reconciles credentials, then entities,
         then scalesets. The ``github_linux_charmed`` template is ensured before scalesets so each
         scaleset can reference it.
+
+        Args:
+            charm_state: The charm state read once for this reconcile pass.
 
         Returns:
             The scalesets GARM still holds after the pass, or None when the pass could not
@@ -1155,7 +1116,6 @@ class GarmCharm(paas_charm.go.Charm):
         # _get_garm_url() which depends on charm config that is not set for the local API.
         base_url = GARM_LOCAL_API_BASE_URL
         try:
-            charm_state = CharmState.from_charm(self)
             auth_client = GarmAuthenticatedClient.from_login(
                 base_url, admin_creds["username"], admin_creds["password"]
             )
@@ -1169,11 +1129,13 @@ class GarmCharm(paas_charm.go.Charm):
             # github.com download URL.
             self._ensure_controller_urls(auth_client)
             agent_mode = self._ensure_agent_tools(auth_client)
-            GithubReconciler(auth_client).reconcile(self._build_desired_credentials())
+            GithubReconciler(auth_client).reconcile(
+                self._build_desired_credentials(charm_state.configurator_data)
+            )
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
             replacing, surviving_scalesets = ScalesetReconciler(auth_client).reconcile(
-                self._build_desired_scalesets(template_id)
+                self._build_desired_scalesets(charm_state.configurator_data, template_id)
             )
             # A label change recreates the scaleset and drains the old one, which
             # outlives this hook: report progress and let update-status converge it.
