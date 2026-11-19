@@ -57,18 +57,35 @@ The GARM configurator charm has no actions.
 
 ### Configurations
 
-The GARM configurator charm holds the configuration for one GARM scaleset. The `os-arch` option, which specifies the
-runner CPU architecture, is mandatory. The OpenStack credentials required by the provider include:
+The GARM configurator charm holds the configuration for one GARM scaleset. The following
+options are required because the charm cannot publish a provider configuration or scaleset
+without them:
 
-* `openstack-auth-url`
-* `openstack-password`
-* `openstack-project-domain-name`
-* `openstack-project-name`
-* `openstack-user-domain-name`
-* `openstack-username`
+* `name`, `flavor`, and `os-arch`, which identify the scaleset and its runners.
+* One of `repo` or `org`, which names the GitHub entity the runners register to.
+* An image: either the `image` option or an image published over the image-builder relation.
+* The OpenStack credentials required by the provider:
+  * `openstack-auth-url`
+  * `openstack-network`
+  * `openstack-password`
+  * `openstack-project-domain-name`
+  * `openstack-project-name`
+  * `openstack-region-name`
+  * `openstack-user-domain-name`
+  * `openstack-username`
+* The GitHub App ID, installation ID, and private key, which GARM uses to authenticate.
 
-The GitHub App ID, installation ID, and private key are also required for GitHub authentication. Review the remaining
-options and defaults before applying the configuration.
+The scaleset options `min-idle-runner`, `max-runner`, `labels`, `runner-group`,
+`pre-install-scripts`, `image-visibility`, `security-group`, and the runner networking and
+observability options are optional; their documented defaults apply when they are unset.
+
+The charm reports `Blocked` while a required configuration value is missing and publishes
+nothing to the GARM relation. It publishes the complete relation payload only once every
+required value, including the image, is available. A relation payload that omits a required
+field, or carries a blank value for one, is invalid and the GARM charm blocks rather than
+creating a partially configured provider or scaleset.
+
+Review the remaining options and defaults before applying the configuration.
 
 ```{seealso}
 [Configurations for GARM configurator charm](https://charmhub.io/garm-configurator/configurations)
