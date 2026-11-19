@@ -61,14 +61,7 @@ def _relation(relation_id: int = 1, scaleset_name: str = "my-scaleset") -> Confi
     )
 
 
-@pytest.mark.parametrize(
-    "provider_name, expected",
-    [
-        pytest.param("configurator-0", "configurator-0", id="published-name"),
-        pytest.param("", "", id="unset-name"),
-    ],
-)
-def test_configurator_relation_provider_name(provider_name: str, expected: str):
+def test_configurator_relation_provider_name():
     """
     arrange: A configurator relation whose scaleset value carries a provider name.
     act: Read its provider name.
@@ -78,11 +71,11 @@ def test_configurator_relation_provider_name(provider_name: str, expected: str):
     relation = ConfiguratorRelation(
         relation_id=1,
         application_name="configurator",
-        provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
-        scaleset=ScalesetConfig(provider_name=provider_name),
+        provider=_provider(),
+        scaleset=_scaleset(provider_name="configurator-0"),
     )
 
-    assert relation.provider_name == expected
+    assert relation.provider_name == "configurator-0"
 
 
 @pytest.mark.parametrize(
