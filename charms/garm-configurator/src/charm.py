@@ -45,14 +45,21 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _reconcile(self, event: ops.EventBase) -> None:
         """Handle all charm events by reconciling configuration and relation data.
 
-        Reads the current charm state, forwards OpenStack credentials to the
-        image-builder relation, publishes scaleset configuration (and secrets
-        when the image reference is available) to all garm-configurator relations,
-        then sets unit status to reflect readiness.
+        Only the leader unit publishes configurator data, so a non-leader blocks before doing
+        any work. The leader reads the current charm state, forwards OpenStack credentials to
+        the image-builder relation, publishes scaleset configuration (and secrets when the image
+        reference is available) to the garm-configurator relations' application databags, then
+        sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
         """
+        if not self.unit.is_leader():
+            self.unit.status = ops.BlockedStatus(
+                "Non-leader unit: configurator data is published by the leader"
+            )
+            return
+
         try:
             state = CharmState.from_charm(self)
         except CharmConfigInvalidError as e:
@@ -119,7 +126,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         if not self.unit.is_leader():
             return None
-
         try:
             secret = self.model.get_secret(label=secret_name)
             secret.set_content({"value": value})
@@ -134,19 +140,17 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """Publish the complete configurator payload to the garm-configurator relation.
 
         Builds one ``RelationProviderConfig`` holding the scaleset fields, runner options,
-        image reference, and OpenStack/GitHub App credentials, then writes it with a single
-        ``ops.Relation.save`` call. ``Relation.save`` persists every model field, so an unset
-        optional field is published as an empty string rather than omitted; consumers treat the
-        empty string as "unset". The ``image_id`` field carries either an OpenStack image name
-        or ID for compatibility.
+        image reference, and OpenStack/GitHub App credentials, then writes it to the
+        application databag with a single ``ops.Relation.save`` call. ``Relation.save``
+        persists every model field, so an unset optional field is published as an empty string
+        rather than omitted; consumers treat the empty string as "unset". The ``image_id`` field
+        carries either an OpenStack image name or ID for compatibility.
 
-        When this unit holds leadership, also provisions Juju secrets for the OpenStack
-        password and GitHub App private key and writes their secret URIs alongside the
-        credential fields. Secret provisioning is gated on the relation existing and the unit
-        being the leader, not on an image being available, so credentials can be published
-        before an image is configured and are retained when an image is withdrawn. Without
-        leadership the credentials are still published, but the secret URIs are left unset for
-        the leader to fill in.
+        Also provisions Juju secrets for the OpenStack password and GitHub App private key and
+        writes their secret URIs alongside the credential fields. Secret provisioning is gated
+        on the relation existing, not on an image being available, so credentials can be
+        published before an image is configured and are retained when an image is withdrawn.
+        Only the leader reaches this method, so the application databag has a single writer.
 
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
@@ -218,7 +222,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
                     str(github_key_secret.id) if github_key_secret is not None else None
                 ),
             ),
-            self.unit,
+            self.app,
         )
 
 

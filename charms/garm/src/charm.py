@@ -655,18 +655,18 @@ class GarmCharm(paas_charm.go.Charm):
     def _get_configurator_provider_configs(
         self, configurator_data: ConfiguratorData
     ) -> list[ProviderConfig]:
-        """Read OpenStack provider configs from all configurator relation units.
+        """Read OpenStack provider configs from all configurator applications.
 
-        The requirer aggregates every related unit, so each unit yields one provider keyed
-        by its name for TOML provider naming. Passwords stored as Juju secret URIs are
-        resolved at this point so that the plaintext value is available for the provider's
-        clouds.yaml file.
+        The requirer aggregates every related application's databag, so each application yields
+        one provider keyed by the provider name its leader publishes for TOML provider naming.
+        Passwords stored as Juju secret URIs are resolved at this point so that the plaintext
+        value is available for the provider's clouds.yaml file.
 
         Args:
             configurator_data: The aggregated garm-configurator relation data.
 
         Returns:
-            One ``ProviderConfig`` per configurator relation unit, ordered by provider name.
+            One ``ProviderConfig`` per configurator application, ordered by provider name.
 
         Raises:
             InvalidConfiguratorRelationError: If a relation is incomplete or conflicts with
@@ -718,7 +718,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
 
         logger.info(
-            "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
+            "GARM configurator provider data: relation_count=%d configured_provider_count=%d",
             len(configurator_data.relations),
             len(configs),
         )
@@ -950,7 +950,7 @@ class GarmCharm(paas_charm.go.Charm):
     def _build_desired_scalesets(
         self, configurator_data: ConfiguratorData, template_id: int | None
     ) -> list[ScalesetSpec]:
-        """Build the desired scaleset list from all garm-configurator relation units."""
+        """Build the desired scaleset list from all garm-configurator relations."""
         specs = []
         for relation in configurator_data.relations:
             spec = self._build_scaleset_spec(relation, template_id)
