@@ -2,7 +2,7 @@ ops==3.10.0
 paas-charm==1.12.3
 Jinja2==3.1.6
 tomli-w==1.2.0
-PyYAML==6.0.3
+PyYAML==6.0.4
 urllib3==2.8.0
 python-dateutil==4.0.0
 pydantic==2.14.4
