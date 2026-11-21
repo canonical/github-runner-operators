@@ -131,22 +131,24 @@ class GarmConfiguratorCharm(ops.CharmBase):
         return secret
 
     def _configure_garm_relation(self, state: CharmState) -> None:
-        """Publish scaleset configuration to the garm-configurator relation.
+        """Publish the complete configurator payload to the garm-configurator relation.
 
-        Writes non-secret scaleset fields (name, provider, credentials, image,
-        image visibility, security group, flavor, arch, runner counts, labels,
-        runner group, remote-shell toggle, and pre-install scripts) to the relation.
-        The ``image_id`` wire field carries either an OpenStack image name or ID
-        for compatibility.
-        The optional ``org`` and ``repo`` fields are included only when set.
+        Builds one ``RelationProviderConfig`` holding the scaleset fields, runner options,
+        image reference, and OpenStack/GitHub App credentials, then writes it with a single
+        ``ops.Relation.save`` call. ``Relation.save`` persists every model field, so an unset
+        optional field is published as an empty string rather than omitted; consumers treat the
+        empty string as "unset". The ``image_id`` field carries either an OpenStack image name
+        or ID for compatibility.
 
-        When the image reference is present and this unit holds leadership, also
-        provisions Juju secrets for the OpenStack password and GitHub App
-        private key, then writes the full OpenStack provider and GitHub App
-        credential fields alongside their secret URIs.
+        When this unit holds leadership, also provisions Juju secrets for the OpenStack
+        password and GitHub App private key and writes their secret URIs alongside the
+        credential fields. Secret provisioning is gated on the relation existing and the unit
+        being the leader, not on an image being available, so credentials can be published
+        before an image is configured and are retained when an image is withdrawn. Without
+        leadership the credentials are still published, but the secret URIs are left unset for
+        the leader to fill in.
 
-        Does nothing when no garm-configurator relation is joined yet or when
-        secrets cannot be created (non-leader unit). Status reporting is
+        Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
 
         Args:
@@ -155,6 +157,17 @@ class GarmConfiguratorCharm(ops.CharmBase):
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
             return
+
+        password_secret = self._ensure_relation_secret(
+            garm_relation,
+            "configurator-password",
+            state.provider_config.password,
+        )
+        github_key_secret = self._ensure_relation_secret(
+            garm_relation,
+            "configurator-github-key",
+            state.github_app_config.private_key,
+        )
 
         pre_install = state.scaleset_config.pre_install_scripts
         rc = state.runner_config
@@ -185,30 +198,15 @@ class GarmConfiguratorCharm(ops.CharmBase):
             basic_data["org"] = state.scaleset_config.org
         if state.scaleset_config.repo:
             basic_data["repo"] = state.scaleset_config.repo
-        garm_relation.data[self.unit].update(basic_data)
-
-        if state.image is None:
-            return
-
-        password_secret = self._ensure_relation_secret(
-            garm_relation,
-            "configurator-password",
-            state.provider_config.password,
-        )
-        github_key_secret = self._ensure_relation_secret(
-            garm_relation,
-            "configurator-github-key",
-            state.github_app_config.private_key,
-        )
-
-        if password_secret is None or github_key_secret is None:
-            return
 
         garm_relation.save(
             RelationProviderConfig(
+                **basic_data,
                 openstack_auth_url=state.provider_config.auth_url,
                 openstack_username=state.provider_config.username,
-                openstack_password_secret_uri=str(password_secret.id),
+                openstack_password_secret_uri=(
+                    str(password_secret.id) if password_secret is not None else None
+                ),
                 openstack_project_name=state.provider_config.project_name,
                 openstack_user_domain_name=state.provider_config.user_domain_name,
                 openstack_project_domain_name=state.provider_config.project_domain_name,
@@ -216,7 +214,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 openstack_network=state.provider_config.network,
                 github_app_id=state.github_app_config.app_id,
                 github_installation_id=state.github_app_config.installation_id,
-                github_private_key_secret_uri=str(github_key_secret.id),
+                github_private_key_secret_uri=(
+                    str(github_key_secret.id) if github_key_secret is not None else None
+                ),
             ),
             self.unit,
         )
