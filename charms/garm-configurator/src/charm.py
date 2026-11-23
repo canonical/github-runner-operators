@@ -10,6 +10,7 @@ import typing
 
 import ops
 from garm_configurator_relation import ProviderConfig as RelationProviderConfig
+from garm_configurator_relation import ScalesetConfig as RelationScalesetConfig
 
 from charm_state import (
     GARM_RELATION_NAME,
@@ -133,20 +134,17 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _configure_garm_relation(self, state: CharmState) -> None:
         """Publish the complete configurator payload to the garm-configurator relation.
 
-        Builds one ``RelationProviderConfig`` holding the scaleset fields, runner options,
-        image reference, and OpenStack/GitHub App credentials, then writes it with a single
-        ``ops.Relation.save`` call. ``Relation.save`` persists every model field, so an unset
-        optional field is published as an empty string rather than omitted; consumers treat the
-        empty string as "unset". The ``image_id`` field carries either an OpenStack image name
-        or ID for compatibility.
+        Saves ``ScalesetConfig`` for the scaleset and runner fields (with ``encoder=str``, which
+        preserves their raw-string wire form) and ``RelationProviderConfig`` for the
+        OpenStack/GitHub App credentials (JSON-encoded). ``Relation.save`` persists every model
+        field, so an unset optional field is published as an empty string rather than omitted;
+        consumers treat the empty string as "unset". The ``image_id`` field carries either an
+        OpenStack image name or ID for compatibility.
 
-        When this unit holds leadership, also provisions Juju secrets for the OpenStack
-        password and GitHub App private key and writes their secret URIs alongside the
-        credential fields. Secret provisioning is gated on the relation existing and the unit
-        being the leader, not on an image being available, so credentials can be published
-        before an image is configured and are retained when an image is withdrawn. Without
-        leadership the credentials are still published, but the secret URIs are left unset for
-        the leader to fill in.
+        When this unit holds leadership, also provisions Juju secrets for the OpenStack password
+        and GitHub App private key and writes their secret URIs alongside the credential fields.
+        Without leadership the credentials are still published, but the secret URIs are left
+        unset for the leader to fill in.
 
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
@@ -171,37 +169,38 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         pre_install = state.scaleset_config.pre_install_scripts
         rc = state.runner_config
-        basic_data: dict[str, str] = {
-            "name": state.scaleset_config.name,
-            "provider_name": state.provider_config.provider_name,
-            "image_id": state.image or "",
-            "image_visibility": state.scaleset_config.image_visibility or "",
-            "security_group": state.scaleset_config.security_group,
-            "flavor": state.scaleset_config.flavor,
-            "os_arch": state.scaleset_config.os_arch,
-            "min_idle_runner": str(state.scaleset_config.min_idle_runner),
-            "max_runner": str(state.scaleset_config.max_runner),
-            "labels": state.scaleset_config.labels,
-            "runner_group": state.scaleset_config.runner_group,
-            "enable_shell": str(state.scaleset_config.enable_shell).lower(),
-            "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
-            if pre_install
-            else "",
-            "dockerhub_mirror": rc.dockerhub_mirror or "",
-            "runner_http_proxy": rc.runner_http_proxy or "",
-            "aproxy_exclude_addresses": rc.aproxy_exclude_addresses or "",
-            "aproxy_redirect_ports": rc.aproxy_redirect_ports or "",
-            "otel_collector_endpoint": rc.otel_collector_endpoint or "",
-            "pre_job_script": rc.pre_job_script or "",
-        }
-        if state.scaleset_config.org:
-            basic_data["org"] = state.scaleset_config.org
-        if state.scaleset_config.repo:
-            basic_data["repo"] = state.scaleset_config.repo
+        garm_relation.save(
+            RelationScalesetConfig(
+                name=state.scaleset_config.name,
+                provider_name=state.provider_config.provider_name,
+                image_id=state.image or "",
+                image_visibility=state.scaleset_config.image_visibility or "",
+                security_group=state.scaleset_config.security_group,
+                flavor=state.scaleset_config.flavor,
+                os_arch=state.scaleset_config.os_arch,
+                min_idle_runner=str(state.scaleset_config.min_idle_runner),
+                max_runner=str(state.scaleset_config.max_runner),
+                labels=state.scaleset_config.labels,
+                runner_group=state.scaleset_config.runner_group,
+                enable_shell=str(state.scaleset_config.enable_shell).lower(),
+                pre_install_scripts=(
+                    json.dumps({"pre_install.sh": pre_install}) if pre_install else ""
+                ),
+                org=state.scaleset_config.org or "",
+                repo=state.scaleset_config.repo or "",
+                dockerhub_mirror=rc.dockerhub_mirror or "",
+                runner_http_proxy=rc.runner_http_proxy or "",
+                aproxy_exclude_addresses=rc.aproxy_exclude_addresses or "",
+                aproxy_redirect_ports=rc.aproxy_redirect_ports or "",
+                otel_collector_endpoint=rc.otel_collector_endpoint or "",
+                pre_job_script=rc.pre_job_script or "",
+            ),
+            self.unit,
+            encoder=str,
+        )
 
         garm_relation.save(
             RelationProviderConfig(
-                **basic_data,
                 openstack_auth_url=state.provider_config.auth_url,
                 openstack_username=state.provider_config.username,
                 openstack_password_secret_uri=(
