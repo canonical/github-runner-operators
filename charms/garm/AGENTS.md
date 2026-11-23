@@ -41,9 +41,10 @@ charm conventions; this file lists only what's specific to `garm`.
   - The record is published even with **no** configurator left, so a pod replaced mid-drain
     still starts GARM with the providers that drain needs. The hook waits for the relation
     only when nothing is related **and** nothing is recorded.
-  - A configurator that is related but has published nothing yet is a waiting state, not a
-    reason to reconcile: the sweep would prune the scalesets that configurator is about to
-    describe.
+  - A configurator application that is related but has published nothing on its application
+    databag is an invalid relation. The hook blocks without reconciling: the sweep would
+    otherwise prune the scalesets that configurator is about to describe. The same holds when
+    one of several related applications has not published yet.
   - The trim takes effect at the **following** replan; that is deliberate, so a retirement
     does not restart GARM twice.
   - A reconcile pass that cannot establish which scalesets GARM holds returns `None`, and

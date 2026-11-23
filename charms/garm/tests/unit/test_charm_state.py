@@ -44,6 +44,7 @@ def _make_charm(units_data=None):
         A MagicMock charm whose ``model.get_relation`` returns the built relation.
     """
     charm = MagicMock()
+    charm.config = {}
     charm.model.relations.get.return_value = []
     if units_data is None:
         charm.model.get_relation.return_value = None
@@ -172,7 +173,6 @@ def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
     return ConfiguratorRelation(
         relation_id=index,
         application_name="garm-configurator",
-        unit_name=f"garm-configurator/{index}",
         provider=RelationProviderConfig(
             openstack_auth_url="https://ks.example.com:5000/v3", **provider_fields
         ),

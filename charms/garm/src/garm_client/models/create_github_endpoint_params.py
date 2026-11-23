@@ -33,8 +33,9 @@ class CreateGithubEndpointParams(BaseModel):
     ca_cert_bundle: Optional[Union[Annotated[bytes, Field(strict=True)], Annotated[str, Field(strict=True)]]] = None
     description: Optional[StrictStr] = None
     name: Optional[StrictStr] = None
+    tools_metadata_url: Optional[StrictStr] = Field(default=None, description="ToolsMetadataURL is an optional GitHub API compatible releases URL that publishes runner binaries. The tools it publishes take precedence over the ones the endpoint API reports, for the OS/arch combos they cover. It is how runners for architectures upstream GitHub does not build are made available.")
     upload_base_url: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["api_base_url", "base_url", "ca_cert_bundle", "description", "name", "upload_base_url"]
+    __properties: ClassVar[List[str]] = ["api_base_url", "base_url", "ca_cert_bundle", "description", "name", "tools_metadata_url", "upload_base_url"]
 
     @field_validator('ca_cert_bundle')
     def ca_cert_bundle_validate_regular_expression(cls, value):
@@ -105,6 +106,7 @@ class CreateGithubEndpointParams(BaseModel):
             "ca_cert_bundle": obj.get("ca_cert_bundle"),
             "description": obj.get("description"),
             "name": obj.get("name"),
+            "tools_metadata_url": obj.get("tools_metadata_url"),
             "upload_base_url": obj.get("upload_base_url")
         })
         return _obj

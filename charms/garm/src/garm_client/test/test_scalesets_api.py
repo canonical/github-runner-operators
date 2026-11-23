@@ -61,6 +61,12 @@ class TestScalesetsApi(unittest.TestCase):
         """
         pass
 
+    def test_list_all_scale_set_jobs(self) -> None:
+        """Test case for list_all_scale_set_jobs
+
+        """
+        pass
+
     def test_list_enterprise_scale_sets(self) -> None:
         """Test case for list_enterprise_scale_sets
 
@@ -79,6 +85,12 @@ class TestScalesetsApi(unittest.TestCase):
         """Test case for list_repo_scale_sets
 
         List repository scale sets.
+        """
+        pass
+
+    def test_list_scale_set_jobs(self) -> None:
+        """Test case for list_scale_set_jobs
+
         """
         pass
 

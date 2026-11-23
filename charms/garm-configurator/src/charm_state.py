@@ -89,7 +89,9 @@ class ProviderConfig(BaseModel):
         project_domain_name: OpenStack project domain name.
         region_name: OpenStack region name.
         network: OpenStack network name or ID.
-        provider_name: GARM provider name. Defaults to the Juju unit name with "/" replaced by "-".
+        provider_name: GARM provider name, ``<model>-<app>``. It identifies the configurator
+            application within the controller and does not change when leadership moves between
+            its units.
     """
 
     auth_url: str
@@ -157,7 +159,7 @@ class ProviderConfig(BaseModel):
             project_domain_name=str(charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)),
             region_name=str(charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME)),
             network=str(charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME)),
-            provider_name=charm.unit.name.replace("/", "-"),
+            provider_name=f"{charm.model.name}-{charm.app.name}",
         )
 
 

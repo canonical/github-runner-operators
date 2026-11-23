@@ -26,6 +26,7 @@ from agent_tools import AgentToolsError, ensure_agent_tools
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
+    BlockedError,
     CharmState,
     ProviderConfig,
     RunnerConfig,
@@ -63,10 +64,6 @@ GARM_PROVIDERS_SECRET_KEY: typing.Final[str] = "providers"
 
 class ProviderRecordError(Exception):
     """The provider record could not be read or written, so the provider set is unknown."""
-
-
-class BlockedError(Exception):
-    """A configuration problem that needs operator action; ``restart`` blocks the unit."""
 
 
 class InvalidProviderConfigError(BlockedError):
@@ -655,18 +652,18 @@ class GarmCharm(paas_charm.go.Charm):
     def _get_configurator_provider_configs(
         self, configurator_data: ConfiguratorData
     ) -> list[ProviderConfig]:
-        """Read OpenStack provider configs from all configurator relation units.
+        """Read OpenStack provider configs from all configurator applications.
 
-        The requirer aggregates every related unit, so each unit yields one provider keyed
-        by its name for TOML provider naming. Passwords stored as Juju secret URIs are
-        resolved at this point so that the plaintext value is available for the provider's
-        clouds.yaml file.
+        The requirer aggregates every related application's databag, so each application yields
+        one provider keyed by the provider name its leader publishes for TOML provider naming.
+        Passwords stored as Juju secret URIs are resolved at this point so that the plaintext
+        value is available for the provider's clouds.yaml file.
 
         Args:
             configurator_data: The aggregated garm-configurator relation data.
 
         Returns:
-            One ``ProviderConfig`` per configurator relation unit, ordered by provider name.
+            One ``ProviderConfig`` per configurator application, ordered by provider name.
 
         Raises:
             InvalidConfiguratorRelationError: If a relation is incomplete or conflicts with
@@ -718,7 +715,7 @@ class GarmCharm(paas_charm.go.Charm):
             )
 
         logger.info(
-            "GARM configurator provider data: relation_unit_count=%d configured_provider_count=%d",
+            "GARM configurator provider data: relation_count=%d configured_provider_count=%d",
             len(configurator_data.relations),
             len(configs),
         )
@@ -950,7 +947,7 @@ class GarmCharm(paas_charm.go.Charm):
     def _build_desired_scalesets(
         self, configurator_data: ConfiguratorData, template_id: int | None
     ) -> list[ScalesetSpec]:
-        """Build the desired scaleset list from all garm-configurator relation units."""
+        """Build the desired scaleset list from all garm-configurator relations."""
         specs = []
         for relation in configurator_data.relations:
             spec = self._build_scaleset_spec(relation, template_id)
@@ -1123,14 +1120,18 @@ class GarmCharm(paas_charm.go.Charm):
             # ``urls_required`` until the controller URLs are set; org/repo entities reference a
             # credential by name; and scalesets are created under a registered entity. So a single
             # authenticated client configures the URLs and reconciles credentials, then entities,
-            # then scalesets — each dependency before its dependants. The garm-agent binaries are
-            # published before the entities that switch agent mode on, because an entity in agent
-            # mode and no matching binary stored makes GARM fall back to handing the runner a
-            # github.com download URL.
+            # then scalesets — each dependency before its dependants. The endpoint's runner tools
+            # source is set before the scalesets whose runners need those tools. The garm-agent
+            # binaries are published before the entities that switch agent mode on, because an
+            # entity in agent mode and no matching binary stored makes GARM fall back to handing
+            # the runner a github.com download URL.
             self._ensure_controller_urls(auth_client)
             agent_mode = self._ensure_agent_tools(auth_client)
             GithubReconciler(auth_client).reconcile(
                 self._build_desired_credentials(charm_state.configurator_data)
+            )
+            auth_client.set_tools_metadata_url(
+                DEFAULT_GITHUB_ENDPOINT, charm_state.runner_tools_metadata_url
             )
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)

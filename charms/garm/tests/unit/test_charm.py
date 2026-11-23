@@ -42,7 +42,11 @@ from charm import (
     GARM_SECRETS_LABEL,
     GarmCharm,
 )
-from charm_state import DEBUG_SSH_INTEGRATION_NAME, GARM_CONFIGURATOR_RELATION_NAME
+from charm_state import (
+    DEBUG_SSH_INTEGRATION_NAME,
+    GARM_CONFIGURATOR_RELATION_NAME,
+    RUNNER_TOOLS_METADATA_URL_CONFIG_NAME,
+)
 from garm_api import GarmApiError, GarmConnectionError
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
@@ -176,6 +180,7 @@ def garm_api_fixture() -> typing.Iterator[_GarmApiMocks]:
         calls.attach_mock(auth_client.update_controller, "controller")
         calls.attach_mock(agent_tools, "agent_tools")
         calls.attach_mock(github_cls.return_value.reconcile, "github")
+        calls.attach_mock(auth_client.set_tools_metadata_url, "tools_metadata_url")
         calls.attach_mock(entity_cls.return_value.reconcile, "entity")
         calls.attach_mock(scaleset_cls.return_value.reconcile, "scaleset")
         yield _GarmApiMocks(
@@ -210,7 +215,7 @@ def _state(
     postgresql_data: dict | None = None,
     config: dict[str, str] | None = None,
     configurator_related: bool = True,
-    configurator_units_data: dict[int, dict] | None = None,
+    configurator_app_data: dict[str, str] | None = None,
     configurator_relations: typing.Sequence[Relation] | None = None,
     debug_ssh_related: bool = False,
     secrets: typing.Sequence[Secret] = (),
@@ -243,10 +248,10 @@ def _state(
                 Relation(
                     endpoint=GARM_CONFIGURATOR_RELATION_NAME,
                     remote_app_name="garm-configurator",
-                    remote_units_data=(
-                        {0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}}
-                        if configurator_units_data is None
-                        else configurator_units_data
+                    remote_app_data=(
+                        {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
+                        if configurator_app_data is None
+                        else configurator_app_data
                     ),
                 )
             ]
@@ -316,23 +321,21 @@ def _configurator_relation(app_name: str) -> Relation:
     return Relation(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name=app_name,
-        remote_units_data={
-            0: {
-                **_PROVIDER_UNIT_DATA,
-                **_SCALESET_UNIT_DATA,
-                "name": f"scaleset-{app_name}",
-                "provider_name": f"{app_name}-0",
-            }
+        remote_app_data={
+            **_PROVIDER_UNIT_DATA,
+            **_SCALESET_UNIT_DATA,
+            "name": f"scaleset-{app_name}",
+            "provider_name": f"{app_name}-0",
         },
     )
 
 
 def _empty_configurator_relation() -> Relation:
-    """Return a joined configurator relation whose units have published nothing yet."""
+    """Return a joined configurator relation whose application has published nothing yet."""
     return Relation(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name="garm-configurator",
-        remote_units_data={},
+        remote_app_data={},
     )
 
 
@@ -512,55 +515,27 @@ def test_workload_is_configured_from_relation_data(ctx: Context, garm_api: _Garm
     assert out.unit_status == ops.ActiveStatus()
 
 
-@pytest.mark.parametrize(
-    "unit_count, expected_status, expected_provider_names",
-    [
-        pytest.param(
-            0,
-            ops.WaitingStatus("Waiting for garm-configurator relation"),
-            None,
-            id="no-units",
-        ),
-        pytest.param(1, ops.ActiveStatus(), ["garm-configurator-0"], id="one-unit"),
-        pytest.param(
-            2,
-            ops.ActiveStatus(),
-            ["garm-configurator-0", "garm-configurator-1"],
-            id="two-units",
-        ),
-    ],
-)
-def test_configurator_application_uses_every_unit(
-    ctx: Context,
-    garm_api: _GarmApiMocks,
-    unit_count: int,
-    expected_status: ops.StatusBase,
-    expected_provider_names: list[str] | None,
+def test_configurator_application_publishes_one_provider_per_application(
+    ctx: Context, garm_api: _GarmApiMocks
 ):
     """
-    arrange: A configurator application has the parametrized number of units.
+    arrange: A configurator application with two units but a single application databag.
     act: Reconcile the GARM charm.
-    assert: No units waits; otherwise every unit configures GARM, because the requirer exposes
-        one provider per related unit.
+    assert: Exactly one provider is rendered, because the leader writes the payload once for the
+        whole application instead of each unit publishing its own provider.
     """
-    unit_data = {
-        unit_id: {
-            **_PROVIDER_UNIT_DATA,
-            **_SCALESET_UNIT_DATA,
-            "name": f"scaleset-{unit_id}",
-            "provider_name": f"garm-configurator-{unit_id}",
-        }
-        for unit_id in range(unit_count)
-    }
+    relation = Relation(
+        endpoint=GARM_CONFIGURATOR_RELATION_NAME,
+        remote_app_name="garm-configurator",
+        remote_app_data={**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA},
+        remote_units_data={0: {}, 1: {}},
+    )
 
-    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data=unit_data))
+    out = ctx.run(ctx.on.update_status(), _state(configurator_relations=[relation]))
 
-    assert out.unit_status == expected_status
-    if expected_provider_names is not None:
-        providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
-        assert [provider["unit_name"] for provider in providers] == expected_provider_names
-    else:
-        garm_api.scaleset.assert_not_called()
+    providers = json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"])
+    assert [provider["unit_name"] for provider in providers] == ["garm-configurator-0"]
+    assert out.unit_status == ops.ActiveStatus()
 
 
 def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api: _GarmApiMocks):
@@ -574,25 +549,21 @@ def test_multiple_configurator_applications_are_supported(ctx: Context, garm_api
         Relation(
             endpoint=GARM_CONFIGURATOR_RELATION_NAME,
             remote_app_name="configurator-a",
-            remote_units_data={
-                0: {
-                    **_PROVIDER_UNIT_DATA,
-                    **_SCALESET_UNIT_DATA,
-                    "name": "scaleset-a",
-                    "provider_name": "configurator-a-0",
-                }
+            remote_app_data={
+                **_PROVIDER_UNIT_DATA,
+                **_SCALESET_UNIT_DATA,
+                "name": "scaleset-a",
+                "provider_name": "configurator-a-0",
             },
         ),
         Relation(
             endpoint=GARM_CONFIGURATOR_RELATION_NAME,
             remote_app_name="configurator-b",
-            remote_units_data={
-                0: {
-                    **_provider_data(openstack_auth_url="https://ks2.example.com:5000/v3"),
-                    **_SCALESET_UNIT_DATA,
-                    "name": "scaleset-b",
-                    "provider_name": "configurator-b-0",
-                }
+            remote_app_data={
+                **_provider_data(openstack_auth_url="https://ks2.example.com:5000/v3"),
+                **_SCALESET_UNIT_DATA,
+                "name": "scaleset-b",
+                "provider_name": "configurator-b-0",
             },
         ),
     ]
@@ -867,54 +838,82 @@ def test_no_configurator_unpublishes_the_last_provider(
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
-def test_silent_configurator_keeps_the_record_published_and_does_not_reconcile(
+def test_unpublished_configurator_blocks_and_does_not_reconcile(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
-    arrange: A configurator relation that exists but has no units yet, while the record holds
-        a provider.
+    arrange: A configurator relation that exists but has not published its application
+        databag yet, while the record holds a provider.
     act: Run update-status.
-    assert: The recorded provider is published so the running GARM keeps what a drain needs,
-        and the reconcile chain does NOT run: every reconciler deletes what it is not told to
-        keep, so an unfinished relation would otherwise cost the scalesets it is about to
-        describe.
+    assert: The unit blocks on the missing payload before it restarts or reconciles, so the
+        record and the running GARM are left untouched and the scalesets the configurator is
+        about to describe are not pruned.
     """
-    with caplog.at_level(logging.INFO):
-        out = ctx.run(
-            ctx.on.update_status(),
-            _state(
-                configurator_relations=[_empty_configurator_relation()],
-                recorded_providers=[_provider_config("garm-configurator-0")],
-            ),
-        )
-
-    service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
-    assert json.loads(service.environment["GARM_PROVIDERS_JSON"])[0]["unit_name"] == (
-        "garm-configurator-0"
+    state = _state(
+        configurator_relations=[_empty_configurator_relation()],
+        recorded_providers=[_provider_config("garm-configurator-0")],
     )
+
+    with caplog.at_level(logging.WARNING):
+        out = ctx.run(ctx.on.update_status(), state)
+
     garm_api.scaleset.assert_not_called()
-    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
-    assert "provider data not yet available" in caplog.text
+    garm_api.auth.from_login.assert_not_called()
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
+    assert _secret_content(out, GARM_PROVIDERS_LABEL) == _secret_content(
+        state, GARM_PROVIDERS_LABEL
+    )
+    assert "incomplete garm-configurator relation data" in caplog.text
 
 
 def test_unpopulated_configurator_relation_does_not_prune(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
-    arrange: A garm-configurator relation that is present but has no units yet.
+    arrange: A garm-configurator relation that is present but has no application data yet.
     act: Run update-status.
-    assert: Scalesets are NOT reconciled — pruning against the empty desired state would
-        delete live scalesets — and the unit waits for the relation to finish publishing.
+    assert: The unit blocks on the invalid relation — pruning against the empty desired state
+        would delete live scalesets — and no scaleset is reconciled.
     """
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.WARNING):
         out = ctx.run(
             ctx.on.update_status(),
             _state(configurator_relations=[_empty_configurator_relation()]),
         )
 
     garm_api.scaleset.assert_not_called()
-    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
-    assert "GARM configurator provider data not yet available" in caplog.text
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
+    assert "incomplete garm-configurator relation data" in caplog.text
+
+
+def test_one_unpublished_configurator_application_blocks_the_whole_aggregate(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: Two configurator applications, one publishing a provider and one that has not
+        published its application databag yet.
+    act: Run update-status.
+    assert: The unit blocks on the unpublished application instead of reconciling the published
+        one alone, so the pending application's provider and scaleset are not pruned.
+    """
+    state = _state(
+        configurator_relations=[
+            _configurator_relation("configurator-a"),
+            _empty_configurator_relation(),
+        ],
+        recorded_providers=[
+            _provider_config("configurator-a-0"),
+            _provider_config("garm-configurator-0"),
+        ],
+    )
+
+    out = ctx.run(ctx.on.update_status(), state)
+
+    garm_api.scaleset.assert_not_called()
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
 
 
 def test_missing_configurator_relation_refreshes_stale_app_status(
@@ -1241,9 +1240,7 @@ def test_incomplete_related_provider_blocks_the_update(ctx: Context, garm_api: _
         is held instead of breaking the provider's scalesets and poisoning the record.
     """
     state = _state(
-        configurator_units_data={
-            0: {**_provider_data(openstack_password=""), **_SCALESET_UNIT_DATA}
-        },
+        configurator_app_data={**_provider_data(openstack_password=""), **_SCALESET_UNIT_DATA},
         recorded_providers=[_provider_config("garm-configurator-0")],
     )
 
@@ -1268,7 +1265,7 @@ def test_invalid_configurator_relation_blocks_the_update(ctx: Context, garm_api:
     provider_data = _provider_data()
     provider_data.pop("openstack_auth_url")
     state = _state(
-        configurator_units_data={0: {**provider_data, **_SCALESET_UNIT_DATA}},
+        configurator_app_data={**provider_data, **_SCALESET_UNIT_DATA},
         recorded_providers=[_provider_config("garm-configurator-0")],
     )
 
@@ -1293,15 +1290,19 @@ def test_conflicting_configurator_scalesets_block_the_update(
     first = Relation(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name="configurator-a",
-        remote_units_data={
-            0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "provider_name": "configurator-a-0"}
+        remote_app_data={
+            **_PROVIDER_UNIT_DATA,
+            **_SCALESET_UNIT_DATA,
+            "provider_name": "configurator-a-0",
         },
     )
     second = Relation(
         endpoint=GARM_CONFIGURATOR_RELATION_NAME,
         remote_app_name="configurator-b",
-        remote_units_data={
-            0: {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA, "provider_name": "configurator-b-0"}
+        remote_app_data={
+            **_PROVIDER_UNIT_DATA,
+            **_SCALESET_UNIT_DATA,
+            "provider_name": "configurator-b-0",
         },
     )
 
@@ -1696,8 +1697,9 @@ def test_reconcilers_run_in_dependency_order(ctx: Context, garm_api: _GarmApiMoc
     arrange: A ready charm.
     act: Run update-status.
     assert: Controller URLs are configured first — GARM 409s every operational call until they
-        are set — then credentials, entities and scalesets reconcile in that order, since
-        entities reference a credential and scalesets are created under an entity. The
+        are set — then credentials, the endpoint's runner tools source, entities and scalesets
+        reconcile in that order, since entities reference a credential and scalesets are
+        created under an entity, whose runners need the tools. The
         garm-agent binaries are published before the entities that switch agent mode on, so
         GARM never falls back to handing a runner a github.com download URL. All of them run
         against the one authenticated client.
@@ -1708,12 +1710,78 @@ def test_reconcilers_run_in_dependency_order(ctx: Context, garm_api: _GarmApiMoc
         "controller",
         "agent_tools",
         "github",
+        "tools_metadata_url",
         "entity",
         "scaleset",
     ]
     garm_api.github.assert_called_once_with(garm_api.auth_client)
     garm_api.entity.assert_called_once_with(garm_api.auth_client, True)
     garm_api.scaleset.assert_called_once_with(garm_api.auth_client)
+
+
+@pytest.mark.parametrize(
+    "config, expected_url",
+    [
+        pytest.param(
+            {},
+            "https://api.github.com/repos/canonical/github-actions-runner/releases",
+            id="default",
+        ),
+        pytest.param(
+            {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: " https://example.com/releases\n"},
+            "https://example.com/releases",
+            id="custom",
+        ),
+        pytest.param({RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: ""}, "", id="unset"),
+    ],
+)
+def test_runner_tools_metadata_url_reaches_the_github_endpoint(
+    ctx: Context, garm_api: _GarmApiMocks, config: dict[str, str], expected_url: str
+):
+    """
+    arrange: A ready charm whose runner-tools-metadata-url is left at its default, set with
+        stray whitespace, or emptied.
+    act: Run update-status.
+    assert: The github.com endpoint is reconciled to the stripped URL. The default points at
+        releases that publish s390x and ppc64le runners; an empty value is passed through so
+        GARM goes back to GitHub's own runner binaries.
+    """
+    out = ctx.run(ctx.on.update_status(), _state(config=config))
+
+    garm_api.auth_client.set_tools_metadata_url.assert_called_once_with(
+        DEFAULT_GITHUB_ENDPOINT, expected_url
+    )
+    assert out.unit_status == ops.ActiveStatus()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "api.github.com/repos/canonical/github-actions-runner/releases",
+        "ftp://example.com/r",
+        "https://[::1/releases",
+        "https://example.com:not-a-port/releases",
+    ],
+    ids=["no-scheme", "not-http", "malformed-host", "invalid-port"],
+)
+def test_invalid_runner_tools_metadata_url_blocks_the_update(
+    ctx: Context, garm_api: _GarmApiMocks, url: str
+):
+    """
+    arrange: A ready charm whose runner-tools-metadata-url is not an http(s) URL, which GARM
+        would reject.
+    act: Run update-status.
+    assert: The unit blocks naming the option and nothing is applied, so the operator sees
+        the mistake instead of a generic GARM sync failure.
+    """
+    out = ctx.run(
+        ctx.on.update_status(), _state(config={RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: url})
+    )
+
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith(f"Invalid {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME}:")
+    assert "garm-command" not in out.get_container(CONTAINER_NAME).layers
+    garm_api.auth.from_login.assert_not_called()
 
 
 def test_reconcile_authenticates_against_the_local_garm_listener(
@@ -1811,7 +1879,11 @@ def test_github_credential_is_built_from_relation_data(ctx: Context, garm_api: _
     """
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
     state = _state(
-        configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **_github_unit_data(key_secret.id)}},
+        configurator_app_data={
+            **_PROVIDER_UNIT_DATA,
+            **_github_unit_data(key_secret.id),
+            **_SCALESET_UNIT_DATA,
+        },
         secrets=[key_secret],
     )
 
@@ -1843,12 +1915,10 @@ def test_github_credential_is_built_from_json_encoded_relation_data(
     """
     key_secret = Secret(tracked_content={"value": "PEMDATA"})
     state = _state(
-        configurator_units_data={
-            0: {
-                **_PROVIDER_UNIT_DATA,
-                **_github_unit_data(key_secret.id),
-                **_SCALESET_UNIT_DATA,
-            }
+        configurator_app_data={
+            **_PROVIDER_UNIT_DATA,
+            **_github_unit_data(key_secret.id),
+            **_SCALESET_UNIT_DATA,
         },
         secrets=[key_secret],
     )
@@ -1884,12 +1954,12 @@ def test_applications_sharing_a_github_app_yield_one_credential(
             Relation(
                 endpoint=GARM_CONFIGURATOR_RELATION_NAME,
                 remote_app_name="configurator-a",
-                remote_units_data={0: dict(unit_data)},
+                remote_app_data={**unit_data, "provider_name": "configurator-a-0"},
             ),
             Relation(
                 endpoint=GARM_CONFIGURATOR_RELATION_NAME,
                 remote_app_name="configurator-b",
-                remote_units_data={0: dict(unit_data)},
+                remote_app_data={**unit_data, "provider_name": "configurator-b-0"},
             ),
         ],
         secrets=[key_secret],
@@ -1917,7 +1987,13 @@ def test_incomplete_github_config_yields_no_credential(
     act: Run update-status.
     assert: No credential is built — GARM rejects a partial one.
     """
-    state = _state(configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **github_data}})
+    state = _state(
+        configurator_app_data={
+            **_PROVIDER_UNIT_DATA,
+            **_SCALESET_UNIT_DATA,
+            **github_data,
+        }
+    )
 
     ctx.run(ctx.on.update_status(), state)
 
@@ -1954,7 +2030,7 @@ def test_stale_image_key_does_not_prevent_scaleset_removal(ctx: Context, garm_ap
     scaleset_data.pop("image_id")
     data = {**_PROVIDER_UNIT_DATA, **scaleset_data}
 
-    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+    ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
 
@@ -1972,7 +2048,7 @@ def test_missing_image_reconciles_existing_scaleset_away(ctx: Context, garm_api:
 
     out = ctx.run(
         ctx.on.update_status(),
-        _state(configurator_units_data={0: {**_PROVIDER_UNIT_DATA, **scaleset_data}}),
+        _state(configurator_app_data={**_PROVIDER_UNIT_DATA, **scaleset_data}),
     )
 
     garm_api.scaleset.return_value.reconcile.assert_called_once_with([])
@@ -2098,7 +2174,7 @@ def test_remote_shell_follows_the_configurator_databag(
     data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
     if databag_value is not None:
         data["enable_shell"] = databag_value
-    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+    ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
     assert [spec.enable_shell for spec in specs] == [expected]
@@ -2121,7 +2197,7 @@ def test_image_visibility_follows_the_configurator_databag(
     data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
     if databag_value is not None:
         data["image_visibility"] = databag_value
-    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+    ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
     assert [spec.image_visibility for spec in specs] == [expected]
@@ -2144,7 +2220,7 @@ def test_security_group_follows_the_configurator_databag(
     data = {**_PROVIDER_UNIT_DATA, **_SCALESET_UNIT_DATA}
     if databag_value is not None:
         data["security_group"] = databag_value
-    ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: data}))
+    ctx.run(ctx.on.update_status(), _state(configurator_app_data=data))
 
     specs = garm_api.scaleset.return_value.reconcile.call_args[0][0]
     assert [spec.security_group for spec in specs] == [expected]

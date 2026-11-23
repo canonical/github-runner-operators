@@ -17,32 +17,30 @@ def _relation(relation_id: int = 1, scaleset_name: str = "my-scaleset") -> Confi
     return ConfiguratorRelation(
         relation_id=relation_id,
         application_name=f"configurator-{relation_id}",
-        unit_name=f"configurator-{relation_id}/0",
         provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
         scaleset=ScalesetConfig(name=scaleset_name),
     )
 
 
 @pytest.mark.parametrize(
-    "unit_name, expected",
+    "provider_name, expected",
     [
-        pytest.param("configurator/0", "configurator-0", id="unit-name-with-slash"),
-        pytest.param("configurator", "configurator", id="unit-name-without-slash"),
+        pytest.param("configurator-0", "configurator-0", id="published-name"),
+        pytest.param("", "", id="unset-name"),
     ],
 )
-def test_configurator_relation_provider_name(unit_name: str, expected: str):
+def test_configurator_relation_provider_name(provider_name: str, expected: str):
     """
-    arrange: A configurator relation whose unit name may contain a slash.
+    arrange: A configurator relation whose scaleset payload names a provider, or leaves it unset.
     act: Read its provider name.
-    assert: The slash becomes a dash, matching GARM's provider registry and the provider name
-        its scalesets reference.
+    assert: The name published on the application databag is returned, matching GARM's provider
+        registry and the provider name its scalesets reference.
     """
     relation = ConfiguratorRelation(
         relation_id=1,
         application_name="configurator",
-        unit_name=unit_name,
         provider=ProviderConfig(openstack_auth_url="https://ks.example.com:5000/v3"),
-        scaleset=ScalesetConfig(),
+        scaleset=ScalesetConfig(provider_name=provider_name),
     )
 
     assert relation.provider_name == expected

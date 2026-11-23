@@ -19,6 +19,8 @@ Name | Type | Description | Notes
 **organizations** | [**List[Organization]**](Organization.md) |  | [optional] 
 **rate_limit** | [**GithubRateLimit**](GithubRateLimit.md) |  | [optional] 
 **repositories** | [**List[Repository]**](Repository.md) |  | [optional] 
+**reserve_usage_enabled** | **bool** | ReserveUsageEnabled toggles whether or not to allocate a certain percentage of the available rate limit to critical operations such as delete operations for runners that have finished their jobs. | [optional] 
+**reserve_usage_percentage** | **int** | ReserveUsagePercentage is the percentage of available rate limit reserved for critical operations. Setting this value too high will negatively impact normal operations, so it is capped at 50%. A value between 5% and 20% should be safe on most setups. Adjust this based on your usage patterns. | [optional] 
 **updated_at** | **datetime** |  | [optional] 
 **upload_base_url** | **str** |  | [optional] 
 
