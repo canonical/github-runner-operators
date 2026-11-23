@@ -405,11 +405,15 @@ def _get_runner_tools_metadata_url(charm: ops.CharmBase) -> str:
     url = str(charm.config.get(RUNNER_TOOLS_METADATA_URL_CONFIG_NAME) or "").strip()
     if not url:
         return ""
-    parsed = urllib.parse.urlparse(url)
+    invalid = BlockedError(
+        f"Invalid {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME}: {url!r} is not an http(s) URL"
+    )
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError as exc:  # e.g. an unbalanced IPv6 bracket in the host
+        raise invalid from exc
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise BlockedError(
-            f"Invalid {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME}: {url!r} is not an http(s) URL"
-        )
+        raise invalid
     return url
 
 

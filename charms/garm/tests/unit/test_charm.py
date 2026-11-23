@@ -1760,8 +1760,12 @@ def test_runner_tools_metadata_url_reaches_the_github_endpoint(
 
 @pytest.mark.parametrize(
     "url",
-    ["api.github.com/repos/canonical/github-actions-runner/releases", "ftp://example.com/r"],
-    ids=["no-scheme", "not-http"],
+    [
+        "api.github.com/repos/canonical/github-actions-runner/releases",
+        "ftp://example.com/r",
+        "https://[::1/releases",
+    ],
+    ids=["no-scheme", "not-http", "malformed-host"],
 )
 def test_invalid_runner_tools_metadata_url_blocks_the_update(
     ctx: Context, garm_api: _GarmApiMocks, url: str
