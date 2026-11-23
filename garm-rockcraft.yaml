@@ -17,7 +17,7 @@ parts:
     plugin: go
     source: https://github.com/cloudbase/garm
     source-type: git
-    # 2026/10/25: Pin to a post-v0.2.1 commit carrying these changes, until v0.2.2+
+    # 2026/11/23: Pin to a post-v0.2.1 commit carrying these changes, until v0.2.2+
     # is released:
     # - golang.org/x/crypto v0.57.0+.
     # - the scale set pseudo pool ID fix (PR #866). Without it, OpenStack scale set
@@ -33,8 +33,11 @@ parts:
     # - the database query timeouts, creating-instance reaper and association
     #   omission (PR #926). Without them, hung PostgreSQL queries and an ABBA
     #   deadlock between instance and scale set updates leave runners stuck.
+    # - the endpoint tools metadata URL (PR #949). Without it, GARM finds no runner
+    #   binaries for architectures GitHub does not publish, such as s390x and
+    #   ppc64le, so it cannot start runners on them.
     # Switch to source-tag once v0.2.2+ is released.
-    source-commit: 1ad3680f097c3e71fa564ca26a41e62e13cbf91f
+    source-commit: 20102174d70174fa2e6a9be9f363d78df08c9ac5
     source-depth: 1
     build-snaps:
       - go/1.26/stable
@@ -54,7 +57,7 @@ parts:
     source: https://github.com/cloudbase/garm-provider-openstack
     source-type: git
     # renovate: datasource=github-releases depName=cloudbase/garm-provider-openstack
-    source-tag: v0.1.5
+    source-tag: v0.1.6
     build-snaps:
       - go/1.26/stable
     build-environment:
@@ -67,10 +70,6 @@ parts:
       - CGO_ENABLED: "0"
     override-build: |
       cd "$CRAFT_PART_SRC"
-      # v0.1.5 is unpatched; upstream main also changes the OpenStack SDK.
-      go get golang.org/x/crypto@v0.57.0
-      go mod tidy
-      go mod vendor
       go build -o bin/garm-provider-openstack .
       mkdir -p "$CRAFT_PART_INSTALL/usr/local/bin"
       cp bin/garm-provider-openstack "$CRAFT_PART_INSTALL/usr/local/bin/"
@@ -117,7 +116,7 @@ parts:
       go mod tidy
       go mod vendor
       AGENT_DIR="$CRAFT_PART_INSTALL/opt/garm-agent"
-      ARCHES="amd64 arm64"
+      ARCHES="amd64 arm64 ppc64le s390x"
       for arch in $ARCHES; do
         GOOS=linux GOARCH="$arch" go build \
           -ldflags "-s -w -X github.com/cloudbase/garm-agent/cmd.Version=${VERSION}" \

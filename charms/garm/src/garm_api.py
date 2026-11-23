@@ -1178,8 +1178,8 @@ class GarmAuthenticatedClient(GarmApiClient):
         Args:
             name: Tool name, sent as ``X-Tool-Name``.
             description: Human-readable description, sent as ``X-Tool-Description``.
-            os_arch: Runner architecture, sent as ``X-Tool-OS-Arch``. GARM accepts only
-                ``amd64`` and ``arm64`` here.
+            os_arch: Runner architecture, sent as ``X-Tool-OS-Arch``. GARM rejects any it
+                cannot run runners on.
             version: Agent version, sent as ``X-Tool-Version``. GARM rejects an empty one
                 and will not serve a stored tool that has no version.
             content: The binary itself.
