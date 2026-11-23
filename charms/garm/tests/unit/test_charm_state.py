@@ -44,6 +44,7 @@ def _make_charm(units_data=None):
         A MagicMock charm whose ``model.get_relation`` returns the built relation.
     """
     charm = MagicMock()
+    charm.config = {}
     charm.model.relations.get.return_value = []
     if units_data is None:
         charm.model.get_relation.return_value = None
