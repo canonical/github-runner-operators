@@ -214,9 +214,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "pre_job_script": rc.pre_job_script or "",
         }
 
-        if password_secret is None or github_key_secret is None:
-            return
-
         garm_relation.save(
             ConfiguratorApplicationData(
                 provider=RelationProviderConfig(
