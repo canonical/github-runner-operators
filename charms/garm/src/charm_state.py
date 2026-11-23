@@ -410,7 +410,9 @@ def _get_runner_tools_metadata_url(charm: ops.CharmBase) -> str:
     )
     try:
         parsed = urllib.parse.urlparse(url)
-    except ValueError as exc:  # e.g. an unbalanced IPv6 bracket in the host
+        # urlparse checks the host's brackets but defers the port until .port is read.
+        _ = parsed.port
+    except ValueError as exc:
         raise invalid from exc
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise invalid

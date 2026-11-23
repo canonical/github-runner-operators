@@ -1764,8 +1764,9 @@ def test_runner_tools_metadata_url_reaches_the_github_endpoint(
         "api.github.com/repos/canonical/github-actions-runner/releases",
         "ftp://example.com/r",
         "https://[::1/releases",
+        "https://example.com:not-a-port/releases",
     ],
-    ids=["no-scheme", "not-http", "malformed-host"],
+    ids=["no-scheme", "not-http", "malformed-host", "invalid-port"],
 )
 def test_invalid_runner_tools_metadata_url_blocks_the_update(
     ctx: Context, garm_api: _GarmApiMocks, url: str
