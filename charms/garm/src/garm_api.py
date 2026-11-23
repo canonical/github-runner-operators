@@ -14,6 +14,7 @@ import urllib3.exceptions
 from garm_client.api.controller_api import ControllerApi
 from garm_client.api.controller_info_api import ControllerInfoApi
 from garm_client.api.credentials_api import CredentialsApi
+from garm_client.api.endpoints_api import EndpointsApi
 from garm_client.api.first_run_api import FirstRunApi
 from garm_client.api.instances_api import InstancesApi
 from garm_client.api.login_api import LoginApi
@@ -47,6 +48,7 @@ from garm_client.models.template import Template
 from garm_client.models.update_controller_params import UpdateControllerParams
 from garm_client.models.update_entity_params import UpdateEntityParams
 from garm_client.models.update_github_credentials_params import UpdateGithubCredentialsParams
+from garm_client.models.update_github_endpoint_params import UpdateGithubEndpointParams
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 from garm_client.models.update_template_params import UpdateTemplateParams
 from security_log import owasp_log
@@ -586,6 +588,37 @@ class GarmAuthenticatedClient(GarmApiClient):
             except ApiException as exc:
                 _raise_api_error(
                     f"Failed to delete credential {cred_id} ({exc.status}): {exc.body}", exc
+                )
+            except urllib3.exceptions.HTTPError as exc:
+                raise GarmConnectionError(f"GARM connection error: {exc}") from exc
+
+    def set_tools_metadata_url(self, endpoint: str, url: str) -> None:
+        """Set the releases URL a GitHub endpoint takes runner binaries from.
+
+        GARM uses binaries from these releases in place of the endpoint's own for each OS and
+        architecture they cover. GARM can change this URL while credentials reference the
+        endpoint, unlike its base URLs. The call is idempotent: GARM stores nothing and
+        refetches nothing when the URL is unchanged.
+
+        Args:
+            endpoint: The GitHub endpoint name, such as ``github.com``.
+            url: The releases URL, or empty to use only the endpoint's own runner binaries.
+
+        Raises:
+            GarmApiError: On API error.
+        """
+        with self._api_client() as client:
+            try:
+                EndpointsApi(api_client=client).update_github_endpoint(
+                    name=endpoint,
+                    body=UpdateGithubEndpointParams(tools_metadata_url=url),
+                    _request_timeout=_REQUEST_TIMEOUT,
+                )
+            except ApiException as exc:
+                _raise_api_error(
+                    f"Failed to set tools metadata URL of GitHub endpoint {endpoint} "
+                    f"({exc.status}): {exc.body}",
+                    exc,
                 )
             except urllib3.exceptions.HTTPError as exc:
                 raise GarmConnectionError(f"GARM connection error: {exc}") from exc

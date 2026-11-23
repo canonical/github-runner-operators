@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-11-23
+
+- `garm`: support GARM runners on s390x and ppc64le. GitHub publishes no runner binaries for these architectures, so the new `runner-tools-metadata-url` option points GARM at a GitHub releases page that does. It defaults to `https://api.github.com/repos/canonical/github-actions-runner/releases`. GARM uses these releases in place of GitHub's runner binaries for every OS and architecture they cover, amd64 and arm64 included; set the option to an empty string to use only GitHub's. The workload is bumped to a GARM revision with this feature and to `garm-provider-openstack` v0.1.6, which accepts s390x and ppc64le instances, and the rock now ships garm-agent for both architectures so these runners can use agent mode. Their images need the .NET 8 runtime installed, because these runner builds are not self-contained.
+
 ## 2026-11-12
 
 - `garm`: stop applying configuration changes when a `garm-configurator` relation publishes an incomplete provider, such as one whose OpenStack password secret is not yet readable. The charm previously restarted GARM with the incomplete provider and recorded it, so the scale sets using that provider failed and later hooks error. The unit now goes to `Blocked` with `Incomplete provider config: <provider>` and leaves GARM running with its existing provider and scale set configuration until the relation data is complete.

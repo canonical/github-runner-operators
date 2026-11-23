@@ -27,6 +27,7 @@ from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
     CharmState,
+    InvalidCharmConfigError,
     ProviderConfig,
     RunnerConfig,
     credential_name,
@@ -374,7 +375,7 @@ class GarmCharm(paas_charm.go.Charm):
         """
         try:
             self._configure_and_reconcile(rerun_migrations)
-        except BlockedError as exc:
+        except (BlockedError, InvalidCharmConfigError) as exc:
             logger.warning("Blocked: %s", exc)
             self.update_app_and_unit_status(ops.BlockedStatus(str(exc)))
 
@@ -1123,14 +1124,18 @@ class GarmCharm(paas_charm.go.Charm):
             # ``urls_required`` until the controller URLs are set; org/repo entities reference a
             # credential by name; and scalesets are created under a registered entity. So a single
             # authenticated client configures the URLs and reconciles credentials, then entities,
-            # then scalesets — each dependency before its dependants. The garm-agent binaries are
-            # published before the entities that switch agent mode on, because an entity in agent
-            # mode and no matching binary stored makes GARM fall back to handing the runner a
-            # github.com download URL.
+            # then scalesets — each dependency before its dependants. The endpoint's runner tools
+            # source is set before the scalesets whose runners need those tools. The garm-agent
+            # binaries are published before the entities that switch agent mode on, because an
+            # entity in agent mode and no matching binary stored makes GARM fall back to handing
+            # the runner a github.com download URL.
             self._ensure_controller_urls(auth_client)
             agent_mode = self._ensure_agent_tools(auth_client)
             GithubReconciler(auth_client).reconcile(
                 self._build_desired_credentials(charm_state.configurator_data)
+            )
+            auth_client.set_tools_metadata_url(
+                DEFAULT_GITHUB_ENDPOINT, charm_state.runner_tools_metadata_url
             )
             EntityReconciler(auth_client, agent_mode).reconcile(charm_state.desired_entities)
             template_id = _apply_garm_template(auth_client, charm_state.ssh_debug_connections)
