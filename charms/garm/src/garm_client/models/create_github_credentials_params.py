@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from garm_client.models.github_app import GithubApp
 from garm_client.models.github_pat import GithubPAT
@@ -35,7 +35,9 @@ class CreateGithubCredentialsParams(BaseModel):
     endpoint: Optional[StrictStr] = None
     name: Optional[StrictStr] = None
     pat: Optional[GithubPAT] = None
-    __properties: ClassVar[List[str]] = ["app", "auth_type", "description", "endpoint", "name", "pat"]
+    reserve_usage_enabled: Optional[StrictBool] = Field(default=None, description="ReserveUsageEnabled toggles whether or not to allocate a certain percentage of the available rate limit to critical operations such as delete operations for runners that have finished their jobs.")
+    reserve_usage_percentage: Optional[StrictInt] = Field(default=None, description="ReserveUsagePercentage is the percentage of available rate limit reserved for critical operations. Setting this value too high will negatively impact normal operations, so it is capped at 50%. A value between 5% and 20% should be safe on most setups. Adjust this based on your usage patterns.")
+    __properties: ClassVar[List[str]] = ["app", "auth_type", "description", "endpoint", "name", "pat", "reserve_usage_enabled", "reserve_usage_percentage"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -99,7 +101,9 @@ class CreateGithubCredentialsParams(BaseModel):
             "description": obj.get("description"),
             "endpoint": obj.get("endpoint"),
             "name": obj.get("name"),
-            "pat": GithubPAT.from_dict(obj["pat"]) if obj.get("pat") is not None else None
+            "pat": GithubPAT.from_dict(obj["pat"]) if obj.get("pat") is not None else None,
+            "reserve_usage_enabled": obj.get("reserve_usage_enabled"),
+            "reserve_usage_percentage": obj.get("reserve_usage_percentage")
         })
         return _obj
 

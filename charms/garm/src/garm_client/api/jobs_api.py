@@ -15,8 +15,11 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from typing import List
-from garm_client.models.job import Job
+from datetime import datetime
+from pydantic import Field, StrictBool, StrictInt
+from typing import Optional
+from typing_extensions import Annotated
+from garm_client.models.jobs_paginated_response import JobsPaginatedResponse
 
 from garm_client.api_client import ApiClient, RequestSerialized
 from garm_client.api_response import ApiResponse
@@ -39,6 +42,11 @@ class JobsApi:
     @validate_call
     def list_jobs(
         self,
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -51,10 +59,20 @@ class JobsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> List[Job]:
-        """List all jobs.
+    ) -> JobsPaginatedResponse:
+        """List jobs. Only queued and in progress jobs are listed unless all is set.
 
 
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -78,6 +96,11 @@ class JobsApi:
         """ # noqa: E501
 
         _param = self._list_jobs_serialize(
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -85,7 +108,7 @@ class JobsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "List[Job]",
+            '200': "JobsPaginatedResponse",
             '400': "APIErrorResponse",
         }
         response_data = self.api_client.call_api(
@@ -102,6 +125,11 @@ class JobsApi:
     @validate_call
     def list_jobs_with_http_info(
         self,
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -114,10 +142,20 @@ class JobsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[List[Job]]:
-        """List all jobs.
+    ) -> ApiResponse[JobsPaginatedResponse]:
+        """List jobs. Only queued and in progress jobs are listed unless all is set.
 
 
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -141,6 +179,11 @@ class JobsApi:
         """ # noqa: E501
 
         _param = self._list_jobs_serialize(
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -148,7 +191,7 @@ class JobsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "List[Job]",
+            '200': "JobsPaginatedResponse",
             '400': "APIErrorResponse",
         }
         response_data = self.api_client.call_api(
@@ -165,6 +208,11 @@ class JobsApi:
     @validate_call
     def list_jobs_without_preload_content(
         self,
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -178,9 +226,19 @@ class JobsApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """List all jobs.
+        """List jobs. Only queued and in progress jobs are listed unless all is set.
 
 
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -204,6 +262,11 @@ class JobsApi:
         """ # noqa: E501
 
         _param = self._list_jobs_serialize(
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -211,7 +274,7 @@ class JobsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "List[Job]",
+            '200': "JobsPaginatedResponse",
             '400': "APIErrorResponse",
         }
         response_data = self.api_client.call_api(
@@ -223,6 +286,11 @@ class JobsApi:
 
     def _list_jobs_serialize(
         self,
+        page,
+        page_size,
+        all,
+        since,
+        until,
         _request_auth,
         _content_type,
         _headers,
@@ -245,6 +313,44 @@ class JobsApi:
 
         # process the path parameters
         # process the query parameters
+        if page is not None:
+            
+            _query_params.append(('page', page))
+            
+        if page_size is not None:
+            
+            _query_params.append(('pageSize', page_size))
+            
+        if all is not None:
+            
+            _query_params.append(('all', all))
+            
+        if since is not None:
+            if isinstance(since, datetime):
+                _query_params.append(
+                    (
+                        'since',
+                        since.strftime(
+                            self.api_client.configuration.datetime_format
+                        )
+                    )
+                )
+            else:
+                _query_params.append(('since', since))
+            
+        if until is not None:
+            if isinstance(until, datetime):
+                _query_params.append(
+                    (
+                        'until',
+                        until.strftime(
+                            self.api_client.configuration.datetime_format
+                        )
+                    )
+                )
+            else:
+                _query_params.append(('until', until))
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter

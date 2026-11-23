@@ -129,6 +129,7 @@ class TestForgeEntity(unittest.TestCase):
                                                             locked_by = '', 
                                                             name = '', 
                                                             org_id = '', 
+                                                            pool_id = '', 
                                                             repo_id = '', 
                                                             repository_name = '', 
                                                             repository_owner = '', 
@@ -137,7 +138,6 @@ class TestForgeEntity(unittest.TestCase):
                                                             runner_group_name = '', 
                                                             runner_id = 56, 
                                                             runner_name = '', 
-                                                            scaleset_job_id = '', 
                                                             started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                                                             status = '', 
                                                             updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -209,6 +209,8 @@ class TestForgeEntity(unittest.TestCase):
                                         owner = '', 
                                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                                     ], 
+                                reserve_usage_enabled = True, 
+                                reserve_usage_percentage = 56, 
                                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                                 upload_base_url = '', ), 
                             credentials_id = 56, 
@@ -286,6 +288,8 @@ class TestForgeEntity(unittest.TestCase):
                             owner = '', 
                             updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                         ], 
+                    reserve_usage_enabled = True, 
+                    reserve_usage_percentage = 56, 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     upload_base_url = '', ),
                 entity_type = '',
