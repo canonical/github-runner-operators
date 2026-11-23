@@ -15,12 +15,14 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from pydantic import Field, StrictStr
-from typing import List
+from datetime import datetime
+from pydantic import Field, StrictBool, StrictInt, StrictStr
+from typing import List, Optional
 from typing_extensions import Annotated
 from garm_client.models.api_error_response import APIErrorResponse
 from garm_client.models.create_scale_set_params import CreateScaleSetParams
 from garm_client.models.scale_set import ScaleSet
+from garm_client.models.scale_set_jobs_paginated_response import ScaleSetJobsPaginatedResponse
 from garm_client.models.update_scale_set_params import UpdateScaleSetParams
 
 from garm_client.api_client import ApiClient, RequestSerialized
@@ -903,6 +905,7 @@ class ScalesetsApi:
     def delete_scale_set(
         self,
         scaleset_id: Annotated[StrictStr, Field(description="ID of the scale set to delete.")],
+        bypass_gh_errors: Annotated[Optional[StrictBool], Field(description="If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -921,6 +924,8 @@ class ScalesetsApi:
 
         :param scaleset_id: ID of the scale set to delete. (required)
         :type scaleset_id: str
+        :param bypass_gh_errors: If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub.
+        :type bypass_gh_errors: bool
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -945,6 +950,7 @@ class ScalesetsApi:
 
         _param = self._delete_scale_set_serialize(
             scaleset_id=scaleset_id,
+            bypass_gh_errors=bypass_gh_errors,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -968,6 +974,7 @@ class ScalesetsApi:
     def delete_scale_set_with_http_info(
         self,
         scaleset_id: Annotated[StrictStr, Field(description="ID of the scale set to delete.")],
+        bypass_gh_errors: Annotated[Optional[StrictBool], Field(description="If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -986,6 +993,8 @@ class ScalesetsApi:
 
         :param scaleset_id: ID of the scale set to delete. (required)
         :type scaleset_id: str
+        :param bypass_gh_errors: If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub.
+        :type bypass_gh_errors: bool
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1010,6 +1019,7 @@ class ScalesetsApi:
 
         _param = self._delete_scale_set_serialize(
             scaleset_id=scaleset_id,
+            bypass_gh_errors=bypass_gh_errors,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1033,6 +1043,7 @@ class ScalesetsApi:
     def delete_scale_set_without_preload_content(
         self,
         scaleset_id: Annotated[StrictStr, Field(description="ID of the scale set to delete.")],
+        bypass_gh_errors: Annotated[Optional[StrictBool], Field(description="If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1051,6 +1062,8 @@ class ScalesetsApi:
 
         :param scaleset_id: ID of the scale set to delete. (required)
         :type scaleset_id: str
+        :param bypass_gh_errors: If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub.
+        :type bypass_gh_errors: bool
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1075,6 +1088,7 @@ class ScalesetsApi:
 
         _param = self._delete_scale_set_serialize(
             scaleset_id=scaleset_id,
+            bypass_gh_errors=bypass_gh_errors,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1093,6 +1107,7 @@ class ScalesetsApi:
     def _delete_scale_set_serialize(
         self,
         scaleset_id,
+        bypass_gh_errors,
         _request_auth,
         _content_type,
         _headers,
@@ -1117,6 +1132,10 @@ class ScalesetsApi:
         if scaleset_id is not None:
             _path_params['scalesetID'] = scaleset_id
         # process the query parameters
+        if bypass_gh_errors is not None:
+            
+            _query_params.append(('bypassGHErrors', bypass_gh_errors))
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -1397,6 +1416,355 @@ class ScalesetsApi:
         return self.api_client.param_serialize(
             method='GET',
             resource_path='/scalesets/{scalesetID}',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def list_all_scale_set_jobs(
+        self,
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ScaleSetJobsPaginatedResponse:
+        """list_all_scale_set_jobs
+
+        List jobs handled by all scale sets. Only queued and in progress jobs are listed unless all is set.
+
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._list_all_scale_set_jobs_serialize(
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ScaleSetJobsPaginatedResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def list_all_scale_set_jobs_with_http_info(
+        self,
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[ScaleSetJobsPaginatedResponse]:
+        """list_all_scale_set_jobs
+
+        List jobs handled by all scale sets. Only queued and in progress jobs are listed unless all is set.
+
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._list_all_scale_set_jobs_serialize(
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ScaleSetJobsPaginatedResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def list_all_scale_set_jobs_without_preload_content(
+        self,
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """list_all_scale_set_jobs
+
+        List jobs handled by all scale sets. Only queued and in progress jobs are listed unless all is set.
+
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._list_all_scale_set_jobs_serialize(
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ScaleSetJobsPaginatedResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _list_all_scale_set_jobs_serialize(
+        self,
+        page,
+        page_size,
+        all,
+        since,
+        until,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        if page is not None:
+            
+            _query_params.append(('page', page))
+            
+        if page_size is not None:
+            
+            _query_params.append(('pageSize', page_size))
+            
+        if all is not None:
+            
+            _query_params.append(('all', all))
+            
+        if since is not None:
+            if isinstance(since, datetime):
+                _query_params.append(
+                    (
+                        'since',
+                        since.strftime(
+                            self.api_client.configuration.datetime_format
+                        )
+                    )
+                )
+            else:
+                _query_params.append(('since', since))
+            
+        if until is not None:
+            if isinstance(until, datetime):
+                _query_params.append(
+                    (
+                        'until',
+                        until.strftime(
+                            self.api_client.configuration.datetime_format
+                        )
+                    )
+                )
+            else:
+                _query_params.append(('until', until))
+            
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'Bearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/scalesets/jobs',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2171,6 +2539,370 @@ class ScalesetsApi:
         return self.api_client.param_serialize(
             method='GET',
             resource_path='/repositories/{repoID}/scalesets',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def list_scale_set_jobs(
+        self,
+        scaleset_id: Annotated[StrictStr, Field(description="ID of the scale set whose jobs to fetch.")],
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ScaleSetJobsPaginatedResponse:
+        """list_scale_set_jobs
+
+        List jobs handled by one scale set. Only queued and in progress jobs are listed unless all is set.
+
+        :param scaleset_id: ID of the scale set whose jobs to fetch. (required)
+        :type scaleset_id: str
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._list_scale_set_jobs_serialize(
+            scaleset_id=scaleset_id,
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ScaleSetJobsPaginatedResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def list_scale_set_jobs_with_http_info(
+        self,
+        scaleset_id: Annotated[StrictStr, Field(description="ID of the scale set whose jobs to fetch.")],
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[ScaleSetJobsPaginatedResponse]:
+        """list_scale_set_jobs
+
+        List jobs handled by one scale set. Only queued and in progress jobs are listed unless all is set.
+
+        :param scaleset_id: ID of the scale set whose jobs to fetch. (required)
+        :type scaleset_id: str
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._list_scale_set_jobs_serialize(
+            scaleset_id=scaleset_id,
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ScaleSetJobsPaginatedResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def list_scale_set_jobs_without_preload_content(
+        self,
+        scaleset_id: Annotated[StrictStr, Field(description="ID of the scale set whose jobs to fetch.")],
+        page: Annotated[Optional[StrictInt], Field(description="The page at which to list.")] = None,
+        page_size: Annotated[Optional[StrictInt], Field(description="Number of items per page.")] = None,
+        all: Annotated[Optional[StrictBool], Field(description="Also list completed jobs.")] = None,
+        since: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or after this timestamp.")] = None,
+        until: Annotated[Optional[datetime], Field(description="Only list jobs recorded at or before this timestamp.")] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """list_scale_set_jobs
+
+        List jobs handled by one scale set. Only queued and in progress jobs are listed unless all is set.
+
+        :param scaleset_id: ID of the scale set whose jobs to fetch. (required)
+        :type scaleset_id: str
+        :param page: The page at which to list.
+        :type page: int
+        :param page_size: Number of items per page.
+        :type page_size: int
+        :param all: Also list completed jobs.
+        :type all: bool
+        :param since: Only list jobs recorded at or after this timestamp.
+        :type since: datetime
+        :param until: Only list jobs recorded at or before this timestamp.
+        :type until: datetime
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._list_scale_set_jobs_serialize(
+            scaleset_id=scaleset_id,
+            page=page,
+            page_size=page_size,
+            all=all,
+            since=since,
+            until=until,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ScaleSetJobsPaginatedResponse",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _list_scale_set_jobs_serialize(
+        self,
+        scaleset_id,
+        page,
+        page_size,
+        all,
+        since,
+        until,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if scaleset_id is not None:
+            _path_params['scalesetID'] = scaleset_id
+        # process the query parameters
+        if page is not None:
+            
+            _query_params.append(('page', page))
+            
+        if page_size is not None:
+            
+            _query_params.append(('pageSize', page_size))
+            
+        if all is not None:
+            
+            _query_params.append(('all', all))
+            
+        if since is not None:
+            if isinstance(since, datetime):
+                _query_params.append(
+                    (
+                        'since',
+                        since.strftime(
+                            self.api_client.configuration.datetime_format
+                        )
+                    )
+                )
+            else:
+                _query_params.append(('since', since))
+            
+        if until is not None:
+            if isinstance(until, datetime):
+                _query_params.append(
+                    (
+                        'until',
+                        until.strftime(
+                            self.api_client.configuration.datetime_format
+                        )
+                    )
+                )
+            else:
+                _query_params.append(('until', until))
+            
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'Bearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/scalesets/{scalesetID}/jobs',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
