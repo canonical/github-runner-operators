@@ -54,6 +54,8 @@ from garm_client.models.instance import Instance
 from garm_client.models.instance_metadata import InstanceMetadata
 from garm_client.models.jwt_response import JWTResponse
 from garm_client.models.job import Job
+from garm_client.models.jobs_paginated_response import JobsPaginatedResponse
+from garm_client.models.jobs_paginated_response_results_inner import JobsPaginatedResponseResultsInner
 from garm_client.models.metadata_service_access_details import MetadataServiceAccessDetails
 from garm_client.models.new_user_params import NewUserParams
 from garm_client.models.organization import Organization
@@ -67,6 +69,9 @@ from garm_client.models.restore_template_request import RestoreTemplateRequest
 from garm_client.models.runner_application_download import RunnerApplicationDownload
 from garm_client.models.runner_prefix import RunnerPrefix
 from garm_client.models.scale_set import ScaleSet
+from garm_client.models.scale_set_job import ScaleSetJob
+from garm_client.models.scale_set_jobs_paginated_response import ScaleSetJobsPaginatedResponse
+from garm_client.models.scale_set_jobs_paginated_response_results_inner import ScaleSetJobsPaginatedResponseResultsInner
 from garm_client.models.status_message import StatusMessage
 from garm_client.models.tag import Tag
 from garm_client.models.template import Template

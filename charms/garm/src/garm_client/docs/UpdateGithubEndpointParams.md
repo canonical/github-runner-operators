@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **base_url** | **str** |  | [optional] 
 **ca_cert_bundle** | **bytes** |  | [optional] 
 **description** | **str** |  | [optional] 
+**tools_metadata_url** | **str** | ToolsMetadataURL is an optional GitHub API compatible releases URL that publishes runner binaries. Set it to an empty string to go back to using only the tools the endpoint API reports. | [optional] 
 **upload_base_url** | **str** |  | [optional] 
 
 ## Example

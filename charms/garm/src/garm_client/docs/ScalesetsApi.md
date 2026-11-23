@@ -9,9 +9,11 @@ Method | HTTP request | Description
 [**create_repo_scale_set**](ScalesetsApi.md#create_repo_scale_set) | **POST** /repositories/{repoID}/scalesets | Create repository scale set with the parameters given.
 [**delete_scale_set**](ScalesetsApi.md#delete_scale_set) | **DELETE** /scalesets/{scalesetID} | Delete scale set by ID.
 [**get_scale_set**](ScalesetsApi.md#get_scale_set) | **GET** /scalesets/{scalesetID} | Get scale set by ID.
+[**list_all_scale_set_jobs**](ScalesetsApi.md#list_all_scale_set_jobs) | **GET** /scalesets/jobs | 
 [**list_enterprise_scale_sets**](ScalesetsApi.md#list_enterprise_scale_sets) | **GET** /enterprises/{enterpriseID}/scalesets | List enterprise scale sets.
 [**list_org_scale_sets**](ScalesetsApi.md#list_org_scale_sets) | **GET** /organizations/{orgID}/scalesets | List organization scale sets.
 [**list_repo_scale_sets**](ScalesetsApi.md#list_repo_scale_sets) | **GET** /repositories/{repoID}/scalesets | List repository scale sets.
+[**list_scale_set_jobs**](ScalesetsApi.md#list_scale_set_jobs) | **GET** /scalesets/{scalesetID}/jobs | 
 [**list_scalesets**](ScalesetsApi.md#list_scalesets) | **GET** /scalesets | List all scalesets.
 [**update_scale_set**](ScalesetsApi.md#update_scale_set) | **PUT** /scalesets/{scalesetID} | Update scale set by ID.
 
@@ -260,7 +262,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **delete_scale_set**
-> APIErrorResponse delete_scale_set(scaleset_id)
+> APIErrorResponse delete_scale_set(scaleset_id, bypass_gh_errors=bypass_gh_errors)
 
 Delete scale set by ID.
 
@@ -296,10 +298,11 @@ with garm_client.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = garm_client.ScalesetsApi(api_client)
     scaleset_id = 'scaleset_id_example' # str | ID of the scale set to delete.
+    bypass_gh_errors = True # bool | If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub. (optional)
 
     try:
         # Delete scale set by ID.
-        api_response = api_instance.delete_scale_set(scaleset_id)
+        api_response = api_instance.delete_scale_set(scaleset_id, bypass_gh_errors=bypass_gh_errors)
         print("The response of ScalesetsApi->delete_scale_set:\n")
         pprint(api_response)
     except Exception as e:
@@ -314,6 +317,7 @@ with garm_client.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **scaleset_id** | **str**| ID of the scale set to delete. | 
+ **bypass_gh_errors** | **bool**| If true GARM removes the scale set even if GitHub fails to delete it, which may leave it orphaned on GitHub. | [optional] 
 
 ### Return type
 
@@ -410,6 +414,92 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | ScaleSet |  -  |
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **list_all_scale_set_jobs**
+> ScaleSetJobsPaginatedResponse list_all_scale_set_jobs(page=page, page_size=page_size, all=all, since=since, until=until)
+
+List jobs handled by all scale sets. Only queued and in progress jobs are
+listed unless all is set.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.scale_set_jobs_paginated_response import ScaleSetJobsPaginatedResponse
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.ScalesetsApi(api_client)
+    page = 56 # int | The page at which to list. (optional)
+    page_size = 56 # int | Number of items per page. (optional)
+    all = True # bool | Also list completed jobs. (optional)
+    since = '2013-10-20T19:20:30+01:00' # datetime | Only list jobs recorded at or after this timestamp. (optional)
+    until = '2013-10-20T19:20:30+01:00' # datetime | Only list jobs recorded at or before this timestamp. (optional)
+
+    try:
+        api_response = api_instance.list_all_scale_set_jobs(page=page, page_size=page_size, all=all, since=since, until=until)
+        print("The response of ScalesetsApi->list_all_scale_set_jobs:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ScalesetsApi->list_all_scale_set_jobs: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **page** | **int**| The page at which to list. | [optional] 
+ **page_size** | **int**| Number of items per page. | [optional] 
+ **all** | **bool**| Also list completed jobs. | [optional] 
+ **since** | **datetime**| Only list jobs recorded at or after this timestamp. | [optional] 
+ **until** | **datetime**| Only list jobs recorded at or before this timestamp. | [optional] 
+
+### Return type
+
+[**ScaleSetJobsPaginatedResponse**](ScaleSetJobsPaginatedResponse.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | ScaleSetJobsPaginatedResponse |  -  |
 **0** | APIErrorResponse |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -644,6 +734,94 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | ScaleSets |  -  |
+**0** | APIErrorResponse |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **list_scale_set_jobs**
+> ScaleSetJobsPaginatedResponse list_scale_set_jobs(scaleset_id, page=page, page_size=page_size, all=all, since=since, until=until)
+
+List jobs handled by one scale set. Only queued and in progress jobs are
+listed unless all is set.
+
+### Example
+
+* Api Key Authentication (Bearer):
+
+```python
+import garm_client
+from garm_client.models.scale_set_jobs_paginated_response import ScaleSetJobsPaginatedResponse
+from garm_client.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to /api/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = garm_client.Configuration(
+    host = "/api/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure API key authorization: Bearer
+configuration.api_key['Bearer'] = os.environ["API_KEY"]
+
+# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
+# configuration.api_key_prefix['Bearer'] = 'Bearer'
+
+# Enter a context with an instance of the API client
+with garm_client.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = garm_client.ScalesetsApi(api_client)
+    scaleset_id = 'scaleset_id_example' # str | ID of the scale set whose jobs to fetch.
+    page = 56 # int | The page at which to list. (optional)
+    page_size = 56 # int | Number of items per page. (optional)
+    all = True # bool | Also list completed jobs. (optional)
+    since = '2013-10-20T19:20:30+01:00' # datetime | Only list jobs recorded at or after this timestamp. (optional)
+    until = '2013-10-20T19:20:30+01:00' # datetime | Only list jobs recorded at or before this timestamp. (optional)
+
+    try:
+        api_response = api_instance.list_scale_set_jobs(scaleset_id, page=page, page_size=page_size, all=all, since=since, until=until)
+        print("The response of ScalesetsApi->list_scale_set_jobs:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ScalesetsApi->list_scale_set_jobs: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **scaleset_id** | **str**| ID of the scale set whose jobs to fetch. | 
+ **page** | **int**| The page at which to list. | [optional] 
+ **page_size** | **int**| Number of items per page. | [optional] 
+ **all** | **bool**| Also list completed jobs. | [optional] 
+ **since** | **datetime**| Only list jobs recorded at or after this timestamp. | [optional] 
+ **until** | **datetime**| Only list jobs recorded at or before this timestamp. | [optional] 
+
+### Return type
+
+[**ScaleSetJobsPaginatedResponse**](ScaleSetJobsPaginatedResponse.md)
+
+### Authorization
+
+[Bearer](../README.md#Bearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | ScaleSetJobsPaginatedResponse |  -  |
 **0** | APIErrorResponse |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

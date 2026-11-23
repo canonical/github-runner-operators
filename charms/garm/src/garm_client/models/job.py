@@ -40,6 +40,7 @@ class Job(BaseModel):
     locked_by: Optional[UUID] = None
     name: Optional[StrictStr] = Field(default=None, description="Name is the name if the job that was triggered.")
     org_id: Optional[UUID] = None
+    pool_id: Optional[UUID] = Field(default=None, description="PoolID is set when one of the pool's runners picks up the job.")
     repo_id: Optional[UUID] = Field(default=None, description="The entity that received the hook.  Webhooks may be configured on the repo, the org and/or the enterprise. If we only configure a repo to use garm, we'll only ever receive a webhook from the repo. But if we configure the parent org of the repo and the parent enterprise of the org to use garm, a webhook will be sent for each entity type, in response to one workflow event. Thus, we will get 3 webhooks with the same run_id and job id. Record all involved entities in the same job if we have them configured in garm.")
     repository_name: Optional[StrictStr] = Field(default=None, description="repository in which the job was triggered.")
     repository_owner: Optional[StrictStr] = None
@@ -48,13 +49,12 @@ class Job(BaseModel):
     runner_group_name: Optional[StrictStr] = None
     runner_id: Optional[StrictInt] = None
     runner_name: Optional[StrictStr] = None
-    scaleset_job_id: Optional[StrictStr] = Field(default=None, description="ScaleSetJobID is the job ID when generated for a scale set.")
     started_at: Optional[datetime] = None
     status: Optional[StrictStr] = Field(default=None, description="Status is the phase of the lifecycle that the job is currently in. \"queued\", \"in_progress\" and \"completed\".")
     updated_at: Optional[datetime] = None
     workflow_job_id: Optional[StrictInt] = None
     workflow_run_url: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["action", "completed_at", "conclusion", "created_at", "enterprise_id", "forge_instance_id", "id", "labels", "locked_by", "name", "org_id", "repo_id", "repository_name", "repository_owner", "run_id", "runner_group_id", "runner_group_name", "runner_id", "runner_name", "scaleset_job_id", "started_at", "status", "updated_at", "workflow_job_id", "workflow_run_url"]
+    __properties: ClassVar[List[str]] = ["action", "completed_at", "conclusion", "created_at", "enterprise_id", "forge_instance_id", "id", "labels", "locked_by", "name", "org_id", "pool_id", "repo_id", "repository_name", "repository_owner", "run_id", "runner_group_id", "runner_group_name", "runner_id", "runner_name", "started_at", "status", "updated_at", "workflow_job_id", "workflow_run_url"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -118,6 +118,7 @@ class Job(BaseModel):
             "locked_by": obj.get("locked_by"),
             "name": obj.get("name"),
             "org_id": obj.get("org_id"),
+            "pool_id": obj.get("pool_id"),
             "repo_id": obj.get("repo_id"),
             "repository_name": obj.get("repository_name"),
             "repository_owner": obj.get("repository_owner"),
@@ -126,7 +127,6 @@ class Job(BaseModel):
             "runner_group_name": obj.get("runner_group_name"),
             "runner_id": obj.get("runner_id"),
             "runner_name": obj.get("runner_name"),
-            "scaleset_job_id": obj.get("scaleset_job_id"),
             "started_at": obj.get("started_at"),
             "status": obj.get("status"),
             "updated_at": obj.get("updated_at"),

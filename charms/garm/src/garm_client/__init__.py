@@ -89,6 +89,8 @@ __all__ = [
     "InstanceMetadata",
     "JWTResponse",
     "Job",
+    "JobsPaginatedResponse",
+    "JobsPaginatedResponseResultsInner",
     "MetadataServiceAccessDetails",
     "NewUserParams",
     "Organization",
@@ -102,6 +104,9 @@ __all__ = [
     "RunnerApplicationDownload",
     "RunnerPrefix",
     "ScaleSet",
+    "ScaleSetJob",
+    "ScaleSetJobsPaginatedResponse",
+    "ScaleSetJobsPaginatedResponseResultsInner",
     "StatusMessage",
     "Tag",
     "Template",
@@ -195,6 +200,8 @@ from garm_client.models.instance import Instance as Instance
 from garm_client.models.instance_metadata import InstanceMetadata as InstanceMetadata
 from garm_client.models.jwt_response import JWTResponse as JWTResponse
 from garm_client.models.job import Job as Job
+from garm_client.models.jobs_paginated_response import JobsPaginatedResponse as JobsPaginatedResponse
+from garm_client.models.jobs_paginated_response_results_inner import JobsPaginatedResponseResultsInner as JobsPaginatedResponseResultsInner
 from garm_client.models.metadata_service_access_details import MetadataServiceAccessDetails as MetadataServiceAccessDetails
 from garm_client.models.new_user_params import NewUserParams as NewUserParams
 from garm_client.models.organization import Organization as Organization
@@ -208,6 +215,9 @@ from garm_client.models.restore_template_request import RestoreTemplateRequest a
 from garm_client.models.runner_application_download import RunnerApplicationDownload as RunnerApplicationDownload
 from garm_client.models.runner_prefix import RunnerPrefix as RunnerPrefix
 from garm_client.models.scale_set import ScaleSet as ScaleSet
+from garm_client.models.scale_set_job import ScaleSetJob as ScaleSetJob
+from garm_client.models.scale_set_jobs_paginated_response import ScaleSetJobsPaginatedResponse as ScaleSetJobsPaginatedResponse
+from garm_client.models.scale_set_jobs_paginated_response_results_inner import ScaleSetJobsPaginatedResponseResultsInner as ScaleSetJobsPaginatedResponseResultsInner
 from garm_client.models.status_message import StatusMessage as StatusMessage
 from garm_client.models.tag import Tag as Tag
 from garm_client.models.template import Template as Template
