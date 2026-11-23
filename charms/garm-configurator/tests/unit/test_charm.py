@@ -1033,11 +1033,12 @@ def test_runner_config_fields_written_to_garm_configurator_relation():
     assert _scaleset_value(rel_out, "pre_job_script") == "echo start"
 
 
-def test_runner_config_fields_absent_when_unset():
+def test_runner_config_fields_empty_when_unset():
     """
     arrange: Valid config with no runner config options set.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The six runner config keys are absent from the databag.
+    assert: The six runner config keys are published as empty strings inside the nested
+        ``scaleset`` value.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
