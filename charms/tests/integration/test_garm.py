@@ -127,15 +127,15 @@ def test_garm_rock_ships_garm_agent_for_every_runner_architecture(
 ):
     """
     arrange: The GARM charm is deployed with the built ROCK image.
-    act: Read the garm-agent manifest the rock records at build time.
-    assert: It lists amd64, arm64, ppc64le and s390x, so the charm publishes a garm-agent for
-        every architecture GARM runs runners on and those runners can use agent mode.
+    act: List the per-architecture garm-agent directories with pebble, since the rock ships no
+        coreutils to exec.
+    assert: There is one for each of amd64, arm64, ppc64le and s390x, so the charm publishes a
+        garm-agent for every architecture GARM runs runners on and those runners can use agent
+        mode.
     """
-    result = juju.exec(
-        f"{PEBBLE_PREFIX} exec -- cat /opt/garm-agent/manifest.txt", unit=f"{garm_app}/0"
-    )
+    result = juju.exec(f"{PEBBLE_PREFIX} ls /opt/garm-agent/linux/", unit=f"{garm_app}/0")
 
-    arches = {line.split()[0] for line in result.stdout.splitlines()[1:] if line.strip()}
+    arches = {name.rstrip("/") for name in result.stdout.split()}
     assert arches == {"amd64", "arm64", "ppc64le", "s390x"}, result.stdout
 
 
