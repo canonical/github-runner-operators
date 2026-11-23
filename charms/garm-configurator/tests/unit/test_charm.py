@@ -777,6 +777,32 @@ def test_reconcile_writes_garm_data_without_image_uuid():
     assert _relation_value(garm_out, "openstack_password_secret_uri")
 
 
+def test_non_leader_publishes_scaleset_fields_without_provider_payload():
+    """
+    arrange: All configs valid, image has a UUID, garm relation joined, unit is not the leader.
+    act: config-changed fires.
+    assert: Only the scaleset fields are published; the provider payload is withheld because a
+        non-leader cannot create the credential secrets or write another unit's databag.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image", remote_units_data={0: {"id": "abc-image-uuid"}})
+    garm_relation = Relation(endpoint="garm-configurator")
+    state = State(
+        config=_valid_config(secret, pk_secret),
+        secrets=[secret, pk_secret],
+        relations=[image_relation, garm_relation],
+        leader=False,
+    )
+    out = ctx.run(ctx.on.config_changed(), state)
+    garm_out = out.get_relation(garm_relation.id)
+    assert _scaleset_value(garm_out, "name") == "my-scaleset"
+    assert _scaleset_value(garm_out, "image_id") == "abc-image-uuid"
+    assert "openstack_auth_url" not in garm_out.local_unit_data
+    assert "github_app_id" not in garm_out.local_unit_data
+
+
 def test_reconcile_writes_garm_data_on_relation_joined():
     """
     arrange: All configs valid, image has UUID, garm relation just joined.
