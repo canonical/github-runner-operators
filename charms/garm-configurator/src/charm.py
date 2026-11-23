@@ -46,11 +46,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _reconcile(self, event: ops.EventBase) -> None:
         """Handle all charm events by reconciling configuration and relation data.
 
-        Blocks non-leader units, because only the leader may create the credential secrets and
-        publish the complete payload. On the leader, reads the current charm state, forwards
-        OpenStack credentials to the image-builder relation, publishes scaleset configuration
-        (and secrets when the image reference is available) to all garm-configurator relations,
-        then sets unit status to reflect readiness.
+        Blocks non-leader units, because only the leader may write the application databag
+        and provision the credential secrets. On the leader, reads the current charm state,
+        forwards OpenStack credentials to the image-builder relation, publishes scaleset
+        configuration (and secrets when the image reference is available) to all
+        garm-configurator relations, then sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
@@ -116,7 +116,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Args:
             relation: The garm-configurator relation.
-            secret_name: A per-unit name for the secret (used as Juju label).
+            secret_name: A per-application name for the secret (used as Juju label).
             value: The secret value to store.
 
         Returns:
@@ -140,16 +140,16 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """Publish the complete configurator payload to the garm-configurator relation.
 
         Saves ``ScalesetConfig`` for the scaleset and runner fields (with ``encoder=str``, which
-        preserves their raw-string wire form) and, on the leader, ``RelationProviderConfig`` for
-        the OpenStack/GitHub App credentials (JSON-encoded). ``Relation.save`` persists every
-        model field, so an unset optional field is published as an empty string rather than
-        omitted; consumers treat the empty string as "unset". The ``image_id`` field carries
-        either an OpenStack image name or ID for compatibility.
+        preserves their raw-string wire form) and ``RelationProviderConfig`` for the
+        OpenStack/GitHub App credentials (JSON-encoded), both on the application databag.
+        ``Relation.save`` persists every model field, so an unset optional field is published as
+        an empty string rather than omitted; consumers treat the empty string as "unset". The
+        ``image_id`` field carries either an OpenStack image name or ID for compatibility.
 
-        When this unit holds leadership, also provisions Juju secrets for the OpenStack password
-        and GitHub App private key and writes their secret URIs alongside the credential fields.
-        This method only runs on the leader, because ``_reconcile`` blocks non-leader units:
-        they cannot create the secrets.
+        Also provisions Juju secrets for the OpenStack password and GitHub App private key and
+        writes their secret URIs alongside the credential fields. Only the leader reaches this
+        method, because ``_reconcile`` blocks non-leader units: they cannot create the secrets
+        and must not write the application databag.
 
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
@@ -200,7 +200,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 otel_collector_endpoint=rc.otel_collector_endpoint or "",
                 pre_job_script=rc.pre_job_script or "",
             ),
-            self.unit,
+            self.app,
             encoder=str,
         )
 
@@ -221,7 +221,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 github_installation_id=state.github_app_config.installation_id,
                 github_private_key_secret_uri=str(github_key_secret.id),
             ),
-            self.unit,
+            self.app,
         )
 
 
