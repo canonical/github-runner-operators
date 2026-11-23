@@ -3,8 +3,9 @@
 
 """Charm state parsing for the GARM charm.
 
-Builds the desired GARM org/repo entities from the garm-configurator relation and the SSH
-debug connections from the debug-ssh relation into a ``CharmState`` value (via
+Builds the desired GARM org/repo entities from the garm-configurator relation, the SSH
+debug connections from the debug-ssh relation and the runner tools source from charm config
+into a ``CharmState`` value (via
 ``CharmState.from_charm``), keeping that relation-parsing out of ``charm.py``. Credential and
 scaleset specs are still built in ``charm.py`` today; they can move here under the same pattern
 as the state grows.
@@ -15,6 +16,7 @@ import ipaddress
 import logging
 import re
 import typing
+import urllib.parse
 from collections.abc import Mapping
 
 import ops
@@ -33,6 +35,11 @@ _PORT_TOKEN_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
 
 DEBUG_SSH_INTEGRATION_NAME: typing.Final[str] = "debug-ssh"
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
+RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: typing.Final[str] = "runner-tools-metadata-url"
+
+
+class BlockedError(Exception):
+    """A configuration problem that needs operator action; ``restart`` blocks the unit."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -350,12 +357,15 @@ class CharmState:
         desired_entities: GARM org/repo entities derived from the garm-configurator relation.
         configurator_data: The aggregated garm-configurator relation data.
         configurator_related: Whether a garm-configurator relation is present.
+        runner_tools_metadata_url: Releases URL GARM takes runner binaries from on top of
+            GitHub's own, or empty for GitHub's only.
     """
 
     ssh_debug_connections: list[SSHDebugInfo]
     desired_entities: list[EntitySpec]
     configurator_data: ConfiguratorData
     configurator_related: bool
+    runner_tools_metadata_url: str
 
     @classmethod
     def from_charm(
@@ -371,6 +381,9 @@ class CharmState:
 
         Returns:
             Current CharmState.
+
+        Raises:
+            BlockedError: If runner-tools-metadata-url is not an http(s) URL.
         """
         configurator_data = requirer.get_data()
         return cls(
@@ -378,7 +391,32 @@ class CharmState:
             desired_entities=_get_desired_entities(configurator_data),
             configurator_data=configurator_data,
             configurator_related=requirer.is_related,
+            runner_tools_metadata_url=_get_runner_tools_metadata_url(charm),
         )
+
+
+def _get_runner_tools_metadata_url(charm: ops.CharmBase) -> str:
+    """Read the runner tools releases URL from config, empty when unset.
+
+    Raises:
+        BlockedError: If the value is set but is not an http(s) URL with a host,
+            which GARM would reject.
+    """
+    url = str(charm.config.get(RUNNER_TOOLS_METADATA_URL_CONFIG_NAME) or "").strip()
+    if not url:
+        return ""
+    invalid = BlockedError(
+        f"Invalid {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME}: {url!r} is not an http(s) URL"
+    )
+    try:
+        parsed = urllib.parse.urlparse(url)
+        # urlparse checks the host's brackets but defers the port until .port is read.
+        _ = parsed.port
+    except ValueError as exc:
+        raise invalid from exc
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise invalid
+    return url
 
 
 @dataclasses.dataclass(frozen=True)
