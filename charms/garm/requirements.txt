@@ -1,12 +1,12 @@
-ops==3.9.0
+ops==3.10.0
 paas-charm==1.12.3
 Jinja2==3.1.6
 tomli-w==1.2.0
-PyYAML==6.0.3
+PyYAML==6.0.4
 urllib3==2.8.0
 python-dateutil==4.0.0
 pydantic==2.14.4
 typing-extensions==4.16.0
 owasp-logger==0.1.6
 # garm_configurator/v0.0.1
-garm-configurator-relation @ git+https://github.com/canonical/github-runner-operators.git@62a02eee9035b84ba97428b557c02a06ee0211b7#subdirectory=charms/garm-configurator/lib
+garm-configurator-relation @ git+https://github.com/canonical/github-runner-operators.git@a868dec2afb69966046917ef311ff8a33d3d3b0c#subdirectory=charms/garm-configurator/lib

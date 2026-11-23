@@ -8,6 +8,7 @@ checksum(s)?
 cjk
 configurator
 cryptographically
+databag(s)?
 datasource
 Diátaxis
 docstrings?

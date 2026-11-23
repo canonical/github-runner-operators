@@ -137,7 +137,7 @@ Class | Method | HTTP request | Description
 *InstancesApi* | [**list_pool_instances**](garm_client/docs/InstancesApi.md#list_pool_instances) | **GET** /pools/{poolID}/instances | List runner instances in a pool.
 *InstancesApi* | [**list_repo_instances**](garm_client/docs/InstancesApi.md#list_repo_instances) | **GET** /repositories/{repoID}/instances | List repository instances.
 *InstancesApi* | [**list_scale_set_instances**](garm_client/docs/InstancesApi.md#list_scale_set_instances) | **GET** /scalesets/{scalesetID}/instances | List runner instances in a scale set.
-*JobsApi* | [**list_jobs**](garm_client/docs/JobsApi.md#list_jobs) | **GET** /jobs | List all jobs.
+*JobsApi* | [**list_jobs**](garm_client/docs/JobsApi.md#list_jobs) | **GET** /jobs | List jobs. Only queued and in progress jobs are listed unless all is set.
 *LoginApi* | [**login**](garm_client/docs/LoginApi.md#login) | **POST** /auth/login | Logs in a user and returns a JWT token.
 *MetricsTokenApi* | [**get_metrics_token**](garm_client/docs/MetricsTokenApi.md#get_metrics_token) | **GET** /metrics-token | Returns a JWT token that can be used to access the metrics endpoint.
 *ObjectsApi* | [**delete_file_object**](garm_client/docs/ObjectsApi.md#delete_file_object) | **DELETE** /objects/{objectID} | Delete a file object.
@@ -211,9 +211,11 @@ Class | Method | HTTP request | Description
 *ScalesetsApi* | [**create_repo_scale_set**](garm_client/docs/ScalesetsApi.md#create_repo_scale_set) | **POST** /repositories/{repoID}/scalesets | Create repository scale set with the parameters given.
 *ScalesetsApi* | [**delete_scale_set**](garm_client/docs/ScalesetsApi.md#delete_scale_set) | **DELETE** /scalesets/{scalesetID} | Delete scale set by ID.
 *ScalesetsApi* | [**get_scale_set**](garm_client/docs/ScalesetsApi.md#get_scale_set) | **GET** /scalesets/{scalesetID} | Get scale set by ID.
+*ScalesetsApi* | [**list_all_scale_set_jobs**](garm_client/docs/ScalesetsApi.md#list_all_scale_set_jobs) | **GET** /scalesets/jobs | 
 *ScalesetsApi* | [**list_enterprise_scale_sets**](garm_client/docs/ScalesetsApi.md#list_enterprise_scale_sets) | **GET** /enterprises/{enterpriseID}/scalesets | List enterprise scale sets.
 *ScalesetsApi* | [**list_org_scale_sets**](garm_client/docs/ScalesetsApi.md#list_org_scale_sets) | **GET** /organizations/{orgID}/scalesets | List organization scale sets.
 *ScalesetsApi* | [**list_repo_scale_sets**](garm_client/docs/ScalesetsApi.md#list_repo_scale_sets) | **GET** /repositories/{repoID}/scalesets | List repository scale sets.
+*ScalesetsApi* | [**list_scale_set_jobs**](garm_client/docs/ScalesetsApi.md#list_scale_set_jobs) | **GET** /scalesets/{scalesetID}/jobs | 
 *ScalesetsApi* | [**list_scalesets**](garm_client/docs/ScalesetsApi.md#list_scalesets) | **GET** /scalesets | List all scalesets.
 *ScalesetsApi* | [**update_scale_set**](garm_client/docs/ScalesetsApi.md#update_scale_set) | **PUT** /scalesets/{scalesetID} | Update scale set by ID.
 *TemplatesApi* | [**create_template**](garm_client/docs/TemplatesApi.md#create_template) | **POST** /templates | Create template with the parameters given.
@@ -270,6 +272,8 @@ Class | Method | HTTP request | Description
  - [InstanceMetadata](garm_client/docs/InstanceMetadata.md)
  - [JWTResponse](garm_client/docs/JWTResponse.md)
  - [Job](garm_client/docs/Job.md)
+ - [JobsPaginatedResponse](garm_client/docs/JobsPaginatedResponse.md)
+ - [JobsPaginatedResponseResultsInner](garm_client/docs/JobsPaginatedResponseResultsInner.md)
  - [MetadataServiceAccessDetails](garm_client/docs/MetadataServiceAccessDetails.md)
  - [NewUserParams](garm_client/docs/NewUserParams.md)
  - [Organization](garm_client/docs/Organization.md)
@@ -283,6 +287,9 @@ Class | Method | HTTP request | Description
  - [RunnerApplicationDownload](garm_client/docs/RunnerApplicationDownload.md)
  - [RunnerPrefix](garm_client/docs/RunnerPrefix.md)
  - [ScaleSet](garm_client/docs/ScaleSet.md)
+ - [ScaleSetJob](garm_client/docs/ScaleSetJob.md)
+ - [ScaleSetJobsPaginatedResponse](garm_client/docs/ScaleSetJobsPaginatedResponse.md)
+ - [ScaleSetJobsPaginatedResponseResultsInner](garm_client/docs/ScaleSetJobsPaginatedResponseResultsInner.md)
  - [StatusMessage](garm_client/docs/StatusMessage.md)
  - [Tag](garm_client/docs/Tag.md)
  - [Template](garm_client/docs/Template.md)

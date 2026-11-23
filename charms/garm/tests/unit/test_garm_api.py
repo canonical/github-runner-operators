@@ -651,6 +651,37 @@ def test_update_controller_raises_on_api_error():
                 )
 
 
+def test_set_tools_metadata_url_updates_only_that_field():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi stubbed.
+    act: Set the tools metadata URL of the github.com endpoint.
+    assert: The named endpoint is updated with a body carrying only the URL, since GARM
+        refuses base URL changes on an endpoint that credentials reference.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            client.set_tools_metadata_url("github.com", "https://example.com/releases")
+
+    update = MockApi.return_value.update_github_endpoint.call_args.kwargs
+    assert update["name"] == "github.com"
+    assert update["body"].to_dict() == {"tools_metadata_url": "https://example.com/releases"}
+
+
+def test_set_tools_metadata_url_raises_on_api_error():
+    """
+    arrange: GarmAuthenticatedClient with EndpointsApi raising ApiException(400).
+    act: Set the tools metadata URL.
+    assert: GarmApiError is raised, which the reconcile treats as a failed GARM sync.
+    """
+    client = GarmAuthenticatedClient(BASE_URL, "token")
+    with _stub_api_client(client):
+        with patch("garm_api.EndpointsApi") as MockApi:
+            MockApi.return_value.update_github_endpoint.side_effect = ApiException(status=400)
+            with pytest.raises(GarmApiError):
+                client.set_tools_metadata_url("github.com", "https://example.com/releases")
+
+
 def test_create_template_base64_encodes_data():
     """
     arrange: GarmAuthenticatedClient with TemplatesApi stubbed.

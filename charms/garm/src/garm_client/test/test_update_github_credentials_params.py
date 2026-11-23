@@ -42,7 +42,9 @@ class TestUpdateGithubCredentialsParams(unittest.TestCase):
                 description = '',
                 name = '',
                 pat = garm_client.models.github_pat.GithubPAT(
-                    oauth2_token = '', )
+                    oauth2_token = '', ),
+                reserve_usage_enabled = True,
+                reserve_usage_percentage = 56
             )
         else:
             return UpdateGithubCredentialsParams(

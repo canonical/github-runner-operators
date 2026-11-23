@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **ca_cert_bundle** | **bytes** |  | [optional] 
 **description** | **str** |  | [optional] 
 **name** | **str** |  | [optional] 
+**tools_metadata_url** | **str** | ToolsMetadataURL is an optional GitHub API compatible releases URL that publishes runner binaries. The tools it publishes take precedence over the ones the endpoint API reports, for the OS/arch combos they cover. It is how runners for architectures upstream GitHub does not build are made available. | [optional] 
 **upload_base_url** | **str** |  | [optional] 
 
 ## Example
