@@ -73,10 +73,6 @@ class InvalidProviderConfigError(BlockedError):
     """A configurator publishes a provider with empty required fields."""
 
 
-class InvalidConfiguratorRelationError(BlockedError):
-    """A configurator relation is incomplete or conflicts with another relation."""
-
-
 CONTAINER_NAME: typing.Final[str] = "app"
 PEBBLE_SERVICE_NAME: typing.Final[str] = "app"
 GARM_BINARY: typing.Final[str] = "/usr/local/bin/garm"
@@ -396,8 +392,6 @@ class GarmCharm(paas_charm.go.Charm):
             rerun_migrations: Passed through to the parent restart.
 
         Raises:
-            InvalidConfiguratorRelationError: If a related configurator relation is incomplete
-                or conflicts with another, before anything is applied.
             InvalidProviderConfigError: If a related provider is incomplete, before anything
                 is applied.
         """
@@ -669,8 +663,6 @@ class GarmCharm(paas_charm.go.Charm):
             One ``ProviderConfig`` per configurator relation unit, ordered by provider name.
 
         Raises:
-            InvalidConfiguratorRelationError: If a relation is incomplete or conflicts with
-                another over a scaleset.
             InvalidProviderConfigError: If a provider has empty required fields, e.g. a
                 password secret not yet readable.
         """
@@ -678,9 +670,7 @@ class GarmCharm(paas_charm.go.Charm):
             relation_ids = ", ".join(
                 str(relation_id) for relation_id in sorted(configurator_data.invalid_relation_ids)
             )
-            raise InvalidConfiguratorRelationError(
-                f"Invalid garm-configurator relation data: {relation_ids}"
-            )
+            logger.warning("Invalid garm-configurator relation data: %s", relation_ids)
         if not configurator_data.relations:
             logger.info("GARM configurator relation not available; provider_count=0")
             return []
