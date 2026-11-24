@@ -27,12 +27,12 @@ def _make_garm_configurator_relation():
 
 def _relation_value(relation: Relation, key: str):
     """Return a JSON-encoded provider relation value, failing if the key is absent."""
-    return json.loads(relation.local_unit_data[key])
+    return json.loads(relation.local_app_data[key])
 
 
 def _scaleset_value(relation: Relation, key: str):
     """Return a raw-string scaleset relation value, failing if the key is absent."""
-    return relation.local_unit_data[key]
+    return relation.local_app_data[key]
 
 
 def _scaleset_value_or_empty(relation: Relation, key: str):
@@ -42,7 +42,7 @@ def _scaleset_value_or_empty(relation: Relation, key: str):
     is indistinguishable from a key that was never written. Non-empty fields use
     ``_scaleset_value`` so a dropped key still fails the assertion.
     """
-    return relation.local_unit_data.get(key, "")
+    return relation.local_app_data.get(key, "")
 
 
 def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
@@ -106,7 +106,7 @@ def test_configured_image_is_published_without_image_relation():
 
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.ActiveStatus("Ready")
-    assert "image" not in garm_out.local_unit_data
+    assert "image" not in garm_out.local_app_data
     assert _scaleset_value(garm_out, "image_id") == "runner-noble-amd64"
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
@@ -238,7 +238,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
-    assert "openstack_password_secret_uri" in garm_out.local_unit_data
+    assert "openstack_password_secret_uri" in garm_out.local_app_data
     assert _relation_value(garm_out, "github_private_key_secret_uri")
     relation_id = garm_relation.id
     relation_secrets = {
@@ -745,7 +745,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     # GitHub config
     assert _relation_value(garm_out, "github_app_id") == 99999
     assert _relation_value(garm_out, "github_installation_id") == 67890
-    assert "github_private_key" not in garm_out.local_unit_data
+    assert "github_private_key" not in garm_out.local_app_data
     assert _relation_value(garm_out, "github_private_key_secret_uri")
 
     # Scaleset config
@@ -795,8 +795,8 @@ def test_non_leader_is_blocked_and_publishes_nothing():
     """
     arrange: All configs valid, image has a UUID, garm relation joined, unit is not the leader.
     act: config-changed fires.
-    assert: The unit is blocked with a leadership message and writes nothing to the relation, so
-        only the leader publishes the payload and provisions the credential secrets.
+    assert: The unit is blocked with a leadership message and writes nothing to the application
+        databag, so only the leader publishes the payload and provisions the credential secrets.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -812,8 +812,7 @@ def test_non_leader_is_blocked_and_publishes_nothing():
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.BlockedStatus("Only the leader unit publishes relation data")
-    assert "name" not in garm_out.local_unit_data
-    assert "openstack_auth_url" not in garm_out.local_unit_data
+    assert garm_out.local_app_data == {}
 
 
 def test_reconcile_writes_garm_data_on_relation_joined():
