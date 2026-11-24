@@ -116,7 +116,7 @@ parts:
       go mod tidy
       go mod vendor
       AGENT_DIR="$CRAFT_PART_INSTALL/opt/garm-agent"
-      ARCHES="amd64 arm64 ppc64le s390x"
+      ARCHES="amd64 arm64 arm ppc64le s390x"
       for arch in $ARCHES; do
         GOOS=linux GOARCH="$arch" go build \
           -ldflags "-s -w -X github.com/cloudbase/garm-agent/cmd.Version=${VERSION}" \
