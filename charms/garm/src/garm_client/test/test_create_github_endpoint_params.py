@@ -40,6 +40,7 @@ class TestCreateGithubEndpointParams(unittest.TestCase):
                 ca_cert_bundle = 'YQ==',
                 description = '',
                 name = '',
+                tools_metadata_url = '',
                 upload_base_url = ''
             )
         else:

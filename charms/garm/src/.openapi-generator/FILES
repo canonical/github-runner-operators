@@ -75,6 +75,8 @@ garm_client/docs/InstancesApi.md
 garm_client/docs/JWTResponse.md
 garm_client/docs/Job.md
 garm_client/docs/JobsApi.md
+garm_client/docs/JobsPaginatedResponse.md
+garm_client/docs/JobsPaginatedResponseResultsInner.md
 garm_client/docs/LoginApi.md
 garm_client/docs/MetadataServiceAccessDetails.md
 garm_client/docs/MetricsTokenApi.md
@@ -96,6 +98,9 @@ garm_client/docs/RestoreTemplateRequest.md
 garm_client/docs/RunnerApplicationDownload.md
 garm_client/docs/RunnerPrefix.md
 garm_client/docs/ScaleSet.md
+garm_client/docs/ScaleSetJob.md
+garm_client/docs/ScaleSetJobsPaginatedResponse.md
+garm_client/docs/ScaleSetJobsPaginatedResponseResultsInner.md
 garm_client/docs/ScalesetsApi.md
 garm_client/docs/StatusMessage.md
 garm_client/docs/Tag.md
@@ -156,6 +161,8 @@ garm_client/models/install_webhook_params.py
 garm_client/models/instance.py
 garm_client/models/instance_metadata.py
 garm_client/models/job.py
+garm_client/models/jobs_paginated_response.py
+garm_client/models/jobs_paginated_response_results_inner.py
 garm_client/models/jwt_response.py
 garm_client/models/metadata_service_access_details.py
 garm_client/models/new_user_params.py
@@ -170,6 +177,9 @@ garm_client/models/restore_template_request.py
 garm_client/models/runner_application_download.py
 garm_client/models/runner_prefix.py
 garm_client/models/scale_set.py
+garm_client/models/scale_set_job.py
+garm_client/models/scale_set_jobs_paginated_response.py
+garm_client/models/scale_set_jobs_paginated_response_results_inner.py
 garm_client/models/status_message.py
 garm_client/models/tag.py
 garm_client/models/template.py
@@ -237,6 +247,8 @@ garm_client/test/test_instance_metadata.py
 garm_client/test/test_instances_api.py
 garm_client/test/test_job.py
 garm_client/test/test_jobs_api.py
+garm_client/test/test_jobs_paginated_response.py
+garm_client/test/test_jobs_paginated_response_results_inner.py
 garm_client/test/test_jwt_response.py
 garm_client/test/test_login_api.py
 garm_client/test/test_metadata_service_access_details.py
@@ -259,6 +271,9 @@ garm_client/test/test_restore_template_request.py
 garm_client/test/test_runner_application_download.py
 garm_client/test/test_runner_prefix.py
 garm_client/test/test_scale_set.py
+garm_client/test/test_scale_set_job.py
+garm_client/test/test_scale_set_jobs_paginated_response.py
+garm_client/test/test_scale_set_jobs_paginated_response_results_inner.py
 garm_client/test/test_scalesets_api.py
 garm_client/test/test_status_message.py
 garm_client/test/test_tag.py

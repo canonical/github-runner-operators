@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
 from garm_client.models.forge_endpoint import ForgeEndpoint
@@ -45,9 +45,11 @@ class ForgeCredentials(BaseModel):
     organizations: Optional[List[Organization]] = None
     rate_limit: Optional[GithubRateLimit] = None
     repositories: Optional[List[Repository]] = None
+    reserve_usage_enabled: Optional[StrictBool] = Field(default=None, description="ReserveUsageEnabled toggles whether or not to allocate a certain percentage of the available rate limit to critical operations such as delete operations for runners that have finished their jobs.")
+    reserve_usage_percentage: Optional[StrictInt] = Field(default=None, description="ReserveUsagePercentage is the percentage of available rate limit reserved for critical operations. Setting this value too high will negatively impact normal operations, so it is capped at 50%. A value between 5% and 20% should be safe on most setups. Adjust this based on your usage patterns.")
     updated_at: Optional[datetime] = None
     upload_base_url: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["api_base_url", "auth-type", "base_url", "ca_bundle", "created_at", "description", "endpoint", "enterprises", "forge_type", "id", "name", "organizations", "rate_limit", "repositories", "updated_at", "upload_base_url"]
+    __properties: ClassVar[List[str]] = ["api_base_url", "auth-type", "base_url", "ca_bundle", "created_at", "description", "endpoint", "enterprises", "forge_type", "id", "name", "organizations", "rate_limit", "repositories", "reserve_usage_enabled", "reserve_usage_percentage", "updated_at", "upload_base_url"]
 
     @field_validator('ca_bundle')
     def ca_bundle_validate_regular_expression(cls, value):
@@ -154,6 +156,8 @@ class ForgeCredentials(BaseModel):
             "organizations": [Organization.from_dict(_item) for _item in obj["organizations"]] if obj.get("organizations") is not None else None,
             "rate_limit": GithubRateLimit.from_dict(obj["rate_limit"]) if obj.get("rate_limit") is not None else None,
             "repositories": [Repository.from_dict(_item) for _item in obj["repositories"]] if obj.get("repositories") is not None else None,
+            "reserve_usage_enabled": obj.get("reserve_usage_enabled"),
+            "reserve_usage_percentage": obj.get("reserve_usage_percentage"),
             "updated_at": obj.get("updated_at"),
             "upload_base_url": obj.get("upload_base_url")
         })

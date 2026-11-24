@@ -4,13 +4,13 @@ All URIs are relative to */api/v1*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**list_jobs**](JobsApi.md#list_jobs) | **GET** /jobs | List all jobs.
+[**list_jobs**](JobsApi.md#list_jobs) | **GET** /jobs | List jobs. Only queued and in progress jobs are listed unless all is set.
 
 
 # **list_jobs**
-> List[Job] list_jobs()
+> JobsPaginatedResponse list_jobs(page=page, page_size=page_size, all=all, since=since, until=until)
 
-List all jobs.
+List jobs. Only queued and in progress jobs are listed unless all is set.
 
 ### Example
 
@@ -18,7 +18,7 @@ List all jobs.
 
 ```python
 import garm_client
-from garm_client.models.job import Job
+from garm_client.models.jobs_paginated_response import JobsPaginatedResponse
 from garm_client.rest import ApiException
 from pprint import pprint
 
@@ -43,10 +43,15 @@ configuration.api_key['Bearer'] = os.environ["API_KEY"]
 with garm_client.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = garm_client.JobsApi(api_client)
+    page = 56 # int | The page at which to list. (optional)
+    page_size = 56 # int | Number of items per page. (optional)
+    all = True # bool | Also list completed jobs. (optional)
+    since = '2013-10-20T19:20:30+01:00' # datetime | Only list jobs recorded at or after this timestamp. (optional)
+    until = '2013-10-20T19:20:30+01:00' # datetime | Only list jobs recorded at or before this timestamp. (optional)
 
     try:
-        # List all jobs.
-        api_response = api_instance.list_jobs()
+        # List jobs. Only queued and in progress jobs are listed unless all is set.
+        api_response = api_instance.list_jobs(page=page, page_size=page_size, all=all, since=since, until=until)
         print("The response of JobsApi->list_jobs:\n")
         pprint(api_response)
     except Exception as e:
@@ -57,11 +62,18 @@ with garm_client.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **page** | **int**| The page at which to list. | [optional] 
+ **page_size** | **int**| Number of items per page. | [optional] 
+ **all** | **bool**| Also list completed jobs. | [optional] 
+ **since** | **datetime**| Only list jobs recorded at or after this timestamp. | [optional] 
+ **until** | **datetime**| Only list jobs recorded at or before this timestamp. | [optional] 
 
 ### Return type
 
-[**List[Job]**](Job.md)
+[**JobsPaginatedResponse**](JobsPaginatedResponse.md)
 
 ### Authorization
 
@@ -76,7 +88,7 @@ This endpoint does not need any parameter.
 
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-**200** | Jobs |  -  |
+**200** | JobsPaginatedResponse |  -  |
 **400** | APIErrorResponse |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

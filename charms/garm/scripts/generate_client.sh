@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-GARM_COMMIT="e03045fc5861a903f72cb04ff37327b19a0d1e20"
+GARM_COMMIT="20102174d70174fa2e6a9be9f363d78df08c9ac5"
 SWAGGER_URL="https://raw.githubusercontent.com/cloudbase/garm/${GARM_COMMIT}/webapp/swagger.yaml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
