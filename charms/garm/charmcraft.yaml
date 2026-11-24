@@ -31,6 +31,15 @@ config:
         "value" key. Set this to the existing passphrase when moving it out of
         the charm-owned garm-secrets secret; changing it makes existing encrypted
         database values unreadable.
+    runner-tools-metadata-url:
+      type: string
+      default: https://api.github.com/repos/canonical/github-actions-runner/releases
+      description: |
+        GitHub releases API URL that publishes GitHub Actions runner binaries,
+        such as those for s390x and ppc64le, which GitHub itself does not
+        publish. GARM uses these binaries in place of GitHub's for every OS and
+        architecture the releases cover, and GitHub's for the rest. Set it to
+        an empty string to use only GitHub's runner binaries.
 
 extensions:
   - go-framework

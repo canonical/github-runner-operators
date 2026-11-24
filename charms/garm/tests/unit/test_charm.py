@@ -42,7 +42,11 @@ from charm import (
     GARM_SECRETS_LABEL,
     GarmCharm,
 )
-from charm_state import DEBUG_SSH_INTEGRATION_NAME, GARM_CONFIGURATOR_RELATION_NAME
+from charm_state import (
+    DEBUG_SSH_INTEGRATION_NAME,
+    GARM_CONFIGURATOR_RELATION_NAME,
+    RUNNER_TOOLS_METADATA_URL_CONFIG_NAME,
+)
 from garm_api import GarmApiError, GarmConnectionError
 from github_reconciler import (
     DEFAULT_GITHUB_ENDPOINT,
@@ -176,6 +180,7 @@ def garm_api_fixture() -> typing.Iterator[_GarmApiMocks]:
         calls.attach_mock(auth_client.update_controller, "controller")
         calls.attach_mock(agent_tools, "agent_tools")
         calls.attach_mock(github_cls.return_value.reconcile, "github")
+        calls.attach_mock(auth_client.set_tools_metadata_url, "tools_metadata_url")
         calls.attach_mock(entity_cls.return_value.reconcile, "entity")
         calls.attach_mock(scaleset_cls.return_value.reconcile, "scaleset")
         yield _GarmApiMocks(
@@ -1696,8 +1701,9 @@ def test_reconcilers_run_in_dependency_order(ctx: Context, garm_api: _GarmApiMoc
     arrange: A ready charm.
     act: Run update-status.
     assert: Controller URLs are configured first — GARM 409s every operational call until they
-        are set — then credentials, entities and scalesets reconcile in that order, since
-        entities reference a credential and scalesets are created under an entity. The
+        are set — then credentials, the endpoint's runner tools source, entities and scalesets
+        reconcile in that order, since entities reference a credential and scalesets are
+        created under an entity, whose runners need the tools. The
         garm-agent binaries are published before the entities that switch agent mode on, so
         GARM never falls back to handing a runner a github.com download URL. All of them run
         against the one authenticated client.
@@ -1708,12 +1714,78 @@ def test_reconcilers_run_in_dependency_order(ctx: Context, garm_api: _GarmApiMoc
         "controller",
         "agent_tools",
         "github",
+        "tools_metadata_url",
         "entity",
         "scaleset",
     ]
     garm_api.github.assert_called_once_with(garm_api.auth_client)
     garm_api.entity.assert_called_once_with(garm_api.auth_client, True)
     garm_api.scaleset.assert_called_once_with(garm_api.auth_client)
+
+
+@pytest.mark.parametrize(
+    "config, expected_url",
+    [
+        pytest.param(
+            {},
+            "https://api.github.com/repos/canonical/github-actions-runner/releases",
+            id="default",
+        ),
+        pytest.param(
+            {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: " https://example.com/releases\n"},
+            "https://example.com/releases",
+            id="custom",
+        ),
+        pytest.param({RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: ""}, "", id="unset"),
+    ],
+)
+def test_runner_tools_metadata_url_reaches_the_github_endpoint(
+    ctx: Context, garm_api: _GarmApiMocks, config: dict[str, str], expected_url: str
+):
+    """
+    arrange: A ready charm whose runner-tools-metadata-url is left at its default, set with
+        stray whitespace, or emptied.
+    act: Run update-status.
+    assert: The github.com endpoint is reconciled to the stripped URL. The default points at
+        releases that publish s390x and ppc64le runners; an empty value is passed through so
+        GARM goes back to GitHub's own runner binaries.
+    """
+    out = ctx.run(ctx.on.update_status(), _state(config=config))
+
+    garm_api.auth_client.set_tools_metadata_url.assert_called_once_with(
+        DEFAULT_GITHUB_ENDPOINT, expected_url
+    )
+    assert out.unit_status == ops.ActiveStatus()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "api.github.com/repos/canonical/github-actions-runner/releases",
+        "ftp://example.com/r",
+        "https://[::1/releases",
+        "https://example.com:not-a-port/releases",
+    ],
+    ids=["no-scheme", "not-http", "malformed-host", "invalid-port"],
+)
+def test_invalid_runner_tools_metadata_url_blocks_the_update(
+    ctx: Context, garm_api: _GarmApiMocks, url: str
+):
+    """
+    arrange: A ready charm whose runner-tools-metadata-url is not an http(s) URL, which GARM
+        would reject.
+    act: Run update-status.
+    assert: The unit blocks naming the option and nothing is applied, so the operator sees
+        the mistake instead of a generic GARM sync failure.
+    """
+    out = ctx.run(
+        ctx.on.update_status(), _state(config={RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: url})
+    )
+
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith(f"Invalid {RUNNER_TOOLS_METADATA_URL_CONFIG_NAME}:")
+    assert "garm-command" not in out.get_container(CONTAINER_NAME).layers
+    garm_api.auth.from_login.assert_not_called()
 
 
 def test_reconcile_authenticates_against_the_local_garm_listener(

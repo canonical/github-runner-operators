@@ -121,6 +121,24 @@ def test_garm_rock_contains_binaries(
     logger.info("GARM binaries confirmed present: %s", result.stdout.strip())
 
 
+def test_garm_rock_ships_garm_agent_for_every_runner_architecture(
+    juju: jubilant.Juju,
+    garm_app: str,
+):
+    """
+    arrange: The GARM charm is deployed with the built ROCK image.
+    act: List the per-architecture garm-agent directories with pebble, since the rock ships no
+        coreutils to exec.
+    assert: There is one for each of amd64, arm64, ppc64le and s390x, so the charm publishes a
+        garm-agent for every architecture GARM runs runners on and those runners can use agent
+        mode.
+    """
+    result = juju.exec(f"{PEBBLE_PREFIX} ls /opt/garm-agent/linux/", unit=f"{garm_app}/0")
+
+    arches = {name.rstrip("/") for name in result.stdout.split()}
+    assert arches == {"amd64", "arm64", "ppc64le", "s390x"}, result.stdout
+
+
 def test_garm_version(
     juju: jubilant.Juju,
     garm_app: str,
@@ -417,6 +435,52 @@ def test_charm_reconciles_org_and_scaleset(
         f"scaleset should reference charmed template id {charmed['id']}; "
         f"got {scaleset.get('template_id')}"
     )
+
+
+def test_charm_sets_runner_tools_metadata_url(
+    juju: jubilant.Juju,
+    configurator_garm: str,
+    configurator_with_image: str,
+):
+    """
+    arrange: GARM and garm-configurator are integrated, so the charm reconciles GARM, with
+        runner-tools-metadata-url at its default.
+    act: Read the github.com endpoint, then set the option to another URL, then empty it.
+    assert: The endpoint carries the default, then each new value, so GARM takes runner
+        binaries from the configured releases and goes back to GitHub's when emptied, even
+        though the charm's credential references the endpoint.
+    """
+    address = _get_garm_address(juju, configurator_garm)
+    base_url = _garm_api_base_url(address)
+    token = _garm_first_run(juju, address)
+    option = "runner-tools-metadata-url"
+    default = str(juju.config(configurator_garm)[option])
+
+    try:
+        for value in (default, "https://example.com/releases", ""):
+            juju.config(configurator_garm, values={option: value})
+            _wait_for_config_applied(juju, configurator_garm, configurator_with_image)
+            _wait_for_tools_metadata_url(base_url, token, value)
+    finally:
+        juju.config(configurator_garm, reset=[option])
+
+
+@retry(
+    retry=retry_if_exception_type(AssertionError),
+    stop=stop_after_attempt(10),
+    wait=wait_exponential(multiplier=1, min=2, max=15),
+    reraise=True,
+)
+def _wait_for_tools_metadata_url(base_url: str, token: str, expected: str) -> None:
+    """Wait for GARM's github.com endpoint to carry the expected tools metadata URL."""
+    resp = requests.get(
+        f"{base_url}/github/endpoints/{_GITHUB_COM_ENDPOINT}",
+        headers=_garm_auth_headers(token),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    # GARM omits the field when it is empty.
+    assert resp.json().get("tools_metadata_url", "") == expected, resp.json()
 
 
 def _wait_for_config_applied(

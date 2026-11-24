@@ -29,7 +29,7 @@ class TestJobsApi(unittest.TestCase):
     def test_list_jobs(self) -> None:
         """Test case for list_jobs
 
-        List all jobs.
+        List jobs. Only queued and in progress jobs are listed unless all is set.
         """
         pass
 
