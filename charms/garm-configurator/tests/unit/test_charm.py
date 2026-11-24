@@ -25,17 +25,17 @@ def _make_garm_configurator_relation():
     return Relation(endpoint="garm-configurator")
 
 
-def _relation_value(relation, key: str):
+def _relation_value(relation: Relation, key: str):
     """Return a JSON-encoded provider relation value, failing if the key is absent."""
     return json.loads(relation.local_unit_data[key])
 
 
-def _scaleset_value(relation, key: str):
+def _scaleset_value(relation: Relation, key: str):
     """Return a raw-string scaleset relation value, failing if the key is absent."""
     return relation.local_unit_data[key]
 
 
-def _scaleset_value_or_empty(relation, key: str):
+def _scaleset_value_or_empty(relation: Relation, key: str):
     """Return a scaleset relation value, treating an omitted empty value as "".
 
     Juju and ops-scenario drop relation keys whose value is an empty string, so an unset field
