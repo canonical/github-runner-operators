@@ -46,14 +46,19 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _reconcile(self, event: ops.EventBase) -> None:
         """Handle all charm events by reconciling configuration and relation data.
 
-        Reads the current charm state, forwards OpenStack credentials to the
-        image-builder relation, publishes scaleset configuration (and secrets
-        when the image reference is available) to all garm-configurator relations,
+        Blocks non-leader units, because only the leader may create the credential secrets and
+        publish the complete payload. On the leader, reads the current charm state, forwards
+        OpenStack credentials to the image-builder relation, publishes scaleset configuration
+        (and secrets when the image reference is available) to all garm-configurator relations,
         then sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
         """
+        if not self.unit.is_leader():
+            self.unit.status = ops.BlockedStatus("Only the leader unit publishes relation data")
+            return
+
         try:
             state = CharmState.from_charm(self)
         except CharmConfigInvalidError as e:
@@ -143,8 +148,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         When this unit holds leadership, also provisions Juju secrets for the OpenStack password
         and GitHub App private key and writes their secret URIs alongside the credential fields.
-        Non-leader units publish only the scaleset fields: they cannot create the secrets, and a
-        leader cannot write another unit's databag.
+        This method only runs on the leader, because ``_reconcile`` blocks non-leader units:
+        they cannot create the secrets.
 
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
