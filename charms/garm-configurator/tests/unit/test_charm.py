@@ -27,24 +27,24 @@ def _make_garm_configurator_relation():
     return Relation(endpoint="garm-configurator")
 
 
-def _relation_value(relation: Relation, key: str):
-    """Return a JSON-encoded provider relation value, failing if the key is absent."""
-    return json.loads(relation.local_app_data[key])
+def _relation_section(relation, section: str) -> dict:
+    """Return a nested application databag value decoded from its JSON form."""
+    return json.loads(relation.local_app_data[section])
 
 
-def _scaleset_value(relation: Relation, key: str):
-    """Return a raw-string scaleset relation value, failing if the key is absent."""
-    return relation.local_app_data[key]
+def _relation_value(relation, key: str):
+    """Return a value from the nested ``provider`` application databag value."""
+    return _relation_section(relation, "provider")[key]
 
 
-def _scaleset_value_or_empty(relation: Relation, key: str):
-    """Return a scaleset relation value, treating an omitted empty value as "".
+def _scaleset_value(relation, key: str):
+    """Return a value from the nested ``scaleset`` application databag value."""
+    return _relation_section(relation, "scaleset")[key]
 
-    Juju and ops-scenario drop relation keys whose value is an empty string, so an unset field
-    is indistinguishable from a key that was never written. Non-empty fields use
-    ``_scaleset_value`` so a dropped key still fails the assertion.
-    """
-    return relation.local_app_data.get(key, "")
+
+def _scaleset_value_or_empty(relation, key: str):
+    """Return a scaleset value, treating an omitted field as ""."""
+    return _relation_section(relation, "scaleset").get(key, "")
 
 
 def _valid_config(secret: Secret, private_key_secret: Secret) -> dict:
@@ -108,7 +108,7 @@ def test_configured_image_is_published_without_image_relation():
 
     garm_out = out.get_relation(garm_relation.id)
     assert out.unit_status == ops.ActiveStatus("Ready")
-    assert "image" not in garm_out.local_app_data
+    assert "image" not in _relation_section(garm_out, "scaleset")
     assert _scaleset_value(garm_out, "image_id") == "runner-noble-amd64"
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
@@ -240,7 +240,7 @@ def test_clearing_configured_image_without_relation_withdraws_only_image():
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
     )
-    assert "openstack_password_secret_uri" in garm_out.local_app_data
+    assert "openstack_password_secret_uri" in _relation_section(garm_out, "provider")
     assert _relation_value(garm_out, "github_private_key_secret_uri")
     relation_id = garm_relation.id
     relation_secrets = {
@@ -734,6 +734,12 @@ def test_reconcile_writes_full_config_to_garm_relation():
     out = ctx.run(ctx.on.config_changed(), state)
     garm_out = out.get_relation(garm_relation.id)
 
+    assert set(garm_out.local_app_data) == {"provider", "scaleset"}
+    provider_data = _relation_section(garm_out, "provider")
+    scaleset_data = _relation_section(garm_out, "scaleset")
+    assert "name" not in provider_data
+    assert "openstack_auth_url" not in scaleset_data
+
     # Provider config
     assert _relation_value(garm_out, "openstack_auth_url") == (
         "https://keystone.example.com:5000/v3"
@@ -750,7 +756,7 @@ def test_reconcile_writes_full_config_to_garm_relation():
     # GitHub config
     assert _relation_value(garm_out, "github_app_id") == 99999
     assert _relation_value(garm_out, "github_installation_id") == 67890
-    assert "github_private_key" not in garm_out.local_app_data
+    assert "github_private_key" not in provider_data
     assert _relation_value(garm_out, "github_private_key_secret_uri")
 
     # Scaleset config
@@ -1031,7 +1037,8 @@ def test_runner_config_fields_empty_when_unset():
     """
     arrange: Valid config with no runner config options set.
     act: Run config-changed with a garm-configurator relation present.
-    assert: The six runner config keys are published as empty strings.
+    assert: The six runner config keys are published as empty strings inside the nested
+        ``scaleset`` value.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
