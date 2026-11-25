@@ -838,54 +838,82 @@ def test_no_configurator_unpublishes_the_last_provider(
     assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
 
 
-def test_silent_configurator_keeps_the_record_published_and_does_not_reconcile(
+def test_unpublished_configurator_blocks_and_does_not_reconcile(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
-    arrange: A configurator relation that exists but has no units yet, while the record holds
-        a provider.
+    arrange: A configurator relation that exists but has not published its application
+        databag yet, while the record holds a provider.
     act: Run update-status.
-    assert: The recorded provider is published so the running GARM keeps what a drain needs,
-        and the reconcile chain does NOT run: every reconciler deletes what it is not told to
-        keep, so an unfinished relation would otherwise cost the scalesets it is about to
-        describe.
+    assert: The unit blocks on the missing payload before it restarts or reconciles, so the
+        record and the running GARM are left untouched and the scalesets the configurator is
+        about to describe are not pruned.
     """
-    with caplog.at_level(logging.INFO):
-        out = ctx.run(
-            ctx.on.update_status(),
-            _state(
-                configurator_relations=[_empty_configurator_relation()],
-                recorded_providers=[_provider_config("garm-configurator-0")],
-            ),
-        )
-
-    service = out.get_container(CONTAINER_NAME).plan.services[SERVICE_NAME]
-    assert json.loads(service.environment["GARM_PROVIDERS_JSON"])[0]["unit_name"] == (
-        "garm-configurator-0"
+    state = _state(
+        configurator_relations=[_empty_configurator_relation()],
+        recorded_providers=[_provider_config("garm-configurator-0")],
     )
+
+    with caplog.at_level(logging.WARNING):
+        out = ctx.run(ctx.on.update_status(), state)
+
     garm_api.scaleset.assert_not_called()
-    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
-    assert "provider data not yet available" in caplog.text
+    garm_api.auth.from_login.assert_not_called()
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
+    assert _secret_content(out, GARM_PROVIDERS_LABEL) == _secret_content(
+        state, GARM_PROVIDERS_LABEL
+    )
+    assert "incomplete garm-configurator relation data" in caplog.text
 
 
 def test_unpopulated_configurator_relation_does_not_prune(
     ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
 ):
     """
-    arrange: A garm-configurator relation that is present but has no units yet.
+    arrange: A garm-configurator relation that is present but has no application data yet.
     act: Run update-status.
-    assert: Scalesets are NOT reconciled — pruning against the empty desired state would
-        delete live scalesets — and the unit waits for the relation to finish publishing.
+    assert: The unit blocks on the invalid relation — pruning against the empty desired state
+        would delete live scalesets — and no scaleset is reconciled.
     """
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.WARNING):
         out = ctx.run(
             ctx.on.update_status(),
             _state(configurator_relations=[_empty_configurator_relation()]),
         )
 
     garm_api.scaleset.assert_not_called()
-    assert out.unit_status == ops.WaitingStatus("Waiting for garm-configurator relation")
-    assert "GARM configurator provider data not yet available" in caplog.text
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
+    assert "incomplete garm-configurator relation data" in caplog.text
+
+
+def test_one_unpublished_configurator_application_blocks_the_whole_aggregate(
+    ctx: Context, garm_api: _GarmApiMocks
+):
+    """
+    arrange: Two configurator applications, one publishing a provider and one that has not
+        published its application databag yet.
+    act: Run update-status.
+    assert: The unit blocks on the unpublished application instead of reconciling the published
+        one alone, so the pending application's provider and scaleset are not pruned.
+    """
+    state = _state(
+        configurator_relations=[
+            _configurator_relation("configurator-a"),
+            _empty_configurator_relation(),
+        ],
+        recorded_providers=[
+            _provider_config("configurator-a-0"),
+            _provider_config("garm-configurator-0"),
+        ],
+    )
+
+    out = ctx.run(ctx.on.update_status(), state)
+
+    garm_api.scaleset.assert_not_called()
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert out.unit_status.message.startswith("Invalid garm-configurator relation data:")
 
 
 def test_missing_configurator_relation_refreshes_stale_app_status(
