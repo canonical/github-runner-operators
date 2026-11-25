@@ -4,9 +4,11 @@
 """Models and requirer helpers for the ``garm-configurator`` relation data contract.
 
 The ``garm-configurator`` charm owns the relation contract and publishes one provider
-configuration per unit with ``ops.Relation.save``. The models live with the charm so consumers
-can share the same definitions and use ``ops.Relation.load`` instead of hand-writing databag
-keys.
+configuration per unit with ``ops.Relation.save``. ``ProviderConfig`` carries the provider and
+GitHub App credentials (JSON-encoded, the default) and ``ScalesetConfig`` carries the scaleset
+and runner fields (saved with ``encoder=str`` so their raw-string wire form is preserved). The
+models live with the charm so consumers can share the same definitions and use
+``ops.Relation.load`` instead of hand-writing databag keys.
 
 The ``GarmConfiguratorRequirer`` aggregates every joined ``garm-configurator`` relation into a
 single ``ConfiguratorData`` value. The ``garm`` charm uses that value to render provider
@@ -68,10 +70,11 @@ class ProviderConfig:
 
 @dataclasses.dataclass(frozen=True)
 class ScalesetConfig:
-    """Scaleset fields published by one ``garm-configurator`` unit.
+    """Scaleset and runner fields published by one ``garm-configurator`` unit.
 
-    The fields keep the relation's string wire form so the consumer applies its own parsing
-    and validation. An empty string means "unset".
+    The configurator fills this model and saves it with ``encoder=str``, which keeps the
+    relation's raw-string wire form so older consumers can still read it. The fields are also
+    loaded directly with ``decoder=str`` on the consuming side. An empty string means "unset".
 
     These fields are still published on the unit databag. The configurator runs no workload and
     always deploys a single unit, so they belong on the application databag instead; that move is
