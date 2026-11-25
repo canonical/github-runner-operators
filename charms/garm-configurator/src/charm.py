@@ -15,6 +15,7 @@ from garm_configurator_relation import ScalesetConfig as RelationScalesetConfig
 from charm_state import (
     GARM_RELATION_NAME,
     IMAGE_RELATION_NAME,
+    PROVIDER_TYPE_LXD,
     CharmConfigInvalidError,
     CharmState,
 )
@@ -141,15 +142,16 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
         Saves ``ScalesetConfig`` for the scaleset and runner fields (with ``encoder=str``, which
         preserves their raw-string wire form) and, on the leader, ``RelationProviderConfig`` for
-        the OpenStack/GitHub App credentials (JSON-encoded). ``Relation.save`` persists every
+        the provider and GitHub App credentials (JSON-encoded). ``Relation.save`` persists every
         model field, so an unset optional field is published as an empty string rather than
         omitted; consumers treat the empty string as "unset". The ``image_id`` field carries
-        either an OpenStack image name or ID for compatibility.
+        either an OpenStack image name or ID, or the LXD image alias or fingerprint.
 
-        When this unit holds leadership, also provisions Juju secrets for the OpenStack password
-        and GitHub App private key and writes their secret URIs alongside the credential fields.
-        This method only runs on the leader, because ``_reconcile`` blocks non-leader units:
-        they cannot create the secrets.
+        When this unit holds leadership, also provisions the Juju secrets GARM needs (the
+        OpenStack password or the LXD client certificate and key, plus the GitHub App private
+        key) and writes their secret URIs alongside the credential fields. This method only runs
+        on the leader, because ``_reconcile`` blocks non-leader units: they cannot create the
+        secrets.
 
         Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
@@ -160,17 +162,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
             return
-
-        password_secret = self._ensure_relation_secret(
-            garm_relation,
-            "configurator-password",
-            state.provider_config.password,
-        )
-        github_key_secret = self._ensure_relation_secret(
-            garm_relation,
-            "configurator-github-key",
-            state.github_app_config.private_key,
-        )
 
         pre_install = state.scaleset_config.pre_install_scripts
         rc = state.runner_config
@@ -204,24 +195,118 @@ class GarmConfiguratorCharm(ops.CharmBase):
             encoder=str,
         )
 
-        if password_secret is None or github_key_secret is None:
+        self._publish_provider_credentials(garm_relation, state)
+
+    def _publish_provider_credentials(self, relation: ops.Relation, state: CharmState) -> None:
+        """Publish the provider payload and GitHub credentials to GARM.
+
+        Builds the provider-specific part of the relation payload and provisions the
+        Juju secrets GARM needs to read the credentials.
+
+        Args:
+            relation: The garm-configurator relation.
+            state: Current resolved charm state.
+        """
+        github_key_secret = self._ensure_relation_secret(
+            relation,
+            "configurator-github-key",
+            state.github_app_config.private_key,
+        )
+        if github_key_secret is None:
             return
 
-        garm_relation.save(
-            RelationProviderConfig(
-                openstack_auth_url=state.provider_config.auth_url,
-                openstack_username=state.provider_config.username,
-                openstack_password_secret_uri=str(password_secret.id),
-                openstack_project_name=state.provider_config.project_name,
-                openstack_user_domain_name=state.provider_config.user_domain_name,
-                openstack_project_domain_name=state.provider_config.project_domain_name,
-                openstack_region_name=state.provider_config.region_name,
-                openstack_network=state.provider_config.network,
-                github_app_id=state.github_app_config.app_id,
-                github_installation_id=state.github_app_config.installation_id,
-                github_private_key_secret_uri=str(github_key_secret.id),
+        if state.provider_config.provider_type == PROVIDER_TYPE_LXD:
+            provider_config = self._lxd_relation_provider_config(relation, state)
+        else:
+            provider_config = self._openstack_relation_provider_config(relation, state)
+        if provider_config is None:
+            return
+
+        provider_config.github_app_id = state.github_app_config.app_id
+        provider_config.github_installation_id = state.github_app_config.installation_id
+        provider_config.github_private_key_secret_uri = str(github_key_secret.id)
+        relation.save(provider_config, self.unit)
+
+    def _openstack_relation_provider_config(
+        self, relation: ops.Relation, state: CharmState
+    ) -> RelationProviderConfig | None:
+        """Build the OpenStack provider payload, provisioning its password secret.
+
+        Args:
+            relation: The garm-configurator relation.
+            state: Current resolved charm state.
+
+        Returns:
+            The provider payload, or None when this unit is not the leader.
+        """
+        password_secret = self._ensure_relation_secret(
+            relation,
+            "configurator-password",
+            state.provider_config.password,
+        )
+        if password_secret is None:
+            return None
+        return RelationProviderConfig(
+            provider_type=state.provider_config.provider_type,
+            openstack_auth_url=state.provider_config.auth_url,
+            openstack_username=state.provider_config.username,
+            openstack_password_secret_uri=str(password_secret.id),
+            openstack_project_name=state.provider_config.project_name,
+            openstack_user_domain_name=state.provider_config.user_domain_name,
+            openstack_project_domain_name=state.provider_config.project_domain_name,
+            openstack_region_name=state.provider_config.region_name,
+            openstack_network=state.provider_config.network,
+        )
+
+    def _lxd_relation_provider_config(
+        self, relation: ops.Relation, state: CharmState
+    ) -> RelationProviderConfig | None:
+        """Build the LXD provider payload, provisioning its certificate secrets.
+
+        The server certificate is optional: when unset, GARM falls back to the
+        system trust store for a server certificate signed by a public CA.
+
+        Args:
+            relation: The garm-configurator relation.
+            state: Current resolved charm state.
+
+        Returns:
+            The provider payload, or None when this unit is not the leader.
+        """
+        client_certificate_secret = self._ensure_relation_secret(
+            relation,
+            "configurator-lxd-client-certificate",
+            state.provider_config.lxd_client_certificate,
+        )
+        client_key_secret = self._ensure_relation_secret(
+            relation,
+            "configurator-lxd-client-key",
+            state.provider_config.lxd_client_key,
+        )
+        if client_certificate_secret is None or client_key_secret is None:
+            return None
+
+        server_certificate_secret = None
+        if state.provider_config.lxd_server_certificate:
+            server_certificate_secret = self._ensure_relation_secret(
+                relation,
+                "configurator-lxd-server-certificate",
+                state.provider_config.lxd_server_certificate,
+            )
+            if server_certificate_secret is None:
+                return None
+
+        return RelationProviderConfig(
+            provider_type=state.provider_config.provider_type,
+            lxd_api_url=state.provider_config.lxd_api_url,
+            lxd_project_name=state.provider_config.lxd_project_name,
+            lxd_instance_type=state.provider_config.lxd_instance_type,
+            lxd_secure_boot=state.provider_config.lxd_secure_boot,
+            lxd_client_certificate_secret_uri=str(client_certificate_secret.id),
+            lxd_client_key_secret_uri=str(client_key_secret.id),
+            lxd_server_certificate_secret_uri=(
+                str(server_certificate_secret.id) if server_certificate_secret else ""
             ),
-            self.unit,
         )
 
 

@@ -81,3 +81,28 @@ def test_configurator_data_reports_empty_and_invalid_state(
 
 # The `garm` charm does not consume `GarmConfiguratorRequirer` yet. Cover its aggregation with
 # scenario tests once it does; until then there is no real charm to exercise it through.
+
+
+def test_provider_config_represents_lxd_without_openstack_credentials():
+    """
+    arrange: An LXD provider payload with certificate secret URIs and no OpenStack fields.
+    act: Build the relation model.
+    assert: The LXD fields are carried through and the missing OpenStack auth URL is allowed,
+        so a configurator can publish an LXD provider.
+    """
+    provider = ProviderConfig(
+        provider_type="lxd",
+        lxd_api_url="https://lxd.example.com:8443",
+        lxd_project_name="runners",
+        lxd_instance_type="container",
+        lxd_secure_boot=True,
+        lxd_client_certificate_secret_uri="secret:client-cert",
+        lxd_client_key_secret_uri="secret:client-key",
+    )
+
+    assert provider.provider_type == "lxd"
+    assert provider.openstack_auth_url is None
+    assert provider.lxd_api_url == "https://lxd.example.com:8443"
+    assert provider.lxd_secure_boot is True
+    assert provider.lxd_client_certificate_secret_uri == "secret:client-cert"
+    assert provider.lxd_client_key_secret_uri == "secret:client-key"
