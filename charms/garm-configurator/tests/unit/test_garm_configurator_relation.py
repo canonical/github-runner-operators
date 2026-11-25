@@ -149,10 +149,12 @@ class _FakeRelation:
         self.loaded_entity = None
 
     def load(self, cls, entity, *args, **kwargs):
-        """Return the nested application payload loaded from the application databag."""
+        """Return the nested application payload, raising as ``ops`` does when it is absent."""
         if cls is not ConfiguratorApplicationData:
             raise AssertionError(f"unexpected databag load for {cls.__name__}")
         self.loaded_entity = entity
+        if self._application_data is None:
+            raise ValueError("incomplete application databag")
         return self._application_data
 
 
@@ -191,17 +193,19 @@ def test_requirer_reads_nested_provider_and_scaleset():
     assert data.relations[0].scaleset.max_runner == "6"
 
 
-def test_requirer_ignores_relation_without_application_data():
+def test_requirer_marks_relation_without_application_data_invalid():
     """
     arrange: A configurator relation whose leader has not published an application payload.
     act: Aggregate the relation data.
-    assert: The relation is neither exposed nor marked invalid, so GARM waits for the first
-        publish instead of blocking on an unfinished relation.
+    assert: The relation is not exposed but is recorded as invalid, so GARM blocks on the
+        partial aggregate instead of reconciling an unfinished relation.
     """
     relation = _FakeRelation()
     charm = SimpleNamespace(model=SimpleNamespace(relations={"garm-configurator": [relation]}))
 
     data = GarmConfiguratorRequirer(charm).get_data()
 
-    assert data.is_empty
-    assert not data.has_invalid_relations
+    assert not data.relations
+    assert data.invalid_relation_ids == frozenset({relation.id})
+    assert not data.is_empty
+    assert data.has_invalid_relations
