@@ -857,7 +857,7 @@ def test_reconcile_writes_optional_scaleset_fields_to_garm_relation():
         Image UUID is present, garm relation is joined.
     act: config-changed fires.
     assert: org, runner_group, and pre_install_scripts are present in the
-        garm relation data. repo is absent.
+        garm relation data. repo is published as an empty string.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
