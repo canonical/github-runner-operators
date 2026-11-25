@@ -30,13 +30,45 @@ logger = logging.getLogger(__name__)
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
+PROVIDER_TYPE_OPENSTACK: typing.Final[str] = "openstack"
+PROVIDER_TYPE_LXD: typing.Final[str] = "lxd"
+PROVIDER_TYPES: typing.Final = (PROVIDER_TYPE_OPENSTACK, PROVIDER_TYPE_LXD)
+
+_OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    "openstack_auth_url",
+    "openstack_username",
+    "openstack_project_name",
+    "openstack_user_domain_name",
+    "openstack_project_domain_name",
+    "openstack_region_name",
+    "openstack_network",
+)
+_OPENSTACK_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    *_OPENSTACK_REQUIRED_PROVIDER_FIELDS,
+    "openstack_password",
+    "openstack_password_secret_uri",
+)
+_LXD_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    "lxd_api_url",
+    "lxd_client_certificate_secret_uri",
+    "lxd_client_key_secret_uri",
+)
+_LXD_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    *_LXD_REQUIRED_PROVIDER_FIELDS,
+    "lxd_project_name",
+    "lxd_secure_boot",
+    "lxd_server_certificate_secret_uri",
+)
+
+
 @pydantic.dataclasses.dataclass
 class ProviderConfig:
     """Provider and GitHub App credentials published by one ``garm-configurator`` unit.
 
     The field names are the relation databag keys, so they are the wire contract between the
-    configurator and GARM. A unit publishes the provider payload only once its image and
-    secrets are ready, so fields the selected provider does not use stay ``None``.
+    configurator and GARM. ``provider_type`` selects which fields a unit publishes: the
+    selected provider's required fields must be present and the other provider's fields must
+    stay unset, so a payload cannot mix OpenStack and LXD settings.
 
     Attributes:
         provider_type: Provider type, "openstack" or "lxd".
@@ -51,7 +83,6 @@ class ProviderConfig:
         openstack_network: Network name or ID instances are attached to.
         lxd_api_url: LXD API URL.
         lxd_project_name: LXD project instances are created in.
-        lxd_instance_type: LXD instance type, "container" or "virtual-machine".
         lxd_secure_boot: Whether LXD virtual machines use secure boot.
         lxd_client_certificate_secret_uri: Juju secret URI holding the client certificate.
         lxd_client_key_secret_uri: Juju secret URI holding the client key.
@@ -61,7 +92,7 @@ class ProviderConfig:
         github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
     """
 
-    provider_type: str = "openstack"
+    provider_type: str
     openstack_auth_url: str | None = None
     openstack_username: str | None = None
     openstack_password: str | None = None
@@ -73,7 +104,6 @@ class ProviderConfig:
     openstack_network: str | None = None
     lxd_api_url: str | None = None
     lxd_project_name: str | None = None
-    lxd_instance_type: str | None = None
     lxd_secure_boot: bool = False
     lxd_client_certificate_secret_uri: str | None = None
     lxd_client_key_secret_uri: str | None = None
@@ -81,6 +111,54 @@ class ProviderConfig:
     github_app_id: int | None = None
     github_installation_id: int | None = None
     github_private_key_secret_uri: str | None = None
+
+    @pydantic.field_validator("provider_type", mode="before")
+    @classmethod
+    def _normalize_provider_type(cls, value: object) -> str:
+        """Normalize and validate the provider type."""
+        normalized = str(value or "").strip().lower()
+        if normalized not in PROVIDER_TYPES:
+            raise ValueError(f"provider_type must be one of: {', '.join(PROVIDER_TYPES)}")
+        return normalized
+
+    @pydantic.model_validator(mode="after")
+    def _validate_provider_fields(self) -> "ProviderConfig":
+        """Require the selected provider's fields and reject the other provider's fields."""
+        if self.provider_type == PROVIDER_TYPE_LXD:
+            required_fields = _LXD_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = _OPENSTACK_PROVIDER_FIELDS
+        else:
+            required_fields = _OPENSTACK_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = _LXD_PROVIDER_FIELDS
+
+        missing = [name for name in required_fields if not getattr(self, name)]
+        if missing:
+            raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
+        conflicting = [
+            name for name in forbidden_fields if _provider_field_is_set(name, getattr(self, name))
+        ]
+        if conflicting:
+            raise ValueError(
+                f"Fields not allowed for provider_type {self.provider_type}: "
+                f"{', '.join(conflicting)}"
+            )
+        return self
+
+
+def _provider_field_is_set(field_name: str, value: object) -> bool:
+    """Return whether a provider field holds a non-default value.
+
+    Args:
+        field_name: The provider model field name.
+        value: The field value.
+
+    Returns:
+        True when the field was set away from its default.
+    """
+    if field_name == "lxd_project_name":
+        return value not in ("", None, "default")
+    return bool(value)
 
 
 @dataclasses.dataclass(frozen=True)

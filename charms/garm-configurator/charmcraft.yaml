@@ -35,11 +35,6 @@ config:
       default: default
       description: |
         LXD project to create runner instances in. The project must already exist.
-    lxd-instance-type:
-      type: string
-      default: virtual-machine
-      description: |
-        LXD instance type for runners: container or virtual-machine.
     lxd-secure-boot:
       type: boolean
       default: false

@@ -10,7 +10,7 @@ import ops
 import pytest
 from pydantic import ValidationError
 
-from charm_state import CharmConfigInvalidError, CharmState, ProviderConfig
+from charm_state import CharmConfigInvalidError, CharmState, ProviderConfig, ProviderType
 
 
 def _image_relation(image_id: str | None = None):
@@ -115,8 +115,7 @@ def test_provider_config_lxd_defaults():
     """
     arrange: A minimal LXD provider config with only the required connection details.
     act: Build the model.
-    assert: The LXD project and instance type default to the documented values and secure
-        boot is off.
+    assert: The LXD project defaults to the documented value and secure boot is off.
     """
     config = ProviderConfig(
         provider_type="lxd",
@@ -126,8 +125,8 @@ def test_provider_config_lxd_defaults():
         lxd_client_key="client-key",
     )
 
+    assert config.provider_type == ProviderType.LXD
     assert config.lxd_project_name == "default"
-    assert config.lxd_instance_type == "virtual-machine"
     assert config.lxd_secure_boot is False
 
 
@@ -147,21 +146,115 @@ def test_provider_config_rejects_non_https_lxd_api_url():
         )
 
 
-def test_provider_config_rejects_unknown_lxd_instance_type():
+@pytest.mark.parametrize(
+    "openstack_field, value",
+    [
+        pytest.param("auth_url", "https://keystone.example.com:5000/v3", id="auth-url"),
+        pytest.param("username", "admin", id="username"),
+        pytest.param("project_name", "myproject", id="project-name"),
+        pytest.param("user_domain_name", "Default", id="user-domain-name"),
+        pytest.param("project_domain_name", "Default", id="project-domain-name"),
+        pytest.param("region_name", "RegionOne", id="region-name"),
+        pytest.param("network", "external-net", id="network"),
+    ],
+)
+def test_provider_config_lxd_rejects_openstack_fields(openstack_field: str, value: str):
     """
-    arrange: An LXD provider config with an unsupported instance type.
+    arrange: An LXD provider config that also sets one OpenStack-only field.
     act: Build the model.
-    assert: Validation fails, so only containers and virtual machines are accepted.
+    assert: Validation fails, so a unit cannot silently mix provider settings.
     """
-    with pytest.raises(ValidationError, match="lxd-instance-type must be one of"):
+    with pytest.raises(ValidationError, match="cannot be set when provider-type is lxd"):
         ProviderConfig(
             provider_type="lxd",
             provider_name="garm-configurator-0",
             lxd_api_url="https://lxd.example.com:8443",
-            lxd_instance_type="vm",
             lxd_client_certificate="client-certificate",
             lxd_client_key="client-key",
+            **{openstack_field: value},
         )
+
+
+@pytest.mark.parametrize(
+    "lxd_field, value",
+    [
+        pytest.param("lxd_api_url", "https://lxd.example.com:8443", id="api-url"),
+        pytest.param("lxd_project_name", "runners", id="project-name"),
+        pytest.param("lxd_secure_boot", True, id="secure-boot"),
+        pytest.param("lxd_client_certificate", "client-certificate", id="client-certificate"),
+        pytest.param("lxd_client_key", "client-key", id="client-key"),
+        pytest.param("lxd_server_certificate", "server-certificate", id="server-certificate"),
+    ],
+)
+def test_provider_config_openstack_rejects_lxd_fields(lxd_field: str, value: object):
+    """
+    arrange: An OpenStack provider config that also sets one LXD-only field.
+    act: Build the model.
+    assert: Validation fails, so a unit cannot silently mix provider settings.
+    """
+    values = {
+        "provider_type": "openstack",
+        "provider_name": "garm-configurator-0",
+        "auth_url": "https://keystone.example.com:5000/v3",
+        "username": "admin",
+        "password": "secret",
+        "project_name": "myproject",
+        "user_domain_name": "Default",
+        "project_domain_name": "Default",
+        "region_name": "RegionOne",
+        "network": "external-net",
+        lxd_field: value,
+    }
+
+    with pytest.raises(ValidationError, match="cannot be set when provider-type is openstack"):
+        ProviderConfig(**values)
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "auth_url",
+        "username",
+        "password",
+        "project_name",
+        "user_domain_name",
+        "project_domain_name",
+        "region_name",
+        "network",
+    ],
+    ids=[
+        "auth-url",
+        "username",
+        "password",
+        "project-name",
+        "user-domain-name",
+        "project-domain-name",
+        "region-name",
+        "network",
+    ],
+)
+def test_provider_config_requires_openstack_fields(missing_field: str):
+    """
+    arrange: An OpenStack provider config with one required field left empty.
+    act: Build the model.
+    assert: Validation fails, because GARM cannot connect without it.
+    """
+    values = {
+        "provider_type": "openstack",
+        "provider_name": "garm-configurator-0",
+        "auth_url": "https://keystone.example.com:5000/v3",
+        "username": "admin",
+        "password": "secret",
+        "project_name": "myproject",
+        "user_domain_name": "Default",
+        "project_domain_name": "Default",
+        "region_name": "RegionOne",
+        "network": "external-net",
+    }
+    values[missing_field] = ""
+
+    with pytest.raises(ValidationError, match="Missing required configuration"):
+        ProviderConfig(**values)
 
 
 @pytest.mark.parametrize(
@@ -205,13 +298,12 @@ def test_from_charm_lxd_resolves_secrets_and_defaults():
     assert config.lxd_client_key == "client-key"
     assert config.lxd_server_certificate == ""
     assert config.lxd_project_name == "default"
-    assert config.lxd_instance_type == "virtual-machine"
     assert config.provider_name == "garm-configurator-0"
 
 
-def test_from_charm_lxd_reads_project_instance_type_and_secure_boot():
+def test_from_charm_lxd_reads_project_and_secure_boot():
     """
-    arrange: An LXD config that sets the optional project, instance type, and secure boot.
+    arrange: An LXD config that sets the optional project and secure boot.
     act: Build the provider config from the charm.
     assert: The configured values are carried through unchanged.
     """
@@ -219,7 +311,6 @@ def test_from_charm_lxd_reads_project_instance_type_and_secure_boot():
         _lxd_config(
             **{
                 "lxd-project-name": "runners",
-                "lxd-instance-type": "container",
                 "lxd-secure-boot": True,
                 "lxd-server-certificate": "secret:server-cert",
             }
@@ -230,7 +321,6 @@ def test_from_charm_lxd_reads_project_instance_type_and_secure_boot():
     config = ProviderConfig.from_charm(charm)
 
     assert config.lxd_project_name == "runners"
-    assert config.lxd_instance_type == "container"
     assert config.lxd_secure_boot is True
     assert config.lxd_server_certificate == "server-certificate"
 

@@ -15,9 +15,9 @@ from garm_configurator_relation import ScalesetConfig as RelationScalesetConfig
 from charm_state import (
     GARM_RELATION_NAME,
     IMAGE_RELATION_NAME,
-    PROVIDER_TYPE_LXD,
     CharmConfigInvalidError,
     CharmState,
+    ProviderType,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,12 +108,14 @@ class GarmConfiguratorCharm(ops.CharmBase):
         relation: ops.Relation,
         secret_name: str,
         value: str,
-    ) -> ops.Secret | None:
+    ) -> ops.Secret:
         """Ensure a Juju secret exists for the given value and grant it to the related app.
 
         Creates a new secret if none exists on this unit for ``secret_name``,
         updates its content if it exists, and grants read access to the
         related application so it can retrieve the secret via its URI.
+        Callers run only on the leader, which is the only unit allowed to
+        create secrets.
 
         Args:
             relation: The garm-configurator relation.
@@ -121,12 +123,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
             value: The secret value to store.
 
         Returns:
-            The (possibly newly-created) Juju Secret object, or None if this
-            unit is not the leader.
+            The (possibly newly-created) Juju Secret object.
         """
-        if not self.unit.is_leader():
-            return None
-
         try:
             secret = self.model.get_secret(label=secret_name)
             secret.set_content({"value": value})
@@ -212,15 +210,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "configurator-github-key",
             state.github_app_config.private_key,
         )
-        if github_key_secret is None:
-            return
 
-        if state.provider_config.provider_type == PROVIDER_TYPE_LXD:
+        if state.provider_config.provider_type == ProviderType.LXD:
             provider_config = self._lxd_relation_provider_config(relation, state)
         else:
             provider_config = self._openstack_relation_provider_config(relation, state)
-        if provider_config is None:
-            return
 
         provider_config.github_app_id = state.github_app_config.app_id
         provider_config.github_installation_id = state.github_app_config.installation_id
@@ -229,7 +223,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
     def _openstack_relation_provider_config(
         self, relation: ops.Relation, state: CharmState
-    ) -> RelationProviderConfig | None:
+    ) -> RelationProviderConfig:
         """Build the OpenStack provider payload, provisioning its password secret.
 
         Args:
@@ -237,17 +231,15 @@ class GarmConfiguratorCharm(ops.CharmBase):
             state: Current resolved charm state.
 
         Returns:
-            The provider payload, or None when this unit is not the leader.
+            The provider payload.
         """
         password_secret = self._ensure_relation_secret(
             relation,
             "configurator-password",
             state.provider_config.password,
         )
-        if password_secret is None:
-            return None
         return RelationProviderConfig(
-            provider_type=state.provider_config.provider_type,
+            provider_type=state.provider_config.provider_type.value,
             openstack_auth_url=state.provider_config.auth_url,
             openstack_username=state.provider_config.username,
             openstack_password_secret_uri=str(password_secret.id),
@@ -260,7 +252,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
 
     def _lxd_relation_provider_config(
         self, relation: ops.Relation, state: CharmState
-    ) -> RelationProviderConfig | None:
+    ) -> RelationProviderConfig:
         """Build the LXD provider payload, provisioning its certificate secrets.
 
         The server certificate is optional: when unset, GARM falls back to the
@@ -271,7 +263,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
             state: Current resolved charm state.
 
         Returns:
-            The provider payload, or None when this unit is not the leader.
+            The provider payload.
         """
         client_certificate_secret = self._ensure_relation_secret(
             relation,
@@ -283,8 +275,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
             "configurator-lxd-client-key",
             state.provider_config.lxd_client_key,
         )
-        if client_certificate_secret is None or client_key_secret is None:
-            return None
 
         server_certificate_secret = None
         if state.provider_config.lxd_server_certificate:
@@ -293,14 +283,11 @@ class GarmConfiguratorCharm(ops.CharmBase):
                 "configurator-lxd-server-certificate",
                 state.provider_config.lxd_server_certificate,
             )
-            if server_certificate_secret is None:
-                return None
 
         return RelationProviderConfig(
-            provider_type=state.provider_config.provider_type,
+            provider_type=state.provider_config.provider_type.value,
             lxd_api_url=state.provider_config.lxd_api_url,
             lxd_project_name=state.provider_config.lxd_project_name,
-            lxd_instance_type=state.provider_config.lxd_instance_type,
             lxd_secure_boot=state.provider_config.lxd_secure_boot,
             lxd_client_certificate_secret_uri=str(client_certificate_secret.id),
             lxd_client_key_secret_uri=str(client_key_secret.id),

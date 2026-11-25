@@ -93,6 +93,7 @@ _POSTGRESQL_DATA = {
 }
 
 _PROVIDER_VALUES = {
+    "provider_type": "openstack",
     "openstack_auth_url": "https://ks1.example.com:5000/v3",
     "openstack_username": "admin1",
     "openstack_password": "pass1",

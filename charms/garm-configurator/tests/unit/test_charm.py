@@ -1160,7 +1160,6 @@ def _valid_lxd_config(
         "provider-type": "lxd",
         "lxd-api-url": "https://lxd.example.com:8443",
         "lxd-project-name": "runners",
-        "lxd-instance-type": "container",
         "lxd-secure-boot": True,
         "lxd-client-certificate": client_certificate_secret.id,
         "lxd-client-key": client_key_secret.id,
@@ -1207,7 +1206,6 @@ def test_lxd_provider_publishes_config_and_secret_uris_to_garm_relation():
     assert _relation_value(garm_out, "provider_type") == "lxd"
     assert _relation_value(garm_out, "lxd_api_url") == "https://lxd.example.com:8443"
     assert _relation_value(garm_out, "lxd_project_name") == "runners"
-    assert _relation_value(garm_out, "lxd_instance_type") == "container"
     assert _relation_value(garm_out, "lxd_secure_boot") is True
     assert _relation_value(garm_out, "openstack_auth_url") is None
 
@@ -1311,11 +1309,6 @@ def test_lxd_provider_without_image_blocks():
             id="non-https-api-url",
         ),
         pytest.param(
-            {"lxd-instance-type": "vm"},
-            "lxd-instance-type must be one of: container, virtual-machine",
-            id="invalid-instance-type",
-        ),
-        pytest.param(
             {"lxd-client-key": _MISSING_CONFIG_SENTINEL},
             "Missing required configuration: lxd-client-key",
             id="missing-client-key",
@@ -1349,3 +1342,53 @@ def test_lxd_provider_invalid_config_blocks(config_mutations, expected_fragment)
 
     assert isinstance(out.unit_status, ops.BlockedStatus)
     assert expected_fragment in out.unit_status.message
+
+
+def test_lxd_provider_rejects_openstack_config():
+    """
+    arrange: An LXD config that also leaves an OpenStack connection option set.
+    act: Run config-changed.
+    assert: The unit blocks, so a mix of provider settings is never published.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    pk_secret = _make_private_key_secret()
+    certificate_secret = _make_secret_with_value("client-certificate")
+    key_secret = _make_secret_with_value("client-key")
+    config = _valid_lxd_config(pk_secret, certificate_secret, key_secret)
+    config["openstack-auth-url"] = "https://keystone.example.com:5000/v3"
+    state = State(
+        config=config,
+        secrets=[pk_secret, certificate_secret, key_secret],
+        relations=[_make_garm_configurator_relation()],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert "cannot be set when provider-type is lxd" in out.unit_status.message
+
+
+def test_openstack_provider_rejects_lxd_config():
+    """
+    arrange: An OpenStack config that also sets the LXD API URL.
+    act: Run config-changed.
+    assert: The unit blocks, so a mix of provider settings is never published.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    config = _valid_config(secret, pk_secret)
+    config["image"] = "runner-noble-amd64"
+    config["lxd-api-url"] = "https://lxd.example.com:8443"
+    state = State(
+        config=config,
+        secrets=[secret, pk_secret],
+        relations=[_make_garm_configurator_relation()],
+        leader=True,
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    assert isinstance(out.unit_status, ops.BlockedStatus)
+    assert "cannot be set when provider-type is openstack" in out.unit_status.message

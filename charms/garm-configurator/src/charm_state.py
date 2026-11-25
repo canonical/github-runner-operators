@@ -3,7 +3,9 @@
 
 """State of the GARM configurator charm."""
 
+import enum
 import ipaddress
+import typing
 
 import ops
 from pydantic import (
@@ -30,7 +32,6 @@ SECURITY_GROUP_CONFIG_NAME = "security-group"
 
 LXD_API_URL_CONFIG_NAME = "lxd-api-url"
 LXD_PROJECT_NAME_CONFIG_NAME = "lxd-project-name"
-LXD_INSTANCE_TYPE_CONFIG_NAME = "lxd-instance-type"
 LXD_SECURE_BOOT_CONFIG_NAME = "lxd-secure-boot"
 LXD_CLIENT_CERTIFICATE_CONFIG_NAME = "lxd-client-certificate"  # nosec
 LXD_CLIENT_KEY_CONFIG_NAME = "lxd-client-key"  # nosec
@@ -63,18 +64,50 @@ PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 
-PROVIDER_TYPE_OPENSTACK = "openstack"
-PROVIDER_TYPE_LXD = "lxd"
-PROVIDER_TYPES = (PROVIDER_TYPE_OPENSTACK, PROVIDER_TYPE_LXD)
-LXD_INSTANCE_TYPES = ("container", "virtual-machine")
+
+class ProviderType(str, enum.Enum):
+    """Provider types the configurator can publish."""
+
+    OPENSTACK = "openstack"
+    LXD = "lxd"
+
+    def __str__(self) -> str:
+        """Return the configured value, so charm config and relation data use the plain string."""
+        return self.value
+
+
+PROVIDER_TYPE_OPENSTACK = ProviderType.OPENSTACK.value
+PROVIDER_TYPE_LXD = ProviderType.LXD.value
+PROVIDER_TYPES = tuple(provider.value for provider in ProviderType)
 DEFAULT_LXD_PROJECT_NAME = "default"
-DEFAULT_LXD_INSTANCE_TYPE = "virtual-machine"
 
 # The visibilities garm-provider-openstack accepts for an image lookup.
 IMAGE_VISIBILITIES = ("public", "private", "shared", "community", "all")
 
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
+
+_OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[tuple[str, str], ...]] = (
+    ("auth_url", OPENSTACK_AUTH_URL_CONFIG_NAME),
+    ("username", OPENSTACK_USERNAME_CONFIG_NAME),
+    ("project_name", OPENSTACK_PROJECT_NAME_CONFIG_NAME),
+    ("user_domain_name", OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME),
+    ("project_domain_name", OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME),
+    ("region_name", OPENSTACK_REGION_NAME_CONFIG_NAME),
+    ("network", OPENSTACK_NETWORK_CONFIG_NAME),
+    ("password", OPENSTACK_PASSWORD_CONFIG_NAME),
+)
+_LXD_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[tuple[str, str], ...]] = (
+    ("lxd_api_url", LXD_API_URL_CONFIG_NAME),
+    ("lxd_client_certificate", LXD_CLIENT_CERTIFICATE_CONFIG_NAME),
+    ("lxd_client_key", LXD_CLIENT_KEY_CONFIG_NAME),
+)
+_LXD_PROVIDER_FIELDS: typing.Final[tuple[tuple[str, str], ...]] = (
+    *_LXD_REQUIRED_PROVIDER_FIELDS,
+    ("lxd_project_name", LXD_PROJECT_NAME_CONFIG_NAME),
+    ("lxd_secure_boot", LXD_SECURE_BOOT_CONFIG_NAME),
+    ("lxd_server_certificate", LXD_SERVER_CERTIFICATE_CONFIG_NAME),
+)
 
 
 class CharmConfigInvalidError(Exception):
@@ -97,6 +130,9 @@ class CharmConfigInvalidError(Exception):
 class ProviderConfig(BaseModel):
     """Provider configuration for a GARM configurator unit.
 
+    The selected provider owns the configuration: its required fields must be set and the
+    other provider's fields must stay unset, so a unit cannot mix OpenStack and LXD settings.
+
     Attributes:
         provider_type: Provider type, either "openstack" or "lxd".
         auth_url: OpenStack Keystone authentication URL.
@@ -109,7 +145,6 @@ class ProviderConfig(BaseModel):
         network: OpenStack network name or ID.
         lxd_api_url: LXD API URL.
         lxd_project_name: LXD project to create runner instances in.
-        lxd_instance_type: LXD instance type, "container" or "virtual-machine".
         lxd_secure_boot: Whether LXD virtual machines use secure boot.
         lxd_client_certificate: LXD client certificate (resolved from secret).
         lxd_client_key: LXD client key (resolved from secret).
@@ -118,7 +153,7 @@ class ProviderConfig(BaseModel):
         provider_name: GARM provider name. Defaults to the Juju unit name with "/" replaced by "-".
     """
 
-    provider_type: str = PROVIDER_TYPE_OPENSTACK
+    provider_type: ProviderType = ProviderType.OPENSTACK
     auth_url: str = ""
     username: str = ""
     password: str = ""
@@ -129,7 +164,6 @@ class ProviderConfig(BaseModel):
     network: str = ""
     lxd_api_url: str = ""
     lxd_project_name: str = DEFAULT_LXD_PROJECT_NAME
-    lxd_instance_type: str = DEFAULT_LXD_INSTANCE_TYPE
     lxd_secure_boot: bool = False
     lxd_client_certificate: str = ""
     lxd_client_key: str = ""
@@ -149,6 +183,17 @@ class ProviderConfig(BaseModel):
             )
         return normalized
 
+    @field_validator("auth_url")
+    @classmethod
+    def _validate_openstack_auth_url(cls, value: str) -> str:
+        """Require the OpenStack auth URL to use HTTP or HTTPS when set."""
+        value = value.strip()
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError(
+                f"{OPENSTACK_AUTH_URL_CONFIG_NAME} must start with http:// or https://"
+            )
+        return value
+
     @field_validator("lxd_api_url")
     @classmethod
     def _validate_lxd_api_url(cls, value: str) -> str:
@@ -158,38 +203,42 @@ class ProviderConfig(BaseModel):
             raise ValueError(f"{LXD_API_URL_CONFIG_NAME} must start with https://")
         return value
 
-    @field_validator("lxd_instance_type")
-    @classmethod
-    def _validate_lxd_instance_type(cls, value: str) -> str:
-        """Require a supported LXD instance type."""
-        value = value.strip()
-        if value not in LXD_INSTANCE_TYPES:
-            raise ValueError(
-                f"{LXD_INSTANCE_TYPE_CONFIG_NAME} must be one of: {', '.join(LXD_INSTANCE_TYPES)}"
-            )
-        return value
-
     @model_validator(mode="after")
-    def _validate_lxd_required_fields(self) -> "ProviderConfig":
-        """Require the connection details an LXD provider cannot work without."""
-        if self.provider_type != PROVIDER_TYPE_LXD:
-            return self
+    def _validate_provider_fields(self) -> "ProviderConfig":
+        """Require the selected provider's fields and reject the other provider's fields."""
+        if self.provider_type == ProviderType.LXD:
+            required_fields = _LXD_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = _OPENSTACK_REQUIRED_PROVIDER_FIELDS
+        else:
+            required_fields = _OPENSTACK_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = _LXD_PROVIDER_FIELDS
+
         missing = [
-            name
-            for name, value in (
-                (LXD_API_URL_CONFIG_NAME, self.lxd_api_url),
-                (LXD_CLIENT_CERTIFICATE_CONFIG_NAME, self.lxd_client_certificate),
-                (LXD_CLIENT_KEY_CONFIG_NAME, self.lxd_client_key),
-            )
-            if not value
+            config_name
+            for field_name, config_name in required_fields
+            if not getattr(self, field_name)
         ]
         if missing:
             raise ValueError(f"Missing required configuration: {', '.join(missing)}")
+
+        conflicting = [
+            config_name
+            for field_name, config_name in forbidden_fields
+            if _provider_field_is_set(field_name, getattr(self, field_name))
+        ]
+        if conflicting:
+            raise ValueError(
+                f"{', '.join(conflicting)} cannot be set when "
+                f"{PROVIDER_TYPE_CONFIG_NAME} is {self.provider_type.value}"
+            )
         return self
 
     @classmethod
     def from_charm(cls, charm: ops.CharmBase) -> "ProviderConfig":
         """Initialize the provider config from charm.
+
+        Builds both provider field sets and lets the validators enforce that the selected
+        provider is complete and does not overlap with the other provider's fields.
 
         Args:
             charm: The charm instance.
@@ -200,84 +249,80 @@ class ProviderConfig(BaseModel):
         Returns:
             The parsed provider configuration.
         """
-        provider_type = (
-            str(charm.config.get(PROVIDER_TYPE_CONFIG_NAME) or PROVIDER_TYPE_OPENSTACK)
-            .strip()
-            .lower()
-        )
-        if provider_type not in PROVIDER_TYPES:
-            raise CharmConfigInvalidError(
-                f"{PROVIDER_TYPE_CONFIG_NAME} must be one of: {', '.join(PROVIDER_TYPES)}"
-            )
-        if provider_type == PROVIDER_TYPE_LXD:
-            return cls._from_charm_lxd(charm)
-        return cls._from_charm_openstack(charm)
-
-    @classmethod
-    def _from_charm_openstack(cls, charm: ops.CharmBase) -> "ProviderConfig":
-        """Build the OpenStack provider config from charm configuration."""
-        required_string_configs = (
-            OPENSTACK_AUTH_URL_CONFIG_NAME,
-            OPENSTACK_USERNAME_CONFIG_NAME,
-            OPENSTACK_PROJECT_NAME_CONFIG_NAME,
-            OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME,
-            OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME,
-            OPENSTACK_REGION_NAME_CONFIG_NAME,
-            OPENSTACK_NETWORK_CONFIG_NAME,
-        )
-        for key in required_string_configs:
-            value = charm.config.get(key)
-            if not value or not str(value).strip():
-                raise CharmConfigInvalidError(f"Missing required configuration: {key}")
-
-        auth_url = str(charm.config.get(OPENSTACK_AUTH_URL_CONFIG_NAME)).strip()
-        if not auth_url.startswith(("http://", "https://")):
-            raise CharmConfigInvalidError(
-                f"{OPENSTACK_AUTH_URL_CONFIG_NAME} must start with http:// or https://"
-            )
-
-        password = _get_secret_value(charm, OPENSTACK_PASSWORD_CONFIG_NAME)
-
-        return cls(
-            provider_type=PROVIDER_TYPE_OPENSTACK,
-            auth_url=auth_url,
-            username=str(charm.config.get(OPENSTACK_USERNAME_CONFIG_NAME)),
-            password=password,
-            project_name=str(charm.config.get(OPENSTACK_PROJECT_NAME_CONFIG_NAME)),
-            user_domain_name=str(charm.config.get(OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME)),
-            project_domain_name=str(charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)),
-            region_name=str(charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME)),
-            network=str(charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME)),
-            provider_name=charm.unit.name.replace("/", "-"),
-        )
-
-    @classmethod
-    def _from_charm_lxd(cls, charm: ops.CharmBase) -> "ProviderConfig":
-        """Build the LXD provider config from charm configuration."""
         try:
             return cls(
-                provider_type=PROVIDER_TYPE_LXD,
+                provider_type=typing.cast(
+                    ProviderType, str(charm.config.get(PROVIDER_TYPE_CONFIG_NAME) or "")
+                ),
+                auth_url=_get_optional_string_config(charm, OPENSTACK_AUTH_URL_CONFIG_NAME) or "",
+                username=_get_optional_string_config(charm, OPENSTACK_USERNAME_CONFIG_NAME) or "",
+                password=_get_secret_value(charm, OPENSTACK_PASSWORD_CONFIG_NAME, required=False),
+                project_name=(
+                    _get_optional_string_config(charm, OPENSTACK_PROJECT_NAME_CONFIG_NAME) or ""
+                ),
+                user_domain_name=(
+                    _get_optional_string_config(charm, OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME)
+                    or ""
+                ),
+                project_domain_name=(
+                    _get_optional_string_config(charm, OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)
+                    or ""
+                ),
+                region_name=(
+                    _get_optional_string_config(charm, OPENSTACK_REGION_NAME_CONFIG_NAME) or ""
+                ),
+                network=_get_optional_string_config(charm, OPENSTACK_NETWORK_CONFIG_NAME) or "",
                 lxd_api_url=_get_optional_string_config(charm, LXD_API_URL_CONFIG_NAME) or "",
                 lxd_project_name=(
                     _get_optional_string_config(charm, LXD_PROJECT_NAME_CONFIG_NAME)
                     or DEFAULT_LXD_PROJECT_NAME
                 ),
-                lxd_instance_type=(
-                    _get_optional_string_config(charm, LXD_INSTANCE_TYPE_CONFIG_NAME)
-                    or DEFAULT_LXD_INSTANCE_TYPE
-                ),
                 lxd_secure_boot=bool(charm.config.get(LXD_SECURE_BOOT_CONFIG_NAME, False)),
                 lxd_client_certificate=_get_secret_value(
-                    charm, LXD_CLIENT_CERTIFICATE_CONFIG_NAME
+                    charm, LXD_CLIENT_CERTIFICATE_CONFIG_NAME, required=False
                 ),
-                lxd_client_key=_get_secret_value(charm, LXD_CLIENT_KEY_CONFIG_NAME),
+                lxd_client_key=_get_secret_value(
+                    charm, LXD_CLIENT_KEY_CONFIG_NAME, required=False
+                ),
                 lxd_server_certificate=_get_secret_value(
                     charm, LXD_SERVER_CERTIFICATE_CONFIG_NAME, required=False
                 ),
                 provider_name=charm.unit.name.replace("/", "-"),
             )
         except ValidationError as exc:
-            raise CharmConfigInvalidError(str(exc)) from exc
+            raise CharmConfigInvalidError(_validation_error_message(exc)) from exc
+
+
+def _provider_field_is_set(field_name: str, value: object) -> bool:
+    """Return whether a provider field holds a non-default value.
+
+    Args:
+        field_name: The provider model field name.
+        value: The field value.
+
+    Returns:
+        True when the field was set away from its default.
+    """
+    if field_name == "lxd_project_name":
+        return value not in ("", None, DEFAULT_LXD_PROJECT_NAME)
+    return bool(value)
+
+
+def _validation_error_message(exc: ValidationError) -> str:
+    """Return a concise message for a pydantic validation error.
+
+    Args:
+        exc: The validation error.
+
+    Returns:
+        The error messages joined into one line, without pydantic's "Value error, " prefix.
+    """
+    messages = []
+    for error in exc.errors():
+        message = str(error["msg"])
+        message = message.removeprefix("Value error, ")
+        messages.append(message)
+    return "; ".join(messages)
 
 
 def _get_secret_value(charm: ops.CharmBase, config_name: str, *, required: bool = True) -> str:
@@ -726,7 +771,7 @@ class CharmState:
         github_app_config = GithubAppConfig.from_charm(charm)
         scaleset_config = ScalesetConfig.from_charm(charm)
         runner_config = RunnerConfig.from_charm(charm)
-        if provider_config.provider_type == PROVIDER_TYPE_LXD:
+        if provider_config.provider_type == ProviderType.LXD:
             # LXD pulls images from configured remotes, not the Glance image builder.
             image_relation = None
         else:
