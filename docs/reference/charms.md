@@ -79,9 +79,10 @@ The scaleset options `min-idle-runner`, `max-runner`, `labels`, `runner-group`,
 `pre-install-scripts`, `image-visibility`, `security-group`, and the runner networking and
 observability options are optional; their documented defaults apply when they are unset.
 
-The charm reports `Blocked` while a required configuration value is missing and publishes
-nothing to the GARM relation. It publishes the complete relation payload only once every
-required value, including the image, is available. A relation payload that omits a required
+The charm reports `Blocked` while a required configuration value is missing, or `Waiting`
+while the image builder has not yet published an image, and publishes nothing to the GARM
+relation. It publishes the complete relation payload only once every required value,
+including the image, is available. A relation payload that omits a required
 field, or carries a blank value for one, is invalid and the GARM charm blocks rather than
 creating a partially configured provider or scaleset.
 
