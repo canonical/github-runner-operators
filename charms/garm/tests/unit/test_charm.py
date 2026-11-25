@@ -1451,14 +1451,14 @@ def test_incomplete_related_provider_blocks_the_update(ctx: Context, garm_api: _
 
 def test_invalid_configurator_relation_blocks_the_update(ctx: Context, garm_api: _GarmApiMocks):
     """
-    arrange: A configurator unit whose provider payload omits the required auth URL, as when
-        it has not finished publishing.
+    arrange: A configurator unit whose provider payload is not valid JSON, as when it has not
+        finished publishing.
     act: Reconcile.
     assert: The unit blocks on the invalid relation and nothing is applied, so a partial
         provider is never rendered and its scalesets are not pruned.
     """
     provider_data = _provider_data()
-    provider_data.pop("openstack_auth_url")
+    provider_data["openstack_auth_url"] = "not-json"
     state = _state(
         configurator_units_data={0: {**provider_data, **_SCALESET_UNIT_DATA}},
         recorded_providers=[_provider_config("garm-configurator-0")],

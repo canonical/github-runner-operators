@@ -28,9 +28,9 @@ from agent_tools import AgentToolsError, ensure_agent_tools
 from charm_state import (
     DEBUG_SSH_INTEGRATION_NAME,
     GARM_CONFIGURATOR_RELATION_NAME,
-    BlockedError,
     PROVIDER_TYPE_LXD,
     PROVIDER_TYPE_OPENSTACK,
+    BlockedError,
     CharmState,
     ProviderConfig,
     RunnerConfig,

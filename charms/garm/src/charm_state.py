@@ -41,6 +41,7 @@ RUNNER_TOOLS_METADATA_URL_CONFIG_NAME: typing.Final[str] = "runner-tools-metadat
 class BlockedError(Exception):
     """A configuration problem that needs operator action; ``restart`` blocks the unit."""
 
+
 PROVIDER_TYPE_OPENSTACK: typing.Final[str] = "openstack"
 PROVIDER_TYPE_LXD: typing.Final[str] = "lxd"
 
