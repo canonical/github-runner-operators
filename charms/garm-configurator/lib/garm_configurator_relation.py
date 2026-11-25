@@ -226,12 +226,11 @@ class GarmConfiguratorRequirer:
         """Aggregate every joined configurator relation into one dataclass.
 
         The configurator publishes its payload on the application databag, so each relation
-        yields at most one entry. A relation whose application databag is still empty has not
-        published yet and is skipped without being marked invalid. A databag that is populated
-        but cannot be loaded is recorded as invalid, so the consumer never renders a half-written
-        provider. Relations that publish the same scaleset name are also rejected and marked
-        invalid, so the consumer sees the conflict instead of a winner chosen by iteration
-        order.
+        yields at most one entry. An empty or incomplete application databag is recorded as
+        invalid, so a related application that has not published yet cannot be mistaken for one
+        that left, and the consumer blocks on the partial aggregate instead of reconciling it.
+        Relations that publish the same scaleset name are also rejected and marked invalid, so
+        the consumer sees the conflict instead of a winner chosen by iteration order.
 
         Returns:
             The valid relation data for every related application, plus the ids of invalid
@@ -245,14 +244,6 @@ class GarmConfiguratorRequirer:
             application = relation.app
             if application is None:
                 invalid_relation_ids.add(relation.id)
-                continue
-            if not relation.data.get(application):
-                logger.info(
-                    "Ignoring garm-configurator relation with no application data yet: "
-                    "relation_id=%d app=%s",
-                    relation.id,
-                    application.name,
-                )
                 continue
             try:
                 provider = relation.load(ProviderConfig, application)

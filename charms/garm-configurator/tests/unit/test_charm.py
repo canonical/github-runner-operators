@@ -8,9 +8,11 @@ import json
 
 import ops
 import pytest
-from scenario import Context, Relation, Secret, State
+from scenario import Context, Model, Relation, Secret, State
 
 from charm import GarmConfiguratorCharm
+
+MODEL_NAME = "test-model"
 
 
 def _make_secret():
@@ -673,7 +675,9 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     """
     arrange: Valid config and an active garm-configurator relation.
     act: Run config-changed.
-    assert: The charm writes all expected scaleset fields to local unit relation data.
+    assert: The charm writes all expected scaleset fields to the application relation data,
+        naming the provider after the model and application so the identity is stable across
+        leadership changes.
     """
     ctx = Context(GarmConfiguratorCharm)
     secret = _make_secret()
@@ -687,6 +691,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
         secrets=[secret, pk_secret],
         relations=[garm_relation],
         leader=True,
+        model=Model(name=MODEL_NAME),
     )
 
     out = ctx.run(ctx.on.config_changed(), state)
@@ -694,7 +699,7 @@ def test_garm_configurator_relation_data_reflects_charm_state():
     rel_out = out.get_relation(garm_relation.id)
     expected_relation_data = {
         "name": "my-scaleset",
-        "provider_name": "garm-configurator-0",
+        "provider_name": f"{MODEL_NAME}-garm-configurator",
         "flavor": "m1.large",
         "os_arch": "amd64",
         "min_idle_runner": "0",

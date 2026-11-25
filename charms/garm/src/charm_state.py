@@ -423,7 +423,7 @@ def _get_runner_tools_metadata_url(charm: ops.CharmBase) -> str:
 class ProviderConfig:
     """One OpenStack provider, as the charm publishes it to GARM.
 
-    The provider's name is its configurator's unit name with ``/`` replaced by ``-``, which is
+    The provider's name is the configurator application's ``<model>-<app>`` name, which is
     also the key GARM's provider registry and the scale sets' ``provider_name`` use. The field
     names are the wire contract: ``as_dict()`` is what the workload entrypoint reads out of
     ``GARM_PROVIDERS_JSON`` and what the record keeps, so renaming a field changes both.
