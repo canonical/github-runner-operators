@@ -9,4 +9,4 @@ pydantic==2.14.4
 typing-extensions==4.16.0
 owasp-logger==0.1.6
 # garm_configurator/v0.0.1
-garm-configurator-relation @ git+https://github.com/canonical/github-runner-operators.git@a4343707d8299bea819831200cff16a946b8c1f4#subdirectory=charms/garm-configurator/lib
+garm-configurator-relation @ git+https://github.com/canonical/github-runner-operators.git@3b089dcc5848706a13ea71ebce6a4a4c3eeda882#subdirectory=charms/garm-configurator/lib
