@@ -23,7 +23,6 @@ _LXD_PROVIDER = {
     "provider_type": "lxd",
     "lxd_api_url": "https://lxd.example.com:8443",
     "lxd_project_name": "runners",
-    "lxd_instance_type": "container",
     "lxd_secure_boot": True,
     "lxd_client_certificate": "client-certificate",
     "lxd_client_key": "client-key",
@@ -303,7 +302,7 @@ def test_build_lxd_provider_writes_config_and_certificate_files(monkeypatch, tmp
     config = tomllib.loads(files[str(config_path)])
     assert config["url"] == "https://lxd.example.com:8443"
     assert config["project_name"] == "runners"
-    assert config["instance_type"] == "container"
+    assert config["instance_type"] == "virtual-machine"
     assert config["secure_boot"] is True
     assert config["unix_socket_path"] == ""
     assert config["include_default_profile"] is False

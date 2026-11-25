@@ -10,7 +10,7 @@ Each revision is versioned by the date of the revision.
 
 ## 2026-11-25
 
-- `garm-configurator`: add `provider-type: lxd` and the LXD provider options `lxd-api-url`, `lxd-project-name`, `lxd-instance-type`, `lxd-secure-boot`, and the `lxd-client-certificate`, `lxd-client-key`, and `lxd-server-certificate` secrets. OpenStack remains the default, so existing deployments are unchanged; when LXD is selected the charm forwards the LXD provider settings and certificate secret URIs to `garm`.
+- `garm-configurator`: add `provider-type: lxd` and the LXD provider options `lxd-api-url`, `lxd-project-name`, `lxd-secure-boot`, and the `lxd-client-certificate`, `lxd-client-key`, and `lxd-server-certificate` secrets. OpenStack remains the default, so existing deployments are unchanged; when LXD is selected the charm forwards the LXD provider settings and certificate secret URIs to `garm`.
 - `garm`: render the `garm-provider-lxd` configuration and its client and server certificate files from the `garm-configurator` relation, and create LXD-backed scale sets. The provider includes the `ubuntu` image remote by default, so a scale set image such as `ubuntu:24.04` is pulled from the Ubuntu simplestreams catalogue.
 
 ## 2026-11-24

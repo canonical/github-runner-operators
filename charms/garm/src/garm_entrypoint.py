@@ -53,7 +53,6 @@ LXD_PROVIDER_FIELDS: Final[tuple[str, ...]] = (
     "unit_name",
     "lxd_api_url",
     "lxd_project_name",
-    "lxd_instance_type",
     "lxd_secure_boot",
     "lxd_client_certificate",
     "lxd_client_key",
@@ -344,7 +343,7 @@ def _build_lxd_provider(
     config: dict[str, typing.Any] = {
         "unix_socket_path": "",
         "include_default_profile": False,
-        "instance_type": provider.get("lxd_instance_type") or "virtual-machine",
+        "instance_type": "virtual-machine",
         "secure_boot": bool(provider.get("lxd_secure_boot", False)),
         "project_name": provider.get("lxd_project_name") or "default",
         "url": provider["lxd_api_url"],

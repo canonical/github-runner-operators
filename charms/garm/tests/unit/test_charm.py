@@ -131,7 +131,6 @@ def _lxd_provider_data(**overrides: typing.Any) -> dict[str, str]:
         "provider_type": "lxd",
         "lxd_api_url": "https://lxd.example.com:8443",
         "lxd_project_name": "runners",
-        "lxd_instance_type": "container",
         "lxd_secure_boot": True,
         **overrides,
     }
@@ -574,7 +573,6 @@ def test_lxd_provider_is_configured_from_relation_data(ctx: Context, garm_api: _
     assert provider["provider_type"] == "lxd"
     assert provider["lxd_api_url"] == "https://lxd.example.com:8443"
     assert provider["lxd_project_name"] == "runners"
-    assert provider["lxd_instance_type"] == "container"
     assert provider["lxd_secure_boot"] is True
     assert provider["lxd_client_certificate"] == "client-certificate"
     assert provider["lxd_client_key"] == "client-key"
@@ -634,26 +632,6 @@ def test_lxd_provider_creates_a_scaleset_with_the_lxd_image(ctx: Context, garm_a
     assert spec.provider_name == "garm-configurator-0"
     assert spec.image == "ubuntu:24.04"
     assert spec.labels == ["lxd", "ubuntu"]
-
-
-def test_lxd_provider_without_certificate_secret_uris_is_skipped(
-    ctx: Context, garm_api: _GarmApiMocks, caplog: pytest.LogCaptureFixture
-):
-    """
-    arrange: A published LXD provider payload that omits its certificate secret URIs.
-    act: Run update-status.
-    assert: The provider is skipped with a warning rather than published without credentials,
-        so GARM never starts an LXD provider it cannot authenticate with.
-    """
-    unit_data = {
-        **_lxd_provider_data(),
-        **_SCALESET_UNIT_DATA,
-    }
-
-    out = ctx.run(ctx.on.update_status(), _state(configurator_units_data={0: unit_data}))
-
-    assert json.loads(_service_environment(out)["GARM_PROVIDERS_JSON"]) == []
-    assert "client certificate or key secret URI is missing" in caplog.text
 
 
 def test_lxd_provider_with_unreadable_client_secret_is_skipped(

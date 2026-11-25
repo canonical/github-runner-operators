@@ -459,7 +459,6 @@ def test_lxd_provider_config_wire_form_matches_the_entrypoint_contract():
         *PROVIDER_REQUIRED_FIELDS[PROVIDER_TYPE_LXD],
         "provider_type",
         "lxd_project_name",
-        "lxd_instance_type",
         "lxd_secure_boot",
         "lxd_server_certificate",
     }

@@ -445,7 +445,6 @@ class ProviderConfig:
         network: Network name or ID instances are attached to.
         lxd_api_url: LXD API URL.
         lxd_project_name: LXD project instances are created in.
-        lxd_instance_type: LXD instance type, "container" or "virtual-machine".
         lxd_secure_boot: Whether LXD virtual machines use secure boot.
         lxd_client_certificate: LXD client certificate, in plaintext for its certificate file.
         lxd_client_key: LXD client key, in plaintext for its key file.
@@ -465,7 +464,6 @@ class ProviderConfig:
     network: str = ""
     lxd_api_url: str = ""
     lxd_project_name: str = "default"
-    lxd_instance_type: str = "virtual-machine"
     lxd_secure_boot: bool = False
     lxd_client_certificate: str = ""
     lxd_client_key: str = ""
@@ -485,7 +483,6 @@ class ProviderConfig:
                 "provider_type",
                 "lxd_api_url",
                 "lxd_project_name",
-                "lxd_instance_type",
                 "lxd_secure_boot",
                 "lxd_client_certificate",
                 "lxd_client_key",
