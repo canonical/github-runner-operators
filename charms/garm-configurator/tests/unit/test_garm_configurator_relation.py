@@ -124,17 +124,19 @@ def test_provider_config_represents_lxd_without_openstack_credentials():
     assert provider.lxd_client_key_secret_uri == "secret:client-key"
 
 
-def test_provider_config_requires_provider_type():
+def test_provider_config_defaults_provider_type_to_openstack():
     """
     arrange: An OpenStack provider payload without a provider type.
     act: Build the relation model.
-    assert: Validation fails, so the consumer never has to guess which provider to render.
+    assert: The provider type defaults to openstack, so a configurator that does not publish it
+        keeps working with an upgraded consumer.
     """
     values = dict(_OPENSTACK_PROVIDER_VALUES)
     del values["provider_type"]
 
-    with pytest.raises(ValueError, match="provider_type"):
-        ProviderConfig(**values)
+    provider = ProviderConfig(**values)
+
+    assert provider.provider_type == "openstack"
 
 
 def test_provider_config_rejects_unknown_provider_type():

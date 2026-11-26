@@ -366,3 +366,27 @@ def test_from_charm_lxd_invalid_api_url_raises_charm_error():
 
     with pytest.raises(CharmConfigInvalidError, match="lxd-api-url must start with https://"):
         ProviderConfig.from_charm(charm)
+
+
+def test_from_charm_defaults_provider_type_to_openstack():
+    """
+    arrange: A complete OpenStack config that does not set provider-type.
+    act: Build the provider config from the charm.
+    assert: The provider type defaults to openstack, so existing deployments keep working
+        without configuration changes.
+    """
+    config = {
+        "openstack-auth-url": "https://keystone.example.com:5000/v3",
+        "openstack-username": "admin",
+        "openstack-password": "secret:password",
+        "openstack-project-name": "myproject",
+        "openstack-user-domain-name": "Default",
+        "openstack-project-domain-name": "Default",
+        "openstack-region-name": "RegionOne",
+        "openstack-network": "external-net",
+    }
+    charm = _make_charm(config, {"secret:password": "password"})
+
+    provider = ProviderConfig.from_charm(charm)
+
+    assert provider.provider_type == ProviderType.OPENSTACK

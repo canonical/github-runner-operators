@@ -19,6 +19,7 @@ are also invalid: a scaleset name must identify exactly one scaleset in GARM.
 """
 
 import dataclasses
+import enum
 import logging
 import typing
 
@@ -30,9 +31,16 @@ logger = logging.getLogger(__name__)
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
-PROVIDER_TYPE_OPENSTACK: typing.Final[str] = "openstack"
-PROVIDER_TYPE_LXD: typing.Final[str] = "lxd"
-PROVIDER_TYPES: typing.Final = (PROVIDER_TYPE_OPENSTACK, PROVIDER_TYPE_LXD)
+class ProviderType(enum.StrEnum):
+    """Provider types the configurator can publish."""
+
+    OPENSTACK = "openstack"
+    LXD = "lxd"
+
+
+PROVIDER_TYPE_OPENSTACK: typing.Final[str] = ProviderType.OPENSTACK.value
+PROVIDER_TYPE_LXD: typing.Final[str] = ProviderType.LXD.value
+PROVIDER_TYPES: typing.Final = tuple(provider.value for provider in ProviderType)
 
 _OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
     "openstack_auth_url",
@@ -68,10 +76,11 @@ class ProviderConfig:
     The field names are the relation databag keys, so they are the wire contract between the
     configurator and GARM. ``provider_type`` selects which fields a unit publishes: the
     selected provider's required fields must be present and the other provider's fields must
-    stay unset, so a payload cannot mix OpenStack and LXD settings.
+    stay unset, so a payload cannot mix OpenStack and LXD settings. It defaults to
+    ``openstack`` so a configurator that does not publish it keeps working.
 
     Attributes:
-        provider_type: Provider type, "openstack" or "lxd".
+        provider_type: Provider type, "openstack" or "lxd". Defaults to "openstack".
         openstack_auth_url: Keystone authentication URL.
         openstack_username: OpenStack username.
         openstack_password: Legacy plaintext password, or None when the secret URI is used.
@@ -92,7 +101,7 @@ class ProviderConfig:
         github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
     """
 
-    provider_type: str
+    provider_type: str = PROVIDER_TYPE_OPENSTACK
     openstack_auth_url: str | None = None
     openstack_username: str | None = None
     openstack_password: str | None = None

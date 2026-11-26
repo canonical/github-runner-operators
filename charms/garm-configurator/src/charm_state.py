@@ -3,11 +3,11 @@
 
 """State of the GARM configurator charm."""
 
-import enum
 import ipaddress
 import typing
 
 import ops
+from garm_configurator_relation import PROVIDER_TYPE_OPENSTACK, PROVIDER_TYPES, ProviderType
 from pydantic import (
     BaseModel,
     HttpUrl,
@@ -64,21 +64,6 @@ PRE_JOB_SCRIPT_CONFIG_NAME = "pre-job-script"
 
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 
-
-class ProviderType(str, enum.Enum):
-    """Provider types the configurator can publish."""
-
-    OPENSTACK = "openstack"
-    LXD = "lxd"
-
-    def __str__(self) -> str:
-        """Return the configured value, so charm config and relation data use the plain string."""
-        return self.value
-
-
-PROVIDER_TYPE_OPENSTACK = ProviderType.OPENSTACK.value
-PROVIDER_TYPE_LXD = ProviderType.LXD.value
-PROVIDER_TYPES = tuple(provider.value for provider in ProviderType)
 DEFAULT_LXD_PROJECT_NAME = "default"
 
 # The visibilities garm-provider-openstack accepts for an image lookup.
@@ -183,6 +168,26 @@ class ProviderConfig(BaseModel):
             )
         return normalized
 
+    @field_validator(
+        "auth_url",
+        "username",
+        "project_name",
+        "user_domain_name",
+        "project_domain_name",
+        "region_name",
+        "network",
+        "lxd_api_url",
+        "lxd_project_name",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_string(cls, value: object, info: ValidationInfo) -> str:
+        """Treat an unset or whitespace-only option as an empty string."""
+        normalized = str(value).strip() if value else ""
+        if info.field_name == "lxd_project_name" and not normalized:
+            return DEFAULT_LXD_PROJECT_NAME
+        return normalized
+
     @field_validator("auth_url")
     @classmethod
     def _validate_openstack_auth_url(cls, value: str) -> str:
@@ -252,30 +257,29 @@ class ProviderConfig(BaseModel):
         try:
             return cls(
                 provider_type=typing.cast(
-                    ProviderType, str(charm.config.get(PROVIDER_TYPE_CONFIG_NAME) or "")
+                    str,
+                    charm.config.get(PROVIDER_TYPE_CONFIG_NAME, PROVIDER_TYPE_OPENSTACK),
                 ),
-                auth_url=_get_optional_string_config(charm, OPENSTACK_AUTH_URL_CONFIG_NAME) or "",
-                username=_get_optional_string_config(charm, OPENSTACK_USERNAME_CONFIG_NAME) or "",
+                auth_url=typing.cast(str, charm.config.get(OPENSTACK_AUTH_URL_CONFIG_NAME, "")),
+                username=typing.cast(str, charm.config.get(OPENSTACK_USERNAME_CONFIG_NAME, "")),
                 password=_get_secret_value(charm, OPENSTACK_PASSWORD_CONFIG_NAME, required=False),
-                project_name=(
-                    _get_optional_string_config(charm, OPENSTACK_PROJECT_NAME_CONFIG_NAME) or ""
+                project_name=typing.cast(
+                    str, charm.config.get(OPENSTACK_PROJECT_NAME_CONFIG_NAME, "")
                 ),
-                user_domain_name=(
-                    _get_optional_string_config(charm, OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME)
-                    or ""
+                user_domain_name=typing.cast(
+                    str, charm.config.get(OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME, "")
                 ),
-                project_domain_name=(
-                    _get_optional_string_config(charm, OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME)
-                    or ""
+                project_domain_name=typing.cast(
+                    str, charm.config.get(OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME, "")
                 ),
-                region_name=(
-                    _get_optional_string_config(charm, OPENSTACK_REGION_NAME_CONFIG_NAME) or ""
+                region_name=typing.cast(
+                    str, charm.config.get(OPENSTACK_REGION_NAME_CONFIG_NAME, "")
                 ),
-                network=_get_optional_string_config(charm, OPENSTACK_NETWORK_CONFIG_NAME) or "",
-                lxd_api_url=_get_optional_string_config(charm, LXD_API_URL_CONFIG_NAME) or "",
-                lxd_project_name=(
-                    _get_optional_string_config(charm, LXD_PROJECT_NAME_CONFIG_NAME)
-                    or DEFAULT_LXD_PROJECT_NAME
+                network=typing.cast(str, charm.config.get(OPENSTACK_NETWORK_CONFIG_NAME, "")),
+                lxd_api_url=typing.cast(str, charm.config.get(LXD_API_URL_CONFIG_NAME, "")),
+                lxd_project_name=typing.cast(
+                    str,
+                    charm.config.get(LXD_PROJECT_NAME_CONFIG_NAME, DEFAULT_LXD_PROJECT_NAME),
                 ),
                 lxd_secure_boot=bool(charm.config.get(LXD_SECURE_BOOT_CONFIG_NAME, False)),
                 lxd_client_certificate=_get_secret_value(
