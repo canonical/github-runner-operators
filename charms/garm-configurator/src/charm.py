@@ -10,6 +10,7 @@ import typing
 
 import ops
 from garm_configurator_relation import ProviderConfig as RelationProviderConfig
+from garm_configurator_relation import ScalesetConfig as RelationScalesetConfig
 
 from charm_state import (
     GARM_RELATION_NAME,
@@ -45,14 +46,19 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _reconcile(self, event: ops.EventBase) -> None:
         """Handle all charm events by reconciling configuration and relation data.
 
-        Reads the current charm state, forwards OpenStack credentials to the
-        image-builder relation, publishes scaleset configuration (and secrets
-        when the image reference is available) to all garm-configurator relations,
+        Blocks non-leader units, because only the leader may create the credential secrets and
+        publish the complete payload. On the leader, reads the current charm state, forwards
+        OpenStack credentials to the image-builder relation, publishes scaleset configuration
+        (and secrets when the image reference is available) to all garm-configurator relations,
         then sets unit status to reflect readiness.
 
         Args:
             event: The triggering event.
         """
+        if not self.unit.is_leader():
+            self.unit.status = ops.BlockedStatus("Only the leader unit publishes relation data")
+            return
+
         try:
             state = CharmState.from_charm(self)
         except CharmConfigInvalidError as e:
@@ -131,22 +137,21 @@ class GarmConfiguratorCharm(ops.CharmBase):
         return secret
 
     def _configure_garm_relation(self, state: CharmState) -> None:
-        """Publish scaleset configuration to the garm-configurator relation.
+        """Publish the complete configurator payload to the garm-configurator relation.
 
-        Writes non-secret scaleset fields (name, provider, credentials, image,
-        image visibility, security group, flavor, arch, runner counts, labels,
-        runner group, remote-shell toggle, and pre-install scripts) to the relation.
-        The ``image_id`` wire field carries either an OpenStack image name or ID
-        for compatibility.
-        The optional ``org`` and ``repo`` fields are included only when set.
+        Saves ``ScalesetConfig`` for the scaleset and runner fields (with ``encoder=str``, which
+        preserves their raw-string wire form) and, on the leader, ``RelationProviderConfig`` for
+        the OpenStack/GitHub App credentials (JSON-encoded). ``Relation.save`` persists every
+        model field, so an unset optional field is published as an empty string rather than
+        omitted; consumers treat the empty string as "unset". The ``image_id`` field carries
+        either an OpenStack image name or ID for compatibility.
 
-        When the image reference is present and this unit holds leadership, also
-        provisions Juju secrets for the OpenStack password and GitHub App
-        private key, then writes the full OpenStack provider and GitHub App
-        credential fields alongside their secret URIs.
+        When this unit holds leadership, also provisions Juju secrets for the OpenStack password
+        and GitHub App private key and writes their secret URIs alongside the credential fields.
+        This method only runs on the leader, because ``_reconcile`` blocks non-leader units:
+        they cannot create the secrets.
 
-        Does nothing when no garm-configurator relation is joined yet or when
-        secrets cannot be created (non-leader unit). Status reporting is
+        Does nothing when no garm-configurator relation is joined yet. Status reporting is
         handled by the caller (_reconcile).
 
         Args:
@@ -154,40 +159,6 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         garm_relation = self.model.get_relation(GARM_RELATION_NAME)
         if garm_relation is None:
-            return
-
-        pre_install = state.scaleset_config.pre_install_scripts
-        rc = state.runner_config
-        basic_data: dict[str, str] = {
-            "name": state.scaleset_config.name,
-            "provider_name": state.provider_config.provider_name,
-            "image_id": state.image or "",
-            "image_visibility": state.scaleset_config.image_visibility or "",
-            "security_group": state.scaleset_config.security_group,
-            "flavor": state.scaleset_config.flavor,
-            "os_arch": state.scaleset_config.os_arch,
-            "min_idle_runner": str(state.scaleset_config.min_idle_runner),
-            "max_runner": str(state.scaleset_config.max_runner),
-            "labels": state.scaleset_config.labels,
-            "runner_group": state.scaleset_config.runner_group,
-            "enable_shell": str(state.scaleset_config.enable_shell).lower(),
-            "pre_install_scripts": json.dumps({"pre_install.sh": pre_install})
-            if pre_install
-            else "",
-            "dockerhub_mirror": rc.dockerhub_mirror or "",
-            "runner_http_proxy": rc.runner_http_proxy or "",
-            "aproxy_exclude_addresses": rc.aproxy_exclude_addresses or "",
-            "aproxy_redirect_ports": rc.aproxy_redirect_ports or "",
-            "otel_collector_endpoint": rc.otel_collector_endpoint or "",
-            "pre_job_script": rc.pre_job_script or "",
-        }
-        if state.scaleset_config.org:
-            basic_data["org"] = state.scaleset_config.org
-        if state.scaleset_config.repo:
-            basic_data["repo"] = state.scaleset_config.repo
-        garm_relation.data[self.unit].update(basic_data)
-
-        if state.image is None:
             return
 
         password_secret = self._ensure_relation_secret(
@@ -199,6 +170,38 @@ class GarmConfiguratorCharm(ops.CharmBase):
             garm_relation,
             "configurator-github-key",
             state.github_app_config.private_key,
+        )
+
+        pre_install = state.scaleset_config.pre_install_scripts
+        rc = state.runner_config
+        garm_relation.save(
+            RelationScalesetConfig(
+                name=state.scaleset_config.name,
+                provider_name=state.provider_config.provider_name,
+                image_id=state.image or "",
+                image_visibility=state.scaleset_config.image_visibility or "",
+                security_group=state.scaleset_config.security_group,
+                flavor=state.scaleset_config.flavor,
+                os_arch=state.scaleset_config.os_arch,
+                min_idle_runner=str(state.scaleset_config.min_idle_runner),
+                max_runner=str(state.scaleset_config.max_runner),
+                labels=state.scaleset_config.labels,
+                runner_group=state.scaleset_config.runner_group,
+                enable_shell=str(state.scaleset_config.enable_shell).lower(),
+                pre_install_scripts=(
+                    json.dumps({"pre_install.sh": pre_install}) if pre_install else ""
+                ),
+                org=state.scaleset_config.org or "",
+                repo=state.scaleset_config.repo or "",
+                dockerhub_mirror=rc.dockerhub_mirror or "",
+                runner_http_proxy=rc.runner_http_proxy or "",
+                aproxy_exclude_addresses=rc.aproxy_exclude_addresses or "",
+                aproxy_redirect_ports=rc.aproxy_redirect_ports or "",
+                otel_collector_endpoint=rc.otel_collector_endpoint or "",
+                pre_job_script=rc.pre_job_script or "",
+            ),
+            self.unit,
+            encoder=str,
         )
 
         if password_secret is None or github_key_secret is None:
