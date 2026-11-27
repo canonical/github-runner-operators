@@ -48,6 +48,7 @@ from runner_paths import (
     RUNNER_HOME,
     RUNNER_USER,
     prepend_after_shebang,
+    require_runner_binary,
 )
 
 _TEMPLATES_DIR = pathlib.Path(__file__).parent / "templates"
@@ -85,7 +86,9 @@ def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
 
     The blocks are inserted immediately after the shebang line (before the base
     template's ``set -e``), mirroring GARM's documented "prepend after the
-    shebang" approach.
+    shebang" approach. The base template's cached-runner check is also tightened
+    to require ``bin/Runner.Listener``, because the job-hooks block creates the
+    runner home directory before the base body runs.
 
     Args:
         base: The system ``github_linux`` template bytes to copy from.
@@ -94,7 +97,7 @@ def build_template_data(base: bytes, config: RunnerConfig) -> bytes:
     Returns:
         The new template bytes, with the pre-install and job-hook blocks injected.
     """
-    text = base.decode("utf-8")
+    text = require_runner_binary(base.decode("utf-8"))
     injection = render_pre_install(config) + render_pre_job_hooks(config)
     return prepend_after_shebang(text, injection).encode("utf-8")
 

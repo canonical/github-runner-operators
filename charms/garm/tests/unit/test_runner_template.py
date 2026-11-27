@@ -312,3 +312,22 @@ def test_render_aproxy_pre_install_script_from_untrusted_databag_drops_malformed
     assert "\nMALICIOUS=1" not in result
     assert "evil" not in result
     assert "2001:db8::1" not in result  # IPv6 dropped: the nft table is IPv4-only
+
+
+BASE_WITH_CACHED_CHECK = (
+    b'#!/bin/bash\nset -e\nRUN_HOME="/home/runner/actions-runner"\n'
+    b'if [ ! -d "$RUN_HOME" ];then\n\techo download\nelse\n\techo cached\nfi\n'
+)
+
+
+def test_build_template_data_requires_runner_binary_not_home_dir():
+    """
+    arrange: A base template with GARM's directory-based cached-runner check.
+    act: Build the runner template data with an empty runner config.
+    assert: The check requires bin/Runner.Listener, so the injected .env block
+        creating the runner home cannot make GARM skip the runner download.
+    """
+    result = build_template_data(BASE_WITH_CACHED_CHECK, RunnerConfig()).decode()
+
+    assert 'if [ ! -x "$RUN_HOME/bin/Runner.Listener" ];then' in result
+    assert 'if [ ! -d "$RUN_HOME" ];then' not in result

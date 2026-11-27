@@ -455,3 +455,23 @@ def test_build_charmed_template_data_writes_user_env_once():
     assert len(written) == 1
     assert "printf" in written[0]
     assert f"TMATE_SERVER_HOST={_CONN.host}" in decoded
+
+
+def test_build_charmed_template_data_requires_runner_binary():
+    """
+    arrange: The base template has GARM's directory-based cached-runner check.
+    act: Call _build_charmed_template_data() with no connections.
+    assert: The built script checks for bin/Runner.Listener, so the injected
+        global .env block creating the runner home cannot skip the download.
+    """
+    client = MagicMock()
+    template = MagicMock()
+    template.data = base64.b64encode(
+        b'#!/bin/bash\nset -e\nif [ ! -d "$RUN_HOME" ];then\n echo download\nfi\n'
+    ).decode()
+    client.get_template.return_value = template
+
+    decoded = garm_template._build_charmed_template_data(client, 1, []).decode()
+
+    assert 'if [ ! -x "$RUN_HOME/bin/Runner.Listener" ];then' in decoded
+    assert 'if [ ! -d "$RUN_HOME" ];then' not in decoded

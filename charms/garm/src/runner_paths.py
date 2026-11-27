@@ -41,3 +41,27 @@ def prepend_after_shebang(script: str, snippet: str) -> str:
         shebang, _, rest = script.partition("\n")
         return f"{shebang}\n{body}{rest}"
     return f"{body}{script}"
+
+
+_CACHED_RUNNER_CHECK = 'if [ ! -d "$RUN_HOME" ];then'
+_RUNNER_BINARY_CHECK = 'if [ ! -x "$RUN_HOME/bin/Runner.Listener" ];then'
+
+
+def require_runner_binary(script: str) -> str:
+    """Make the base install script's cached-runner check require the binary.
+
+    The charmed templates inject a block that creates the runner home directory
+    to write the runner's ``.env`` file. GARM's base ``github_linux`` template
+    treats any existing ``$RUN_HOME`` as a cached runner and skips downloading
+    the runner archive, which leaves the instance without ``Runner.Listener``.
+    Requiring the binary itself keeps the cached-runner shortcut for real cached
+    installs while making a directory created just for ``.env`` trigger the
+    download.
+
+    Args:
+        script: The base runner install script.
+
+    Returns:
+        The script with the directory check replaced by a binary check.
+    """
+    return script.replace(_CACHED_RUNNER_CHECK, _RUNNER_BINARY_CHECK)
