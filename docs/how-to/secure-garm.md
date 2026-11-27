@@ -19,11 +19,12 @@ remote-shell settings, Juju secrets, and trusted script configuration.
 - Permission to change Juju application configuration.
 - A deployment ingress that can provide HTTPS for externally reachable GARM
   traffic.
-- Juju secret values for the GitHub App and OpenStack credentials.
+- Juju secret values for the GitHub App and the provider credentials (OpenStack
+  or LXD).
 
 This guide covers charm settings and assumptions. Follow the platform's
 Canonical documentation for ingress, Juju access control, PostgreSQL, and
-OpenStack hardening.
+OpenStack or LXD hardening.
 
 ## Protect the GARM endpoint
 
@@ -54,7 +55,10 @@ TLS-protected GARM agent path and restrict GARM administrator access.
 
 ## Protect credentials
 
-Use Juju secrets for the GitHub App private key and OpenStack password.
+Use Juju secrets for the GitHub App private key and the provider credentials.
+For OpenStack, use the password. For LXD, use the client certificate, client
+key, and, when the server certificate is not publicly trusted, the server
+certificate.
 
 The ``get-credentials`` action returns the GARM administrator password. Run it
 only when needed and treat its output as secret material:

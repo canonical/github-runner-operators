@@ -31,7 +31,7 @@ In this documentation
     * - Get started
       - :doc:`Deploy GARM and configure a runner scale set <tutorial/garm>`
     * - Operations
-      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>`
+      - :ref:`Retrieve GARM administrator credentials <how_to_retrieve_garm_credentials>` | :ref:`Configure the LXD provider <how_to_configure_lxd_provider>`
     * - Design
       - :ref:`Architecture overview <reference_charm_architecture_deployment>` | :ref:`Charm reference <reference_charm_reference>`
     * - Security

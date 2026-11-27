@@ -14,3 +14,4 @@ GARM configurator.
 
    Retrieve GARM admin credentials <retrieve-garm-credentials>
    Secure GARM and the GARM configurator <secure-garm>
+   Configure the LXD provider <configure-lxd-provider>

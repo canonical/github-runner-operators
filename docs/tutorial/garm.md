@@ -21,6 +21,9 @@ OpenStack values and an image reference. Everything up to and including the scal
 on GitHub is real: the last section explains exactly which values you would change to make runners
 boot.
 
+This tutorial uses OpenStack. To use LXD virtual machine runners instead, see
+{ref}`how_to_configure_lxd_provider`.
+
 ## What you'll do
 
 1. Deploy GARM and PostgreSQL, and integrate them.
