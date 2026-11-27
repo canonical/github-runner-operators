@@ -13,4 +13,5 @@ GARM configurator.
    :maxdepth: 1
 
    Retrieve GARM admin credentials <retrieve-garm-credentials>
+   Put GARM behind HAProxy with TLS termination <garm-haproxy-tls>
    Secure GARM and the GARM configurator <secure-garm>

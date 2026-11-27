@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-11-27
+
+- `docs`: add a how-to guide for putting GARM behind HAProxy with TLS termination, a private metrics path, and the required cross-model ingress relation.
+
 ## 2026-11-24
 
 - `garm`: the rock now ships garm-agent for armhf, so armhf runners can use agent mode. These runners previously logged `agent mode enabled but no tools available` and did not run in agent mode.
