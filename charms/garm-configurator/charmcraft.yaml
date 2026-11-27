@@ -24,7 +24,9 @@ config:
       default: openstack
       description: |
         Provider type to configure: openstack or lxd. OpenStack is the default so
-        existing deployments keep working without configuration changes.
+        existing deployments keep working without configuration changes. With
+        lxd, runners are virtual machines, so the LXD server must be 6.7 or
+        later (the provider uses the boot.mode option added in that release).
     lxd-api-url:
       type: string
       description: |
@@ -34,12 +36,13 @@ config:
       type: string
       default: default
       description: |
-        LXD project to create runner instances in. The project must already exist.
+        LXD project to create runner instances in. The project must already
+        exist, and the LXD profile named by flavor must exist in it.
     lxd-secure-boot:
       type: boolean
       default: false
       description: |
-        Enable secure boot for LXD virtual machines. Ignored for containers.
+        Enable secure boot for LXD virtual machines.
     lxd-client-certificate:
       type: secret
       description: |
@@ -95,6 +98,7 @@ config:
       description: |
         OpenStack security group name or ID to attach to runner instances. When
         unset, the provider attaches the project's default security group.
+        Ignored when provider-type is lxd.
     github-app-id:
       type: int
       description: |
@@ -115,7 +119,9 @@ config:
     flavor:
       type: string
       description: |
-        The resource flavor to use for runners in the scaleset.
+        The resource flavor to use for runners in the scaleset. With the LXD
+        provider this is the name of an existing LXD profile in the configured
+        project; use default for the built-in profile.
     os-arch:
       type: string
       description: |
@@ -123,18 +129,20 @@ config:
     image:
       type: string
       description: |
-        Stable OpenStack image name or image ID to use for runners. An image name
-        must uniquely identify one image in the OpenStack project. When unset,
-        the image is read from the image relation for backwards compatibility.
-        If neither source provides an image, GARM removes this configurator's
-        scale set and its runners.
+        Image to use for runners. With the OpenStack provider this is a stable
+        image name or image ID; an image name must uniquely identify one image
+        in the OpenStack project. With the LXD provider this is an LXD image
+        reference such as ubuntu:24.04, a local image alias, or an image
+        fingerprint. When unset, the OpenStack provider reads the image from the
+        image relation for backwards compatibility. If neither source provides
+        an image, GARM removes this configurator's scale set and its runners.
     image-visibility:
       type: string
       description: |
         Optional Glance visibility used when the OpenStack provider looks up an image
         by name: public, private, shared, community, or all. When unset, the provider
         searches public images only, so a private image needs "private". It has no
-        effect when the image is an ID.
+        effect when the image is an ID. Ignored when provider-type is lxd.
     min-idle-runner:
       type: int
       default: 0

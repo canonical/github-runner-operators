@@ -18,7 +18,9 @@ flowchart TD
   GC(["GARM configurator charm(s)"]) -->|many-to-one| G
   G -->|GitHub API| GH["GitHub"]
   G -->|OpenStack API| OS["OpenStack"]
+  G -->|LXD API| LXD["LXD"]
   OS -->|Spawns multiple| RUN["Runner VMs"]
+  LXD -->|Spawns multiple| RUN
   RUN -->|callback| G
   COS(["OpenTelemetry Collector charm"]) -->|scrapes metrics| G
 ```
@@ -30,7 +32,8 @@ The diagram above contains the following components:
 - GARM charm: Operates a [GitHub Actions Runner Manager (GARM)](https://github.com/cloudbase/garm) instance which manages GitHub Scalesets. The Scaleset is a GitHub feature for managing a set of Self-hosted runners.
 - GARM configurator charm: Provides configuration of a single GitHub scaleset to the GARM charm. Multiple GARM configurator charms can be integrated to a single GARM charm.
 - PostgreSQL charm: Provides a PostgreSQL database for the GARM charm to store its state.
-- OpenStack: The substrate where the runner VMs are spawned.
+- OpenStack: A substrate where the runner VMs are spawned.
+- LXD: An alternative substrate where the runner VMs are spawned. LXD runners require LXD 6.7 or later.
 - OpenTelemetry Collector charm: Scapes the metrics from the GARM charm and sends them to COS.
 
 ## Ingress
@@ -44,7 +47,7 @@ The logs of the GARM charm are ingested by Loki to the dashboard.
 
 ## Security boundaries
 
-The charms control configuration, Juju secret references, relation data, and GARM reconciliation. The deployment environment controls the external ingress, network exposure, PostgreSQL service, OpenStack tenant, GitHub permissions, and observability storage.
+The charms control configuration, Juju secret references, relation data, and GARM reconciliation. The deployment environment controls the external ingress, network exposure, PostgreSQL service, OpenStack tenant or LXD project, GitHub permissions, and observability storage.
 
 The GARM workload serves its API and metrics on port 8080. The workload does not terminate TLS, so external deployments need a TLS-terminating ingress and a restricted network path. GARM metrics are not authenticated by the application and should be reachable only by the monitoring system.
 

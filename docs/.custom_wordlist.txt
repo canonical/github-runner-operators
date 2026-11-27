@@ -71,6 +71,7 @@ SCons
 sequenceDiagram
 SIEM
 Sigma
+simplestreams
 sitemapindex
 Sphinx
 Spread

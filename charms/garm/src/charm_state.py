@@ -42,6 +42,10 @@ class BlockedError(Exception):
     """A configuration problem that needs operator action; ``restart`` blocks the unit."""
 
 
+PROVIDER_TYPE_OPENSTACK: typing.Final[str] = "openstack"
+PROVIDER_TYPE_LXD: typing.Final[str] = "lxd"
+
+
 @dataclasses.dataclass(frozen=True)
 class SSHDebugInfo:
     """SSH debug connection information from the debug-ssh relation.
@@ -421,7 +425,7 @@ def _get_runner_tools_metadata_url(charm: ops.CharmBase) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class ProviderConfig:
-    """One OpenStack provider, as the charm publishes it to GARM.
+    """One provider, as the charm publishes it to GARM.
 
     The provider's name is its configurator's unit name with ``/`` replaced by ``-``, which is
     also the key GARM's provider registry and the scale sets' ``provider_name`` use. The field
@@ -430,6 +434,7 @@ class ProviderConfig:
 
     Attributes:
         unit_name: The provider name.
+        provider_type: Provider type, "openstack" or "lxd".
         auth_url: Keystone authentication URL.
         username: OpenStack username.
         password: OpenStack password, in plaintext — it goes into the provider's clouds.yaml.
@@ -438,22 +443,62 @@ class ProviderConfig:
         project_domain_name: Domain of the project.
         region_name: OpenStack region.
         network: Network name or ID instances are attached to.
+        lxd_api_url: LXD API URL.
+        lxd_project_name: LXD project instances are created in.
+        lxd_secure_boot: Whether LXD virtual machines use secure boot.
+        lxd_client_certificate: LXD client certificate, in plaintext for its certificate file.
+        lxd_client_key: LXD client key, in plaintext for its key file.
+        lxd_server_certificate: LXD server certificate for certificate pinning, or "" to use
+            the system trust store.
     """
 
     unit_name: str
-    auth_url: str
-    username: str
-    password: str
-    project_name: str
-    user_domain_name: str
-    project_domain_name: str
-    region_name: str
-    network: str
+    provider_type: str = PROVIDER_TYPE_OPENSTACK
+    auth_url: str = ""
+    username: str = ""
+    password: str = ""
+    project_name: str = ""
+    user_domain_name: str = ""
+    project_domain_name: str = ""
+    region_name: str = ""
+    network: str = ""
+    lxd_api_url: str = ""
+    lxd_project_name: str = "default"
+    lxd_secure_boot: bool = False
+    lxd_client_certificate: str = ""
+    lxd_client_key: str = ""
+    lxd_server_certificate: str = ""
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, typing.Any]:
         """Return the wire form the entrypoint and the record read.
 
         Returns:
-            The provider's fields, keyed by the names in ``GARM_PROVIDERS_JSON``.
+            The provider's fields, keyed by the names in ``GARM_PROVIDERS_JSON``. Only the
+            fields of this provider type are included, so an OpenStack provider never carries
+            LXD credentials and vice versa.
         """
-        return dataclasses.asdict(self)
+        if self.provider_type == PROVIDER_TYPE_LXD:
+            fields = (
+                "unit_name",
+                "provider_type",
+                "lxd_api_url",
+                "lxd_project_name",
+                "lxd_secure_boot",
+                "lxd_client_certificate",
+                "lxd_client_key",
+                "lxd_server_certificate",
+            )
+        else:
+            fields = (
+                "unit_name",
+                "provider_type",
+                "auth_url",
+                "username",
+                "password",
+                "project_name",
+                "user_domain_name",
+                "project_domain_name",
+                "region_name",
+                "network",
+            )
+        return {field: getattr(self, field) for field in fields}

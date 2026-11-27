@@ -9,7 +9,12 @@ import typing
 
 from charm_state import SSHDebugInfo
 from garm_api import GarmApiError, GarmAuthenticatedClient
-from runner_paths import RUNNER_ENV_PATH, RUNNER_USER, prepend_after_shebang
+from runner_paths import (
+    RUNNER_ENV_PATH,
+    RUNNER_USER,
+    prepend_after_shebang,
+    require_runner_binary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +146,10 @@ def _build_charmed_template_data(
 
     # GARM returns the template body as a base64-encoded string.
     base_script = base64.b64decode(base_template.data).decode("utf-8")
+    # The env snippet creates the runner home to write .env before the base
+    # body runs; require the runner binary so that does not suppress the
+    # runner download.
+    base_script = require_runner_binary(base_script)
     snippet = build_env_snippet(connections)
     return prepend_after_shebang(base_script, snippet).encode("utf-8")
 
