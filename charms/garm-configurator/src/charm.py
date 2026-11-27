@@ -22,6 +22,29 @@ from charm_state import (
 
 logger = logging.getLogger(__name__)
 
+GITHUB_KEY_SECRET_LABEL: typing.Final[str] = "configurator-github-key"
+OPENSTACK_PASSWORD_SECRET_LABEL: typing.Final[str] = "configurator-password"
+LXD_CLIENT_CERTIFICATE_SECRET_LABEL: typing.Final[str] = "configurator-lxd-client-certificate"
+LXD_CLIENT_KEY_SECRET_LABEL: typing.Final[str] = "configurator-lxd-client-key"
+LXD_SERVER_CERTIFICATE_SECRET_LABEL: typing.Final[str] = "configurator-lxd-server-certificate"
+_PROVIDER_SECRET_LABELS: typing.Final[frozenset[str]] = frozenset(
+    {
+        GITHUB_KEY_SECRET_LABEL,
+        OPENSTACK_PASSWORD_SECRET_LABEL,
+        LXD_CLIENT_CERTIFICATE_SECRET_LABEL,
+        LXD_CLIENT_KEY_SECRET_LABEL,
+        LXD_SERVER_CERTIFICATE_SECRET_LABEL,
+    }
+)
+_IMAGE_RELATION_CREDENTIAL_FIELDS: typing.Final[tuple[str, ...]] = (
+    "auth_url",
+    "password",
+    "project_domain_name",
+    "project_name",
+    "user_domain_name",
+    "username",
+)
+
 
 class GarmConfiguratorCharm(ops.CharmBase):
     """GARM configurator charm."""
@@ -84,13 +107,18 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _update_image_relation(self, state: CharmState) -> None:
         """Push OpenStack provider credentials to the image-builder relation.
 
-        Does nothing if the image-builder relation is not yet joined.
+        Does nothing if the image-builder relation is not yet joined. For the LXD provider,
+        clears any credentials a previous OpenStack configuration published, so the image
+        builder does not keep the old plaintext password and connection details.
 
         Args:
             state: Current resolved charm state.
         """
-        relation = state.image_relation
+        relation = self.model.get_relation(IMAGE_RELATION_NAME)
         if relation is None:
+            return
+        if state.provider_config.provider_type == ProviderType.LXD:
+            relation.data[self.unit].update(dict.fromkeys(_IMAGE_RELATION_CREDENTIAL_FIELDS, ""))
             return
         relation.data[self.unit].update(
             {
@@ -141,8 +169,8 @@ class GarmConfiguratorCharm(ops.CharmBase):
         Saves ``ScalesetConfig`` for the scaleset and runner fields (with ``encoder=str``, which
         preserves their raw-string wire form) and, on the leader, ``RelationProviderConfig`` for
         the provider and GitHub App credentials (JSON-encoded). ``Relation.save`` persists every
-        model field, so an unset optional field is published as an empty string rather than
-        omitted; consumers treat the empty string as "unset". The ``image_id`` field carries
+        model field, so an unset optional field is still published, as an empty string or
+        JSON null; consumers treat both as "unset". The ``image_id`` field carries
         either an OpenStack image name or ID, or the LXD image alias or fingerprint.
 
         When this unit holds leadership, also provisions the Juju secrets GARM needs (the
@@ -198,8 +226,9 @@ class GarmConfiguratorCharm(ops.CharmBase):
     def _publish_provider_credentials(self, relation: ops.Relation, state: CharmState) -> None:
         """Publish the provider payload and GitHub credentials to GARM.
 
-        Builds the provider-specific part of the relation payload and provisions the
-        Juju secrets GARM needs to read the credentials.
+        Builds the provider-specific part of the relation payload, provisions the
+        Juju secrets GARM needs to read the credentials, and removes any secret left
+        over from the previously configured provider.
 
         Args:
             relation: The garm-configurator relation.
@@ -207,7 +236,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         github_key_secret = self._ensure_relation_secret(
             relation,
-            "configurator-github-key",
+            GITHUB_KEY_SECRET_LABEL,
             state.github_app_config.private_key,
         )
 
@@ -220,6 +249,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         provider_config.github_installation_id = state.github_app_config.installation_id
         provider_config.github_private_key_secret_uri = str(github_key_secret.id)
         relation.save(provider_config, self.unit)
+        self._prune_obsolete_provider_secrets(relation, state)
 
     def _openstack_relation_provider_config(
         self, relation: ops.Relation, state: CharmState
@@ -235,7 +265,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         password_secret = self._ensure_relation_secret(
             relation,
-            "configurator-password",
+            OPENSTACK_PASSWORD_SECRET_LABEL,
             state.provider_config.password,
         )
         return RelationProviderConfig(
@@ -267,12 +297,12 @@ class GarmConfiguratorCharm(ops.CharmBase):
         """
         client_certificate_secret = self._ensure_relation_secret(
             relation,
-            "configurator-lxd-client-certificate",
+            LXD_CLIENT_CERTIFICATE_SECRET_LABEL,
             state.provider_config.lxd_client_certificate,
         )
         client_key_secret = self._ensure_relation_secret(
             relation,
-            "configurator-lxd-client-key",
+            LXD_CLIENT_KEY_SECRET_LABEL,
             state.provider_config.lxd_client_key,
         )
 
@@ -280,7 +310,7 @@ class GarmConfiguratorCharm(ops.CharmBase):
         if state.provider_config.lxd_server_certificate:
             server_certificate_secret = self._ensure_relation_secret(
                 relation,
-                "configurator-lxd-server-certificate",
+                LXD_SERVER_CERTIFICATE_SECRET_LABEL,
                 state.provider_config.lxd_server_certificate,
             )
 
@@ -292,9 +322,47 @@ class GarmConfiguratorCharm(ops.CharmBase):
             lxd_client_certificate_secret_uri=str(client_certificate_secret.id),
             lxd_client_key_secret_uri=str(client_key_secret.id),
             lxd_server_certificate_secret_uri=(
-                str(server_certificate_secret.id) if server_certificate_secret else ""
+                str(server_certificate_secret.id) if server_certificate_secret else None
             ),
         )
+
+    def _prune_obsolete_provider_secrets(self, relation: ops.Relation, state: CharmState) -> None:
+        """Remove secrets that belonged to a provider this unit no longer configures.
+
+        GARM records the provider configuration it was started with, including the resolved
+        credentials, so removing the configurator's copy does not strand an active runner
+        drain. The GitHub App key is shared by both providers and is always retained.
+
+        Args:
+            relation: The garm-configurator relation the secrets were granted to.
+            state: Current resolved charm state.
+        """
+        active_labels = self._active_provider_secret_labels(state)
+        for label in _PROVIDER_SECRET_LABELS - active_labels:
+            try:
+                secret = self.model.get_secret(label=label)
+            except ops.SecretNotFoundError:
+                continue
+            secret.revoke(relation)
+            secret.remove_all_revisions()
+
+    def _active_provider_secret_labels(self, state: CharmState) -> set[str]:
+        """Return the labels of the secrets the current provider configuration uses.
+
+        Args:
+            state: Current resolved charm state.
+
+        Returns:
+            The labels of the secrets to keep.
+        """
+        labels = {GITHUB_KEY_SECRET_LABEL}
+        if state.provider_config.provider_type == ProviderType.LXD:
+            labels |= {LXD_CLIENT_CERTIFICATE_SECRET_LABEL, LXD_CLIENT_KEY_SECRET_LABEL}
+            if state.provider_config.lxd_server_certificate:
+                labels.add(LXD_SERVER_CERTIFICATE_SECRET_LABEL)
+        else:
+            labels.add(OPENSTACK_PASSWORD_SECRET_LABEL)
+        return labels
 
 
 if __name__ == "__main__":

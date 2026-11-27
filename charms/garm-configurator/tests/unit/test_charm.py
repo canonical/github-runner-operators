@@ -307,7 +307,7 @@ _MISSING_CONFIG_SENTINEL = object()
         ),
         pytest.param(
             {"openstack-auth-url": "ftp://invalid.example.com"},
-            "openstack-auth-url must start with http:// or https://",
+            "openstack-auth-url must be a valid http:// or https:// URL with a host and port",
             id="invalid-auth-url",
         ),
         pytest.param(
@@ -1241,9 +1241,147 @@ def test_lxd_provider_without_server_certificate_skips_its_secret():
     out = ctx.run(ctx.on.config_changed(), state)
 
     garm_out = out.get_relation(garm_relation.id)
-    assert _relation_value(garm_out, "lxd_server_certificate_secret_uri") == ""
+    assert _relation_value(garm_out, "lxd_server_certificate_secret_uri") is None
     labels = {secret.label for secret in out.secrets if secret.label is not None}
     assert "configurator-lxd-server-certificate" not in labels
+
+
+def test_switching_to_lxd_clears_openstack_credentials_and_secret():
+    """
+    arrange: An OpenStack deployment has published credentials to the image builder and the
+        GARM relation.
+    act: Switch provider-type to lxd and reconcile.
+    assert: The image builder databag no longer holds the OpenStack password or connection
+        details, and the obsolete password secret is removed so GARM keeps no access to it.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    image_relation = Relation(endpoint="image")
+    garm_relation = _make_garm_configurator_relation()
+    openstack_out = ctx.run(
+        ctx.on.config_changed(),
+        State(
+            config=_valid_config(secret, pk_secret),
+            secrets=[secret, pk_secret],
+            relations=[image_relation, garm_relation],
+            leader=True,
+        ),
+    )
+    assert openstack_out.get_relation(image_relation.id).local_unit_data["password"] == "s3cr3t"
+
+    certificate_secret = _make_secret_with_value("client-certificate")
+    key_secret = _make_secret_with_value("client-key")
+    out = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(
+            openstack_out,
+            config=_valid_lxd_config(pk_secret, certificate_secret, key_secret),
+            secrets=[*openstack_out.secrets, certificate_secret, key_secret],
+        ),
+    )
+
+    image_out = out.get_relation(image_relation.id)
+    for key in (
+        "auth_url",
+        "password",
+        "project_domain_name",
+        "project_name",
+        "user_domain_name",
+        "username",
+    ):
+        assert key not in image_out.local_unit_data
+    labels = {secret.label for secret in out.secrets if secret.label is not None}
+    assert "configurator-password" not in labels
+    assert "configurator-lxd-client-certificate" in labels
+    assert "configurator-lxd-client-key" in labels
+
+
+def test_switching_to_openstack_removes_lxd_secrets():
+    """
+    arrange: An LXD deployment has published its client and server certificate secrets.
+    act: Switch provider-type to openstack and reconcile.
+    assert: The obsolete LXD secrets are removed, while the OpenStack password secret is
+        created, so GARM only retains access to the selected provider's credentials.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    secret = _make_secret()
+    pk_secret = _make_private_key_secret()
+    certificate_secret = _make_secret_with_value("client-certificate")
+    key_secret = _make_secret_with_value("client-key")
+    server_secret = _make_secret_with_value("server-certificate")
+    garm_relation = _make_garm_configurator_relation()
+    lxd_out = ctx.run(
+        ctx.on.config_changed(),
+        State(
+            config=_valid_lxd_config(pk_secret, certificate_secret, key_secret, server_secret),
+            secrets=[pk_secret, certificate_secret, key_secret, server_secret],
+            relations=[garm_relation],
+            leader=True,
+        ),
+    )
+    lxd_labels = {secret.label for secret in lxd_out.secrets if secret.label is not None}
+    assert "configurator-lxd-server-certificate" in lxd_labels
+
+    openstack_config = _valid_config(secret, pk_secret)
+    openstack_config["image"] = "runner-noble-amd64"
+    out = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(
+            lxd_out,
+            config=openstack_config,
+            secrets=[*lxd_out.secrets, secret],
+        ),
+    )
+
+    labels = {secret.label for secret in out.secrets if secret.label is not None}
+    assert "configurator-lxd-client-certificate" not in labels
+    assert "configurator-lxd-client-key" not in labels
+    assert "configurator-lxd-server-certificate" not in labels
+    assert "configurator-password" in labels
+
+
+def test_removing_lxd_server_certificate_removes_its_secret():
+    """
+    arrange: An LXD deployment has published an optional server certificate secret.
+    act: Clear lxd-server-certificate and reconcile.
+    assert: The server certificate secret is removed and the relation publishes no URI, so
+        GARM falls back to the system trust store without retaining the old secret.
+    """
+    ctx = Context(GarmConfiguratorCharm)
+    pk_secret = _make_private_key_secret()
+    certificate_secret = _make_secret_with_value("client-certificate")
+    key_secret = _make_secret_with_value("client-key")
+    server_secret = _make_secret_with_value("server-certificate")
+    garm_relation = _make_garm_configurator_relation()
+    with_server_out = ctx.run(
+        ctx.on.config_changed(),
+        State(
+            config=_valid_lxd_config(pk_secret, certificate_secret, key_secret, server_secret),
+            secrets=[pk_secret, certificate_secret, key_secret, server_secret],
+            relations=[garm_relation],
+            leader=True,
+        ),
+    )
+    with_server_labels = {
+        secret.label for secret in with_server_out.secrets if secret.label is not None
+    }
+    assert "configurator-lxd-server-certificate" in with_server_labels
+
+    out = ctx.run(
+        ctx.on.config_changed(),
+        dataclasses.replace(
+            with_server_out,
+            config=_valid_lxd_config(pk_secret, certificate_secret, key_secret),
+        ),
+    )
+
+    garm_out = out.get_relation(garm_relation.id)
+    assert _relation_value(garm_out, "lxd_server_certificate_secret_uri") is None
+    labels = {secret.label for secret in out.secrets if secret.label is not None}
+    assert "configurator-lxd-server-certificate" not in labels
+    assert "configurator-lxd-client-certificate" in labels
+    assert "configurator-lxd-client-key" in labels
 
 
 def test_lxd_provider_ignores_image_builder_relation():
@@ -1305,7 +1443,7 @@ def test_lxd_provider_without_image_blocks():
     [
         pytest.param(
             {"lxd-api-url": "http://lxd.example.com:8443"},
-            "lxd-api-url must start with https://",
+            "lxd-api-url must be a valid https:// URL with a host and port",
             id="non-https-api-url",
         ),
         pytest.param(

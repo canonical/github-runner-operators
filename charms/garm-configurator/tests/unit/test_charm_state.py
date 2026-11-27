@@ -136,13 +136,76 @@ def test_provider_config_rejects_non_https_lxd_api_url():
     act: Build the model.
     assert: Validation fails, because LXD credentials must never travel in the clear.
     """
-    with pytest.raises(ValidationError, match="lxd-api-url must start with https://"):
+    with pytest.raises(
+        ValidationError, match="lxd-api-url must be a valid https:// URL with a host and port"
+    ):
         ProviderConfig(
             provider_type="lxd",
             provider_name="garm-configurator-0",
             lxd_api_url="http://lxd.example.com:8443",
             lxd_client_certificate="client-certificate",
             lxd_client_key="client-key",
+        )
+
+
+@pytest.mark.parametrize(
+    "api_url",
+    [
+        pytest.param("https://", id="missing-host"),
+        pytest.param("https://:8443", id="port-without-host"),
+        pytest.param("https://example.com:invalid", id="non-numeric-port"),
+        pytest.param("https://example.com:0", id="zero-port"),
+        pytest.param("https://example.com:70000", id="port-out-of-range"),
+    ],
+)
+def test_provider_config_rejects_malformed_lxd_api_url(api_url: str):
+    """
+    arrange: An LXD provider config whose API URL has a malformed host or port.
+    act: Build the model.
+    assert: Validation fails, so an unusable endpoint is never published as Ready.
+    """
+    with pytest.raises(
+        ValidationError, match="lxd-api-url must be a valid https:// URL with a host and port"
+    ):
+        ProviderConfig(
+            provider_type="lxd",
+            provider_name="garm-configurator-0",
+            lxd_api_url=api_url,
+            lxd_client_certificate="client-certificate",
+            lxd_client_key="client-key",
+        )
+
+
+@pytest.mark.parametrize(
+    "auth_url",
+    [
+        pytest.param("https://", id="missing-host"),
+        pytest.param("https://:5000", id="port-without-host"),
+        pytest.param("https://example.com:invalid", id="non-numeric-port"),
+        pytest.param("ftp://keystone.example.com:5000/v3", id="unsupported-scheme"),
+    ],
+)
+def test_provider_config_rejects_malformed_openstack_auth_url(auth_url: str):
+    """
+    arrange: An OpenStack provider config whose auth URL has a malformed host, port, or scheme.
+    act: Build the model.
+    assert: Validation fails, so an unusable Keystone endpoint is never published as Ready.
+    """
+    with pytest.raises(
+        ValidationError,
+        match="openstack-auth-url must be a valid http:// or https:// URL with a host and port",
+    ):
+        ProviderConfig(
+            provider_type="openstack",
+            provider_name="garm-configurator-0",
+            auth_url=auth_url,
+            username="admin",
+            password="secret",
+            project_name="myproject",
+            user_domain_name="Default",
+            project_domain_name="Default",
+            region_name="RegionOne",
+            network="external-net",
         )
 
 
@@ -364,7 +427,10 @@ def test_from_charm_lxd_invalid_api_url_raises_charm_error():
         _lxd_config(**{"lxd-api-url": "http://lxd.example.com:8443"}), _LXD_SECRETS
     )
 
-    with pytest.raises(CharmConfigInvalidError, match="lxd-api-url must start with https://"):
+    with pytest.raises(
+        CharmConfigInvalidError,
+        match="lxd-api-url must be a valid https:// URL with a host and port",
+    ):
         ProviderConfig.from_charm(charm)
 
 

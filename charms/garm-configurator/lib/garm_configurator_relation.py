@@ -42,7 +42,7 @@ PROVIDER_TYPE_OPENSTACK: typing.Final[str] = ProviderType.OPENSTACK.value
 PROVIDER_TYPE_LXD: typing.Final[str] = ProviderType.LXD.value
 PROVIDER_TYPES: typing.Final = tuple(provider.value for provider in ProviderType)
 
-_OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
     "openstack_auth_url",
     "openstack_username",
     "openstack_project_name",
@@ -51,18 +51,18 @@ _OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
     "openstack_region_name",
     "openstack_network",
 )
-_OPENSTACK_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
-    *_OPENSTACK_REQUIRED_PROVIDER_FIELDS,
+OPENSTACK_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    *OPENSTACK_REQUIRED_PROVIDER_FIELDS,
     "openstack_password",
     "openstack_password_secret_uri",
 )
-_LXD_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+LXD_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
     "lxd_api_url",
     "lxd_client_certificate_secret_uri",
     "lxd_client_key_secret_uri",
 )
-_LXD_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
-    *_LXD_REQUIRED_PROVIDER_FIELDS,
+LXD_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    *LXD_REQUIRED_PROVIDER_FIELDS,
     "lxd_project_name",
     "lxd_secure_boot",
     "lxd_server_certificate_secret_uri",
@@ -134,18 +134,18 @@ class ProviderConfig:
     def _validate_provider_fields(self) -> "ProviderConfig":
         """Require the selected provider's fields and reject the other provider's fields."""
         if self.provider_type == PROVIDER_TYPE_LXD:
-            required_fields = _LXD_REQUIRED_PROVIDER_FIELDS
-            forbidden_fields = _OPENSTACK_PROVIDER_FIELDS
+            required_fields = LXD_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = OPENSTACK_PROVIDER_FIELDS
         else:
-            required_fields = _OPENSTACK_REQUIRED_PROVIDER_FIELDS
-            forbidden_fields = _LXD_PROVIDER_FIELDS
+            required_fields = OPENSTACK_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = LXD_PROVIDER_FIELDS
 
         missing = [name for name in required_fields if not getattr(self, name)]
         if missing:
             raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
         conflicting = [
-            name for name in forbidden_fields if _provider_field_is_set(name, getattr(self, name))
+            name for name in forbidden_fields if provider_field_is_set(name, getattr(self, name))
         ]
         if conflicting:
             raise ValueError(
@@ -155,7 +155,7 @@ class ProviderConfig:
         return self
 
 
-def _provider_field_is_set(field_name: str, value: object) -> bool:
+def provider_field_is_set(field_name: str, value: object) -> bool:
     """Return whether a provider field holds a non-default value.
 
     Args:

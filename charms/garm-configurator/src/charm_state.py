@@ -5,9 +5,19 @@
 
 import ipaddress
 import typing
+import urllib.parse
 
 import ops
-from garm_configurator_relation import PROVIDER_TYPE_OPENSTACK, PROVIDER_TYPES, ProviderType
+from garm_configurator_relation import (
+    LXD_PROVIDER_FIELDS,
+    LXD_REQUIRED_PROVIDER_FIELDS,
+    OPENSTACK_PROVIDER_FIELDS,
+    OPENSTACK_REQUIRED_PROVIDER_FIELDS,
+    PROVIDER_TYPE_OPENSTACK,
+    PROVIDER_TYPES,
+    ProviderType,
+    provider_field_is_set,
+)
 from pydantic import (
     BaseModel,
     HttpUrl,
@@ -72,26 +82,42 @@ IMAGE_VISIBILITIES = ("public", "private", "shared", "community", "all")
 IMAGE_RELATION_NAME = "image"
 GARM_RELATION_NAME = "garm-configurator"
 
-_OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[tuple[str, str], ...]] = (
-    ("auth_url", OPENSTACK_AUTH_URL_CONFIG_NAME),
-    ("username", OPENSTACK_USERNAME_CONFIG_NAME),
-    ("project_name", OPENSTACK_PROJECT_NAME_CONFIG_NAME),
-    ("user_domain_name", OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME),
-    ("project_domain_name", OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME),
-    ("region_name", OPENSTACK_REGION_NAME_CONFIG_NAME),
-    ("network", OPENSTACK_NETWORK_CONFIG_NAME),
-    ("password", OPENSTACK_PASSWORD_CONFIG_NAME),
-)
-_LXD_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[tuple[str, str], ...]] = (
-    ("lxd_api_url", LXD_API_URL_CONFIG_NAME),
-    ("lxd_client_certificate", LXD_CLIENT_CERTIFICATE_CONFIG_NAME),
-    ("lxd_client_key", LXD_CLIENT_KEY_CONFIG_NAME),
-)
-_LXD_PROVIDER_FIELDS: typing.Final[tuple[tuple[str, str], ...]] = (
-    *_LXD_REQUIRED_PROVIDER_FIELDS,
-    ("lxd_project_name", LXD_PROJECT_NAME_CONFIG_NAME),
-    ("lxd_secure_boot", LXD_SECURE_BOOT_CONFIG_NAME),
-    ("lxd_server_certificate", LXD_SERVER_CERTIFICATE_CONFIG_NAME),
+# Map each relation provider field to the charm-state model field and config option it
+# represents, so provider validation reuses the relation contract's field lists instead of
+# keeping a second copy that could drift from what the configurator publishes.
+_OPENSTACK_PROVIDER_FIELD_MAP: typing.Final[dict[str, tuple[str, str]]] = {
+    "openstack_auth_url": ("auth_url", OPENSTACK_AUTH_URL_CONFIG_NAME),
+    "openstack_username": ("username", OPENSTACK_USERNAME_CONFIG_NAME),
+    "openstack_password": ("password", OPENSTACK_PASSWORD_CONFIG_NAME),
+    "openstack_password_secret_uri": ("password", OPENSTACK_PASSWORD_CONFIG_NAME),
+    "openstack_project_name": ("project_name", OPENSTACK_PROJECT_NAME_CONFIG_NAME),
+    "openstack_user_domain_name": ("user_domain_name", OPENSTACK_USER_DOMAIN_NAME_CONFIG_NAME),
+    "openstack_project_domain_name": (
+        "project_domain_name",
+        OPENSTACK_PROJECT_DOMAIN_NAME_CONFIG_NAME,
+    ),
+    "openstack_region_name": ("region_name", OPENSTACK_REGION_NAME_CONFIG_NAME),
+    "openstack_network": ("network", OPENSTACK_NETWORK_CONFIG_NAME),
+}
+_LXD_PROVIDER_FIELD_MAP: typing.Final[dict[str, tuple[str, str]]] = {
+    "lxd_api_url": ("lxd_api_url", LXD_API_URL_CONFIG_NAME),
+    "lxd_project_name": ("lxd_project_name", LXD_PROJECT_NAME_CONFIG_NAME),
+    "lxd_secure_boot": ("lxd_secure_boot", LXD_SECURE_BOOT_CONFIG_NAME),
+    "lxd_client_certificate_secret_uri": (
+        "lxd_client_certificate",
+        LXD_CLIENT_CERTIFICATE_CONFIG_NAME,
+    ),
+    "lxd_client_key_secret_uri": ("lxd_client_key", LXD_CLIENT_KEY_CONFIG_NAME),
+    "lxd_server_certificate_secret_uri": (
+        "lxd_server_certificate",
+        LXD_SERVER_CERTIFICATE_CONFIG_NAME,
+    ),
+}
+# The relation model treats the password as optional so an older payload without it still
+# loads; the charm itself cannot configure a provider without one.
+_OPENSTACK_REQUIRED_CONFIG_FIELDS: typing.Final[tuple[str, ...]] = (
+    *OPENSTACK_REQUIRED_PROVIDER_FIELDS,
+    "openstack_password",
 )
 
 
@@ -191,46 +217,54 @@ class ProviderConfig(BaseModel):
     @field_validator("auth_url")
     @classmethod
     def _validate_openstack_auth_url(cls, value: str) -> str:
-        """Require the OpenStack auth URL to use HTTP or HTTPS when set."""
-        value = value.strip()
-        if value and not value.startswith(("http://", "https://")):
-            raise ValueError(
-                f"{OPENSTACK_AUTH_URL_CONFIG_NAME} must start with http:// or https://"
-            )
-        return value
+        """Require the OpenStack auth URL to be a well-formed HTTP(S) URL when set."""
+        return _validate_provider_url(
+            value,
+            schemes=("http", "https"),
+            config_name=OPENSTACK_AUTH_URL_CONFIG_NAME,
+        )
 
     @field_validator("lxd_api_url")
     @classmethod
     def _validate_lxd_api_url(cls, value: str) -> str:
-        """Require the LXD API URL to use HTTPS when set."""
-        value = value.strip()
-        if value and not value.startswith("https://"):
-            raise ValueError(f"{LXD_API_URL_CONFIG_NAME} must start with https://")
-        return value
+        """Require the LXD API URL to be a well-formed HTTPS URL when set."""
+        return _validate_provider_url(
+            value,
+            schemes=("https",),
+            config_name=LXD_API_URL_CONFIG_NAME,
+        )
 
     @model_validator(mode="after")
     def _validate_provider_fields(self) -> "ProviderConfig":
         """Require the selected provider's fields and reject the other provider's fields."""
         if self.provider_type == ProviderType.LXD:
-            required_fields = _LXD_REQUIRED_PROVIDER_FIELDS
-            forbidden_fields = _OPENSTACK_REQUIRED_PROVIDER_FIELDS
+            required_fields = LXD_REQUIRED_PROVIDER_FIELDS
+            required_map = _LXD_PROVIDER_FIELD_MAP
+            forbidden_fields = OPENSTACK_PROVIDER_FIELDS
+            forbidden_map = _OPENSTACK_PROVIDER_FIELD_MAP
         else:
-            required_fields = _OPENSTACK_REQUIRED_PROVIDER_FIELDS
-            forbidden_fields = _LXD_PROVIDER_FIELDS
+            required_fields = _OPENSTACK_REQUIRED_CONFIG_FIELDS
+            required_map = _OPENSTACK_PROVIDER_FIELD_MAP
+            forbidden_fields = LXD_PROVIDER_FIELDS
+            forbidden_map = _LXD_PROVIDER_FIELD_MAP
 
-        missing = [
-            config_name
-            for field_name, config_name in required_fields
-            if not getattr(self, field_name)
-        ]
+        missing: list[str] = []
+        for field_name in required_fields:
+            model_field, config_name = required_map[field_name]
+            if not getattr(self, model_field):
+                missing.append(config_name)
         if missing:
             raise ValueError(f"Missing required configuration: {', '.join(missing)}")
 
-        conflicting = [
-            config_name
-            for field_name, config_name in forbidden_fields
-            if _provider_field_is_set(field_name, getattr(self, field_name))
-        ]
+        conflicting: list[str] = []
+        seen: set[str] = set()
+        for field_name in forbidden_fields:
+            model_field, config_name = forbidden_map[field_name]
+            if model_field in seen:
+                continue
+            if provider_field_is_set(field_name, getattr(self, model_field)):
+                conflicting.append(config_name)
+                seen.add(model_field)
         if conflicting:
             raise ValueError(
                 f"{', '.join(conflicting)} cannot be set when "
@@ -297,19 +331,36 @@ class ProviderConfig(BaseModel):
             raise CharmConfigInvalidError(_validation_error_message(exc)) from exc
 
 
-def _provider_field_is_set(field_name: str, value: object) -> bool:
-    """Return whether a provider field holds a non-default value.
+def _validate_provider_url(value: str, *, schemes: tuple[str, ...], config_name: str) -> str:
+    """Require a set provider URL to be well-formed with a valid host and port.
 
     Args:
-        field_name: The provider model field name.
-        value: The field value.
+        value: The configured URL.
+        schemes: The URL schemes the provider accepts.
+        config_name: The config option name, for the error message.
+
+    Raises:
+        ValueError: If the URL is malformed, uses another scheme, or has no host.
 
     Returns:
-        True when the field was set away from its default.
+        The stripped URL.
     """
-    if field_name == "lxd_project_name":
-        return value not in ("", None, DEFAULT_LXD_PROJECT_NAME)
-    return bool(value)
+    value = value.strip()
+    if not value:
+        return value
+    allowed = " or ".join(f"{scheme}://" for scheme in schemes)
+    message = f"{config_name} must be a valid {allowed} URL with a host and port"
+    try:
+        parsed = urllib.parse.urlparse(value)
+        port = parsed.port
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if parsed.scheme not in schemes or not hostname:
+        raise ValueError(message)
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError(message)
+    return value
 
 
 def _validation_error_message(exc: ValidationError) -> str:
