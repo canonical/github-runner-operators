@@ -19,6 +19,7 @@ are also invalid: a scaleset name must identify exactly one scaleset in GARM.
 """
 
 import dataclasses
+import enum
 import logging
 import typing
 
@@ -30,16 +31,56 @@ logger = logging.getLogger(__name__)
 GARM_CONFIGURATOR_RELATION_NAME: typing.Final[str] = "garm-configurator"
 
 
+class ProviderType(enum.StrEnum):
+    """Provider types the configurator can publish."""
+
+    OPENSTACK = "openstack"
+    LXD = "lxd"
+
+
+PROVIDER_TYPE_OPENSTACK: typing.Final[str] = ProviderType.OPENSTACK.value
+PROVIDER_TYPE_LXD: typing.Final[str] = ProviderType.LXD.value
+PROVIDER_TYPES: typing.Final = tuple(provider.value for provider in ProviderType)
+
+OPENSTACK_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    "openstack_auth_url",
+    "openstack_username",
+    "openstack_project_name",
+    "openstack_user_domain_name",
+    "openstack_project_domain_name",
+    "openstack_region_name",
+    "openstack_network",
+)
+OPENSTACK_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    *OPENSTACK_REQUIRED_PROVIDER_FIELDS,
+    "openstack_password",
+    "openstack_password_secret_uri",
+)
+LXD_REQUIRED_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    "lxd_api_url",
+    "lxd_client_certificate_secret_uri",
+    "lxd_client_key_secret_uri",
+)
+LXD_PROVIDER_FIELDS: typing.Final[tuple[str, ...]] = (
+    *LXD_REQUIRED_PROVIDER_FIELDS,
+    "lxd_project_name",
+    "lxd_secure_boot",
+    "lxd_server_certificate_secret_uri",
+)
+
+
 @pydantic.dataclasses.dataclass
 class ProviderConfig:
     """Provider and GitHub App credentials published by one ``garm-configurator`` unit.
 
     The field names are the relation databag keys, so they are the wire contract between the
-    configurator and GARM. The auth URL is required: a unit publishes the rest of the provider
-    payload alongside it, so a databag without it is incomplete and treated as invalid rather
-    than as an empty provider.
+    configurator and GARM. ``provider_type`` selects which fields a unit publishes: the
+    selected provider's required fields must be present and the other provider's fields must
+    stay unset, so a payload cannot mix OpenStack and LXD settings. It defaults to
+    ``openstack`` so a configurator that does not publish it keeps working.
 
     Attributes:
+        provider_type: Provider type, "openstack" or "lxd". Defaults to "openstack".
         openstack_auth_url: Keystone authentication URL.
         openstack_username: OpenStack username.
         openstack_password: Legacy plaintext password, or None when the secret URI is used.
@@ -49,12 +90,19 @@ class ProviderConfig:
         openstack_project_domain_name: Domain of the project.
         openstack_region_name: OpenStack region.
         openstack_network: Network name or ID instances are attached to.
+        lxd_api_url: LXD API URL.
+        lxd_project_name: LXD project instances are created in.
+        lxd_secure_boot: Whether LXD virtual machines use secure boot.
+        lxd_client_certificate_secret_uri: Juju secret URI holding the client certificate.
+        lxd_client_key_secret_uri: Juju secret URI holding the client key.
+        lxd_server_certificate_secret_uri: Juju secret URI holding the server certificate.
         github_app_id: GitHub App ID.
         github_installation_id: GitHub App installation ID.
         github_private_key_secret_uri: Juju secret URI holding the GitHub App private key.
     """
 
-    openstack_auth_url: str
+    provider_type: str = PROVIDER_TYPE_OPENSTACK
+    openstack_auth_url: str | None = None
     openstack_username: str | None = None
     openstack_password: str | None = None
     openstack_password_secret_uri: str | None = None
@@ -63,9 +111,63 @@ class ProviderConfig:
     openstack_project_domain_name: str | None = None
     openstack_region_name: str | None = None
     openstack_network: str | None = None
+    lxd_api_url: str | None = None
+    lxd_project_name: str | None = None
+    lxd_secure_boot: bool = False
+    lxd_client_certificate_secret_uri: str | None = None
+    lxd_client_key_secret_uri: str | None = None
+    lxd_server_certificate_secret_uri: str | None = None
     github_app_id: int | None = None
     github_installation_id: int | None = None
     github_private_key_secret_uri: str | None = None
+
+    @pydantic.field_validator("provider_type", mode="before")
+    @classmethod
+    def _normalize_provider_type(cls, value: object) -> str:
+        """Normalize and validate the provider type."""
+        normalized = str(value or "").strip().lower()
+        if normalized not in PROVIDER_TYPES:
+            raise ValueError(f"provider_type must be one of: {', '.join(PROVIDER_TYPES)}")
+        return normalized
+
+    @pydantic.model_validator(mode="after")
+    def _validate_provider_fields(self) -> "ProviderConfig":
+        """Require the selected provider's fields and reject the other provider's fields."""
+        if self.provider_type == PROVIDER_TYPE_LXD:
+            required_fields = LXD_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = OPENSTACK_PROVIDER_FIELDS
+        else:
+            required_fields = OPENSTACK_REQUIRED_PROVIDER_FIELDS
+            forbidden_fields = LXD_PROVIDER_FIELDS
+
+        missing = [name for name in required_fields if not getattr(self, name)]
+        if missing:
+            raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
+        conflicting = [
+            name for name in forbidden_fields if provider_field_is_set(name, getattr(self, name))
+        ]
+        if conflicting:
+            raise ValueError(
+                f"Fields not allowed for provider_type {self.provider_type}: "
+                f"{', '.join(conflicting)}"
+            )
+        return self
+
+
+def provider_field_is_set(field_name: str, value: object) -> bool:
+    """Return whether a provider field holds a non-default value.
+
+    Args:
+        field_name: The provider model field name.
+        value: The field value.
+
+    Returns:
+        True when the field was set away from its default.
+    """
+    if field_name == "lxd_project_name":
+        return value not in ("", None, "default")
+    return bool(value)
 
 
 @dataclasses.dataclass(frozen=True)

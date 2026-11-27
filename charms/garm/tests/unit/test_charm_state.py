@@ -163,6 +163,17 @@ _PROVIDER_FIELDS = frozenset(
     {"github_app_id", "github_installation_id", "github_private_key_secret_uri"}
 )
 
+_OPENSTACK_PROVIDER_VALUES = {
+    "provider_type": "openstack",
+    "openstack_auth_url": "https://ks.example.com:5000/v3",
+    "openstack_username": "admin",
+    "openstack_project_name": "myproject",
+    "openstack_user_domain_name": "Default",
+    "openstack_project_domain_name": "Default",
+    "openstack_region_name": "RegionOne",
+    "openstack_network": "external-net",
+}
+
 
 def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
     """Build one configurator relation from a flat databag of provider and scaleset fields."""
@@ -174,9 +185,7 @@ def _configurator_relation(index: int, **unit_data) -> ConfiguratorRelation:
         relation_id=index,
         application_name="garm-configurator",
         unit_name=f"garm-configurator/{index}",
-        provider=RelationProviderConfig(
-            openstack_auth_url="https://ks.example.com:5000/v3", **provider_fields
-        ),
+        provider=RelationProviderConfig(**{**_OPENSTACK_PROVIDER_VALUES, **provider_fields}),
         scaleset=ScalesetConfig(**scaleset_fields),
     )
 

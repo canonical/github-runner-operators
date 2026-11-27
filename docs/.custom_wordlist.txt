@@ -38,6 +38,7 @@ LaTeX
 latexmk
 LogQL
 Loki
+LXD
 Makefile
 Multipass
 MyST

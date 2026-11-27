@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Each revision is versioned by the date of the revision.
 
+## 2026-11-25
+
+- `garm-configurator`: add `provider-type: lxd` and the LXD provider options `lxd-api-url`, `lxd-project-name`, `lxd-secure-boot`, and the `lxd-client-certificate`, `lxd-client-key`, and `lxd-server-certificate` secrets. OpenStack remains the default, so existing deployments are unchanged; when LXD is selected the charm forwards the LXD provider settings and certificate secret URIs to `garm`.
+
 ## 2026-11-24
 
 - `garm`: the rock now ships garm-agent for armhf, so armhf runners can use agent mode. These runners previously logged `agent mode enabled but no tools available` and did not run in agent mode.
